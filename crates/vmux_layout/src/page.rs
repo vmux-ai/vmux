@@ -804,30 +804,32 @@ fn rename_folder(uuid: String, current: &str) {
 fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
     rsx! {
-        div { class: "glass mb-2 flex flex-col gap-1 rounded-md p-1.5",
+        div { class: "glass mb-2 flex flex-col rounded-lg p-1.5",
             if !pins.is_empty() {
-                div { class: "grid grid-cols-3 gap-2 p-1",
+                div { class: "mb-1 grid grid-cols-3 gap-2 p-1",
                     for p in pins.iter() {
                         PinTile { key: "{p.uuid}", row: p.clone() }
                     }
                 }
             }
-            for node in roots.iter() {
-                match node {
-                    BookmarkNode::Folder(f) => rsx! { BookmarkFolder { key: "{f.uuid}", folder: f.clone() } },
-                    BookmarkNode::Entry(b) => rsx! { BookmarkEntry { key: "{b.uuid}", row: b.clone() } },
+            div { class: "flex flex-col gap-1",
+                for node in roots.iter() {
+                    match node {
+                        BookmarkNode::Folder(f) => rsx! { BookmarkFolder { key: "{f.uuid}", folder: f.clone() } },
+                        BookmarkNode::Entry(b) => rsx! { BookmarkEntry { key: "{b.uuid}", row: b.clone() } },
+                    }
                 }
-            }
-            button {
-                r#type: "button",
-                class: "flex items-center gap-1.5 rounded-md px-2 py-1 text-ui-xs text-muted-foreground hover:bg-white/5 hover:text-foreground",
-                onclick: move |_| new_folder(),
-                Icon { class: "h-3.5 w-3.5 shrink-0",
-                    path { d: "M12 10v6" }
-                    path { d: "M9 13h6" }
-                    path { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                SheetNewButton {
+                    label: "New Folder".to_string(),
+                    icon: rsx! {
+                        Icon { class: "h-4 w-4 shrink-0",
+                            path { d: "M12 10v6" }
+                            path { d: "M9 13h6" }
+                            path { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                        }
+                    },
+                    onclick: move |_| new_folder(),
                 }
-                span { "New Folder" }
             }
         }
     }
@@ -887,11 +889,12 @@ fn BookmarkEntry(row: BookmarkRow) -> Element {
     } else {
         row.title.clone()
     };
+    let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
     rsx! {
         ContextMenu { attributes: vec![],
             ContextMenuTrigger { attributes: vec![],
-                div {
-                    class: "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                SheetEntryRow {
+                    active: false,
                     onclick: {
                         let u = url_open.clone();
                         move |_| open_bookmark(u.clone())
@@ -902,7 +905,7 @@ fn BookmarkEntry(row: BookmarkRow) -> Element {
                         class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                         globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                     }
-                    span { class: "min-w-0 flex-1 truncate", "{title}" }
+                    span { class: "{title_class}", "{title}" }
                 }
             }
             ContextMenuContent { attributes: vec![],
@@ -942,16 +945,16 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
     let menu_val = use_signal(|| folder.uuid.clone());
     let collapsed = folder.collapsed;
     rsx! {
-        div { class: "flex flex-col",
+        div { class: "flex flex-col gap-1",
             ContextMenu { attributes: vec![],
                 ContextMenuTrigger { attributes: vec![],
-                    div {
-                        class: "flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-ui font-medium text-foreground hover:bg-white/5",
+                    SheetEntryRow {
+                        active: false,
                         onclick: move |_| bookmark_cmd("toggle_folder", Some(uuid_toggle.clone())),
-                        Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                        Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                             path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
                         }
-                        span { class: "min-w-0 flex-1 truncate", "{folder.name}" }
+                        span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
                     }
                 }
                 ContextMenuContent { attributes: vec![],
@@ -983,7 +986,7 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
                 }
             }
             if !collapsed {
-                div { class: "ml-3 flex flex-col",
+                div { class: "ml-3 flex flex-col gap-1",
                     for b in folder.children.iter() {
                         BookmarkEntry { key: "{b.uuid}", row: b.clone() }
                     }
@@ -1016,6 +1019,37 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                 class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left",
                 "{space.name}"
             }
+        }
+    }
+}
+
+/// Shared side-sheet row shell used by stack rows, bookmark entries, and folder
+/// headers. `active` renders the inset glass box; otherwise a hover row.
+#[component]
+fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Element) -> Element {
+    rsx! {
+        div {
+            class: if active {
+                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+            } else {
+                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+            },
+            onclick: move |e| onclick.call(e),
+            {children}
+        }
+    }
+}
+
+/// Shared "+ New X" button used by New Stack and New Folder.
+#[component]
+fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            onclick: move |e| onclick.call(e),
+            {icon}
+            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{label}" }
         }
     }
 }
@@ -1059,9 +1093,14 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 #[component]
 fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
-        button {
-            r#type: "button",
-            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+        SheetNewButton {
+            label: "New Stack".to_string(),
+            icon: rsx! {
+                Icon { class: "h-4 w-4 shrink-0",
+                    path { d: "M12 5v14" }
+                    path { d: "M5 12h14" }
+                }
+            },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
@@ -1069,11 +1108,6 @@ fn NewStackRow(pane_id: u64) -> Element {
                     stack_index: 0,
                 });
             },
-            Icon { class: "h-4 w-4 shrink-0",
-                path { d: "M12 5v14" }
-                path { d: "M5 12h14" }
-            }
-            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "New Stack" }
         }
     }
 }
@@ -1083,13 +1117,21 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
 
+    let title_class = if is_active {
+        format!(
+            "min-w-0 flex-1 {} text-ui font-medium text-foreground",
+            dir_truncate_class(&stack.title)
+        )
+    } else {
+        format!(
+            "min-w-0 flex-1 {} text-ui",
+            dir_truncate_class(&stack.title)
+        )
+    };
+
     rsx! {
-        div {
-            class: if is_active {
-                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
-            } else {
-                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
-            },
+        SheetEntryRow {
+            active: is_active,
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "activate_stack".to_string(),
@@ -1098,14 +1140,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 });
             },
             StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-            span {
-                class: if is_active {
-                    format!("min-w-0 flex-1 {} text-ui font-medium text-foreground", dir_truncate_class(&stack.title))
-                } else {
-                    format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&stack.title))
-                },
-                "{stack.title}"
-            }
+            span { class: "{title_class}", "{stack.title}" }
             button {
                 r#type: "button",
                 aria_label: "Close stack",
