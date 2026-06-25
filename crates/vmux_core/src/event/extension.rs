@@ -200,4 +200,6 @@ pub struct ExtListRequest;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ExtBrowseStoreRequest;
+pub struct ExtBrowseStoreRequest {
+    pub query: String,
+}

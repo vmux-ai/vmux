@@ -10,8 +10,8 @@ use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::event::extension::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
     ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
-    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest,
-    ExtensionsEvent,
+    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
+    ExtUninstallRequest, ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -257,14 +257,34 @@ fn on_open_manager_request(
 
 const WEB_STORE_URL: &str = "https://chromewebstore.google.com/category/extensions";
 
+fn encode_query(q: &str) -> String {
+    let mut out = String::with_capacity(q.len());
+    for b in q.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 fn on_browse_store_request(
-    _trigger: On<BinReceive<ExtBrowseStoreRequest>>,
+    trigger: On<BinReceive<ExtBrowseStoreRequest>>,
     mut cmd: MessageWriter<AppCommand>,
 ) {
+    let query = trigger.event().payload.query.trim();
+    let url = if query.is_empty() {
+        WEB_STORE_URL.to_string()
+    } else {
+        format!(
+            "https://chromewebstore.google.com/search/{}",
+            encode_query(query)
+        )
+    };
     cmd.write(AppCommand::Browser(BrowserCommand::Open(
-        OpenCommand::InNewStack {
-            url: Some(WEB_STORE_URL.to_string()),
-        },
+        OpenCommand::InNewStack { url: Some(url) },
     )));
 }
 

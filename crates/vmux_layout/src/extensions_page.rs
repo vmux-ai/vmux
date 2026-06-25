@@ -11,9 +11,12 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(ExtensionsEvent::default);
     let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
+    let mut loaded = use_signal(|| false);
+    let mut search = use_signal(String::new);
 
     let _list = use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |e| {
         state.set(e);
+        loaded.set(true);
     });
     let _prog =
         use_bin_event_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |p| {
@@ -44,7 +47,23 @@ pub fn Page() -> Element {
             div { class: "flex shrink-0 items-center gap-3 border-b border-white/[0.07] px-5 py-3",
                 div { class: "text-base font-semibold tracking-tight", "Extensions" }
                 div { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-muted-foreground", "{snap.extensions.len()}" }
-                div { class: "flex-1" }
+                div { class: "flex min-w-0 flex-1 items-center",
+                    input {
+                        r#type: "search",
+                        class: "w-full max-w-80 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-white/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-white/[0.08] focus:ring-cyan-400/30",
+                        placeholder: "Search the Chrome Web Store…",
+                        value: "{search}",
+                        oninput: move |e| search.set(e.value()),
+                        onkeydown: move |e: KeyboardEvent| {
+                            if e.key() == Key::Enter {
+                                let q = search();
+                                if !q.trim().is_empty() {
+                                    let _ = try_cef_bin_emit_rkyv(&ExtBrowseStoreRequest { query: q });
+                                }
+                            }
+                        },
+                    }
+                }
                 if snap.pending {
                     button {
                         class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
@@ -65,16 +84,23 @@ pub fn Page() -> Element {
             }
 
             div { class: "min-h-0 flex-1 overflow-auto px-3 pb-4",
-                if snap.extensions.is_empty() {
+                if !loaded() {
+                    for i in 0..3 {
+                        div {
+                            key: "{i}",
+                            class: "flex items-center gap-3 rounded-xl px-3 py-2.5",
+                            div { class: "h-6 w-6 shrink-0 animate-pulse rounded bg-white/[0.06]" }
+                            div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
+                                div { class: "h-3 w-32 animate-pulse rounded bg-white/[0.06]" }
+                                div { class: "h-2.5 w-16 animate-pulse rounded bg-white/[0.05]" }
+                            }
+                        }
+                    }
+                } else if snap.extensions.is_empty() {
                     div { class: "flex flex-col items-center gap-3 px-3 py-16 text-center",
                         div { class: "text-sm text-muted-foreground", "No extensions installed yet." }
-                        button {
-                            class: "rounded-lg bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
-                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtBrowseStoreRequest); },
-                            "Browse the Chrome Web Store"
-                        }
                         div { class: "text-xs text-muted-foreground/70",
-                            "Open an extension and click \"Add to Vmux\"."
+                            "Search the Chrome Web Store above, then click \"Add to Vmux\"."
                         }
                     }
                 }
