@@ -30,6 +30,10 @@ pub enum AppCommand {
 
     #[menu(label = "Service")]
     Service(ServiceCommand),
+
+    #[menu(label = "Bookmark")]
+    #[mcp(skip)]
+    Bookmark(BookmarkCommand),
 }
 
 #[derive(OsSubMenuGroup, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,6 +231,17 @@ pub enum ServiceCommand {
     #[default]
     #[menu(id = "service_open", label = "Open Service Monitor")]
     Open,
+}
+
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BookmarkCommand {
+    #[default]
+    #[menu(id = "bookmark_toggle_active", label = "Bookmark Page", accel = "super+d")]
+    #[shortcut(direct = "Super+d")]
+    ToggleActive,
+    #[menu(id = "bookmark_pin_active", label = "Pin Page")]
+    PinActive,
 }
 
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -430,6 +445,10 @@ mod tests {
         assert!(
             has_super(KeyCode::KeyW),
             "cmd+W (close stack) must be a global shortcut"
+        );
+        assert!(
+            has_super(KeyCode::KeyD),
+            "cmd+D (bookmark page) must be a global shortcut"
         );
         assert_eq!(
             AppCommand::from_menu_id("open_in_new_tab"),
