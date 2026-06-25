@@ -105,8 +105,7 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_debug_update_clear)
             .add_systems(
                 Update,
-                sync_appearance_to_cef
-                    .run_if(resource_changed::<bevy_cef::prelude::CefColorScheme>),
+                sync_appearance_to_cef.run_if(resource_changed::<AppSettings>),
             )
             .add_systems(
                 Update,
@@ -3902,6 +3901,28 @@ mod tests {
             editor: Default::default(),
             appearance: Default::default(),
         }
+    }
+
+    #[test]
+    fn appearance_change_updates_cef_color_scheme() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_app_settings_with_radius(0.0))
+            .init_resource::<CefColorScheme>()
+            .add_systems(
+                Update,
+                sync_appearance_to_cef.run_if(resource_changed::<AppSettings>),
+            );
+        app.update();
+        app.world_mut()
+            .resource_mut::<AppSettings>()
+            .appearance
+            .mode = vmux_setting::ColorScheme::Light;
+        app.update();
+        assert_eq!(
+            app.world().resource::<CefColorScheme>().0,
+            CefColorMode::Light
+        );
     }
 
     #[test]
