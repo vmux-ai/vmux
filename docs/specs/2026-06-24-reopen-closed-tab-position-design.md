@@ -62,7 +62,7 @@ gracefully (never lose the page) when the original structure no longer exists.
 We add exactly one new component, `PaneId(String)` (opaque UUID), in
 `vmux_layout/src/pane.rs`, mirroring `SpaceId`. It derives
 `Component, Reflect, Default, Clone, Debug, PartialEq, Eq`, is `#[reflect(Component)]`,
-and is `#[require(Save)]` so it round-trips through `space.ron`. Register it in the
+and is `#[require(Save)]` so it round-trips through `store.ron`. Register it in the
 pane plugin (`pane.rs:53`).
 
 No `TabId` or `StackId`. Rationale (the rest of the position is integers + reuse):
@@ -89,63 +89,74 @@ per-site assignment would rot). A system `assign_pane_ids` runs in `Update`:
 Query<Entity, (With<Pane>, Without<PaneId>)> → insert PaneId(Uuid::new_v4())
 ```
 
-Load-safe: only fills missing ids, so ids restored from `space.ron` always win.
+Load-safe: only fills missing ids, so ids restored from `store.ron` always win.
 A one-frame delay before a freshly spawned pane has an id is harmless — close/archive
 happens long after spawn.
 
 ### 2. Capture position at close
 
-Extend `ArchivedPage` (component) and `PageArchiveRequest` (message), both in
-`vmux_core/src/archive.rs`, with a structural position:
+The structural position is a **separate component**, `ArchivedPagePosition`, spawned on
+the same entity as `ArchivedPage`. A separate component (rather than new `ArchivedPage`
+fields) makes save/load compatibility trivial: old stores simply lack the component, and
+a missing whole component on load is always safe — no field-default deserialization, and
+`ArchivedPage`'s existing shape, constructors, and tests are untouched.
 
 ```rust
-pub struct PagePosition {
-    pub space_id: String,
-    pub tab_index: usize,        // ordering hint if the tab must be recreated
-    pub path: Vec<PaneStep>,     // tab root split → … → parent split of the leaf
-    pub leaf_pane_id: String,    // PaneId of the leaf pane that held the closed stack
-    pub stack_index: usize,      // position among sibling stacks in that leaf pane
+// vmux_core/src/archive.rs
+#[derive(Component, Clone, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_core::archive"]
+pub struct ArchivedPagePosition {
+    pub leaf_pane_id: String,     // PaneId of the leaf pane that held the stack
+    pub stack_index: usize,       // position among sibling stacks in that pane
+    pub pane_path: Vec<PaneStep>, // tab root split → … → parent split of the leaf
 }
 
+#[derive(Clone, Debug, Reflect, Default, PartialEq)]
 pub struct PaneStep {
-    pub split_id: String,        // PaneId of the PaneSplit node at this level
-    pub axis: SplitAxis,         // vmux_core mirror of PaneSplitDirection
-    pub child_index: usize,      // which child we descend into
-    pub flex_weights: Vec<f32>,  // children flex weights, to restore PaneSize
+    pub split_id: String,         // PaneId of the PaneSplit node at this level
+    pub axis: SplitAxis,          // vmux_core mirror of PaneSplitDirection
+    pub child_index: usize,       // which child we descend into
+    pub flex_weights: Vec<f32>,   // children flex weights, to restore PaneSize
 }
 
-pub enum SplitAxis { Row, Column }
+#[derive(Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+pub enum SplitAxis { #[default] Row, Column }
 ```
 
-The tab is identified by the first `PaneStep`'s `split_id` (the root split pane lives
-directly under the tab); no separate tab id is stored. `path[0].split_id` is the root
-pane, so resolving it yields the tab via its `ChildOf`.
+`PageArchiveRequest` (transient message, not persisted) gains the same three values so
+`capture_archived_pages` can spawn `ArchivedPage` + `ArchivedPagePosition` together.
 
-`PagePosition`, `PaneStep`, `SplitAxis` live in `vmux_core` and derive `Reflect` so
-the component persists. `vmux_core` must not depend on `vmux_layout` (cycle), so
-`SplitAxis` mirrors `PaneSplitDirection`; `vmux_layout` maps between them at the
-boundary (consistent with the existing no-new-crates / mirror-type pattern).
+The tab is identified by `pane_path[0].split_id` (the root split pane lives directly
+under the tab); resolving that root `PaneId` yields the tab via its `ChildOf`. No
+separate tab id is stored.
 
-`archive_on_stack_close` builds `PagePosition` by walking from the closing stack up
-to its tab, recording each `PaneSplit` ancestor's `PaneId`, direction, the child
-index descended into, and that split's children flex weights; plus the leaf
-`PaneId`, the stack's index among sibling stacks, `tab_index`, and `space_id`.
+`ArchivedPagePosition`/`PaneStep`/`SplitAxis` live in `vmux_core` because `ArchivedPage`
+does and `vmux_core` must not depend on `vmux_layout` (cycle). `SplitAxis` mirrors
+`PaneSplitDirection`; `vmux_layout` maps between them at the boundary (existing
+no-new-crates / mirror-type pattern).
 
-Older `ArchivedPage` entries deserialized without the new fields default to empty
-`path` / ids and fall through to the legacy recreate-tab path (step 3 below).
+`archive_on_stack_close` fills these by walking from the closing stack up to its tab,
+recording each `PaneSplit` ancestor's `PaneId`, direction, the child index descended
+into, and that split's children flex weights; plus the leaf `PaneId` and the stack's
+index among sibling stacks. Entries with no `ArchivedPagePosition` (old stores) fall
+through to the recreate-tab path (step 3).
 
 ### 3. Restore ladder (`handle_reopen_closed_page`)
 
-Resolve the target space by `space_id` (fallback: active space, then any space).
-Within that space, first match wins:
+Pick the newest archived entry (`max_by_key(closed_at)`) and read its optional
+`ArchivedPagePosition`. Resolve the target space by `space_id` (fallback: active space,
+then any space). With no position component (old entries), jump straight to step 3.
+Otherwise, within that space, first match wins:
 
 1. **Leaf pane alive** — a live leaf `Pane` with `PaneId == leaf_pane_id` exists:
    spawn a single `Stack`, parent it to that pane, insert at `min(stack_index, n)`.
    *(Case A — the primary fix.)*
-2. **Split survives, leaf gone** — resolve the tab from `path[0].split_id` (root
-   pane → `ChildOf` → tab), then walk `path` by `split_id`. Descend through every
+2. **Split survives, leaf gone** — resolve the tab from `pane_path[0].split_id` (root
+   pane → `ChildOf` → tab), then walk `pane_path` by `split_id`. Descend through every
    split that still exists. From the deepest surviving split, recreate the missing
-   sub-splits and the leaf pane to honor the remaining path (reusing `pane.rs` split
+   sub-splits and the leaf pane to honor the remaining steps (reusing `pane.rs` split
    helpers), apply `flex_weights` via `PaneSize`, then insert the stack.
    *(Case B2 — true split reconstruction.)*
    - The common collapse sub-case (the split kept ≥2 children) is trivial: the
@@ -155,8 +166,8 @@ Within that space, first match wins:
      level: convert the surviving container back into a `PaneSplit` on the recorded
      `axis`, move its current content into one child, add the reopened leaf as the
      other child at `child_index`.
-3. **Tab gone, space alive** — no `PaneId` from `path` resolves, so recreate a tab
-   scaffold at `tab_index` and insert the stack. *(Case B1 / PR #159, keyed by
+3. **Tab gone, space alive** — no `PaneId` from `pane_path` resolves, so recreate a
+   tab scaffold at `tab_index` and insert the stack. *(Case B1 / PR #159, keyed by
    `tab_index`.)*
 4. **Space gone** — append a new tab in the fallback space. *(Existing behavior.)*
 
@@ -175,9 +186,29 @@ on the archived `url` + `launch`.
 
 ### 5. Persistence & registration
 
-Register `PaneId` in the pane plugin so Save/Load round-trips it and the loader does
-not panic on unknown types (cf. the stale-`space.ron` crash class). `PagePosition`
-reflection is covered by `ArchivedPage` already being `Save`.
+Persistence is a single unified `store.ron` (schema v2) written by `save_space_to_path`
+(`vmux_desktop/src/persistence.rs`) via one allowlisted `SaveWorld`. There is no
+separate runtime `space.ron` — that name only survives in tests and the stale-detection
+string scan. Two things are required for the new data to round-trip:
+
+1. **Register types** — `register_type::<PaneId>()` in the pane plugin (`pane.rs:53`),
+   and `register_type` for `ArchivedPagePosition`, `PaneStep`, `SplitAxis` (and
+   `Vec<PaneStep>` if the reflection path needs it) wherever `ArchivedPage` is
+   registered (`vmux_core/src/lib.rs:44`). Avoids loader panics on unknown types (cf.
+   the stale-store crash class).
+2. **Allowlist** — the saver uses `SceneFilter::deny_all().allow::<…>()`, so
+   `#[require(Save)]` alone is insufficient. Add `.allow::<PaneId>()` and
+   `.allow::<ArchivedPagePosition>()` to the allowlist in `save_space_to_path`
+   (`persistence.rs:178‑204`).
+3. **Dirty tracking (optional)** — `ArchivedPagePosition` is always spawned alongside
+   `ArchivedPage`, whose `Added`/`Removed` already marks the store dirty
+   (`mark_dirty_on_change`), so no change is strictly required there.
+
+**No schema bump / no store reset.** `STORE_SCHEMA_VERSION` stays at 2. Old stores load
+unchanged: panes have no `PaneId` and get one assigned at runtime by `assign_pane_ids`;
+old archived entries simply have no `ArchivedPagePosition` component (a missing component
+is always safe to load) and fall through to the recreate-tab path. Wiping user layouts
+on upgrade is unacceptable and unnecessary here.
 
 ## Out of scope
 
@@ -190,8 +221,11 @@ reflection is covered by `ArchivedPage` already being `Save`.
 
 - `assign_pane_ids` fills missing `PaneId` on panes and leaves existing ids
   untouched.
-- Capture records full `PagePosition`: leaf_pane_id, stack_index, and a `path` with
-  correct split ids / axes / child indices / flex weights.
+- Capture spawns `ArchivedPagePosition` with correct leaf_pane_id, stack_index, and a
+  `pane_path` (split ids / axes / child indices / flex weights).
+- `PaneId` + `ArchivedPagePosition` round-trip through `store.ron` (save → load).
+- An archived entry with no `ArchivedPagePosition` (old store) reopens via the
+  recreate-tab path without error and without a schema reset.
 - Reopen step 1: restores a stacked tab into the surviving leaf pane at its index.
 - Reopen step 2a: split kept ≥2 children → leaf re-added under the surviving split.
 - Reopen step 2b: collapsed split → split level reconstructed, leaf restored.
@@ -204,5 +238,5 @@ reflection is covered by `ArchivedPage` already being `Save`.
 
 - Reconstruction touches `pane.rs` split/collapse logic, which is intricate; mitigated
   by reusing existing split helpers and broad unit coverage of each ladder step.
-- Adding one persisted component (`PaneId`) grows `space.ron`; acceptable and
-  additive.
+- Two new persisted components (`PaneId` on every pane, `ArchivedPagePosition` per
+  archived entry) grow `store.ron`; acceptable and additive.
