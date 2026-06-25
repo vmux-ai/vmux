@@ -24,7 +24,12 @@ impl Keymap for VscodeKeymap {
             }
         };
 
-        if m.cmd() && !m.alt {
+        #[cfg(target_os = "macos")]
+        let gui = m.meta;
+        #[cfg(not(target_os = "macos"))]
+        let gui = m.meta || m.ctrl;
+
+        if gui && !m.alt {
             return match k.key.to_ascii_lowercase().as_str() {
                 "c" => vec![Yank],
                 "x" => vec![Cut],
@@ -34,6 +39,25 @@ impl Keymap for VscodeKeymap {
                 "z" if m.shift => vec![Redo],
                 "z" => vec![Undo],
                 "y" => vec![Redo],
+                _ => vec![],
+            };
+        }
+
+        // macOS readline/emacs navigation on Ctrl (Ctrl is free on macOS; on Linux
+        // Ctrl is the GUI modifier handled above). Shift extends the selection.
+        #[cfg(target_os = "macos")]
+        if m.ctrl && !m.meta && !m.alt {
+            return match k.key.as_str() {
+                "a" | "A" => mv(Motion::LineStart),
+                "e" | "E" => mv(Motion::LineEnd),
+                "f" | "F" => mv(Motion::Right),
+                "b" | "B" => mv(Motion::Left),
+                "n" | "N" => mv(Motion::Down),
+                "p" | "P" => mv(Motion::Up),
+                "d" | "D" => vec![DeleteForward],
+                "h" | "H" => vec![DeleteBack],
+                "k" | "K" => vec![DeleteToLineEnd],
+                "w" | "W" => vec![DeleteWordBack],
                 _ => vec![],
             };
         }
@@ -145,5 +169,69 @@ mod tests {
             km.handle(&key("Backspace", alt)),
             vec![EditCommand::DeleteWordBack]
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ctrl_emacs_nav_macos() {
+        let mut km = VscodeKeymap;
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("a", ctrl)),
+            vec![EditCommand::Move(Motion::LineStart)]
+        );
+        assert_eq!(
+            km.handle(&key("e", ctrl)),
+            vec![EditCommand::Move(Motion::LineEnd)]
+        );
+        assert_eq!(
+            km.handle(&key("f", ctrl)),
+            vec![EditCommand::Move(Motion::Right)]
+        );
+        assert_eq!(
+            km.handle(&key("k", ctrl)),
+            vec![EditCommand::DeleteToLineEnd]
+        );
+        assert_eq!(km.handle(&key("h", ctrl)), vec![EditCommand::DeleteBack]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ctrl_shift_extends_macos() {
+        let mut km = VscodeKeymap;
+        let cs = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("A", cs)),
+            vec![EditCommand::Select(Motion::LineStart)]
+        );
+        assert_eq!(
+            km.handle(&key("E", cs)),
+            vec![EditCommand::Select(Motion::LineEnd)]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ctrl_is_not_gui_on_macos() {
+        let mut km = VscodeKeymap;
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        // Copy is Cmd+C on macOS; Ctrl+C is not a GUI chord (and 'c' has no emacs binding).
+        assert_eq!(km.handle(&key("c", ctrl)), Vec::<EditCommand>::new());
+        // Cmd+C still copies.
+        let meta = Mods {
+            meta: true,
+            ..Default::default()
+        };
+        assert_eq!(km.handle(&key("c", meta)), vec![EditCommand::Yank]);
     }
 }
