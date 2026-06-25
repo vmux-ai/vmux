@@ -241,12 +241,16 @@ pub fn active_tab_siblings(
         .collect::<Vec<_>>()
 }
 
-fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+pub(crate) fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if siblings.len() <= 1 {
         return None;
     }
     let idx = siblings.iter().position(|e| *e == active)?;
-    let next_idx = if idx + 1 < siblings.len() { idx + 1 } else { 0 };
+    let next_idx = if idx + 1 < siblings.len() {
+        idx + 1
+    } else {
+        idx - 1
+    };
     let target = siblings[next_idx];
     if target == active { None } else { Some(target) }
 }
@@ -387,6 +391,21 @@ mod tests {
         let id = target.to_bits().to_string();
 
         assert_eq!(tab_target(Some(&id), [other, target]), Some(target));
+    }
+
+    #[test]
+    fn pick_after_close_prefers_right_then_left_neighbor() {
+        let a = Entity::from_bits(1);
+        let b = Entity::from_bits(2);
+        let c = Entity::from_bits(3);
+        let d = Entity::from_bits(4);
+        let tabs = [a, b, c, d];
+
+        assert_eq!(pick_after_close(d, &tabs), Some(c));
+        assert_eq!(pick_after_close(b, &tabs), Some(c));
+        assert_eq!(pick_after_close(a, &tabs), Some(b));
+        assert_eq!(pick_after_close(b, &[a, b]), Some(a));
+        assert_eq!(pick_after_close(a, &[a]), None);
     }
 
     #[test]
@@ -700,6 +719,115 @@ mod tests {
         assert!(app.world().get_entity(tab).is_err());
         assert!(app.world().get_entity(other_tab).is_ok());
         assert!(app.world().resource::<LastTabCloseAt>().0.is_some());
+    }
+
+    #[test]
+    fn closing_active_rightmost_tab_activates_left_neighbor_not_first() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands));
+
+        app.world_mut().spawn(PrimaryWindow);
+        let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        let a = app
+            .world_mut()
+            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .id();
+        let c = app
+            .world_mut()
+            .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
+            .id();
+        let d = app
+            .world_mut()
+            .spawn((
+                tab_bundle(),
+                LastActivatedAt(4),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::Close)));
+
+        app.update();
+        app.update();
+
+        assert!(
+            app.world().get_entity(d).is_err(),
+            "the active rightmost tab must be closed"
+        );
+        assert!(
+            app.world().entity(c).contains::<vmux_core::Active>(),
+            "left neighbor must become active after closing the rightmost active tab"
+        );
+        assert!(
+            !app.world().entity(a).contains::<vmux_core::Active>(),
+            "closing the rightmost tab must not jump to the first tab"
+        );
+    }
+
+    #[test]
+    fn page_close_command_on_active_rightmost_activates_left_neighbor() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_observer(on_tabs_command_emit);
+
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PrimaryWindow);
+        let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        let a = app
+            .world_mut()
+            .spawn((tab_bundle(), LastActivatedAt(1), ChildOf(space)))
+            .id();
+        let c = app
+            .world_mut()
+            .spawn((tab_bundle(), LastActivatedAt(3), ChildOf(space)))
+            .id();
+        let d = app
+            .world_mut()
+            .spawn((
+                tab_bundle(),
+                LastActivatedAt(4),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+
+        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+            webview,
+            payload: TabsCommandEvent {
+                command: "close".to_string(),
+                tab_id: Some(d.to_bits().to_string()),
+            },
+        });
+        app.world_mut().flush();
+        app.world_mut()
+            .run_system_once(crate::active::ensure_active_tab)
+            .ok();
+
+        assert!(app.world().get_entity(d).is_err(), "active tab closed");
+        assert!(
+            app.world().entity(c).contains::<vmux_core::Active>(),
+            "left neighbor must be active via the page close observer"
+        );
+        assert!(
+            !app.world().entity(a).contains::<vmux_core::Active>(),
+            "must not jump to first tab"
+        );
     }
 
     #[test]

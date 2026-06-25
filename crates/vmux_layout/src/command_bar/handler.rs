@@ -1458,7 +1458,7 @@ fn close_tab_if_only_pending_stack(
     if siblings.len() <= 1 {
         return false;
     }
-    if let Some(next) = pick_tab_after_close(tab, &siblings) {
+    if let Some(next) = crate::tab::pick_after_close(tab, &siblings) {
         commands.entity(next).insert(LastActivatedAt::now());
     }
     commands.entity(tab).despawn();
@@ -1507,16 +1507,6 @@ fn sibling_tabs(
         return vec![tab];
     };
     children.iter().filter(|e| tab_q.get(*e).is_ok()).collect()
-}
-
-fn pick_tab_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
-    if siblings.len() <= 1 {
-        return None;
-    }
-    let idx = siblings.iter().position(|e| *e == active)?;
-    let next_idx = if idx + 1 < siblings.len() { idx + 1 } else { 0 };
-    let target = siblings[next_idx];
-    if target == active { None } else { Some(target) }
 }
 
 fn deferred_dismiss_modal(
