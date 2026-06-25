@@ -36,7 +36,7 @@ pub fn install(
         .as_ref()
         .and_then(|rel| icon_data_url(&unpack_dir, rel));
 
-    if let Some(pk) = crx::crx_public_key(&bytes) {
+    if let Some(pk) = crx::crx_public_key_for(&bytes, &id) {
         let key_b64 = base64::engine::general_purpose::STANDARD.encode(&pk);
         let _ = manifest::prepare_unpacked(&unpack_dir, &key_b64, m.popup.as_deref());
     }

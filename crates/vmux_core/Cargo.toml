@@ -22,4 +22,5 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }

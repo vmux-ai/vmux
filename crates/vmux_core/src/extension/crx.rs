@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::Path;
 
@@ -53,48 +54,81 @@ pub fn unpack_crx(bytes: &[u8], dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn crx_public_key(bytes: &[u8]) -> Option<Vec<u8>> {
-    if bytes.len() < 12 || &bytes[0..4] != b"Cr24" {
-        return None;
-    }
-    if u32::from_le_bytes(bytes[4..8].try_into().ok()?) != 3 {
-        return None;
-    }
-    let header_len = u32::from_le_bytes(bytes[8..12].try_into().ok()?) as usize;
-    let end = 12usize.checked_add(header_len)?;
-    if end > bytes.len() {
-        return None;
-    }
-    header_public_key(&bytes[12..end])
+// CWS CRXs carry several signing proofs (Google's publisher key, the
+// developer key, an ecdsa proof); the extension id derives from the developer
+// RSA key, so pick the proof whose id matches the expected Web Store id.
+pub fn crx_public_key_for(bytes: &[u8], expected_id: &str) -> Option<Vec<u8>> {
+    crx_public_keys(bytes)
+        .into_iter()
+        .find(|pk| extension_id_from_key(pk) == expected_id)
 }
 
-fn header_public_key(header: &[u8]) -> Option<Vec<u8>> {
+pub fn crx_public_keys(bytes: &[u8]) -> Vec<Vec<u8>> {
+    if bytes.len() < 12 || &bytes[0..4] != b"Cr24" {
+        return Vec::new();
+    }
+    if u32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default()) != 3 {
+        return Vec::new();
+    }
+    let header_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or_default()) as usize;
+    let Some(end) = 12usize.checked_add(header_len) else {
+        return Vec::new();
+    };
+    if end > bytes.len() {
+        return Vec::new();
+    }
+    header_public_keys(&bytes[12..end])
+}
+
+pub fn extension_id_from_key(pubkey_der: &[u8]) -> String {
+    let digest = Sha256::digest(pubkey_der);
+    let mut id = String::with_capacity(32);
+    for byte in &digest[..16] {
+        id.push((b'a' + (byte >> 4)) as char);
+        id.push((b'a' + (byte & 0x0f)) as char);
+    }
+    id
+}
+
+fn header_public_keys(header: &[u8]) -> Vec<Vec<u8>> {
+    let mut keys = Vec::new();
     let mut i = 0;
     while i < header.len() {
-        let (tag, adv) = read_varint(header, i)?;
+        let Some((tag, adv)) = read_varint(header, i) else {
+            break;
+        };
         i += adv;
         match tag & 7 {
-            0 => i += read_varint(header, i)?.1,
+            0 => {
+                let Some((_, n)) = read_varint(header, i) else {
+                    break;
+                };
+                i += n;
+            }
             1 => i += 8,
             5 => i += 4,
             2 => {
-                let (len, n) = read_varint(header, i)?;
+                let Some((len, n)) = read_varint(header, i) else {
+                    break;
+                };
                 i += n;
-                let stop = i.checked_add(len as usize)?;
+                let Some(stop) = i.checked_add(len as usize) else {
+                    break;
+                };
                 if stop > header.len() {
-                    return None;
+                    break;
                 }
                 if tag >> 3 == 2
                     && let Some(pk) = proof_public_key(&header[i..stop])
                 {
-                    return Some(pk);
+                    keys.push(pk);
                 }
                 i = stop;
             }
-            _ => return None,
+            _ => break,
         }
     }
-    None
+    keys
 }
 
 fn proof_public_key(msg: &[u8]) -> Option<Vec<u8>> {
@@ -196,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn extracts_public_key_from_crx3_header() {
+    fn extracts_public_keys_and_matches_id() {
         // CrxFileHeader { sha256_with_rsa[0] { public_key: "PUBKEY" } }
         let header = [0x12u8, 0x08, 0x0a, 0x06, b'P', b'U', b'B', b'K', b'E', b'Y'];
         let mut crx = Vec::new();
@@ -204,6 +238,11 @@ mod tests {
         crx.extend_from_slice(&3u32.to_le_bytes());
         crx.extend_from_slice(&(header.len() as u32).to_le_bytes());
         crx.extend_from_slice(&header);
-        assert_eq!(crx_public_key(&crx).unwrap(), b"PUBKEY");
+        assert_eq!(crx_public_keys(&crx), vec![b"PUBKEY".to_vec()]);
+        let id = extension_id_from_key(b"PUBKEY");
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| (b'a'..=b'p').contains(&b)));
+        assert_eq!(crx_public_key_for(&crx, &id).unwrap(), b"PUBKEY");
+        assert!(crx_public_key_for(&crx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_none());
     }
 }
