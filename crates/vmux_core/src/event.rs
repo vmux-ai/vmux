@@ -25,6 +25,21 @@ pub const FILE_OPEN_EVENT: &str = "file_open";
 pub const FILE_IMAGE_EVENT: &str = "file_image";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
+pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
+pub const FILE_KEY_EVENT: &str = "file_key";
+pub const FILE_POINTER_EVENT: &str = "file_pointer";
+pub const FILE_CURSOR_EVENT: &str = "file_cursor";
+pub const FILE_DIRTY_EVENT: &str = "file_dirty";
+pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
+pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
+pub const FILE_HOVER_EVENT: &str = "file_hover";
+pub const FILE_DEFINITION_REQUEST_EVENT: &str = "file_definition_request";
+pub const FILE_REFERENCES_REQUEST_EVENT: &str = "file_references_request";
+pub const FILE_REFERENCES_EVENT: &str = "file_references";
+pub const FILE_COMPLETION_REQUEST_EVENT: &str = "file_completion_request";
+pub const FILE_COMPLETION_EVENT: &str = "file_completion";
+pub const FILE_GOTO_REQUEST_EVENT: &str = "file_goto_request";
+pub const FILE_COMPLETION_COMMIT_EVENT: &str = "file_completion_commit";
 pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
 pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
 pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
@@ -1032,9 +1047,350 @@ pub struct TermTitleEvent {
     pub title: String,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileTextInput {
+    pub text: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KeyMods {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileKeyEvent {
+    pub key: String,
+    pub code: String,
+    pub mods: KeyMods,
+    pub repeat: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FilePointerEvent {
+    pub line: u32,
+    pub col: u32,
+    pub extend: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCursorEvent {
+    pub mode: crate::editor::EditMode,
+    pub mode_label: String,
+    pub primary: crate::editor::CursorPos,
+    pub selections: Vec<crate::editor::SelSpan>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileDirtyEvent {
+    pub dirty: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileExternalChange {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileHoverRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct HoverBlock {
+    pub code: bool,
+    pub text: String,
+    pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileHoverEvent {
+    pub line: u32,
+    pub col: u32,
+    pub blocks: Vec<HoverBlock>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileDefinitionRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileReferencesRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RefItem {
+    pub path: String,
+    pub display: String,
+    pub line: u32,
+    pub col: u32,
+    pub preview: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileReferencesEvent {
+    pub items: Vec<RefItem>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CompletionItem {
+    pub label: String,
+    pub insert_text: String,
+    pub detail: String,
+    pub kind: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionEvent {
+    pub items: Vec<CompletionItem>,
+    pub replace_from_col: u32,
+    pub line: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileGotoRequest {
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileCompletionCommit {
+    pub line: u32,
+    pub replace_from_col: u32,
+    pub text: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn file_cursor_event_roundtrips() {
+        use crate::editor::{CursorPos, EditMode, SelSpan};
+        let e = FileCursorEvent {
+            mode: EditMode::Insert,
+            mode_label: "INSERT".into(),
+            primary: CursorPos { line: 3, col: 5 },
+            selections: vec![SelSpan {
+                line: 3,
+                start: 0,
+                end: 5,
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();
+        let back = rkyv::from_bytes::<FileCursorEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, e);
+    }
 
     fn patch(changed_rows: Vec<u16>, cols: u16, rows: u16, full: bool) -> TermViewportPatch {
         TermViewportPatch {

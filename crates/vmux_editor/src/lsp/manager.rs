@@ -17,6 +17,13 @@ pub fn utf16_to_char_col(text: &str, utf16_col: u32) -> u32 {
     chars
 }
 
+pub fn char_to_utf16_col(text: &str, char_col: u32) -> u32 {
+    text.chars()
+        .take(char_col as usize)
+        .map(|c| c.len_utf16() as u32)
+        .sum()
+}
+
 fn map_severity(sev: Option<lsp_types::DiagnosticSeverity>) -> DiagSeverity {
     match sev {
         Some(s) if s == lsp_types::DiagnosticSeverity::ERROR => DiagSeverity::Error,
@@ -30,11 +37,20 @@ pub fn to_file_diagnostics(
     lines: &[FileLine],
     diags: &[lsp_types::Diagnostic],
 ) -> Vec<FileDiagnostic> {
+    map_diags(diags, |line| {
+        lines.get(line as usize).map(line_text).unwrap_or_default()
+    })
+}
+
+fn map_diags(
+    diags: &[lsp_types::Diagnostic],
+    line_text: impl Fn(u32) -> String,
+) -> Vec<FileDiagnostic> {
     diags
         .iter()
         .map(|d| {
             let line = d.range.start.line;
-            let text = lines.get(line as usize).map(line_text).unwrap_or_default();
+            let text = line_text(line);
             let start_col = utf16_to_char_col(&text, d.range.start.character);
             let end_col = if d.range.end.line == line {
                 utf16_to_char_col(&text, d.range.end.character).max(start_col)
@@ -53,6 +69,17 @@ pub fn to_file_diagnostics(
         .collect()
 }
 
+fn rope_line_text(rope: &ropey::Rope, line: u32) -> String {
+    let l = line as usize;
+    if l >= rope.len_lines() {
+        return String::new();
+    }
+    rope.line(l)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect()
+}
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -66,12 +93,34 @@ type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+pub enum ReqKind {
+    Hover { line: u32, col: u32 },
+    Definition,
+    References,
+    Completion { line: u32, replace_from_col: u32 },
+}
+
+pub struct InFlight {
+    entity: Entity,
+    kind: ReqKind,
+    rx: std::sync::mpsc::Receiver<serde_json::Value>,
+}
+
+#[derive(Message)]
+pub struct LspGoto {
+    pub entity: Entity,
+    pub path: PathBuf,
+    pub line: u32,
+    pub utf16_col: u32,
+}
+
 #[derive(Default)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
     outbox: LspOutbox,
+    inflight: Vec<InFlight>,
 }
 
 fn uri_for(path: &Path) -> Option<String> {
@@ -160,6 +209,21 @@ impl LspManager {
         }
     }
 
+    pub fn change_with_text(&mut self, path: &Path, text: &str) {
+        let Some(doc) = self.open_docs.get_mut(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        doc.version += 1;
+        let version = doc.version;
+        let key = doc.key.clone();
+        if let Some(client) = self.servers.get(&key) {
+            client.did_change(&uri, version, text);
+        }
+    }
+
     pub fn close(&mut self, path: &Path) {
         let Some(doc) = self.open_docs.remove(path) else {
             return;
@@ -168,12 +232,266 @@ impl LspManager {
             client.did_close(&uri);
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn send_doc_request(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        method: &str,
+        line: u32,
+        utf16_col: u32,
+        extra: serde_json::Value,
+        kind: ReqKind,
+    ) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        let mut params = serde_json::json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": utf16_col },
+        });
+        if let (Some(obj), Some(ex)) = (params.as_object_mut(), extra.as_object()) {
+            for (k, v) in ex {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        let (_, rx) = client.send_request(method, params);
+        self.inflight.push(InFlight { entity, kind, rx });
+    }
+
+    pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/hover",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Hover {
+                line,
+                col: echo_col,
+            },
+        );
+    }
+
+    pub fn definition(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/definition",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Definition,
+        );
+    }
+
+    pub fn references(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/references",
+            line,
+            utf16_col,
+            serde_json::json!({ "context": { "includeDeclaration": true } }),
+            ReqKind::References,
+        );
+    }
+
+    pub fn completion(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+        line: u32,
+        utf16_col: u32,
+        replace_from_col: u32,
+    ) {
+        self.send_doc_request(
+            entity,
+            path,
+            "textDocument/completion",
+            line,
+            utf16_col,
+            serde_json::json!({}),
+            ReqKind::Completion {
+                line,
+                replace_from_col,
+            },
+        );
+    }
+}
+
+fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
+    use lsp_types::{HoverContents, MarkedString};
+    let marked = |m: MarkedString| match m {
+        MarkedString::String(s) => s,
+        MarkedString::LanguageString(ls) => ls.value,
+    };
+    match c {
+        HoverContents::Scalar(m) => marked(m),
+        HoverContents::Array(items) => items
+            .into_iter()
+            .map(marked)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        HoverContents::Markup(mc) => mc.value,
+    }
+}
+
+fn parse_hover(value: &serde_json::Value) -> Vec<vmux_core::event::HoverBlock> {
+    let Some(result) = value.get("result") else {
+        return Vec::new();
+    };
+    if result.is_null() {
+        return Vec::new();
+    }
+    let md = serde_json::from_value::<lsp_types::Hover>(result.clone())
+        .map(|h| hover_contents_to_string(h.contents))
+        .unwrap_or_default();
+    markdown_to_hover_blocks(&md)
+}
+
+fn markdown_to_hover_blocks(md: &str) -> Vec<vmux_core::event::HoverBlock> {
+    use vmux_core::event::HoverBlock;
+    let mut blocks = Vec::new();
+    let mut in_code = false;
+    let mut lang = String::new();
+    let mut buf = String::new();
+    let flush_prose = |buf: &mut String, blocks: &mut Vec<HoverBlock>| {
+        let t = buf.trim();
+        if !t.is_empty() {
+            blocks.push(HoverBlock {
+                code: false,
+                text: t.to_string(),
+                lines: Vec::new(),
+            });
+        }
+        buf.clear();
+    };
+    for line in md.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("```") {
+            if in_code {
+                blocks.push(HoverBlock {
+                    code: true,
+                    text: String::new(),
+                    lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+                });
+                buf.clear();
+                in_code = false;
+            } else {
+                flush_prose(&mut buf, &mut blocks);
+                in_code = true;
+                lang = rest.trim().to_string();
+            }
+            continue;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    if in_code {
+        blocks.push(HoverBlock {
+            code: true,
+            text: String::new(),
+            lines: crate::highlight::highlight_snippet(&buf, lang.trim()),
+        });
+    } else {
+        flush_prose(&mut buf, &mut blocks);
+    }
+    blocks
+}
+
+fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf, u32, u32)> {
+    let path = crate::lsp::client::path_from_uri(uri.as_str())?;
+    Some((path, pos.line, pos.character))
+}
+
+fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
+    let result = value.get("result")?;
+    if result.is_null() {
+        return None;
+    }
+    use lsp_types::GotoDefinitionResponse::*;
+    match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
+        Scalar(l) => loc_tuple(&l.uri, l.range.start),
+        Array(ls) => ls
+            .into_iter()
+            .find_map(|l| loc_tuple(&l.uri, l.range.start)),
+        Link(lls) => lls
+            .into_iter()
+            .find_map(|l| loc_tuple(&l.target_uri, l.target_range.start)),
+    }
+}
+
+fn parse_references(value: &serde_json::Value) -> Vec<(PathBuf, u32, u32)> {
+    let Some(result) = value.get("result") else {
+        return Vec::new();
+    };
+    serde_json::from_value::<Vec<lsp_types::Location>>(result.clone())
+        .map(|ls| {
+            ls.into_iter()
+                .filter_map(|l| loc_tuple(&l.uri, l.range.start))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::CompletionItem> {
+    let Some(result) = value.get("result") else {
+        return Vec::new();
+    };
+    if result.is_null() {
+        return Vec::new();
+    }
+    let items = match serde_json::from_value::<lsp_types::CompletionResponse>(result.clone()) {
+        Ok(lsp_types::CompletionResponse::Array(a)) => a,
+        Ok(lsp_types::CompletionResponse::List(l)) => l.items,
+        Err(_) => return Vec::new(),
+    };
+    items
+        .into_iter()
+        .take(200)
+        .map(|it| {
+            let insert_text = it.insert_text.clone().unwrap_or_else(|| it.label.clone());
+            vmux_core::event::CompletionItem {
+                label: it.label.clone(),
+                insert_text,
+                detail: it.detail.clone().unwrap_or_default(),
+                kind: it.kind.map(|k| format!("{k:?}")).unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+pub fn disk_line(path: &Path, line: u32) -> String {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return String::new();
+    };
+    content
+        .lines()
+        .nth(line as usize)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn ref_display(path: &Path, line: u32) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    format!("{}:{}", name, line + 1)
 }
 
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::plugin::{FileBuffer, FileView};
+use crate::plugin::{EditState, FileView};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -196,19 +514,104 @@ fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
 }
 
 fn lsp_open_documents(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<LspOpened>>,
+    q: Query<(Entity, &FileView, &EditState), Without<LspOpened>>,
     settings: Res<vmux_setting::AppSettings>,
     mut manager: NonSendMut<LspManager>,
     mut commands: Commands,
 ) {
     let overrides = server_overrides(&settings);
-    for (entity, fv, buf) in &q {
-        if buf.language.starts_with("__error__:") {
-            continue;
-        }
+    for (entity, fv, _edit) in &q {
         manager.open(&fv.path, &overrides);
         commands.entity(entity).insert(LspOpened);
     }
+}
+
+fn drain_lsp_requests(
+    mut manager: NonSendMut<LspManager>,
+    browsers: NonSend<Browsers>,
+    mut goto_w: MessageWriter<LspGoto>,
+    mut commands: Commands,
+) {
+    use vmux_core::event::{
+        FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT, FileCompletionEvent,
+        FileHoverEvent, FileReferencesEvent, RefItem,
+    };
+    let drained = std::mem::take(&mut manager.inflight);
+    let mut still = Vec::new();
+    for f in drained {
+        let value = match f.rx.try_recv() {
+            Ok(v) => v,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                still.push(f);
+                continue;
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => continue,
+        };
+        let ready = browsers.has_browser(f.entity) && browsers.host_emit_ready(&f.entity);
+        match f.kind {
+            ReqKind::Hover { line, col } => {
+                let blocks = parse_hover(&value);
+                if !blocks.is_empty() && ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_HOVER_EVENT,
+                        &FileHoverEvent { line, col, blocks },
+                    ));
+                }
+            }
+            ReqKind::Definition => {
+                if let Some((path, line, utf16_col)) = parse_definition(&value) {
+                    goto_w.write(LspGoto {
+                        entity: f.entity,
+                        path,
+                        line,
+                        utf16_col,
+                    });
+                }
+            }
+            ReqKind::References => {
+                let items: Vec<RefItem> = parse_references(&value)
+                    .into_iter()
+                    .map(|(path, line, utf16_col)| {
+                        let text = disk_line(&path, line);
+                        let col = utf16_to_char_col(&text, utf16_col);
+                        RefItem {
+                            display: ref_display(&path, line),
+                            path: path.to_string_lossy().into_owned(),
+                            line,
+                            col,
+                            preview: text.trim().to_string(),
+                        }
+                    })
+                    .collect();
+                if !items.is_empty() && ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_REFERENCES_EVENT,
+                        &FileReferencesEvent { items },
+                    ));
+                }
+            }
+            ReqKind::Completion {
+                line,
+                replace_from_col,
+            } => {
+                let items = parse_completion(&value);
+                if ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        FILE_COMPLETION_EVENT,
+                        &FileCompletionEvent {
+                            items,
+                            replace_from_col,
+                            line,
+                        },
+                    ));
+                }
+            }
+        }
+    }
+    manager.inflight = still;
 }
 
 pub fn build(app: &mut App, outbox: LspOutbox) {
@@ -218,6 +621,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
     })
     .init_resource::<LintOutbox>()
     .init_resource::<DiagState>()
+    .add_message::<LspGoto>()
     .add_systems(
         Update,
         (
@@ -225,6 +629,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
             lint_on_open,
             drain_lsp_diagnostics,
             drain_lint,
+            drain_lsp_requests,
             emit_diagnostics_system,
             lsp_status_system,
         )
@@ -288,7 +693,7 @@ fn emit_diagnostics_system(
 fn drain_lsp_diagnostics(
     outbox: Res<LspOutbox>,
     mut state: ResMut<DiagState>,
-    views: Query<(Entity, &FileView, &FileBuffer)>,
+    views: Query<(Entity, &FileView, &EditState)>,
 ) {
     let drained: Vec<(PathBuf, Vec<lsp_types::Diagnostic>)> = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
@@ -299,7 +704,7 @@ fn drain_lsp_diagnostics(
         let mapped = views
             .iter()
             .find(|(_, fv, _)| canon(&fv.path) == target)
-            .map(|(_, _, buf)| to_file_diagnostics(&buf.lines, &diags))
+            .map(|(_, _, edit)| map_diags(&diags, |l| rope_line_text(&edit.core.buffer.rope, l)))
             .unwrap_or_default();
         state.lsp.insert(target, mapped);
     }
@@ -319,15 +724,12 @@ fn drain_lint(outbox: Res<LintOutbox>, mut state: ResMut<DiagState>) {
 pub struct LintRan;
 
 fn lint_on_open(
-    q: Query<(Entity, &FileView, &FileBuffer), Without<LintRan>>,
+    q: Query<(Entity, &FileView, &EditState), Without<LintRan>>,
     outbox: Res<LintOutbox>,
     mut commands: Commands,
 ) {
-    for (entity, fv, buf) in &q {
+    for (entity, fv, _edit) in &q {
         commands.entity(entity).insert(LintRan);
-        if buf.language.starts_with("__error__:") {
-            continue;
-        }
         let Some(ext) = fv.path.extension().and_then(|e| e.to_str()) else {
             continue;
         };
@@ -499,5 +901,68 @@ mod tests {
         });
         app.update();
         assert!(outbox.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn char_utf16_roundtrip_surrogate_pair() {
+        let text = "a😀b";
+        assert_eq!(char_to_utf16_col(text, 0), 0);
+        assert_eq!(char_to_utf16_col(text, 1), 1);
+        assert_eq!(char_to_utf16_col(text, 2), 3);
+        assert_eq!(char_to_utf16_col(text, 3), 4);
+        assert_eq!(utf16_to_char_col(text, 3), 2);
+    }
+
+    #[test]
+    fn diagnostics_map_through_editstate() {
+        use crate::edit::highlight_cache::HighlightCache;
+        use crate::edit::{EditCore, EditMode};
+        use crate::lsp::LspOutbox;
+        use crate::plugin::{EditState, FileView};
+        use std::path::PathBuf;
+
+        let path = PathBuf::from("/tmp/vmux_lsp_editstate.rs");
+        let mut app = App::new();
+        let outbox = LspOutbox::default();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<DiagState>()
+            .insert_resource(outbox.clone())
+            .add_systems(Update, drain_lsp_diagnostics);
+
+        let core = EditCore::new(
+            path.clone(),
+            "Rust".into(),
+            "fn a() {}\nlet x = 1;\n",
+            EditMode::Insert,
+        );
+        let hl = HighlightCache::new(&path);
+        app.world_mut()
+            .spawn((FileView { path: path.clone() }, EditState { core, hl }));
+
+        let diag = lsp_types::Diagnostic {
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 1,
+                    character: 4,
+                },
+                end: lsp_types::Position {
+                    line: 1,
+                    character: 5,
+                },
+            },
+            message: "boom".into(),
+            ..Default::default()
+        };
+        outbox.0.lock().unwrap().push((path.clone(), vec![diag]));
+        app.update();
+
+        let state = app.world().resource::<DiagState>();
+        let mapped = state
+            .lsp
+            .get(&canon(&path))
+            .expect("diagnostics mapped for EditState entity");
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0].line, 1);
+        assert_eq!(mapped[0].start_col, 4);
     }
 }

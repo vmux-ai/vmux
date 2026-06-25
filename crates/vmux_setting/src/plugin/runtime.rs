@@ -39,6 +39,8 @@ pub struct AppSettings {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct EditorSettings {
     #[serde(default)]
+    pub keymap: vmux_core::KeymapKind,
+    #[serde(default)]
     pub lsp: LspSettings,
 }
 
