@@ -953,7 +953,10 @@ mod tests {
             .expect("position round-tripped");
         assert_eq!(pos.leaf_pane_id, "p-1");
         assert_eq!(pos.pane_path[0].child_index, 2);
-        assert!(matches!(pos.pane_path[0].axis, vmux_core::SplitAxis::Column));
+        assert!(matches!(
+            pos.pane_path[0].axis,
+            vmux_core::SplitAxis::Column
+        ));
     }
 
     #[test]

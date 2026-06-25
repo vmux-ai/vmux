@@ -290,7 +290,7 @@ fn handle_reopen_closed_page(
     };
 
     let position = positions.get(entry_entity).ok().cloned();
-    let stack = resolve_reopen_stack(
+    let (stack, focus_anchor) = resolve_reopen_stack(
         space,
         origin_space == Some(space),
         page.tab_index,
@@ -311,7 +311,7 @@ fn handle_reopen_closed_page(
     commands
         .entity(stack)
         .insert(vmux_history::LastActivatedAt::now());
-    focus_reopened_ancestors(stack, &layout, &mut commands);
+    focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -362,7 +362,7 @@ fn resolve_reopen_stack(
     commands: &mut Commands,
     primary_window: Entity,
     gap: f32,
-) -> Entity {
+) -> (Entity, Entity) {
     if let Some(pos) = position.filter(|p| !p.leaf_pane_id.is_empty()) {
         if let Some(leaf) = layout
             .pane_ids
@@ -371,20 +371,35 @@ fn resolve_reopen_stack(
             .map(|(e, _)| e)
             .filter(|&leaf| pane_in_space(leaf, space, &layout.child_of))
         {
-            return spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands);
+            return (
+                spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
+                leaf,
+            );
         }
         if let Some(leaf) = reattach_along_path(space, pos, layout, commands) {
-            return spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands);
+            let anchor = pos
+                .pane_path
+                .first()
+                .and_then(|s| {
+                    layout
+                        .pane_ids
+                        .iter()
+                        .find(|(_, id)| id.0 == s.split_id)
+                        .map(|(e, _)| e)
+                })
+                .unwrap_or(leaf);
+            return (
+                spawn_stack_in_leaf(leaf, pos.stack_index, layout, commands),
+                anchor,
+            );
         }
     }
 
     let scaffold = spawn_tab_scaffold_in_space(commands, space, primary_window, gap);
-    if origin_matches
-        && let Some(idx) = tab_index
-    {
+    if origin_matches && let Some(idx) = tab_index {
         commands.entity(space).insert_children(idx, &[scaffold.tab]);
     }
-    scaffold.stack
+    (scaffold.stack, scaffold.tab)
 }
 
 fn pane_in_space(pane: Entity, space: Entity, child_of: &Query<&ChildOf>) -> bool {
@@ -422,8 +437,11 @@ fn spawn_stack_in_leaf(
     stack
 }
 
-fn focus_reopened_ancestors(stack: Entity, layout: &ReopenLayout, commands: &mut Commands) {
-    let mut cur = stack;
+fn focus_reopened_ancestors(anchor: Entity, layout: &ReopenLayout, commands: &mut Commands) {
+    commands
+        .entity(anchor)
+        .insert(vmux_history::LastActivatedAt::now());
+    let mut cur = anchor;
     while let Ok(rel) = layout.child_of.get(cur) {
         let parent = rel.parent();
         commands
@@ -515,14 +533,19 @@ fn reattach_along_path(
             .entity(new_child)
             .insert(PaneSize { flex_grow: flex });
         let insert_at = clamp_child_index(parent, step.child_index, &layout.children_q);
-        commands.entity(parent).insert_children(insert_at, &[new_child]);
+        commands
+            .entity(parent)
+            .insert_children(insert_at, &[new_child]);
         parent = new_child;
     }
     Some(parent)
 }
 
 fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) -> usize {
-    let count = children_q.get(parent).map(|c| c.iter().count()).unwrap_or(0);
+    let count = children_q
+        .get(parent)
+        .map(|c| c.iter().count())
+        .unwrap_or(0);
     idx.min(count)
 }
 
@@ -1214,7 +1237,11 @@ mod tests {
             .iter()
             .filter(|&e| app.world().entity(e).contains::<Pane>())
             .collect();
-        assert_eq!(panes.len(), 2, "reopened leaf re-added under surviving split");
+        assert_eq!(
+            panes.len(),
+            2,
+            "reopened leaf re-added under surviving split"
+        );
         let has_stack = panes.iter().any(|&p| {
             app.world()
                 .entity(p)
@@ -1279,12 +1306,49 @@ mod tests {
         let mut ids = app.world_mut().query::<&crate::pane::PaneId>();
         let recreated_nested = ids.iter(app.world()).any(|id| id.0 == "nested");
         assert!(recreated_nested, "nested split recreated by id");
-        let stack_count = app
-            .world_mut()
-            .query::<&Stack>()
-            .iter(app.world())
-            .count();
+        let stack_count = app.world_mut().query::<&Stack>().iter(app.world()).count();
         assert_eq!(stack_count, 1);
         assert_eq!(drain_opens(&mut app).len(), 1);
+    }
+
+    #[test]
+    fn reopen_focuses_restored_stack_and_ancestors() {
+        use crate::pane::{Pane, PaneId};
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let leaf = app
+            .world_mut()
+            .spawn((Pane, PaneId("leaf-A".to_string()), ChildOf(tab)))
+            .id();
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://z".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "leaf-A".to_string(),
+                stack_index: 0,
+                pane_path: Vec::new(),
+            },
+        ));
+        dispatch_reopen(&mut app);
+        assert!(
+            app.world()
+                .entity(leaf)
+                .get::<vmux_history::LastActivatedAt>()
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .entity(tab)
+                .get::<vmux_history::LastActivatedAt>()
+                .is_some()
+        );
     }
 }
