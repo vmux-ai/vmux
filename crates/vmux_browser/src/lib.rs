@@ -2579,6 +2579,7 @@ fn handle_browser_commands(
                     if resolved.is_empty() {
                         continue;
                     }
+                    let resolved = normalize_vmux_url(&resolved);
                     let current_url = meta_q
                         .get(webview)
                         .map(|m| m.url.clone())
@@ -2594,7 +2595,6 @@ fn handle_browser_commands(
                         });
                         continue;
                     }
-                    let resolved = normalize_vmux_url(&resolved);
                     if let Ok(mut meta) = meta_q.get_mut(webview) {
                         meta.url = resolved.clone();
                         meta.title = resolved.clone();
@@ -3001,9 +3001,16 @@ fn normalize_vmux_url(url: &str) -> String {
 }
 
 fn page_needs_host_spawn(url: &str) -> bool {
-    url.starts_with("file:")
-        || url.starts_with("vmux://terminal")
-        || url.starts_with("vmux://agent")
+    fn has_vmux_host(url: &str, host: &str) -> bool {
+        let Some(rest) = url.strip_prefix("vmux://") else {
+            return false;
+        };
+        let Some(tail) = rest.strip_prefix(host) else {
+            return false;
+        };
+        tail.is_empty() || matches!(tail.as_bytes().first(), Some(b'/' | b'?' | b'#'))
+    }
+    url.starts_with("file:") || has_vmux_host(url, "terminal") || has_vmux_host(url, "agent")
 }
 
 fn resolve_page_open_target(
@@ -3393,6 +3400,21 @@ mod tests {
             normalize_vmux_url("file:///tmp/main.rs"),
             "file:///tmp/main.rs"
         );
+    }
+
+    #[test]
+    fn page_needs_host_spawn_matches_host_on_boundaries() {
+        assert!(page_needs_host_spawn("file:///tmp/x"));
+        assert!(page_needs_host_spawn("vmux://terminal"));
+        assert!(page_needs_host_spawn("vmux://terminal/"));
+        assert!(page_needs_host_spawn("vmux://terminal/?pid=1"));
+        assert!(page_needs_host_spawn("vmux://agent"));
+        assert!(page_needs_host_spawn("vmux://agent/vibe/setup"));
+
+        assert!(!page_needs_host_spawn("vmux://agentic/"));
+        assert!(!page_needs_host_spawn("vmux://terminals/"));
+        assert!(!page_needs_host_spawn("vmux://settings/"));
+        assert!(!page_needs_host_spawn("https://example.com"));
     }
 
     #[test]
