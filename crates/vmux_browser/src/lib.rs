@@ -172,6 +172,7 @@ impl Plugin for BrowserPlugin {
                     push_stacks_host_emit,
                     push_pane_tree_emit,
                     push_tabs_host_emit,
+                    push_bookmarks_host_emit,
                     push_update_notice_emit,
                 )
                     .after(vmux_layout::apply_cef_state_from_webview)
@@ -2583,6 +2584,98 @@ fn push_pane_tree_emit(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn push_bookmarks_host_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    pins: Query<(&vmux_core::Uuid, &PageMetadata), With<vmux_core::Pin>>,
+    folders: Query<
+        (
+            Entity,
+            &vmux_core::Uuid,
+            &Name,
+            Option<&Children>,
+            Has<vmux_core::Collapsed>,
+            &vmux_core::Order,
+        ),
+        With<vmux_core::Folder>,
+    >,
+    top_bookmarks: Query<
+        (&vmux_core::Uuid, &PageMetadata, &vmux_core::Order),
+        (
+            With<vmux_core::Bookmark>,
+            Without<vmux_core::Pin>,
+            Without<ChildOf>,
+        ),
+    >,
+    child_bookmarks: Query<
+        (&vmux_core::Uuid, &PageMetadata),
+        (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
+    >,
+    mut last: Local<String>,
+) {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+        return;
+    }
+
+    let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata| vmux_layout::event::BookmarkRow {
+        uuid: uuid.0.clone(),
+        url: meta.url.clone(),
+        title: meta.title.clone(),
+        favicon_url: meta.favicon_url.clone(),
+    };
+
+    let pin_rows: Vec<vmux_layout::event::BookmarkRow> =
+        pins.iter().map(|(u, m)| row(u, m)).collect();
+
+    let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
+    for (_entity, uuid, name, children, collapsed, order) in folders.iter() {
+        let mut kids: Vec<vmux_layout::event::BookmarkRow> = Vec::new();
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok((u, m)) = child_bookmarks.get(child) {
+                    kids.push(row(u, m));
+                }
+            }
+        }
+        roots.push((
+            order.0,
+            vmux_layout::event::BookmarkNode::Folder(vmux_layout::event::FolderRow {
+                uuid: uuid.0.clone(),
+                name: name.as_str().to_string(),
+                collapsed,
+                children: kids,
+            }),
+        ));
+    }
+    for (uuid, meta, order) in top_bookmarks.iter() {
+        roots.push((
+            order.0,
+            vmux_layout::event::BookmarkNode::Entry(row(uuid, meta)),
+        ));
+    }
+    roots.sort_by_key(|(o, _)| *o);
+    let roots: Vec<vmux_layout::event::BookmarkNode> = roots.into_iter().map(|(_, n)| n).collect();
+
+    let payload = vmux_layout::event::BookmarksHostEvent {
+        pins: pin_rows,
+        roots,
+    };
+    let body = ron::ser::to_string(&payload).unwrap_or_default();
+    if !page_ready.is_changed() && body == *last {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        cef_e,
+        vmux_layout::event::BOOKMARKS_EVENT,
+        &payload,
+    ));
+    *last = body;
+}
+
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
