@@ -62,7 +62,6 @@ pub enum StackCommand {
     Close,
     #[menu(id = "stack_next", label = "Next Stack", accel = "super+shift+n")]
     #[shortcut(direct = "Super+Shift+J")]
-    #[shortcut(direct = "Super+Shift+ArrowDown")]
     Next,
     #[menu(
         id = "stack_previous",
@@ -70,7 +69,6 @@ pub enum StackCommand {
         accel = "super+shift+p"
     )]
     #[shortcut(direct = "Super+Shift+K")]
-    #[shortcut(direct = "Super+Shift+ArrowUp")]
     Previous,
     #[menu(
         id = "stack_reopen",
