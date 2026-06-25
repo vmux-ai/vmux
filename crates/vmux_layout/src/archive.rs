@@ -7,10 +7,11 @@ use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PageMetadata, PageOpenRequest,
-    PageOpenTarget, now_millis,
+    PageOpenTarget, PaneStep, SplitAxis, now_millis,
 };
 
 use crate::event::TERMINAL_PAGE_URL;
+use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
 use crate::stack::{FocusedStack, Stack, StackCommandSet};
@@ -37,6 +38,7 @@ impl Plugin for ArchivePlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn archive_on_stack_close(
     mut reader: MessageReader<AppCommand>,
     focused: Res<FocusedStack>,
@@ -46,6 +48,11 @@ fn archive_on_stack_close(
     spaces: Query<(), With<Space>>,
     space_ids: Query<&SpaceId>,
     tabs: Query<(), With<Tab>>,
+    stacks: Query<(), With<Stack>>,
+    pane_ids: Query<&PaneId>,
+    splits: Query<&PaneSplit>,
+    pane_sizes: Query<&PaneSize>,
+    panes: Query<(), With<Pane>>,
     mut writer: MessageWriter<PageArchiveRequest>,
 ) {
     let mut closing = false;
@@ -75,15 +82,27 @@ fn archive_on_stack_close(
         .map(|id| id.0.clone())
         .unwrap_or_default();
     let tab_index = space.and_then(|s| tab_index_of(stack, s, &child_of, &children_q, &tabs));
+    let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
+        stack,
+        &child_of,
+        &children_q,
+        &pane_ids,
+        &splits,
+        &pane_sizes,
+        &panes,
+        &stacks,
+        &tabs,
+    )
+    .unwrap_or_default();
     writer.write(PageArchiveRequest {
         url: meta.url.clone(),
         title: meta.title.clone(),
         space_id,
         launch: launch.cloned(),
         tab_index,
-        leaf_pane_id: String::new(),
-        stack_index: 0,
-        pane_path: Vec::new(),
+        leaf_pane_id,
+        stack_index,
+        pane_path,
     });
 }
 
@@ -107,6 +126,64 @@ fn tab_index_of(
         .iter()
         .filter(|e| tabs.get(*e).is_ok())
         .position(|e| e == tab)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pane_path_of(
+    stack: Entity,
+    child_of: &Query<&ChildOf>,
+    children_q: &Query<&Children>,
+    pane_ids: &Query<&PaneId>,
+    splits: &Query<&PaneSplit>,
+    pane_sizes: &Query<&PaneSize>,
+    panes: &Query<(), With<Pane>>,
+    stacks: &Query<(), With<Stack>>,
+    tabs: &Query<(), With<Tab>>,
+) -> Option<(String, usize, Vec<PaneStep>)> {
+    let leaf = child_of.get(stack).ok()?.parent();
+    if !panes.contains(leaf) {
+        return None;
+    }
+    let leaf_pane_id = pane_ids.get(leaf).ok()?.0.clone();
+    let stack_index = children_q
+        .get(leaf)
+        .ok()?
+        .iter()
+        .filter(|&e| stacks.contains(e))
+        .position(|e| e == stack)?;
+
+    let mut steps_rev: Vec<PaneStep> = Vec::new();
+    let mut cur = leaf;
+    loop {
+        let parent = child_of.get(cur).ok()?.parent();
+        if tabs.contains(parent) {
+            break;
+        }
+        let Ok(split) = splits.get(parent) else {
+            return None;
+        };
+        let pane_children: Vec<Entity> = children_q
+            .get(parent)
+            .map(|c| c.iter().filter(|&e| panes.contains(e)).collect())
+            .unwrap_or_default();
+        let child_index = pane_children.iter().position(|&e| e == cur)?;
+        let flex_weights = pane_children
+            .iter()
+            .map(|&e| pane_sizes.get(e).map(|s| s.flex_grow).unwrap_or(1.0))
+            .collect();
+        steps_rev.push(PaneStep {
+            split_id: pane_ids.get(parent).ok()?.0.clone(),
+            axis: match split.direction {
+                PaneSplitDirection::Row => SplitAxis::Row,
+                PaneSplitDirection::Column => SplitAxis::Column,
+            },
+            child_index,
+            flex_weights,
+        });
+        cur = parent;
+    }
+    steps_rev.reverse();
+    Some((leaf_pane_id, stack_index, steps_rev))
 }
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
@@ -477,6 +554,80 @@ mod tests {
         let reqs = drain_archive_reqs(&mut app);
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].tab_index, Some(1));
+    }
+
+    #[test]
+    fn close_records_pane_path_and_leaf() {
+        use crate::pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection};
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageArchiveRequest>()
+            .init_resource::<FocusedStack>()
+            .add_systems(Update, super::archive_on_stack_close);
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneId("root".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let leaf0 = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("leaf0".to_string()),
+                PaneSize { flex_grow: 1.0 },
+                ChildOf(root),
+            ))
+            .id();
+        let leaf1 = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("leaf1".to_string()),
+                PaneSize { flex_grow: 3.0 },
+                ChildOf(root),
+            ))
+            .id();
+        let _ = leaf0;
+        app.world_mut().spawn((Stack::default(), ChildOf(leaf1)));
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                PageMetadata {
+                    url: "https://z.example".to_string(),
+                    ..default()
+                },
+                ChildOf(leaf1),
+            ))
+            .id();
+        app.world_mut().resource_mut::<FocusedStack>().stack = Some(stack);
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close,
+            )));
+        app.update();
+        let reqs = drain_archive_reqs(&mut app);
+        assert_eq!(reqs.len(), 1);
+        let req = &reqs[0];
+        assert_eq!(req.leaf_pane_id, "leaf1");
+        assert_eq!(req.stack_index, 1);
+        assert_eq!(req.pane_path.len(), 1);
+        assert_eq!(req.pane_path[0].split_id, "root");
+        assert_eq!(req.pane_path[0].child_index, 1);
+        assert_eq!(req.pane_path[0].flex_weights, vec![1.0, 3.0]);
+        assert!(matches!(req.pane_path[0].axis, SplitAxis::Row));
     }
 
     fn reopen_app() -> App {
