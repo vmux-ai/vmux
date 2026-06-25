@@ -459,7 +459,15 @@ pub fn Page() -> Element {
                                     {
                                         dismiss_command_bar(is_open);
                                     } else if e.key() == Key::Enter {
-                                        if should_open_typed_query_on_enter(open_target, nav_mode(), &q) {
+                                        let prefer_page = matches!(
+                                            results.get(sel),
+                                            Some(ResultItem::Page { url, .. })
+                                                if q.trim().starts_with("vmux://")
+                                                    && url.starts_with(q.trim())
+                                        );
+                                        if !prefer_page
+                                            && should_open_typed_query_on_enter(open_target, nav_mode(), &q)
+                                        {
                                             is_open.set(false);
                                             emit_action_with_target("open", &q, open_target);
                                         } else if let Some(item) = results.get(sel) {
