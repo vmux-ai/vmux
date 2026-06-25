@@ -17,6 +17,13 @@ pub fn utf16_to_char_col(text: &str, utf16_col: u32) -> u32 {
     chars
 }
 
+pub fn char_to_utf16_col(text: &str, char_col: u32) -> u32 {
+    text.chars()
+        .take(char_col as usize)
+        .map(|c| c.len_utf16() as u32)
+        .sum()
+}
+
 fn map_severity(sev: Option<lsp_types::DiagnosticSeverity>) -> DiagSeverity {
     match sev {
         Some(s) if s == lsp_types::DiagnosticSeverity::ERROR => DiagSeverity::Error,
@@ -86,12 +93,23 @@ type ServerOverrides = std::collections::BTreeMap<String, ServerSpec>;
 
 const LSP_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
+pub enum ReqKind {
+    Hover { line: u32, col: u32 },
+}
+
+pub struct InFlight {
+    entity: Entity,
+    kind: ReqKind,
+    rx: std::sync::mpsc::Receiver<serde_json::Value>,
+}
+
 #[derive(Default)]
 pub struct LspManager {
     servers: HashMap<ServerKey, ServerClient>,
     open_docs: HashMap<PathBuf, OpenDoc>,
     failed: HashSet<ServerKey>,
     outbox: LspOutbox,
+    inflight: Vec<InFlight>,
 }
 
 fn uri_for(path: &Path) -> Option<String> {
@@ -180,6 +198,22 @@ impl LspManager {
         }
     }
 
+    /// Like `change` but sends the supplied in-memory text (for live, unsaved sync).
+    pub fn change_with_text(&mut self, path: &Path, text: &str) {
+        let Some(doc) = self.open_docs.get_mut(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        doc.version += 1;
+        let version = doc.version;
+        let key = doc.key.clone();
+        if let Some(client) = self.servers.get(&key) {
+            client.did_change(&uri, version, text);
+        }
+    }
+
     pub fn close(&mut self, path: &Path) {
         let Some(doc) = self.open_docs.remove(path) else {
             return;
@@ -188,6 +222,64 @@ impl LspManager {
             client.did_close(&uri);
         }
     }
+
+    /// Request hover at a UTF-16 column. `echo_col` is the original char column to
+    /// echo back to the page for anchoring.
+    pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        let (_, rx) = client.send_request(
+            "textDocument/hover",
+            serde_json::json!({
+                "textDocument": { "uri": uri },
+                "position": { "line": line, "character": utf16_col },
+            }),
+        );
+        self.inflight.push(InFlight {
+            entity,
+            kind: ReqKind::Hover {
+                line,
+                col: echo_col,
+            },
+            rx,
+        });
+    }
+}
+
+fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
+    use lsp_types::{HoverContents, MarkedString};
+    let marked = |m: MarkedString| match m {
+        MarkedString::String(s) => s,
+        MarkedString::LanguageString(ls) => ls.value,
+    };
+    match c {
+        HoverContents::Scalar(m) => marked(m),
+        HoverContents::Array(items) => items
+            .into_iter()
+            .map(marked)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        HoverContents::Markup(mc) => mc.value,
+    }
+}
+
+fn parse_hover(value: &serde_json::Value) -> String {
+    let Some(result) = value.get("result") else {
+        return String::new();
+    };
+    if result.is_null() {
+        return String::new();
+    }
+    serde_json::from_value::<lsp_types::Hover>(result.clone())
+        .map(|h| hover_contents_to_string(h.contents))
+        .unwrap_or_default()
 }
 
 #[derive(Component)]
@@ -228,6 +320,42 @@ fn lsp_open_documents(
     }
 }
 
+fn drain_lsp_requests(
+    mut manager: NonSendMut<LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    use vmux_core::event::{FILE_HOVER_EVENT, FileHoverEvent};
+    let drained = std::mem::take(&mut manager.inflight);
+    let mut still = Vec::new();
+    for f in drained {
+        match f.rx.try_recv() {
+            Ok(value) => match f.kind {
+                ReqKind::Hover { line, col } => {
+                    let contents = parse_hover(&value);
+                    if !contents.is_empty()
+                        && browsers.has_browser(f.entity)
+                        && browsers.host_emit_ready(&f.entity)
+                    {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            f.entity,
+                            FILE_HOVER_EVENT,
+                            &FileHoverEvent {
+                                line,
+                                col,
+                                contents,
+                            },
+                        ));
+                    }
+                }
+            },
+            Err(std::sync::mpsc::TryRecvError::Empty) => still.push(f),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+        }
+    }
+    manager.inflight = still;
+}
+
 pub fn build(app: &mut App, outbox: LspOutbox) {
     app.insert_non_send(LspManager {
         outbox,
@@ -242,6 +370,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
             lint_on_open,
             drain_lsp_diagnostics,
             drain_lint,
+            drain_lsp_requests,
             emit_diagnostics_system,
             lsp_status_system,
         )
@@ -513,6 +642,16 @@ mod tests {
         });
         app.update();
         assert!(outbox.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn char_utf16_roundtrip_surrogate_pair() {
+        let text = "a😀b";
+        assert_eq!(char_to_utf16_col(text, 0), 0);
+        assert_eq!(char_to_utf16_col(text, 1), 1);
+        assert_eq!(char_to_utf16_col(text, 2), 3);
+        assert_eq!(char_to_utf16_col(text, 3), 4);
+        assert_eq!(utf16_to_char_col(text, 3), 2);
     }
 
     #[test]

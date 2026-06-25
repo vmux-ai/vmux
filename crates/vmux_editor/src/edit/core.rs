@@ -423,7 +423,11 @@ impl EditCore {
                     text_changed = true;
                 }
             }
-            EditCommand::Save => {}
+            EditCommand::Save
+            | EditCommand::GotoDefinition
+            | EditCommand::FindReferences
+            | EditCommand::Hover
+            | EditCommand::TriggerCompletion => {}
         }
 
         EditOutcome {

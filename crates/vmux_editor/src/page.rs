@@ -372,6 +372,8 @@ pub fn Page() -> Element {
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut dirty = use_signal(|| false);
     let mut composing = use_signal(|| false);
+    let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
+    let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
@@ -393,6 +395,7 @@ pub fn Page() -> Element {
         first_line.set(p.first_line);
         total_lines.set(p.total_lines);
         lines.set(p.lines);
+        lsp_hover.set(None);
     });
 
     let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
@@ -404,6 +407,10 @@ pub fn Page() -> Element {
 
     let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
+    });
+
+    let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
+        lsp_hover.set(Some(h));
     });
 
     let _diag =
@@ -834,7 +841,12 @@ pub fn Page() -> Element {
                             let cy = 8.0 + crow * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
-                                div { class: "relative min-h-0 flex-1 overflow-auto",
+                                div {
+                                    class: "relative min-h-0 flex-1 overflow-auto",
+                                    onmouseleave: move |_| {
+                                        lsp_hover.set(None);
+                                        hover_pos.set(None);
+                                    },
                                     div { class: "relative min-w-max py-2",
                                         for line in lines().iter() {
                                             {
@@ -873,6 +885,35 @@ pub fn Page() -> Element {
                                                                 });
                                                             }
                                                             focus_file_input();
+                                                        },
+                                                        onmousemove: move |e: Event<MouseData>| {
+                                                            let (cw, _) = cell_dims();
+                                                            let g = gw as f64 * cw + 36.0;
+                                                            let dd = e.data();
+                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
+                                                                && let Some(t) = raw
+                                                                    .current_target()
+                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                                                            {
+                                                                let rect = t.get_bounding_client_rect();
+                                                                let x = raw.client_x() as f64 - rect.left() - g;
+                                                                if x < 0.0 {
+                                                                    return;
+                                                                }
+                                                                let col = if cw > 0.0 {
+                                                                    (x / cw).floor().max(0.0) as u32
+                                                                } else {
+                                                                    0
+                                                                };
+                                                                if hover_pos() != Some((ln, col)) {
+                                                                    hover_pos.set(Some((ln, col)));
+                                                                    lsp_hover.set(None);
+                                                                    let _ = try_cef_bin_emit_rkyv(&FileHoverRequest {
+                                                                        line: ln,
+                                                                        col,
+                                                                    });
+                                                                }
+                                                            }
                                                         },
                                                         span {
                                                             class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
@@ -976,6 +1017,23 @@ pub fn Page() -> Element {
                                                     repeat: raw.repeat(),
                                                 });
                                             },
+                                        }
+
+                                        {
+                                            lsp_hover().map(|h| {
+                                                let (cw, ch) = cell_dims();
+                                                let top = 8.0
+                                                    + (h.line.saturating_sub(first_line())) as f64 * ch
+                                                    + ch;
+                                                let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
+                                                rsx! {
+                                                    div {
+                                                        class: "pointer-events-none absolute z-30 max-w-lg whitespace-pre-wrap rounded-xl bg-white/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        style: "left:{left}px;top:{top}px;",
+                                                        "{h.contents}"
+                                                    }
+                                                }
+                                            })
                                         }
                                     }
                                 }

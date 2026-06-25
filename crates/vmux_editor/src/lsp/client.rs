@@ -136,12 +136,13 @@ impl ServerClient {
         }));
     }
 
-    fn request(
+    /// Send a request without blocking. The returned receiver is fulfilled by the
+    /// reader thread when the response arrives (used for interactive features).
+    pub fn send_request(
         &self,
         method: &str,
         params: serde_json::Value,
-        timeout: Duration,
-    ) -> std::io::Result<serde_json::Value> {
+    ) -> (i64, mpsc::Receiver<serde_json::Value>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
         self.pending
@@ -154,6 +155,16 @@ impl ServerClient {
             "method": method,
             "params": params,
         }));
+        (id, rx)
+    }
+
+    fn request(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        timeout: Duration,
+    ) -> std::io::Result<serde_json::Value> {
+        let (id, rx) = self.send_request(method, params);
         rx.recv_timeout(timeout).map_err(|_| {
             self.pending
                 .lock()

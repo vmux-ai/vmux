@@ -836,6 +836,7 @@ fn run_commands(
     vp: &mut FileViewport,
     clipboard: &mut ClipboardHandle,
     self_writes: &mut SelfWrites,
+    manager: &mut crate::lsp::manager::LspManager,
     browsers: &Browsers,
     commands: &mut Commands,
 ) -> bool {
@@ -843,6 +844,36 @@ fn run_commands(
     let mut sel_or_mode = false;
     let mut dirty_changed = false;
     for cmd in cmds {
+        match &cmd {
+            EditCommand::Hover => {
+                let head = edit.core.primary().head;
+                let (line, ccol) = edit.core.buffer.char_to_coords(head);
+                let lt: String = edit
+                    .core
+                    .buffer
+                    .rope
+                    .line(line)
+                    .chars()
+                    .filter(|c| *c != '\n' && *c != '\r')
+                    .collect();
+                let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, ccol as u32);
+                manager.hover(
+                    entity,
+                    &edit.core.buffer.path,
+                    line as u32,
+                    utf16,
+                    ccol as u32,
+                );
+                continue;
+            }
+            EditCommand::GotoDefinition
+            | EditCommand::FindReferences
+            | EditCommand::TriggerCompletion => {
+                // Wired in later milestones (M3-M5).
+                continue;
+            }
+            _ => {}
+        }
         if matches!(cmd, EditCommand::Save) {
             let body = edit.core.buffer.text();
             if std::fs::write(&edit.core.buffer.path, body).is_ok() {
@@ -900,6 +931,12 @@ fn run_commands(
             },
         ));
     }
+    if text_changed {
+        commands
+            .entity(entity)
+            .insert(LspEditDirty)
+            .remove::<crate::lsp::manager::LintRan>();
+    }
     text_changed
 }
 
@@ -908,6 +945,7 @@ fn on_file_key(
     mut q: Query<(&mut EditState, &mut EditorKeymap, &mut FileViewport)>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -938,6 +976,7 @@ fn on_file_key(
         &mut vp,
         &mut clipboard,
         &mut self_writes,
+        &mut manager,
         &browsers,
         &mut commands,
     );
@@ -948,6 +987,7 @@ fn on_file_text_input(
     mut q: Query<(&mut EditState, &EditorKeymap, &mut FileViewport)>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -970,9 +1010,35 @@ fn on_file_text_input(
         &mut vp,
         &mut clipboard,
         &mut self_writes,
+        &mut manager,
         &browsers,
         &mut commands,
     );
+}
+
+fn on_file_hover_request(
+    trigger: On<BinReceive<FileHoverRequest>>,
+    q: Query<&EditState>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+) {
+    let entity = trigger.event().webview;
+    let req = trigger.event().payload;
+    let Ok(edit) = q.get(entity) else {
+        return;
+    };
+    let line = req
+        .line
+        .min(edit.core.buffer.len_lines().saturating_sub(1) as u32);
+    let lt: String = edit
+        .core
+        .buffer
+        .rope
+        .line(line as usize)
+        .chars()
+        .filter(|c| *c != '\n' && *c != '\r')
+        .collect();
+    let utf16 = crate::lsp::manager::char_to_utf16_col(&lt, req.col);
+    manager.hover(entity, &edit.core.buffer.path, line, utf16, req.col);
 }
 
 fn on_file_pointer(
@@ -1009,7 +1075,7 @@ fn on_file_pointer(
 fn flush_lsp_changes(
     time: Res<Time>,
     mut acc: Local<f32>,
-    q: Query<(Entity, &FileView), With<LspEditDirty>>,
+    q: Query<(Entity, &FileView, &EditState), With<LspEditDirty>>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
@@ -1021,8 +1087,8 @@ fn flush_lsp_changes(
         return;
     }
     *acc = 0.0;
-    for (entity, fv) in &q {
-        manager.change(&fv.path);
+    for (entity, fv, edit) in &q {
+        manager.change_with_text(&fv.path, &edit.core.buffer.text());
         commands.entity(entity).remove::<LspEditDirty>();
     }
 }
@@ -1064,6 +1130,7 @@ impl Plugin for EditorPlugin {
                 FileTextInput,
                 FileKeyEvent,
                 FilePointerEvent,
+                FileHoverRequest,
             )>::default())
             .add_systems(
                 Update,
@@ -1091,7 +1158,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_open)
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
-            .add_observer(on_file_pointer);
+            .add_observer(on_file_pointer)
+            .add_observer(on_file_hover_request);
     }
 }
 

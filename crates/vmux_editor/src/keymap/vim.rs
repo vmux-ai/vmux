@@ -87,11 +87,15 @@ impl VimKeymap {
 
         if self.g_pending {
             self.g_pending = false;
-            if key == "g" {
-                self.count = None;
-                return vec![Move(Motion::DocStart)];
-            }
-            return vec![];
+            return match key {
+                "g" => {
+                    self.count = None;
+                    vec![Move(Motion::DocStart)]
+                }
+                "d" => vec![GotoDefinition],
+                "r" => vec![FindReferences],
+                _ => vec![],
+            };
         }
 
         if key == "r" && k.mods.ctrl {
@@ -155,6 +159,7 @@ impl VimKeymap {
             }
             "p" => vec![Paste],
             "P" => vec![PasteBefore],
+            "K" => vec![Hover],
             "u" => {
                 let n = self.take_count();
                 rep(Undo, n)
@@ -382,6 +387,16 @@ mod tests {
     fn ctrl_r_redo() {
         let mut km = VimKeymap::default();
         assert_eq!(km.handle(&ctrl("r")), vec![EditCommand::Redo]);
+    }
+
+    #[test]
+    fn lsp_actions() {
+        let mut km = VimKeymap::default();
+        km.handle(&k("g"));
+        assert_eq!(km.handle(&k("d")), vec![EditCommand::GotoDefinition]);
+        km.handle(&k("g"));
+        assert_eq!(km.handle(&k("r")), vec![EditCommand::FindReferences]);
+        assert_eq!(km.handle(&k("K")), vec![EditCommand::Hover]);
     }
 
     #[test]

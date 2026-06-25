@@ -24,6 +24,11 @@ impl Keymap for VscodeKeymap {
             }
         };
 
+        // Ctrl+Space triggers completion on every platform.
+        if m.ctrl && !m.meta && !m.alt && k.key == " " {
+            return vec![TriggerCompletion];
+        }
+
         // GUI letter chords: Cmd on macOS, Ctrl on Linux. Unmatched keys fall
         // through (so Linux Ctrl+Arrow / Ctrl+Backspace reach word motion below).
         #[cfg(target_os = "macos")]
@@ -109,6 +114,8 @@ impl Keymap for VscodeKeymap {
             "Delete" => vec![DeleteForward],
             "Enter" => vec![InsertNewline],
             "Tab" => vec![InsertTab],
+            "F12" if m.shift => vec![FindReferences],
+            "F12" => vec![GotoDefinition],
             _ => vec![],
         }
     }
@@ -252,6 +259,31 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(km.handle(&key("c", meta)), vec![EditCommand::Yank]);
+    }
+
+    #[test]
+    fn lsp_actions() {
+        let mut km = VscodeKeymap;
+        assert_eq!(
+            km.handle(&key("F12", Mods::default())),
+            vec![EditCommand::GotoDefinition]
+        );
+        let shift = Mods {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("F12", shift)),
+            vec![EditCommand::FindReferences]
+        );
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key(" ", ctrl)),
+            vec![EditCommand::TriggerCompletion]
+        );
     }
 
     #[cfg(target_os = "macos")]

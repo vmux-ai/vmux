@@ -31,6 +31,8 @@ pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
 pub const FILE_DIRTY_EVENT: &str = "file_dirty";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
+pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
+pub const FILE_HOVER_EVENT: &str = "file_hover";
 pub const LSP_CATALOG_REQUEST: &str = "lsp_catalog_request";
 pub const LSP_CATALOG_EVENT: &str = "lsp_catalog";
 pub const LSP_INSTALL_REQUEST: &str = "lsp_install_request";
@@ -1156,6 +1158,40 @@ pub struct FileDirtyEvent {
 )]
 pub struct FileExternalChange {
     pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileHoverRequest {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileHoverEvent {
+    pub line: u32,
+    pub col: u32,
+    pub contents: String,
 }
 
 #[cfg(test)]
