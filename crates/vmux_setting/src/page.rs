@@ -9,6 +9,9 @@ use dioxus::prelude::*;
 use serde_json::{Map, Value};
 use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use vmux_ui::components::input::Input;
+use vmux_ui::components::select::{
+    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
+};
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -255,7 +258,7 @@ fn FieldView(
 
     if let Some(widget) = spec.widget {
         return rsx! {
-            WidgetView { widget, path, value, label, hint }
+            WidgetView { widget, path, value, label, hint, options: spec.options.clone() }
         };
     }
 
@@ -406,8 +409,48 @@ fn WidgetView(
     value: Value,
     label: String,
     hint: Option<String>,
+    options: Vec<crate::schema::SelectOption>,
 ) -> Element {
     match widget {
+        WidgetKind::Select => {
+            let current = value.as_str().unwrap_or_default().to_string();
+            let selected: Option<Option<String>> =
+                Some((!current.is_empty()).then(|| current.clone()));
+            let path_for_change = path.clone();
+            rsx! {
+                Row { label, hint,
+                    control: rsx! {
+                        Select::<String> {
+                            value: Into::<ReadSignal<Option<Option<String>>>>::into(Signal::new(selected)),
+                            default_value: (!current.is_empty()).then(|| current.clone()),
+                            placeholder: Into::<ReadSignal<String>>::into(Signal::new(String::new())),
+                            on_value_change: Callback::new(move |v: Option<String>| {
+                                if let Some(v) = v {
+                                    emit_update(&path_for_change, serde_json::json!(v));
+                                }
+                            }),
+                            attributes: vec![],
+                            SelectTrigger { attributes: vec![], SelectValue { attributes: vec![] } }
+                            SelectList { attributes: vec![],
+                                SelectGroup { attributes: vec![],
+                                    for (i, opt) in options.iter().enumerate() {
+                                        SelectOption::<String> {
+                                            key: "{opt.value}",
+                                            value: Into::<ReadSignal<String>>::into(Signal::new(opt.value.clone())),
+                                            index: i,
+                                            text_value: Some(opt.label.clone()),
+                                            attributes: vec![],
+                                            "{opt.label}"
+                                            SelectItemIndicator {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+        }
         WidgetKind::LeaderKbd => {
             let text = format_combo(&value);
             rsx! {
