@@ -779,25 +779,23 @@ fn request_bookmark_menu() {
     });
 }
 
-fn rename_folder(uuid: String, current: &str) {
-    let entered = web_sys::window().and_then(|w| {
-        w.prompt_with_message_and_default("Folder name", current)
-            .ok()
-            .flatten()
+/// Commit an inline folder-name edit. Empty name discards the folder (used both
+/// when cancelling a just-created folder and when clearing an existing name).
+fn commit_folder_rename(uuid: String, name: String) {
+    let name = name.trim().to_string();
+    let command = if name.is_empty() {
+        "remove_folder"
+    } else {
+        "rename_folder"
+    };
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: command.into(),
+        uuid: Some(uuid),
+        name: if name.is_empty() { None } else { Some(name) },
+        url: None,
+        title: None,
+        favicon_url: None,
     });
-    if let Some(name) = entered {
-        let name = name.trim().to_string();
-        if !name.is_empty() {
-            let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
-                command: "rename_folder".into(),
-                uuid: Some(uuid),
-                name: Some(name),
-                url: None,
-                title: None,
-                favicon_url: None,
-            });
-        }
-    }
 }
 
 #[component]
@@ -954,51 +952,106 @@ fn BookmarkEntry(row: BookmarkRow) -> Element {
 
 #[component]
 fn BookmarkFolder(folder: FolderRow) -> Element {
-    let uuid_toggle = folder.uuid.clone();
-    let uuid_toggle2 = folder.uuid.clone();
-    let uuid_rename = folder.uuid.clone();
-    let uuid_remove = folder.uuid.clone();
-    let name_rename = folder.name.clone();
-    let menu_val = use_signal(|| folder.uuid.clone());
+    let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
+    let was_new = folder.name.trim().is_empty();
+    let mut editing = use_signal(|| was_new);
+    let mut draft = use_signal(|| folder.name.clone());
+    let menu_val = use_signal(|| folder.uuid.clone());
+
     rsx! {
         div { class: "flex flex-col gap-1",
-            ContextMenu { attributes: vec![],
-                ContextMenuTrigger { attributes: vec![],
-                    SheetEntryRow {
-                        active: false,
-                        onclick: move |_| bookmark_cmd("toggle_folder", Some(uuid_toggle.clone())),
-                        Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                            path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
-                        }
-                        span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
+            if editing() {
+                div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                    input {
+                        r#type: "text",
+                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none",
+                        placeholder: "Folder name",
+                        value: "{draft}",
+                        autofocus: true,
+                        onmounted: move |e: Event<MountedData>| {
+                            if let Some(el) = e.downcast::<web_sys::Element>()
+                                && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
+                            {
+                                let _ = input.focus();
+                            }
+                        },
+                        oninput: move |e| draft.set(e.value()),
+                        onkeydown: {
+                            let id = uuid.clone();
+                            move |e: Event<KeyboardData>| match e.key() {
+                                Key::Enter => {
+                                    e.prevent_default();
+                                    editing.set(false);
+                                    commit_folder_rename(id.clone(), draft());
+                                }
+                                Key::Escape => {
+                                    e.prevent_default();
+                                    editing.set(false);
+                                    if was_new {
+                                        bookmark_cmd("remove_folder", Some(id.clone()));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        },
+                        onblur: {
+                            let id = uuid.clone();
+                            move |_| {
+                                if editing() {
+                                    editing.set(false);
+                                    commit_folder_rename(id.clone(), draft());
+                                }
+                            }
+                        },
                     }
                 }
-                ContextMenuContent { attributes: vec![],
-                    ContextMenuItem {
-                        index: 0usize,
-                        value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_toggle2.clone(); move |_: String| bookmark_cmd("toggle_folder", Some(id.clone())) },
-                        attributes: vec![],
-                        if collapsed { "Expand" } else { "Collapse" }
+            } else {
+                ContextMenu { attributes: vec![],
+                    ContextMenuTrigger { attributes: vec![],
+                        SheetEntryRow {
+                            active: false,
+                            onclick: {
+                                let id = uuid.clone();
+                                move |_| bookmark_cmd("toggle_folder", Some(id.clone()))
+                            },
+                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                            }
+                            span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
+                        }
                     }
-                    ContextMenuItem {
-                        index: 1usize,
-                        value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: {
-                            let id = uuid_rename.clone();
-                            let cur = name_rename.clone();
-                            move |_: String| rename_folder(id.clone(), &cur)
-                        },
-                        attributes: vec![],
-                        "Rename"
-                    }
-                    ContextMenuItem {
-                        index: 2usize,
-                        value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
-                        attributes: vec![],
-                        "Remove Folder"
+                    ContextMenuContent { attributes: vec![],
+                        ContextMenuItem {
+                            index: 0usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("toggle_folder", Some(id.clone())) },
+                            attributes: vec![],
+                            if collapsed { "Expand" } else { "Collapse" }
+                        }
+                        ContextMenuItem {
+                            index: 1usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: {
+                                let name = folder.name.clone();
+                                move |_: String| {
+                                    draft.set(name.clone());
+                                    editing.set(true);
+                                }
+                            },
+                            attributes: vec![],
+                            "Rename Folder"
+                        }
+                        ContextMenuItem {
+                            index: 2usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
+                            attributes: vec![],
+                            "Remove Folder"
+                        }
                     }
                 }
             }
