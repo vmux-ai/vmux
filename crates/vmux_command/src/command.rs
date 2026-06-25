@@ -237,7 +237,11 @@ pub enum ServiceCommand {
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BookmarkCommand {
     #[default]
-    #[menu(id = "bookmark_toggle_active", label = "Bookmark Page", accel = "super+d")]
+    #[menu(
+        id = "bookmark_toggle_active",
+        label = "Bookmark Page",
+        accel = "super+d"
+    )]
     #[shortcut(direct = "Super+d")]
     ToggleActive,
     #[menu(id = "bookmark_pin_active", label = "Pin Page")]
