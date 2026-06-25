@@ -18,6 +18,17 @@
     }
     return null;
   }
+  function labelNode(root) {
+    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var n,
+      best = null;
+    while ((n = w.nextNode())) {
+      var t = (n.nodeValue || "").trim();
+      if (t === "Add to Chrome" || t === "Remove from Chrome") return n;
+      if (!best && t) best = n;
+    }
+    return best;
+  }
   function place() {
     var id = extId();
     var existing = document.getElementById("vmux-add-ext");
@@ -34,14 +45,17 @@
     b.dataset.extId = id;
     b.removeAttribute("disabled");
     b.removeAttribute("href");
-    b.textContent = "Add to Vmux";
+    var ln = labelNode(b);
+    if (ln) ln.nodeValue = "Add to Vmux";
+    else b.textContent = "Add to Vmux";
     b.addEventListener("click", function (ev) {
       ev.preventDefault();
       ev.stopPropagation();
       try {
         cef.emit({ channel: "vmux-add-extension", id: id });
       } catch (e) {}
-      b.textContent = "Added — relaunch";
+      if (ln) ln.nodeValue = "Added — relaunch";
+      else b.textContent = "Added — relaunch";
     });
     anchor.style.display = "none";
     anchor.parentNode.insertBefore(b, anchor);
