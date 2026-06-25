@@ -10,6 +10,7 @@ use crate::scroll::{ScrollKind, scroll_delta};
 thread_local! {
     static MATCHER: RefCell<Matcher> = RefCell::new(Matcher::new());
     static FORCE_INSERT: RefCell<bool> = const { RefCell::new(false) };
+    static HINTS: RefCell<Option<crate::hints::Hints>> = const { RefCell::new(None) };
 }
 
 fn document() -> Document {
@@ -65,6 +66,28 @@ fn on_keydown(ev: KeyboardEvent) {
         return;
     }
 
+    let hints_open = HINTS.with(|h| h.borrow().is_some());
+    if hints_open {
+        ev.prevent_default();
+        ev.stop_propagation();
+        if key == "Escape" {
+            HINTS.with(|h| {
+                if let Some(hl) = h.borrow().as_ref() {
+                    hl.cancel(&doc);
+                }
+                *h.borrow_mut() = None;
+            });
+            return;
+        }
+        if key.chars().count() == 1 {
+            let keep = HINTS.with(|h| h.borrow_mut().as_mut().unwrap().feed(&doc, &key));
+            if !keep {
+                HINTS.with(|h| *h.borrow_mut() = None);
+            }
+        }
+        return;
+    }
+
     let result = MATCHER.with(|m| m.borrow_mut().feed(&key));
     match result {
         MatchResult::Action(action) => {
@@ -109,6 +132,11 @@ fn dispatch(action: Action, doc: &Document) {
         }
         Action::Reload => {
             let _ = win.location().reload();
+        }
+        Action::Hints => {
+            if let Some(h) = crate::hints::Hints::show(doc) {
+                HINTS.with(|c| *c.borrow_mut() = Some(h));
+            }
         }
         other => web_sys::console::log_1(&format!("[vmux-vimium] {other:?}").into()),
     }

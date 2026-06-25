@@ -19,6 +19,7 @@ web-sys = { version = "0.3", features = [
     "HtmlCollection",
     "Node",
     "NodeList",
+    "DocumentFragment",
     "DomRect",
     "CssStyleDeclaration",
     "ShadowRoot",
