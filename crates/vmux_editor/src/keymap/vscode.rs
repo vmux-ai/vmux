@@ -24,13 +24,10 @@ impl Keymap for VscodeKeymap {
             }
         };
 
-        // Ctrl+Space triggers completion on every platform.
         if m.ctrl && !m.meta && !m.alt && k.key == " " {
             return vec![TriggerCompletion];
         }
 
-        // GUI letter chords: Cmd on macOS, Ctrl on Linux. Unmatched keys fall
-        // through (so Linux Ctrl+Arrow / Ctrl+Backspace reach word motion below).
         #[cfg(target_os = "macos")]
         let gui = m.meta;
         #[cfg(not(target_os = "macos"))]
@@ -52,7 +49,6 @@ impl Keymap for VscodeKeymap {
             }
         }
 
-        // macOS: Cmd+Arrow = line/document boundaries; Cmd+Shift+Arrow extends.
         #[cfg(target_os = "macos")]
         if m.meta && !m.ctrl && !m.alt {
             match k.key.as_str() {
@@ -64,8 +60,6 @@ impl Keymap for VscodeKeymap {
             }
         }
 
-        // macOS readline/emacs navigation on Ctrl (Ctrl is free on macOS; on Linux
-        // Ctrl is the GUI modifier handled above). Shift extends the selection.
         #[cfg(target_os = "macos")]
         if m.ctrl && !m.meta && !m.alt {
             let cmd = match k.key.as_str() {
@@ -251,9 +245,7 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        // Copy is Cmd+C on macOS; Ctrl+C is not a GUI chord (and 'c' has no emacs binding).
         assert_eq!(km.handle(&key("c", ctrl)), Vec::<EditCommand>::new());
-        // Cmd+C still copies.
         let meta = Mods {
             meta: true,
             ..Default::default()

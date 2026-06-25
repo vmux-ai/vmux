@@ -42,8 +42,6 @@ pub enum EditCommand {
     Undo,
     Redo,
     Save,
-    // LSP actions — not buffer edits; intercepted in the plugin and routed to the
-    // language server at the caret.
     GotoDefinition,
     FindReferences,
     Hover,

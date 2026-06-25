@@ -5,12 +5,9 @@ use vmux_core::event::{FileLine, StyledSpan};
 
 use crate::highlight::{default_theme, select_syntax, styled_span, syntax_set};
 
-/// Resumable per-line syntect state so edits only re-highlight from the edit
-/// point, and only the visible window is materialised into spans.
 pub struct HighlightCache {
     syntax: &'static SyntaxReference,
     theme: Theme,
-    /// befores[i] = parser/highlight state *before* line i. befores[0] is initial.
     befores: Vec<(ParseState, HighlightState)>,
     pub language: String,
 }
@@ -58,7 +55,6 @@ impl HighlightCache {
         }
     }
 
-    /// Highlighted FileLines for [start, end).
     pub fn line_window(&mut self, rope: &Rope, start: usize, end: usize) -> Vec<FileLine> {
         let total = rope.len_lines();
         let end = end.min(total);

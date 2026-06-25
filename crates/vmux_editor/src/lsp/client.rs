@@ -136,8 +136,6 @@ impl ServerClient {
         }));
     }
 
-    /// Send a request without blocking. The returned receiver is fulfilled by the
-    /// reader thread when the response arrives (used for interactive features).
     pub fn send_request(
         &self,
         method: &str,

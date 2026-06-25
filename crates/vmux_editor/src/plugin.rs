@@ -504,13 +504,17 @@ fn reset_file_sent_markers_on_page_ready(
 
 fn on_file_resize(
     trigger: On<BinReceive<FileResizeEvent>>,
-    mut q: Query<(&mut FileViewport, Option<&mut EditState>)>,
+    mut q: Query<(
+        &mut FileViewport,
+        Option<&mut EditState>,
+        Option<&EditorKeymap>,
+    )>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut vp, edit)) = q.get_mut(entity) else {
+    let Ok((mut vp, edit, keymap)) = q.get_mut(entity) else {
         return;
     };
     vp.rows = rows_from_viewport(evt.char_height, evt.viewport_height);
@@ -518,24 +522,42 @@ fn on_file_resize(
         edit.core.rows = vp.rows;
         let vpc = *vp;
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
+        if let Some(keymap) = keymap {
+            emit_cursor(
+                entity,
+                &edit.core,
+                keymap.0.as_ref(),
+                &vpc,
+                &browsers,
+                &mut commands,
+            );
+        }
     }
 }
 
 fn on_file_scroll(
     trigger: On<BinReceive<FileScrollEvent>>,
-    mut q: Query<(&mut EditState, &mut FileViewport)>,
+    mut q: Query<(&mut EditState, &mut FileViewport, &EditorKeymap)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut edit, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut vp, keymap)) = q.get_mut(entity) else {
         return;
     };
     let total = edit.core.buffer.len_lines() as u32;
     vp.top_line = clamp_top_line(evt.top_line, total, vp.rows);
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
+    emit_cursor(
+        entity,
+        &edit.core,
+        keymap.0.as_ref(),
+        &vpc,
+        &browsers,
+        &mut commands,
+    );
 }
 
 fn send_initial_image(
@@ -801,7 +823,6 @@ fn reload_changed_files(
             continue;
         }
 
-        // Text file: keep unsaved edits, surface a conflict banner instead of clobbering.
         if let Some(edit) = edit
             && edit.core.dirty
         {
@@ -816,7 +837,6 @@ fn reload_changed_files(
             }
             continue;
         }
-        // Not dirty: drop state and let load_file_buffers rebuild from disk.
         commands
             .entity(entity)
             .remove::<EditState>()
@@ -827,7 +847,6 @@ fn reload_changed_files(
     }
 }
 
-/// Caret as (line, utf16_col, char_col, line_text) for LSP requests.
 fn caret_lsp(edit: &EditState) -> (u32, u32, usize, String) {
     let head = edit.core.primary().head;
     let (line, ccol) = edit.core.buffer.char_to_coords(head);
@@ -850,6 +869,17 @@ fn word_start_col(line_text: &str, char_col: usize) -> u32 {
         i -= 1;
     }
     i as u32
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = match dir {
+        Some(d) => d.join(format!(".{fname}.vmux-tmp")),
+        None => PathBuf::from(format!(".{fname}.vmux-tmp")),
+    };
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -913,19 +943,35 @@ fn run_commands(
             _ => {}
         }
         if matches!(cmd, EditCommand::Save) {
+            let path = edit.core.buffer.path.clone();
             let body = edit.core.buffer.text();
-            if std::fs::write(&edit.core.buffer.path, body).is_ok() {
-                self_writes
-                    .0
-                    .insert(canon(&edit.core.buffer.path), std::time::Instant::now());
-                if edit.core.dirty {
-                    edit.core.dirty = false;
-                    dirty_changed = true;
+            match write_atomic(&path, body.as_bytes()) {
+                Ok(()) => {
+                    self_writes
+                        .0
+                        .insert(canon(&path), std::time::Instant::now());
+                    let was_dirty = edit.core.dirty;
+                    edit.core.mark_saved();
+                    if was_dirty {
+                        dirty_changed = true;
+                    }
+                    commands
+                        .entity(entity)
+                        .insert(LspEditDirty)
+                        .remove::<crate::lsp::manager::LintRan>();
                 }
-                commands
-                    .entity(entity)
-                    .insert(LspEditDirty)
-                    .remove::<crate::lsp::manager::LintRan>();
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), "editor save failed: {e}");
+                    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            FILE_ERROR_EVENT,
+                            &FileErrorEvent {
+                                message: format!("save failed: {e}"),
+                            },
+                        ));
+                    }
+                }
             }
             continue;
         }

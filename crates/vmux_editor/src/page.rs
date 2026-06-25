@@ -374,7 +374,6 @@ pub fn Page() -> Element {
     let mut composing = use_signal(|| false);
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
     let mut hover_pos = use_signal(|| Option::<(u32, u32)>::None);
-    // (x, y, line, col) of an open right-click menu.
     let mut ctx_menu = use_signal(|| Option::<(f64, f64, u32, u32)>::None);
     let mut refs = use_signal(Vec::<RefItem>::new);
     let mut refs_sel = use_signal(|| 0usize);

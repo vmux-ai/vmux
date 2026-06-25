@@ -35,7 +35,6 @@ impl TextBuffer {
         self.rope.line_to_char(line)
     }
 
-    /// Char length of a line excluding its trailing newline.
     pub fn line_len_chars(&self, line: usize) -> usize {
         if line >= self.len_lines() {
             return 0;
@@ -78,7 +77,6 @@ impl TextBuffer {
         self.rope.to_string()
     }
 
-    /// Char index of the next grapheme boundary after `char_idx` (cursor Right).
     pub fn next_grapheme(&self, char_idx: usize) -> usize {
         let len = self.len_chars();
         if char_idx >= len {
@@ -97,6 +95,31 @@ impl TextBuffer {
             acc += glen;
         }
         (char_idx + 1).min(len)
+    }
+
+    pub fn prev_grapheme(&self, char_idx: usize) -> usize {
+        if char_idx == 0 {
+            return 0;
+        }
+        let char_idx = char_idx.min(self.len_chars());
+        let line = self.char_to_line(char_idx);
+        let line_start = self.rope.line_to_char(line);
+        if char_idx == line_start {
+            return char_idx - 1;
+        }
+        let line_str: String = self.rope.line(line).chars().collect();
+        let off = char_idx - line_start;
+        let mut acc = 0usize;
+        let mut prev = 0usize;
+        for g in line_str.graphemes(true) {
+            let glen = g.chars().count();
+            if acc + glen >= off {
+                return line_start + prev;
+            }
+            prev = acc + glen;
+            acc += glen;
+        }
+        line_start + prev
     }
 }
 

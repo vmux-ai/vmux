@@ -14,8 +14,6 @@ pub struct Mods {
 }
 
 impl Mods {
-    /// Primary command modifier: Cmd on macOS, Ctrl elsewhere. The page sets
-    /// `meta` from `event.metaKey`; we accept either for portability.
     pub fn cmd(&self) -> bool {
         self.meta || self.ctrl
     }

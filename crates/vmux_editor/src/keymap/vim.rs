@@ -55,7 +55,7 @@ impl VimKeymap {
 
         if let Some(op) = self.pending_op {
             self.pending_op = None;
-            let _n = self.take_count();
+            let n = self.take_count();
             if key.len() == 1 && key.starts_with(op) {
                 return match op {
                     'd' => vec![DeleteLine],
@@ -73,11 +73,13 @@ impl VimKeymap {
             }
             if let Some(m) = motion_for(key) {
                 return match op {
-                    'd' => vec![DeleteRange(m)],
+                    'd' => rep(DeleteRange(m), n),
                     'y' => vec![YankRange(m)],
                     'c' => {
                         self.mode = EditMode::Insert;
-                        vec![DeleteRange(m), SetMode(EditMode::Insert)]
+                        let mut cmds = rep(DeleteRange(m), n);
+                        cmds.push(SetMode(EditMode::Insert));
+                        cmds
                     }
                     _ => vec![],
                 };
@@ -387,6 +389,20 @@ mod tests {
     fn ctrl_r_redo() {
         let mut km = VimKeymap::default();
         assert_eq!(km.handle(&ctrl("r")), vec![EditCommand::Redo]);
+    }
+
+    #[test]
+    fn dw_count_repeats() {
+        let mut km = VimKeymap::default();
+        km.handle(&k("d"));
+        km.handle(&k("2"));
+        assert_eq!(
+            km.handle(&k("w")),
+            vec![
+                EditCommand::DeleteRange(Motion::WordNext),
+                EditCommand::DeleteRange(Motion::WordNext)
+            ]
+        );
     }
 
     #[test]

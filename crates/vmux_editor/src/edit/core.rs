@@ -29,8 +29,10 @@ pub struct EditCore {
     pub rows: u16,
     pub dirty: bool,
     pub register: Option<(String, bool)>,
-    undo: Vec<(ropey::Rope, Vec<Selection>)>,
-    redo: Vec<(ropey::Rope, Vec<Selection>)>,
+    rev: u64,
+    saved_rev: Option<u64>,
+    undo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
+    redo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
     last_group: Option<Group>,
 }
 
@@ -43,10 +45,18 @@ impl EditCore {
             rows: 0,
             dirty: false,
             register: None,
+            rev: 0,
+            saved_rev: Some(0),
             undo: Vec::new(),
             redo: Vec::new(),
             last_group: None,
         }
+    }
+
+    pub fn mark_saved(&mut self) {
+        self.saved_rev = Some(self.rev);
+        self.dirty = false;
+        self.last_group = None;
     }
 
     pub fn primary(&self) -> Selection {
@@ -114,7 +124,7 @@ impl EditCore {
     }
     fn snapshot(&mut self) {
         self.undo
-            .push((self.buffer.rope.clone(), self.selections.clone()));
+            .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
         self.redo.clear();
     }
     fn checkpoint(&mut self, group: Group) {
@@ -122,13 +132,14 @@ impl EditCore {
             self.snapshot();
         }
         self.last_group = Some(group);
-        self.dirty = true;
+        self.rev += 1;
+        self.dirty = self.saved_rev != Some(self.rev);
     }
 
     fn resolve_motion(&self, from: usize, motion: Motion) -> usize {
         let len = self.buffer.len_chars();
         match motion {
-            Motion::Left => from.saturating_sub(1),
+            Motion::Left => self.buffer.prev_grapheme(from),
             Motion::Right => self.buffer.next_grapheme(from).min(len),
             Motion::Up => self.vertical(from, -1),
             Motion::Down => self.vertical(from, 1),
@@ -278,7 +289,7 @@ impl EditCore {
                     let head = self.primary().head;
                     if head > 0 {
                         self.checkpoint(Group::Delete);
-                        let prev = head - 1;
+                        let prev = self.buffer.prev_grapheme(head);
                         self.buffer.remove(prev..head);
                         self.set_caret(prev);
                         text_changed = true;
@@ -288,11 +299,16 @@ impl EditCore {
                 }
             }
             EditCommand::DeleteForward => {
-                let head = self.primary().head;
-                if head < self.buffer.len_chars() {
-                    self.checkpoint(Group::Delete);
-                    self.buffer.remove(head..head + 1);
-                    text_changed = true;
+                if !self.primary().is_empty() {
+                    text_changed = self.delete_selection();
+                } else {
+                    let head = self.primary().head;
+                    if head < self.buffer.len_chars() {
+                        self.checkpoint(Group::Delete);
+                        let next = self.buffer.next_grapheme(head);
+                        self.buffer.remove(head..next);
+                        text_changed = true;
+                    }
                 }
             }
             EditCommand::DeleteWordBack => {
@@ -360,24 +376,26 @@ impl EditCore {
                 self.mode = m;
             }
             EditCommand::Undo => {
-                if let Some((rope, sel)) = self.undo.pop() {
+                if let Some((rope, sel, rev)) = self.undo.pop() {
                     self.redo
-                        .push((self.buffer.rope.clone(), self.selections.clone()));
+                        .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
                     self.buffer.rope = rope;
                     self.selections = sel;
+                    self.rev = rev;
+                    self.dirty = self.saved_rev != Some(self.rev);
                     self.break_group();
-                    self.dirty = true;
                     text_changed = true;
                 }
             }
             EditCommand::Redo => {
-                if let Some((rope, sel)) = self.redo.pop() {
+                if let Some((rope, sel, rev)) = self.redo.pop() {
                     self.undo
-                        .push((self.buffer.rope.clone(), self.selections.clone()));
+                        .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
                     self.buffer.rope = rope;
                     self.selections = sel;
+                    self.rev = rev;
+                    self.dirty = self.saved_rev != Some(self.rev);
                     self.break_group();
-                    self.dirty = true;
                     text_changed = true;
                 }
             }
@@ -408,7 +426,29 @@ impl EditCore {
                     text_changed = true;
                 }
             }
-            EditCommand::Paste | EditCommand::PasteBefore => {
+            EditCommand::Paste => {
+                if let Some((s, _linewise)) = self.register.clone() {
+                    let was_visual = self.mode.is_visual();
+                    if !self.primary().is_empty() {
+                        self.delete_selection();
+                    }
+                    self.mode = if was_visual {
+                        EditMode::Normal
+                    } else {
+                        self.mode
+                    };
+                    self.checkpoint(Group::Other);
+                    let at = if !was_visual && self.mode == EditMode::Normal {
+                        self.buffer.next_grapheme(self.primary().head)
+                    } else {
+                        self.primary().head
+                    };
+                    self.buffer.insert(at, &s);
+                    self.set_caret(at + s.chars().count());
+                    text_changed = true;
+                }
+            }
+            EditCommand::PasteBefore => {
                 if let Some((s, _linewise)) = self.register.clone() {
                     if !self.primary().is_empty() {
                         self.delete_selection();
@@ -440,8 +480,6 @@ impl EditCore {
         }
     }
 
-    /// Given the page's current top line + rows, return a new top line that keeps
-    /// the primary caret visible, or None if no scroll needed.
     pub fn autoscroll(&self, top: u32, rows: u16) -> Option<u32> {
         if rows == 0 {
             return None;
@@ -569,6 +607,51 @@ mod tests {
         c.set_caret(6);
         c.apply(EditCommand::Paste);
         assert_eq!(text_of(&c), "abcdefab");
+    }
+
+    #[test]
+    fn delete_forward_removes_selection() {
+        let mut c = core("abcdef");
+        c.selections = vec![Selection { anchor: 1, head: 4 }];
+        c.apply(EditCommand::DeleteForward);
+        assert_eq!(text_of(&c), "aef");
+    }
+
+    #[test]
+    fn undo_back_to_saved_is_clean() {
+        let mut c = core("");
+        c.apply(EditCommand::InsertText("ab".into()));
+        c.mark_saved();
+        assert!(!c.dirty);
+        c.apply(EditCommand::InsertText("c".into()));
+        assert!(c.dirty);
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "ab");
+        assert!(!c.dirty, "undo to saved revision clears dirty");
+    }
+
+    #[test]
+    fn delete_back_is_grapheme_aware() {
+        let mut c = core("ae\u{0301}");
+        c.set_caret(c.buffer.len_chars());
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "a");
+    }
+
+    #[test]
+    fn paste_after_vs_before_in_normal() {
+        let mut c = core("ac");
+        c.register = Some(("X".into(), false));
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Paste);
+        assert_eq!(text_of(&c), "aXc");
+        let mut c2 = core("ac");
+        c2.register = Some(("X".into(), false));
+        c2.mode = EditMode::Normal;
+        c2.set_caret(0);
+        c2.apply(EditCommand::PasteBefore);
+        assert_eq!(text_of(&c2), "Xac");
     }
 
     #[test]

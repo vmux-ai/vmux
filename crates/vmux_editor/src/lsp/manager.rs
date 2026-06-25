@@ -106,7 +106,6 @@ pub struct InFlight {
     rx: std::sync::mpsc::Receiver<serde_json::Value>,
 }
 
-/// Emitted when a go-to-definition / reference navigation resolves to a target.
 #[derive(Message)]
 pub struct LspGoto {
     pub entity: Entity,
@@ -210,7 +209,6 @@ impl LspManager {
         }
     }
 
-    /// Like `change` but sends the supplied in-memory text (for live, unsaved sync).
     pub fn change_with_text(&mut self, path: &Path, text: &str) {
         let Some(doc) = self.open_docs.get_mut(path) else {
             return;
@@ -235,8 +233,6 @@ impl LspManager {
         }
     }
 
-    /// Send a positional request and track it in-flight. `extra` is merged into the
-    /// params object (e.g. references context).
     #[allow(clippy::too_many_arguments)]
     fn send_doc_request(
         &mut self,
@@ -270,7 +266,6 @@ impl LspManager {
         self.inflight.push(InFlight { entity, kind, rx });
     }
 
-    /// `echo_col` is the original char column echoed back to the page for anchoring.
     pub fn hover(&mut self, entity: Entity, path: &Path, line: u32, utf16_col: u32, echo_col: u32) {
         self.send_doc_request(
             entity,
@@ -367,7 +362,6 @@ fn loc_tuple(uri: &lsp_types::Uri, pos: lsp_types::Position) -> Option<(PathBuf,
     Some((path, pos.line, pos.character))
 }
 
-/// First definition target as (path, line, utf16_col).
 fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
     let result = value.get("result")?;
     if result.is_null() {
@@ -425,7 +419,6 @@ fn parse_completion(value: &serde_json::Value) -> Vec<vmux_core::event::Completi
         .collect()
 }
 
-/// Read line `line` of `path` from disk (for reference previews / nav col mapping).
 pub fn disk_line(path: &Path, line: u32) -> String {
     let Ok(content) = std::fs::read_to_string(path) else {
         return String::new();
