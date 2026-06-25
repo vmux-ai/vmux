@@ -1,5 +1,6 @@
 pub mod keymap;
 pub mod mode;
+pub mod scroll;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn preload_script() -> &'static str {

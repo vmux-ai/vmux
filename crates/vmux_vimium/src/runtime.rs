@@ -5,6 +5,7 @@ use web_sys::{Document, KeyboardEvent};
 
 use crate::keymap::{Action, MatchResult, Matcher};
 use crate::mode::{Mode, resolve_mode};
+use crate::scroll::{ScrollKind, scroll_delta};
 
 thread_local! {
     static MATCHER: RefCell<Matcher> = RefCell::new(Matcher::new());
@@ -79,9 +80,40 @@ fn on_keydown(ev: KeyboardEvent) {
     }
 }
 
-fn dispatch(action: Action, _doc: &Document) {
+fn dispatch(action: Action, doc: &Document) {
+    let win = web_sys::window().unwrap();
+    let vh = win
+        .inner_height()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .unwrap_or(800.0);
     match action {
         Action::EnterInsert => FORCE_INSERT.with(|f| *f.borrow_mut() = true),
+        Action::ScrollDownLine => scroll_by(&win, scroll_delta(ScrollKind::Line, true, vh)),
+        Action::ScrollUpLine => scroll_by(&win, scroll_delta(ScrollKind::Line, false, vh)),
+        Action::ScrollDownHalf => scroll_by(&win, scroll_delta(ScrollKind::Half, true, vh)),
+        Action::ScrollUpHalf => scroll_by(&win, scroll_delta(ScrollKind::Half, false, vh)),
+        Action::ScrollTop => win.scroll_to_with_x_and_y(0.0, 0.0),
+        Action::ScrollBottom => {
+            let h = doc
+                .document_element()
+                .map(|e| e.scroll_height() as f64)
+                .unwrap_or(0.0);
+            win.scroll_to_with_x_and_y(0.0, h);
+        }
+        Action::HistoryBack => {
+            let _ = win.history().and_then(|h| h.back());
+        }
+        Action::HistoryForward => {
+            let _ = win.history().and_then(|h| h.forward());
+        }
+        Action::Reload => {
+            let _ = win.location().reload();
+        }
         other => web_sys::console::log_1(&format!("[vmux-vimium] {other:?}").into()),
     }
+}
+
+fn scroll_by(win: &web_sys::Window, dy: f64) {
+    win.scroll_by_with_x_and_y(0.0, dy);
 }
