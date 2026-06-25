@@ -24,42 +24,61 @@ impl Keymap for VscodeKeymap {
             }
         };
 
+        // GUI letter chords: Cmd on macOS, Ctrl on Linux. Unmatched keys fall
+        // through (so Linux Ctrl+Arrow / Ctrl+Backspace reach word motion below).
         #[cfg(target_os = "macos")]
         let gui = m.meta;
         #[cfg(not(target_os = "macos"))]
         let gui = m.meta || m.ctrl;
-
         if gui && !m.alt {
-            return match k.key.to_ascii_lowercase().as_str() {
-                "c" => vec![Yank],
-                "x" => vec![Cut],
-                "v" => vec![Paste],
-                "a" => vec![Move(Motion::DocStart), Select(Motion::DocEnd)],
-                "s" => vec![Save],
-                "z" if m.shift => vec![Redo],
-                "z" => vec![Undo],
-                "y" => vec![Redo],
-                _ => vec![],
+            let cmd = match k.key.to_ascii_lowercase().as_str() {
+                "c" => Some(vec![Yank]),
+                "x" => Some(vec![Cut]),
+                "v" => Some(vec![Paste]),
+                "a" => Some(vec![Move(Motion::DocStart), Select(Motion::DocEnd)]),
+                "s" => Some(vec![Save]),
+                "z" if m.shift => Some(vec![Redo]),
+                "z" => Some(vec![Undo]),
+                "y" => Some(vec![Redo]),
+                _ => None,
             };
+            if let Some(cmd) = cmd {
+                return cmd;
+            }
+        }
+
+        // macOS: Cmd+Arrow = line/document boundaries; Cmd+Shift+Arrow extends.
+        #[cfg(target_os = "macos")]
+        if m.meta && !m.ctrl && !m.alt {
+            match k.key.as_str() {
+                "ArrowLeft" => return mv(Motion::LineStart),
+                "ArrowRight" => return mv(Motion::LineEnd),
+                "ArrowUp" => return mv(Motion::DocStart),
+                "ArrowDown" => return mv(Motion::DocEnd),
+                _ => {}
+            }
         }
 
         // macOS readline/emacs navigation on Ctrl (Ctrl is free on macOS; on Linux
         // Ctrl is the GUI modifier handled above). Shift extends the selection.
         #[cfg(target_os = "macos")]
         if m.ctrl && !m.meta && !m.alt {
-            return match k.key.as_str() {
-                "a" | "A" => mv(Motion::LineStart),
-                "e" | "E" => mv(Motion::LineEnd),
-                "f" | "F" => mv(Motion::Right),
-                "b" | "B" => mv(Motion::Left),
-                "n" | "N" => mv(Motion::Down),
-                "p" | "P" => mv(Motion::Up),
-                "d" | "D" => vec![DeleteForward],
-                "h" | "H" => vec![DeleteBack],
-                "k" | "K" => vec![DeleteToLineEnd],
-                "w" | "W" => vec![DeleteWordBack],
-                _ => vec![],
+            let cmd = match k.key.as_str() {
+                "a" | "A" => Some(mv(Motion::LineStart)),
+                "e" | "E" => Some(mv(Motion::LineEnd)),
+                "f" | "F" => Some(mv(Motion::Right)),
+                "b" | "B" => Some(mv(Motion::Left)),
+                "n" | "N" => Some(mv(Motion::Down)),
+                "p" | "P" => Some(mv(Motion::Up)),
+                "d" | "D" => Some(vec![DeleteForward]),
+                "h" | "H" => Some(vec![DeleteBack]),
+                "k" | "K" => Some(vec![DeleteToLineEnd]),
+                "w" | "W" => Some(vec![DeleteWordBack]),
+                _ => None,
             };
+            if let Some(cmd) = cmd {
+                return cmd;
+            }
         }
 
         match k.key.as_str() {
@@ -233,5 +252,50 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(km.handle(&key("c", meta)), vec![EditCommand::Yank]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cmd_arrow_line_doc_nav_macos() {
+        let mut km = VscodeKeymap;
+        let cmd = Mods {
+            meta: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("ArrowLeft", cmd)),
+            vec![EditCommand::Move(Motion::LineStart)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowRight", cmd)),
+            vec![EditCommand::Move(Motion::LineEnd)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowUp", cmd)),
+            vec![EditCommand::Move(Motion::DocStart)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowDown", cmd)),
+            vec![EditCommand::Move(Motion::DocEnd)]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cmd_shift_arrow_selects_macos() {
+        let mut km = VscodeKeymap;
+        let cs = Mods {
+            meta: true,
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            km.handle(&key("ArrowLeft", cs)),
+            vec![EditCommand::Select(Motion::LineStart)]
+        );
+        assert_eq!(
+            km.handle(&key("ArrowDown", cs)),
+            vec![EditCommand::Select(Motion::DocEnd)]
+        );
     }
 }
