@@ -611,8 +611,9 @@ pub fn Page() -> Element {
             class: "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
             style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
-            onmousedown: move |_| {
+            onmousedown: move |e: Event<MouseData>| {
                 if mode() == Mode::Text {
+                    e.prevent_default();
                     focus_file_input();
                 } else {
                     focus_container();
@@ -911,6 +912,7 @@ pub fn Page() -> Element {
                                                         key: "{ln}",
                                                         class: "group flex hover:bg-white/[0.035]",
                                                         onmousedown: move |e: Event<MouseData>| {
+                                                            e.prevent_default();
                                                             ctx_menu.set(None);
                                                             let (cw, _) = cell_dims();
                                                             let g = gw as f64 * cw + 36.0;
