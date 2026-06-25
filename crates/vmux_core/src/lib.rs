@@ -21,7 +21,7 @@ pub mod notify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod team;
 #[cfg(not(target_arch = "wasm32"))]
-pub use archive::{ArchivedPage, PageArchiveRequest};
+pub use archive::{ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PaneStep, SplitAxis};
 #[cfg(not(target_arch = "wasm32"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 #[cfg(not(target_arch = "wasm32"))]

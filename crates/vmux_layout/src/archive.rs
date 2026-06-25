@@ -6,7 +6,8 @@ use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest};
 use vmux_core::{
-    ArchivedPage, PageArchiveRequest, PageMetadata, PageOpenRequest, PageOpenTarget, now_millis,
+    ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PageMetadata, PageOpenRequest,
+    PageOpenTarget, now_millis,
 };
 
 use crate::event::TERMINAL_PAGE_URL;
@@ -113,14 +114,21 @@ fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut com
         if req.url.is_empty() {
             continue;
         }
-        commands.spawn(ArchivedPage {
-            url: req.url.clone(),
-            title: req.title.clone(),
-            space_id: req.space_id.clone(),
-            closed_at: now_millis(),
-            launch: req.launch.clone(),
-            tab_index: req.tab_index,
-        });
+        commands.spawn((
+            ArchivedPage {
+                url: req.url.clone(),
+                title: req.title.clone(),
+                space_id: req.space_id.clone(),
+                closed_at: now_millis(),
+                launch: req.launch.clone(),
+                tab_index: req.tab_index,
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: req.leaf_pane_id.clone(),
+                stack_index: req.stack_index,
+                pane_path: req.pane_path.clone(),
+            },
+        ));
     }
 }
 
@@ -304,6 +312,40 @@ mod tests {
         app.update();
         let mut q = app.world_mut().query::<&ArchivedPage>();
         assert_eq!(q.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn capture_spawns_position_component() {
+        let mut app = App::new();
+        app.add_message::<PageArchiveRequest>()
+            .add_systems(Update, capture_archived_pages);
+        app.world_mut()
+            .resource_mut::<Messages<PageArchiveRequest>>()
+            .write(PageArchiveRequest {
+                url: "https://a.example".to_string(),
+                title: "A".to_string(),
+                space_id: "s".to_string(),
+                launch: None,
+                tab_index: Some(0),
+                leaf_pane_id: "leaf-1".to_string(),
+                stack_index: 2,
+                pane_path: vec![vmux_core::PaneStep {
+                    split_id: "root".to_string(),
+                    axis: vmux_core::SplitAxis::Row,
+                    child_index: 1,
+                    flex_weights: vec![1.0, 2.0],
+                }],
+            });
+        app.update();
+        let mut q = app
+            .world_mut()
+            .query::<(&ArchivedPage, &ArchivedPagePosition)>();
+        let (page, pos) = q.single(app.world()).expect("archived page + position");
+        assert_eq!(page.url, "https://a.example");
+        assert_eq!(pos.leaf_pane_id, "leaf-1");
+        assert_eq!(pos.stack_index, 2);
+        assert_eq!(pos.pane_path.len(), 1);
+        assert_eq!(pos.pane_path[0].child_index, 1);
     }
 
     #[test]
