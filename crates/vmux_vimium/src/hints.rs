@@ -1,27 +1,27 @@
 const ALPHABET: &[u8] = b"sadfjklewcmpgh";
 
 pub fn generate_labels(count: usize) -> Vec<String> {
-    let n = ALPHABET.len();
     if count == 0 {
         return Vec::new();
     }
-    if count <= n {
-        return ALPHABET
-            .iter()
-            .take(count)
-            .map(|&c| (c as char).to_string())
-            .collect();
+    let n = ALPHABET.len();
+    let mut len = 1;
+    let mut cap = n;
+    while cap < count {
+        len += 1;
+        cap = cap.saturating_mul(n);
     }
-    let mut out = Vec::with_capacity(count);
-    'outer: for &a in ALPHABET {
-        for &b in ALPHABET {
-            out.push(format!("{}{}", a as char, b as char));
-            if out.len() == count {
-                break 'outer;
-            }
-        }
+    (0..count).map(|i| encode_label(i, len)).collect()
+}
+
+fn encode_label(mut idx: usize, len: usize) -> String {
+    let n = ALPHABET.len();
+    let mut chars = vec![ALPHABET[0]; len];
+    for slot in chars.iter_mut().rev() {
+        *slot = ALPHABET[idx % n];
+        idx /= n;
     }
-    out
+    chars.into_iter().map(|b| b as char).collect()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,6 +78,17 @@ mod tests {
     fn unknown_is_no_match() {
         let labels = generate_labels(3);
         assert_eq!(match_hint(&labels, "z"), HintMatch::NoMatch);
+    }
+
+    #[test]
+    fn handles_counts_above_alphabet_squared() {
+        let labels = generate_labels(300);
+        assert_eq!(labels.len(), 300);
+        assert!(labels.iter().all(|l| l.chars().count() == 3));
+        let mut sorted = labels.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 300);
     }
 }
 

@@ -3,17 +3,24 @@ pub fn to_url(input: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    let looks_like_url = trimmed.contains("://")
-        || (trimmed.contains('.') && !trimmed.contains(' ') && !trimmed.starts_with('.'));
-    if looks_like_url {
-        if trimmed.contains("://") {
-            trimmed.to_string()
-        } else {
-            format!("https://{trimmed}")
+    if let Some(idx) = trimmed.find("://") {
+        let scheme = trimmed[..idx].to_ascii_lowercase();
+        if scheme == "http" || scheme == "https" {
+            return trimmed.to_string();
         }
-    } else {
-        format!("https://duckduckgo.com/?q={}", urlencode(trimmed))
+        return search_url(trimmed);
     }
+    let looks_like_domain =
+        trimmed.contains('.') && !trimmed.contains(' ') && !trimmed.starts_with('.');
+    if looks_like_domain {
+        format!("https://{trimmed}")
+    } else {
+        search_url(trimmed)
+    }
+}
+
+fn search_url(query: &str) -> String {
+    format!("https://duckduckgo.com/?q={}", urlencode(query))
 }
 
 fn urlencode(s: &str) -> String {
@@ -55,6 +62,13 @@ mod tests {
     #[test]
     fn single_word_with_no_dot_is_search() {
         assert_eq!(to_url("rustlang"), "https://duckduckgo.com/?q=rustlang");
+    }
+
+    #[test]
+    fn disallowed_schemes_become_search() {
+        assert!(to_url("javascript://%0aalert(1)").starts_with("https://duckduckgo.com/?q="));
+        assert!(to_url("file:///etc/passwd").starts_with("https://duckduckgo.com/?q="));
+        assert!(to_url("data:text/html,x").starts_with("https://duckduckgo.com/?q="));
     }
 }
 

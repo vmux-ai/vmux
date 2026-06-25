@@ -16,9 +16,8 @@ impl Plugin for VimiumPlugin {
 
 fn set_vimium_preload(
     settings: Option<Res<AppSettings>>,
-    mut commands: Commands,
-    new_pages: Query<
-        (Entity, &ResolvedWebviewUri),
+    mut new_pages: Query<
+        (&ResolvedWebviewUri, &mut PreloadScripts),
         (Added<ResolvedWebviewUri>, With<Browser>, Without<LayoutCef>),
     >,
 ) {
@@ -26,12 +25,13 @@ fn set_vimium_preload(
     if !enabled {
         return;
     }
-    for (entity, uri) in new_pages.iter() {
+    let script = vmux_vimium::preload_script();
+    for (uri, mut preload) in new_pages.iter_mut() {
         if !vmux_vimium::is_web_scheme(&uri.0) {
             continue;
         }
-        commands.entity(entity).insert(PreloadScripts(vec![
-            vmux_vimium::preload_script().to_string(),
-        ]));
+        if !preload.0.iter().any(|s| s == script) {
+            preload.0.push(script.to_string());
+        }
     }
 }

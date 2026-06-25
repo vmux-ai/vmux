@@ -13,7 +13,10 @@ thread_local! {
     static HINTS: RefCell<Option<crate::hints::Hints>> = const { RefCell::new(None) };
     static FIND: RefCell<Option<crate::find::Find>> = const { RefCell::new(None) };
     static OPENBAR: RefCell<Option<crate::openbar::OpenBar>> = const { RefCell::new(None) };
+    static PENDING_AT: RefCell<f64> = const { RefCell::new(0.0) };
 }
+
+const PENDING_TIMEOUT_MS: f64 = 1000.0;
 
 fn document() -> Document {
     web_sys::window().unwrap().document().unwrap()
@@ -148,6 +151,12 @@ fn on_keydown(ev: KeyboardEvent) {
         return;
     }
 
+    let now = js_sys::Date::now();
+    let stale = MATCHER.with(|m| m.borrow().has_pending())
+        && PENDING_AT.with(|t| now - *t.borrow() > PENDING_TIMEOUT_MS);
+    if stale {
+        MATCHER.with(|m| m.borrow_mut().clear_pending());
+    }
     let result = MATCHER.with(|m| m.borrow_mut().feed(&key));
     match result {
         MatchResult::Action(action) => {
@@ -156,6 +165,7 @@ fn on_keydown(ev: KeyboardEvent) {
             dispatch(action, &doc);
         }
         MatchResult::Pending => {
+            PENDING_AT.with(|t| *t.borrow_mut() = now);
             ev.prevent_default();
             ev.stop_propagation();
         }

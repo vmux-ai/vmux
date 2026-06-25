@@ -10,7 +10,11 @@
     var bin = atob(b64);
     var bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    wasm_bindgen(bytes).then(function () { wasm_bindgen.start(); });
+    wasm_bindgen(bytes)
+      .then(function () { wasm_bindgen.start(); })
+      .catch(function (e) {
+        if (window.console) console.warn("[vmux-vimium] wasm init failed", e);
+      });
   } catch (e) {
     if (window.console) console.warn("[vmux-vimium] init failed", e);
   }
