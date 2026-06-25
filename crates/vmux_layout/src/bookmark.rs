@@ -323,8 +323,10 @@ fn handle_bookmark_app_commands(
             AppCommand::Bookmark(BookmarkCommand::ToggleActive) => false,
             AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
             AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
+                // Empty name -> the page opens an inline rename input on the new
+                // folder so the user types the name and presses Enter.
                 ops.write(BookmarkOp::AddFolder {
-                    name: "New Folder".to_string(),
+                    name: String::new(),
                 });
                 continue;
             }
