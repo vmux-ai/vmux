@@ -44,10 +44,49 @@ pub struct FieldSpec {
     pub omit: bool,
     #[serde(default)]
     pub step: Option<f64>,
+    #[serde(default)]
+    pub options: Vec<SelectOption>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WidgetKind {
     LeaderKbd,
     BindingsList,
+    Select,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SelectOption {
+    pub value: String,
+    pub label: String,
+}
+
+#[cfg(test)]
+mod select_widget_tests {
+    use super::*;
+
+    #[test]
+    fn select_field_with_options_round_trips_json() {
+        let spec = FieldSpec {
+            label: Some("Mode".into()),
+            widget: Some(WidgetKind::Select),
+            options: vec![
+                SelectOption {
+                    value: "device".into(),
+                    label: "Device".into(),
+                },
+                SelectOption {
+                    value: "light".into(),
+                    label: "Light".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        let back: FieldSpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.widget, Some(WidgetKind::Select));
+        assert_eq!(back.options.len(), 2);
+        assert_eq!(back.options[0].value, "device");
+        assert_eq!(back.options[1].label, "Light");
+    }
 }
