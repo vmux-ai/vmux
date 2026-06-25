@@ -1,6 +1,7 @@
 (
     browser: (
         startup_url: "https://www.google.com",
+        vimium_enabled: true,
     ),
     layout: (
         window: (

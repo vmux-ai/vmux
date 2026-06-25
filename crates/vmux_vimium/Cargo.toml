@@ -1,0 +1,40 @@
+[package]
+name = "vmux_vimium"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlCollection",
+    "Node",
+    "NodeList",
+    "DomRect",
+    "CssStyleDeclaration",
+    "ShadowRoot",
+    "ShadowRootInit",
+    "ShadowRootMode",
+    "KeyboardEvent",
+    "FocusEvent",
+    "Event",
+    "EventTarget",
+    "Location",
+    "History",
+    "DomTokenList",
+    "Text",
+    "console",
+] }
+
+[build-dependencies]
+wasm-bindgen-cli-support = "0.2"
+base64 = "0.22"

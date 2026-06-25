@@ -3,6 +3,8 @@
 mod host_focus;
 pub use host_focus::HostFocusIntent;
 
+mod vimium;
+
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     input::{
@@ -95,6 +97,7 @@ impl Plugin for BrowserPlugin {
                 BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::for_hosts(&[
                     "debug",
                 ]),
+                vimium::VimiumPlugin,
             ))
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)

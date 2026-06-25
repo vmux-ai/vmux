@@ -276,16 +276,23 @@ impl KeyComboDef {
 pub struct BrowserSettings {
     #[serde(default = "default_browser_startup_url")]
     pub startup_url: String,
+    #[serde(default = "default_vimium_enabled")]
+    pub vimium_enabled: bool,
 }
 
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
         startup_url: default_browser_startup_url(),
+        vimium_enabled: default_vimium_enabled(),
     }
 }
 
 fn default_browser_startup_url() -> String {
     "https://www.google.com".to_string()
+}
+
+fn default_vimium_enabled() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

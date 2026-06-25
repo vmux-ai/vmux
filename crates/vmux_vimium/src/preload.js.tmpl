@@ -1,0 +1,17 @@
+(function () {
+  try {
+    if (window.top !== window) return;
+    var p = location.protocol;
+    if (p !== "http:" && p !== "https:") return;
+    if (window.__vmuxVimium) return;
+    window.__vmuxVimium = true;
+    %%GLUE_JS%%
+    var b64 = "%%WASM_B64%%";
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    wasm_bindgen(bytes).then(function () { wasm_bindgen.start(); });
+  } catch (e) {
+    if (window.console) console.warn("[vmux-vimium] init failed", e);
+  }
+})();
