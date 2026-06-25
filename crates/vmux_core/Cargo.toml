@@ -12,6 +12,7 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tempfile = "3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
@@ -20,3 +21,5 @@ bevy_cef_core = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 moonshine-save = { workspace = true }
+serde_json = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }

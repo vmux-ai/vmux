@@ -9766,7 +9766,9 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "tempfile",
  "uuid",
+ "zip",
 ]
 
 [[package]]
