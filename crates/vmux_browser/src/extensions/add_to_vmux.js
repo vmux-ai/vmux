@@ -11,28 +11,26 @@
     }
     return null;
   }
-  function isInstallText(el) {
+  // The real install CTA is a filled (colored) button whose label contains the
+  // untranslated brand word "chrome" ("Add to Chrome"/"Ajouter à Google
+  // Chrome"...). The top "switch to Chrome" banner's CTA also says "...Chrome"
+  // but is a transparent text link, so the background filter excludes it.
+  function isInstallButton(el) {
     if (el.offsetParent === null) return false;
     var t = (el.textContent || "").trim().toLowerCase();
-    return (
-      !!t &&
-      t.length <= 40 &&
-      t.indexOf("chrome") !== -1 &&
-      t.indexOf("web store") === -1
-    );
+    if (!t || t.length > 40 || t.indexOf("chrome") === -1 || t.indexOf("web store") !== -1) {
+      return false;
+    }
+    var bg = getComputedStyle(el).backgroundColor;
+    return !!bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)";
   }
-  // The real install button lives in the extension header next to the <h1>
-  // title; the top-of-page "switch to Chrome" banner has a separate CTA that
-  // also says "...Chrome", so scope the search to the title's container.
-  function headerBtn() {
-    var h1 = document.querySelector("h1");
-    if (!h1) return null;
-    var c = h1;
-    for (var u = 0; u < 5 && c.parentElement; u++) c = c.parentElement;
-    var els = c.querySelectorAll("button, [role=button]");
+  function findBtn() {
+    var els = document.querySelectorAll("button, [role=button]");
     for (var i = 0; i < els.length; i++) {
       if (els[i].dataset && els[i].dataset.vmux) return els[i];
-      if (isInstallText(els[i])) return els[i];
+    }
+    for (var j = 0; j < els.length; j++) {
+      if (isInstallButton(els[j])) return els[j];
     }
     return null;
   }
@@ -56,7 +54,7 @@
   function relabel() {
     var id = extId();
     if (!id) return;
-    var btn = headerBtn();
+    var btn = findBtn();
     if (!btn) return;
     if (btn.dataset.vmux === id) return;
     btn.dataset.vmux = id;
@@ -97,30 +95,15 @@
     },
     true,
   );
-  // Hide the "switch to Chrome" banner (its CTA also says "...Chrome", so find
-  // that CTA — not the header button — and hide its full-width container) and
-  // remove the "Switch to Chrome?" dialog.
+  // Remove only the small "Switch to Chrome?" nag dialog: a dialog mentioning
+  // "chrome" with no input (so we never touch the search box or main content).
   function dismissNags() {
-    var real = headerBtn();
-    var els = document.querySelectorAll("button, [role=button], a");
-    for (var i = 0; i < els.length; i++) {
-      var e = els[i];
-      if (e === real || (e.dataset && e.dataset.vmux)) continue;
-      if (!isInstallText(e)) continue;
-      var p = e;
-      for (var d = 0; d < 6 && p; d++) {
-        var w = p.getBoundingClientRect ? p.getBoundingClientRect().width : 0;
-        if (w >= 600) {
-          p.style.display = "none";
-          break;
-        }
-        p = p.parentElement;
-      }
-    }
-    var dialogs = document.querySelectorAll("[role=dialog], [role=alertdialog]");
-    for (var k = 0; k < dialogs.length; k++) {
-      if ((dialogs[k].textContent || "").toLowerCase().indexOf("chrome") !== -1) {
-        dialogs[k].remove();
+    var dialogs = document.querySelectorAll("[role=alertdialog], [role=dialog]");
+    for (var i = 0; i < dialogs.length; i++) {
+      var d = dialogs[i];
+      var t = (d.textContent || "").toLowerCase();
+      if (t.indexOf("chrome") !== -1 && !d.querySelector("input, textarea")) {
+        d.remove();
       }
     }
   }
