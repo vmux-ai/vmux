@@ -874,11 +874,11 @@ fn add_to_bookmarks(command: &str, url: String, title: String, favicon_url: Stri
     });
 }
 
-fn new_folder() {
+fn request_bookmark_menu() {
     let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
-        command: "new_folder".into(),
-        name: Some("New Folder".into()),
+        command: "menu_new_folder".into(),
         uuid: None,
+        name: None,
         url: None,
         title: None,
         favicon_url: None,
@@ -916,14 +916,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
                 class: "glass mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
                 oncontextmenu: move |e| {
                     e.prevent_default();
-                    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
-                        command: "menu_new_folder".into(),
-                        uuid: None,
-                        name: None,
-                        url: None,
-                        title: None,
-                        favicon_url: None,
-                    });
+                    request_bookmark_menu();
                 },
                 "No pins or bookmarks"
             }
@@ -931,7 +924,19 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
     }
 
     rsx! {
-        div { class: "glass mb-2 flex flex-col rounded-lg p-1.5",
+        div {
+            class: "glass mb-2 flex flex-col rounded-lg p-1.5",
+            oncontextmenu: move |e: Event<MouseData>| {
+                let data = e.data();
+                let on_card = data
+                    .downcast::<web_sys::MouseEvent>()
+                    .map(|m| m.target() == m.current_target())
+                    .unwrap_or(false);
+                if on_card {
+                    e.prevent_default();
+                    request_bookmark_menu();
+                }
+            },
             if !pins.is_empty() {
                 div { class: "mb-1 grid grid-cols-3 gap-2 p-1",
                     for p in pins.iter() {
@@ -945,17 +950,6 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
                         BookmarkNode::Folder(f) => rsx! { BookmarkFolder { key: "{f.uuid}", folder: f.clone() } },
                         BookmarkNode::Entry(b) => rsx! { BookmarkEntry { key: "{b.uuid}", row: b.clone() } },
                     }
-                }
-                SheetNewButton {
-                    label: "New Folder".to_string(),
-                    icon: rsx! {
-                        Icon { class: "h-4 w-4 shrink-0",
-                            path { d: "M12 10v6" }
-                            path { d: "M9 13h6" }
-                            path { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                        }
-                    },
-                    onclick: move |_| new_folder(),
                 }
             }
         }
