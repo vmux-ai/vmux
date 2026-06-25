@@ -909,39 +909,23 @@ fn rename_folder(uuid: String, current: &str) {
 #[component]
 fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
-    let menu_val = use_signal(String::new);
 
     if pins.is_empty() && roots.is_empty() {
         return rsx! {
-            ContextMenu { attributes: vec![],
-                ContextMenuTrigger { attributes: vec![],
-                    div { class: "glass mb-2 flex flex-col rounded-lg p-1.5",
-                        div {
-                            class: "flex items-center justify-center px-2 py-3 text-ui-xs text-muted-foreground",
-                            "No pins or bookmarks"
-                        }
-                        SheetNewButton {
-                            label: "New Folder".to_string(),
-                            icon: rsx! {
-                                Icon { class: "h-4 w-4 shrink-0",
-                                    path { d: "M12 10v6" }
-                                    path { d: "M9 13h6" }
-                                    path { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                }
-                            },
-                            onclick: move |_| new_folder(),
-                        }
-                    }
-                }
-                ContextMenuContent { attributes: vec![],
-                    ContextMenuItem {
-                        index: 0usize,
-                        value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: move |_: String| new_folder(),
-                        attributes: vec![],
-                        "New Folder"
-                    }
-                }
+            div {
+                class: "glass mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+                        command: "menu_new_folder".into(),
+                        uuid: None,
+                        name: None,
+                        url: None,
+                        title: None,
+                        favicon_url: None,
+                    });
+                },
+                "No pins or bookmarks"
             }
         };
     }
