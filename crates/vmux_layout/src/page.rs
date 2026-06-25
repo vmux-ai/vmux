@@ -772,6 +772,9 @@ fn SideSheetView(
                 }
             }
             BookmarksSection { bookmarks }
+            if !panes.is_empty() {
+                div { class: "mx-1 mb-2 h-px bg-white/10" }
+            }
             div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
                 if let Some(err) = pane_tree_error {
                     div { class: "flex items-center px-2 py-1",
@@ -909,6 +912,27 @@ fn rename_folder(uuid: String, current: &str) {
 #[component]
 fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
+    let menu_val = use_signal(String::new);
+
+    if pins.is_empty() && roots.is_empty() {
+        return rsx! {
+            ContextMenu { attributes: vec![],
+                ContextMenuTrigger { attributes: vec![],
+                    div { class: "min-h-9 w-full" }
+                }
+                ContextMenuContent { attributes: vec![],
+                    ContextMenuItem {
+                        index: 0usize,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: move |_: String| new_folder(),
+                        attributes: vec![],
+                        "New Folder"
+                    }
+                }
+            }
+        };
+    }
+
     rsx! {
         div { class: "glass mb-2 flex flex-col rounded-lg p-1.5",
             if !pins.is_empty() {
