@@ -51,6 +51,7 @@ pub struct PaneHoverIntent {
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Pane>()
+            .register_type::<PaneId>()
             .register_type::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .register_type::<PaneSize>()
@@ -59,6 +60,7 @@ impl Plugin for PanePlugin {
             .init_resource::<PendingCursorWarp>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, stamp_spawn_seq)
+            .add_systems(Update, assign_pane_ids)
             .add_systems(
                 Startup,
                 reseed_spawn_counter.in_set(crate::LayoutStartupSet::Post),
@@ -153,6 +155,23 @@ pub struct PendingCursorWarp {
 #[type_path = "vmux_desktop::layout::pane"]
 #[require(Save)]
 pub struct Pane;
+
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::pane"]
+#[require(Save)]
+pub struct PaneId(pub String);
+
+pub fn assign_pane_ids(
+    panes: Query<Entity, (With<Pane>, Without<PaneId>)>,
+    mut commands: Commands,
+) {
+    for entity in &panes {
+        commands
+            .entity(entity)
+            .insert(PaneId(uuid::Uuid::new_v4().to_string()));
+    }
+}
 
 #[derive(Component, Debug)]
 pub struct Zoomed {
@@ -4537,5 +4556,20 @@ mod tests {
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
         assert_eq!(collected.0[0].url, "https://x");
+    }
+
+    #[test]
+    fn assign_pane_ids_fills_missing_and_keeps_existing() {
+        let mut app = App::new();
+        app.add_systems(Update, super::assign_pane_ids);
+        let bare = app.world_mut().spawn(super::Pane).id();
+        let kept = app
+            .world_mut()
+            .spawn((super::Pane, super::PaneId("fixed".to_string())))
+            .id();
+        app.update();
+        let assigned = app.world().get::<super::PaneId>(bare).expect("id assigned");
+        assert!(!assigned.0.is_empty());
+        assert_eq!(app.world().get::<super::PaneId>(kept).unwrap().0, "fixed");
     }
 }

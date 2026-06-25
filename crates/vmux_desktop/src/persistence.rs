@@ -6,14 +6,14 @@ use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
-use vmux_core::{ArchivedPage, CreatedAt, Order, PageMetadata};
+use vmux_core::{ArchivedPage, ArchivedPagePosition, CreatedAt, Order, PageMetadata};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
 use vmux_layout::space::{Space, SpaceId};
 use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
-    pane::{Pane, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
+    pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
     stack::Stack,
     tab::Tab,
     window::{Main, WindowGeometry},
@@ -192,6 +192,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Open>()
         .allow::<PageMetadata>()
         .allow::<ArchivedPage>()
+        .allow::<ArchivedPagePosition>()
+        .allow::<PaneId>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
         .allow::<vmux_history::Visit>()
@@ -890,6 +892,71 @@ mod tests {
         assert!(geom.fullscreen);
         assert_eq!(geom.position, Some(IVec2::new(11, 22)));
         assert_eq!(geom.size, Some(Vec2::new(640.0, 480.0)));
+    }
+
+    #[test]
+    fn pane_id_and_position_round_trip_through_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+
+        let mut app_save = App::new();
+        app_save.add_plugins(MinimalPlugins);
+        app_save.add_plugins(vmux_core::CorePlugin);
+        app_save.register_type::<PaneId>();
+        app_save.add_observer(save_on_default_event);
+        app_save
+            .world_mut()
+            .spawn((Save, Pane, PaneId("p-1".to_string())));
+        app_save.world_mut().spawn((
+            Save,
+            ArchivedPage {
+                url: "https://x".into(),
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "p-1".into(),
+                stack_index: 1,
+                pane_path: vec![vmux_core::PaneStep {
+                    split_id: "root".into(),
+                    axis: vmux_core::SplitAxis::Column,
+                    child_index: 2,
+                    flex_weights: vec![1.0, 4.0],
+                }],
+            },
+        ));
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+        assert!(path.exists());
+
+        let mut app_load = App::new();
+        app_load.add_plugins(MinimalPlugins);
+        app_load.add_plugins(vmux_core::CorePlugin);
+        app_load.register_type::<PaneId>();
+        app_load.add_observer(load_on_default_event);
+        app_load.update();
+        app_load
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        app_load.update();
+
+        let pid = app_load
+            .world_mut()
+            .query::<&PaneId>()
+            .single(app_load.world())
+            .expect("PaneId round-tripped");
+        assert_eq!(pid.0, "p-1");
+        let pos = app_load
+            .world_mut()
+            .query::<&ArchivedPagePosition>()
+            .single(app_load.world())
+            .expect("position round-tripped");
+        assert_eq!(pos.leaf_pane_id, "p-1");
+        assert_eq!(pos.pane_path[0].child_index, 2);
+        assert!(matches!(
+            pos.pane_path[0].axis,
+            vmux_core::SplitAxis::Column
+        ));
     }
 
     #[test]
