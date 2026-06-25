@@ -317,6 +317,7 @@ mod tests {
             spaces: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
+            appearance: Default::default(),
         }
     }
 
