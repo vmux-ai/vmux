@@ -112,7 +112,7 @@ const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.025] p
 
 fn row_class(selected: bool) -> String {
     let base =
-        "flex items-center gap-2.5 rounded-lg px-3 py-2 cursor-default transition-all duration-100";
+        "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
     if selected {
         format!(
             "{base} bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
@@ -281,7 +281,7 @@ fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
 fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
     if let Some(url) = thumb {
         return rsx! {
-            img { src: "{url}", class: "h-6 w-6 shrink-0 rounded object-cover ring-1 ring-border" }
+            img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
         };
     }
     type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
@@ -645,6 +645,7 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 let next = if len == 0 { 0 } else { (cur + 1).min(len - 1) };
                                 selected.set(next);
+                                scroll_dir_row_into_view(next);
                                 if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
@@ -653,6 +654,7 @@ pub fn Page() -> Element {
                                 e.prevent_default();
                                 let next = cur.saturating_sub(1);
                                 selected.set(next);
+                                scroll_dir_row_into_view(next);
                                 if let Some(p) = vis.get(next).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
@@ -723,6 +725,7 @@ pub fn Page() -> Element {
                                 let vis2 = visible_entries(&dir_entries.read(), next);
                                 let idx = clamp_selection(cur, vis2.len());
                                 selected.set(idx);
+                                scroll_dir_row_into_view(idx);
                                 if let Some(p) = vis2.get(idx).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
@@ -820,7 +823,7 @@ pub fn Page() -> Element {
                             for e in visible_entries(&parent_entries(), show_hidden()) {
                                 div {
                                     key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2.5 rounded-lg bg-cyan-400/10 px-3 py-2 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2.5 rounded-lg px-3 py-2 text-foreground/45 transition-colors hover:bg-white/[0.04]" },
+                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-white/[0.04]" },
                                     {entry_visual(&e, None)}
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
@@ -837,6 +840,7 @@ pub fn Page() -> Element {
                                     rsx! {
                                         div {
                                             key: "{e.path}",
+                                            id: "dir-row-{i}",
                                             class: row_class(i == selected()),
                                             title: "{e.path}",
                                             onclick: move |_| {
@@ -1344,6 +1348,18 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+fn scroll_dir_row_into_view(idx: usize) {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(&format!("dir-row-{idx}")))
+    else {
+        return;
+    };
+    let opts = web_sys::ScrollIntoViewOptions::new();
+    opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+    el.scroll_into_view_with_scroll_into_view_options(&opts);
 }
 
 fn focus_container() {
