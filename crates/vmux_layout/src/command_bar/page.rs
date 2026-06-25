@@ -481,6 +481,28 @@ pub fn Page() -> Element {
                                 },
                             }
                         }
+                        button {
+                            r#type: "button",
+                            aria_label: "Bookmark this page",
+                            title: "Bookmark this page (\u{2318}D)",
+                            class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                            onmousedown: move |e| { e.prevent_default(); e.stop_propagation(); },
+                            onclick: move |e| {
+                                e.prevent_default();
+                                e.stop_propagation();
+                                let _ = try_cef_bin_emit_rkyv(&crate::event::BookmarksCommandEvent {
+                                    command: "toggle_active".into(),
+                                    uuid: None,
+                                    name: None,
+                                    url: None,
+                                    title: None,
+                                    favicon_url: None,
+                                });
+                            },
+                            Icon { class: "h-4 w-4",
+                                path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
+                            }
+                        }
                     }
                 }
                 if !results.is_empty() {
