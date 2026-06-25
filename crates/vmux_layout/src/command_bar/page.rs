@@ -505,13 +505,17 @@ pub fn Page() -> Element {
                                         }
                                         span { class: result_trailing_slot_class() }
                                     },
-                                    ResultItem::Stack { title, url, .. } => rsx! {
+                                    ResultItem::Stack { title, url, icon, .. } => rsx! {
                                         div { class: result_content_row_class(),
-                                            Favicon {
-                                                favicon_url: String::new(),
-                                                url: url.clone(),
-                                                class: result_favicon_class().to_string(),
-                                                globe_class: result_leading_icon_class().to_string(),
+                                            if icon.is_empty() {
+                                                Favicon {
+                                                    favicon_url: String::new(),
+                                                    url: url.clone(),
+                                                    class: result_favicon_class().to_string(),
+                                                    globe_class: result_leading_icon_class().to_string(),
+                                                }
+                                            } else {
+                                                {page_icon(icon)}
                                             }
                                             div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                                 span { class: result_primary_text_class(), "{title}" }
