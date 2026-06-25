@@ -1,3 +1,6 @@
+pub mod keymap;
+pub mod mode;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn preload_script() -> &'static str {
     include_str!(concat!(env!("OUT_DIR"), "/vimium_preload.js"))
