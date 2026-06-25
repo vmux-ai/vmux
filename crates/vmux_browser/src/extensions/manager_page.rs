@@ -2,13 +2,15 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use bevy_cef::prelude::{
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, JsEmitEventPlugin, Receive,
+    WebviewCommittedNavigationEvent,
+};
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::event::extension::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
-    ExtActionRequest, ExtInstallPhase, ExtInstallProgress, ExtInstallRequest, ExtListRequest,
-    ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
-    ExtUninstallRequest, ExtensionsEvent,
+    ExtActionRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest, ExtOpenManagerRequest,
+    ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest, ExtUninstallRequest, ExtensionsEvent,
 };
 use vmux_core::extension::store;
 use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
@@ -43,7 +45,6 @@ impl Plugin for ExtensionsPlugin {
             .add_message::<CefPageAttachRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtListRequest,
-                ExtInstallRequest,
                 ExtToggleRequest,
                 ExtUninstallRequest,
             )>::default())
@@ -51,17 +52,21 @@ impl Plugin for ExtensionsPlugin {
                 ExtActionRequest,
                 ExtOpenManagerRequest,
             )>::default())
+            .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
             .add_observer(on_list_request)
-            .add_observer(on_install_request)
             .add_observer(on_toggle_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_action_request)
             .add_observer(on_open_manager_request)
+            .add_observer(on_add_extension)
             .add_systems(
                 Update,
                 handle_extensions_page_open.in_set(PageOpenSet::HandleKnownPages),
             )
-            .add_systems(Update, (run_agent_installs, drain_outbox));
+            .add_systems(
+                Update,
+                (run_agent_installs, inject_on_cws_nav, drain_outbox),
+            );
     }
 }
 
@@ -198,16 +203,6 @@ fn on_list_request(
     push(&outbox, entity, OutMsg::List(snapshot()));
 }
 
-fn on_install_request(
-    trigger: On<BinReceive<ExtInstallRequest>>,
-    mut subs: ResMut<ExtSubscribers>,
-    outbox: Res<ExtOutbox>,
-) {
-    subs.0.insert(trigger.event().webview);
-    let source = trigger.event().payload.source.clone();
-    spawn_install(&outbox, subs.0.iter().copied().collect(), source);
-}
-
 fn on_toggle_request(
     trigger: On<BinReceive<ExtToggleRequest>>,
     subs: Res<ExtSubscribers>,
@@ -269,6 +264,85 @@ fn run_agent_installs(
             req.source.clone(),
         );
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AddExtensionRequest {
+    channel: String,
+    id: String,
+}
+
+const ADD_CHANNEL: &str = "vmux-add-extension";
+
+fn is_webstore_url(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split(['/', '?', '#']).next())
+        .map(|authority| authority == "chromewebstore.google.com")
+        .unwrap_or(false)
+}
+
+const INJECTOR_JS: &str = r#"(function(){
+  if (window.__VMUX_EXT__) return;
+  window.__VMUX_EXT__ = true;
+  function extId(){
+    var segs = location.pathname.split('/');
+    for (var i=0;i<segs.length;i++){ if (/^[a-p]{32}$/.test(segs[i])) return segs[i]; }
+    return null;
+  }
+  function findAnchor(){
+    var els = document.querySelectorAll('button, a, [role=button]');
+    for (var i=0;i<els.length;i++){
+      var t = (els[i].textContent||'').trim();
+      if (t === 'Add to Chrome' || t === 'Remove from Chrome') return els[i];
+    }
+    return null;
+  }
+  function place(){
+    var id = extId();
+    var existing = document.getElementById('vmux-add-ext');
+    if (!id){ if (existing) existing.remove(); return; }
+    if (existing){ if (existing.dataset.extId === id) return; existing.remove(); }
+    var anchor = findAnchor();
+    if (!anchor || !anchor.parentNode) return;
+    var b = document.createElement('button');
+    b.id = 'vmux-add-ext';
+    b.dataset.extId = id;
+    b.textContent = 'Add to vmux';
+    b.style.cssText = 'margin-left:8px;padding:8px 18px;border:0;border-radius:9999px;background:#3b82f6;color:#fff;font:inherit;font-weight:600;cursor:pointer;';
+    b.addEventListener('click', function(){
+      try { cef.emit({ channel: 'vmux-add-extension', id: id }); } catch(e){}
+      b.textContent = 'Added — relaunch to enable';
+      b.disabled = true;
+      b.style.opacity = '0.6';
+    });
+    anchor.parentNode.insertBefore(b, anchor.nextSibling);
+  }
+  new MutationObserver(place).observe(document.documentElement, {childList:true, subtree:true});
+  place();
+})();"#;
+
+fn inject_on_cws_nav(
+    mut events: MessageReader<WebviewCommittedNavigationEvent>,
+    browsers: NonSend<Browsers>,
+) {
+    for ev in events.read() {
+        if ev.is_main_frame && is_webstore_url(&ev.url) {
+            browsers.execute_js(&ev.webview, INJECTOR_JS);
+        }
+    }
+}
+
+fn on_add_extension(
+    trigger: On<Receive<AddExtensionRequest>>,
+    mut writer: MessageWriter<vmux_layout::ExtensionInstallRequest>,
+) {
+    let req = &trigger.payload;
+    if req.channel != ADD_CHANNEL || req.id.trim().is_empty() {
+        return;
+    }
+    writer.write(vmux_layout::ExtensionInstallRequest {
+        source: req.id.clone(),
+    });
 }
 
 fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut commands: Commands) {

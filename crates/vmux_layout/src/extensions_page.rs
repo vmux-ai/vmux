@@ -10,7 +10,6 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(ExtensionsEvent::default);
-    let mut source = use_signal(String::new);
     let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
 
     let _list = use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |e| {
@@ -55,27 +54,6 @@ pub fn Page() -> Element {
                 }
             }
 
-            div { class: "flex shrink-0 items-center gap-2 px-5 py-3",
-                input {
-                    r#type: "text",
-                    value: "{source}",
-                    placeholder: "Paste Chrome Web Store URL or extension ID",
-                    class: "min-w-0 flex-1 rounded-xl bg-white/[0.04] px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 ring-1 ring-inset ring-white/10 outline-none focus:ring-cyan-400/30",
-                    oninput: move |e| source.set(e.value()),
-                }
-                button {
-                    class: "shrink-0 rounded-lg bg-cyan-400/15 px-4 py-2 text-xs font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
-                    onclick: move |_| {
-                        let s = source();
-                        if !s.trim().is_empty() {
-                            let _ = try_cef_bin_emit_rkyv(&ExtInstallRequest { source: s });
-                            source.set(String::new());
-                        }
-                    },
-                    "Add"
-                }
-            }
-
             if !installing.is_empty() {
                 div { class: "shrink-0 px-5 pb-2",
                     for pr in installing.iter() {
@@ -88,7 +66,9 @@ pub fn Page() -> Element {
 
             div { class: "min-h-0 flex-1 overflow-auto px-3 pb-4",
                 if snap.extensions.is_empty() {
-                    div { class: "px-3 py-6 text-center text-xs text-muted-foreground", "No extensions installed." }
+                    div { class: "px-3 py-10 text-center text-xs text-muted-foreground",
+                        "No extensions installed. Browse the Chrome Web Store and click \"Add to vmux\"."
+                    }
                 }
                 for ext in snap.extensions.iter() {
                     {

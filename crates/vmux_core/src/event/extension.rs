@@ -128,21 +128,6 @@ pub struct ExtStatusEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ExtInstallRequest {
-    pub source: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
 pub struct ExtToggleRequest {
     pub id: String,
     pub enabled: bool,

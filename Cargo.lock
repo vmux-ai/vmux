@@ -9716,6 +9716,7 @@ dependencies = [
  "chrono",
  "reqwest",
  "ron 0.8.1",
+ "serde",
  "vmux_agent",
  "vmux_command",
  "vmux_core",

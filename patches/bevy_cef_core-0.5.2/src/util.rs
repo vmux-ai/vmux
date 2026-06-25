@@ -165,7 +165,11 @@ pub fn is_trusted_embedded_page(url: &str) -> bool {
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
 }
 
-pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] = &["chat.mistral.ai", "chat.local.mistral.ai:8443"];
+pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] = &[
+    "chat.mistral.ai",
+    "chat.local.mistral.ai:8443",
+    "chromewebstore.google.com",
+];
 
 pub fn is_bridge_allowed_origin(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
