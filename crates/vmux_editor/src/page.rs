@@ -891,6 +891,7 @@ pub fn Page() -> Element {
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
+                                    id: "file-scroll",
                                     class: "relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
@@ -1453,7 +1454,11 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
     let _ = html.style().set_property("--cw", &format!("{cw}px"));
     let _ = html.style().set_property("--ch", &format!("{ch}px"));
 
-    let vh = container.client_height() as f64;
+    let vh = document
+        .get_element_by_id("file-scroll")
+        .map(|e| e.client_height() as f64)
+        .filter(|h| *h > 0.0)
+        .unwrap_or_else(|| container.client_height() as f64);
 
     let _ = try_cef_bin_emit_rkyv(&FileResizeEvent {
         char_height: ch as f32,
