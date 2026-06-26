@@ -472,6 +472,28 @@ specific page; defaults to the focused page."
     }
 }
 
+fn browser_scroll_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "browser_scroll".into(),
+        description:
+            "Scroll the visible browser page so the user can watch, then return the post-scroll \
+snapshot (same shape as browser_snapshot, including viewport + inViewport flags). Pass exactly one \
+of `to` (\"top\" or \"bottom\") or `delta` (pixels; positive = down, e.g. one screen is about the \
+snapshot's viewport.height). Pass `target` = pane:<id> or stack:<id> to pick a page; defaults to \
+the focused page. Prefer scrolling to read long pages instead of assuming off-screen content."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom."},
+                "delta": {"type": "integer", "description": "Scroll by pixels; positive = down."},
+                "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; focused page if omitted."}
+            }
+        }),
+    }
+}
+
 fn record_start_definition() -> ToolDefinition {
     ToolDefinition {
         name: "record_start".into(),
@@ -534,6 +556,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
     defs.push(browser_snapshot_definition());
+    defs.push(browser_scroll_definition());
     defs.push(record_start_definition());
     defs.push(record_stop_definition());
     defs
@@ -699,6 +722,35 @@ pub fn dispatch_with_anchor(
             vmux_service::protocol::AgentQuery::BrowserSnapshot { pane },
         ));
     }
+    if name == "browser_scroll" {
+        let pane = match arguments.get("target") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => {
+                let s = s.trim();
+                (!s.is_empty()).then(|| s.to_string())
+            }
+            Some(_) => return Err("browser_scroll.target must be a string".to_string()),
+        };
+        let to = match arguments.get("to").and_then(Value::as_str) {
+            None => None,
+            Some(value @ ("top" | "bottom")) => Some(value.to_string()),
+            Some(other) => {
+                return Err(format!(
+                    "browser_scroll.to must be 'top' or 'bottom', got {other}"
+                ));
+            }
+        };
+        let delta = arguments
+            .get("delta")
+            .and_then(Value::as_i64)
+            .map(|d| d as i32);
+        if to.is_some() == delta.is_some() {
+            return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
+        }
+        return Ok(DispatchTarget::Query(
+            vmux_service::protocol::AgentQuery::BrowserScroll { pane, to, delta },
+        ));
+    }
     if name == "record_start" {
         let gif = arguments
             .get("gif")
@@ -850,6 +902,53 @@ mod tests {
         let err =
             dispatch_query("browser_snapshot", serde_json::json!({ "target": 123 })).unwrap_err();
         assert!(err.contains("target"));
+    }
+
+    #[test]
+    fn browser_scroll_dispatches_with_delta() {
+        let q = dispatch_query("browser_scroll", serde_json::json!({ "delta": 600 })).unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::BrowserScroll {
+                pane: None,
+                to: None,
+                delta: Some(600)
+            }
+        );
+    }
+
+    #[test]
+    fn browser_scroll_dispatches_to_bottom_with_pane() {
+        let q = dispatch_query(
+            "browser_scroll",
+            serde_json::json!({ "to": "bottom", "target": "pane:3" }),
+        )
+        .unwrap();
+        assert_eq!(
+            q,
+            AgentQuery::BrowserScroll {
+                pane: Some("pane:3".to_string()),
+                to: Some("bottom".to_string()),
+                delta: None
+            }
+        );
+    }
+
+    #[test]
+    fn browser_scroll_requires_exactly_one_of_to_or_delta() {
+        assert!(dispatch_query("browser_scroll", serde_json::json!({})).is_err());
+        assert!(
+            dispatch_query(
+                "browser_scroll",
+                serde_json::json!({ "to": "top", "delta": 5 })
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn browser_scroll_is_listed() {
+        assert!(tool_names().contains(&"browser_scroll".to_string()));
     }
 
     #[test]
