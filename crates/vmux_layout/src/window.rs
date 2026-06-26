@@ -1,7 +1,8 @@
-use crate::event::COMMAND_BAR_PAGE_URL;
+use crate::event::{COMMAND_BAR_PAGE_URL, ISLAND_PAGE_URL};
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
+    island::Island,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     scene::MainCamera,
     settings::LayoutSettings,
@@ -417,6 +418,23 @@ fn setup(
         Visibility::Hidden,
         Pickable::IGNORE,
         ChildOf(root),
+    ));
+
+    // Island: an always-active OSR webview whose ONLY output is the native floating panel
+    // (`WebviewNativeOverlay` → `NativeOverlayFrames`, composited by `vmux_desktop::dynamic_island`).
+    // It deliberately has NO `Mesh3d`/`MeshMaterial3d` and is not in the layout UI tree, so it never
+    // renders a duplicate quad in the main window. Size tracks the page's morph.
+    commands.spawn((
+        Island,
+        HostWindow(pw),
+        Browser,
+        WebviewTransparent,
+        bevy_cef::prelude::WebviewNativeOverlay,
+        bevy_cef::prelude::CefIgnorePinchZoom,
+        WebviewSource::new(ISLAND_PAGE_URL),
+        WebviewSize(Vec2::new(360.0, 44.0)),
+        Visibility::Hidden,
+        Pickable::IGNORE,
     ));
 
     commands.spawn((
@@ -1083,6 +1101,29 @@ mod tests {
         let node = app.world().get::<Node>(root).expect("window node");
 
         assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
+    }
+
+    #[test]
+    fn island_webview_is_osr_native_overlay() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let island = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::island::Island>>()
+            .single(app.world())
+            .expect("island");
+
+        assert!(
+            app.world()
+                .get::<bevy_cef::prelude::WebviewNativeOverlay>(island)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<bevy_cef::prelude::WebviewWindowed>(island)
+                .is_none()
+        );
     }
 
     #[test]

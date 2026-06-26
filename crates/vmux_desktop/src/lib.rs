@@ -9,6 +9,7 @@ mod background_lifecycle;
 mod boot_status;
 mod browser_snapshot;
 mod display;
+mod dynamic_island;
 #[cfg(target_os = "macos")]
 mod event_tap;
 #[cfg(target_os = "macos")]
@@ -172,8 +173,12 @@ impl Plugin for VmuxPlugin {
             .add_systems(Update, notify::post_os_notifications);
 
         #[cfg(target_os = "macos")]
-        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
-            .add_systems(Last, focus_native::apply_winit_host_focus);
+        app.add_plugins((
+            glass::GlassPlugin,
+            splash::SplashPlugin,
+            dynamic_island::DynamicIslandPlugin,
+        ))
+        .add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
 

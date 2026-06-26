@@ -6,6 +6,7 @@ use crate::archive::ArchivePlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::focus_ring::FocusRingPlugin;
 use crate::header::HeaderLayoutPlugin;
+use crate::island::IslandPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::scene::ScenePlugin;
@@ -87,6 +88,7 @@ impl Plugin for LayoutPlugin {
                 TogglePlugin,
                 WebviewRevealPlugin,
                 ArchivePlugin,
+                IslandPlugin,
             ));
     }
 }

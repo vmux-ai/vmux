@@ -12,6 +12,7 @@ pub mod error_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod extensions_page;
+pub mod island;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod protocol;
@@ -102,6 +103,14 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         icon: None,
         command_bar: false,
     };
+#[cfg(not(target_arch = "wasm32"))]
+pub const ISLAND_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "island",
+    title: "Island",
+    keywords: &[],
+    icon: None,
+    command_bar: false,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "debug",

@@ -92,7 +92,11 @@ objc2-foundation = { version = "0.3", features = [
     "NSString",
     "NSProcessInfo",
 ] }
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }
+objc2-quartz-core = { version = "0.3", features = [
+    "CALayer",
+    "CAShapeLayer",
+    "objc2-core-foundation",
+] }
 objc2-core-graphics = { version = "0.3", features = [
     "CGEvent",
     "CGEventTypes",
@@ -100,6 +104,8 @@ objc2-core-graphics = { version = "0.3", features = [
     "CGColorSpace",
     "CGContext",
     "CGBitmapContext",
+    "CGPath",
+    "CGAffineTransform",
 ] }
 objc2-core-foundation = { version = "0.3", features = [
     "CFBase",

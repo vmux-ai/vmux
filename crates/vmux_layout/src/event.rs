@@ -2,6 +2,7 @@ use vmux_core::PageIcon;
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";
+pub const ISLAND_PAGE_URL: &str = "vmux://island/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 pub const SERVICES_PAGE_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
