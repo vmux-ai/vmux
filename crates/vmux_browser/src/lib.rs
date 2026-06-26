@@ -2625,7 +2625,7 @@ fn push_bookmarks_host_emit(
         uuid: uuid.0.clone(),
         url: meta.url.clone(),
         title: meta.title.clone(),
-        favicon_url: meta.favicon_url.clone(),
+        favicon_url: meta.icon.favicon_url().to_string(),
     };
 
     let pin_rows: Vec<vmux_layout::event::BookmarkRow> =

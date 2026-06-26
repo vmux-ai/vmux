@@ -1300,7 +1300,7 @@ fn handle_agent_queries(
                         "uuid": u.0,
                         "url": m.url,
                         "title": m.title,
-                        "favicon_url": m.favicon_url,
+                        "favicon_url": m.icon.favicon_url(),
                     })
                 };
                 let pins: Vec<serde_json::Value> = bm_pins.iter().map(|(u, m)| row(u, m)).collect();

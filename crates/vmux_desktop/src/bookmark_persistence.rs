@@ -140,7 +140,7 @@ mod tests {
             PageMetadata {
                 title: "A".into(),
                 url: "https://a.test".into(),
-                favicon_url: String::new(),
+                icon: vmux_core::icon::PageIcon::default(),
                 bg_color: None,
             },
             Order(1),

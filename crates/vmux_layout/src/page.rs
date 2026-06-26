@@ -508,10 +508,10 @@ fn Tab(tab: TabRow) -> Element {
 
     let bm_url = tab.url.clone();
     let bm_title = display_title.clone();
-    let bm_favicon = tab.favicon_url.clone();
+    let bm_favicon = tab.icon.favicon_url().to_string();
     let pin_url = tab.url.clone();
     let pin_title = display_title.clone();
-    let pin_favicon = tab.favicon_url.clone();
+    let pin_favicon = tab.icon.favicon_url().to_string();
     let menu_val = use_signal(|| tab.id.clone());
 
     rsx! {
