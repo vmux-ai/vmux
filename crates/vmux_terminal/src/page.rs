@@ -9,6 +9,8 @@ use dioxus::html::Modifiers;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
+use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -29,7 +31,7 @@ pub fn Page() -> Element {
     let mut copy_mode = use_signal(|| false);
     let mut theme = use_signal(|| None::<TermThemeEvent>);
     let mut service_error = use_signal(String::new);
-    let mut loading = use_signal(|| None::<String>);
+    let mut loading = use_signal(|| None::<(String, String)>);
 
     let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
         SERVICE_UNAVAILABLE_EVENT,
@@ -113,7 +115,11 @@ pub fn Page() -> Element {
 
     let _loading_listener =
         use_bin_event_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
-            loading.set(if evt.loading { Some(evt.label) } else { None });
+            loading.set(if evt.loading {
+                Some((evt.label, evt.segment))
+            } else {
+                None
+            });
         });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
@@ -292,23 +298,64 @@ pub fn Page() -> Element {
             }
 
             {
-                let label = loading.read().clone();
-                label.map(|label| rsx! {
-                    div {
-                        class: "absolute inset-0 z-40 flex flex-col items-center justify-center pointer-events-none bg-term-bg",
+                let state = loading.read().clone();
+                state.map(|(label, segment)| {
+                    let accent = agent_accent(&segment);
+                    let favicon_url = format!("vmux://agent/{segment}/cli/");
+                    rsx! {
                         div {
-                            class: "mb-3 text-sm",
-                            style: "color:var(--term-fg);opacity:0.75;",
-                            "{label}"
-                        }
-                        div {
-                            class: "h-2 w-40 rounded-md animate-pulse",
-                            style: "background:var(--term-fg);opacity:0.12;",
-                        }
-                        div {
-                            class: "mt-2 text-xs",
-                            style: "color:var(--term-fg);opacity:0.4;",
-                            "starting…"
+                            class: "pointer-events-none absolute inset-0 z-40 overflow-hidden bg-term-bg",
+                            div { class: "{accent.glow_top}" }
+                            div { class: "{accent.glow_bottom}" }
+                            div {
+                                class: "relative flex h-full w-full flex-col",
+                                div {
+                                    class: "flex items-center gap-3 px-5 py-4",
+                                    div {
+                                        class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] ring-1 ring-inset ring-white/10",
+                                        Favicon {
+                                            favicon_url: "".to_string(),
+                                            url: favicon_url.clone(),
+                                            class: "h-5 w-5 shrink-0 rounded object-contain".to_string(),
+                                            globe_class: "h-5 w-5 text-muted-foreground".to_string(),
+                                        }
+                                    }
+                                    div {
+                                        div { class: "text-sm font-semibold text-foreground", "{label}" }
+                                        div {
+                                            class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                                            span { class: "h-1.5 w-1.5 rounded-full animate-pulse {accent.accent_bg}" }
+                                            "starting…"
+                                        }
+                                    }
+                                }
+                                div {
+                                    class: "flex flex-1 flex-col gap-4 px-5 py-3",
+                                    div {
+                                        class: "flex justify-end gap-2.5",
+                                        div {
+                                            class: "flex max-w-[60%] flex-col items-end gap-2",
+                                            div { class: "h-2.5 w-40 rounded-md bg-white/10 animate-pulse" }
+                                        }
+                                        div { class: "h-6 w-6 shrink-0 rounded-lg bg-white/10" }
+                                    }
+                                    div {
+                                        class: "flex gap-2.5",
+                                        div { class: "h-6 w-6 shrink-0 rounded-lg bg-gradient-to-br {accent.grad}" }
+                                        div {
+                                            class: "flex flex-1 flex-col gap-2",
+                                            div { class: "h-2.5 w-[92%] rounded-md bg-white/10 animate-pulse" }
+                                            div { class: "h-2.5 w-[80%] rounded-md bg-white/10 animate-pulse [animation-delay:120ms]" }
+                                            div { class: "h-2.5 w-[45%] rounded-md bg-white/10 animate-pulse [animation-delay:240ms]" }
+                                        }
+                                    }
+                                }
+                                div {
+                                    class: "mx-4 mb-4 flex items-center gap-2 rounded-xl bg-white/[0.03] px-3 py-3 ring-1 ring-inset ring-white/10",
+                                    span { class: "h-4 w-0.5 animate-pulse {accent.accent_bg}" }
+                                    div { class: "h-2 w-32 rounded bg-white/10 animate-pulse" }
+                                }
+                            }
                         }
                     }
                 })

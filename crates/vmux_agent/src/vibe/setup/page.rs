@@ -2,16 +2,10 @@
 
 use crate::vibe::setup::event::AgentInstallRunRequest;
 use dioxus::prelude::*;
+use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_theme};
-
-struct Accent {
-    glow_top: &'static str,
-    glow_bottom: &'static str,
-    badge: &'static str,
-    prompt: &'static str,
-    cta: &'static str,
-}
 
 fn current_agent_segment() -> String {
     web_sys::window()
@@ -29,32 +23,6 @@ fn tagline(segment: &str) -> &'static str {
     }
 }
 
-fn accent(segment: &str) -> Accent {
-    match segment {
-        "claude" => Accent {
-            glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-rose-500/20 blur-[120px]",
-            glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-orange-400/10 blur-[120px]",
-            badge: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-rose-500 text-white shadow-lg shadow-rose-500/30",
-            prompt: "select-none font-mono text-sm text-rose-400/80",
-            cta: "group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-rose-500/25 transition-all hover:shadow-rose-500/40 hover:brightness-110 active:scale-[0.99]",
-        },
-        "codex" => Accent {
-            glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-emerald-500/20 blur-[120px]",
-            glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-teal-400/10 blur-[120px]",
-            badge: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/30",
-            prompt: "select-none font-mono text-sm text-emerald-400/80",
-            cta: "group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-emerald-500/25 transition-all hover:shadow-emerald-500/40 hover:brightness-110 active:scale-[0.99]",
-        },
-        _ => Accent {
-            glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-orange-500/20 blur-[120px]",
-            glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-amber-400/10 blur-[120px]",
-            badge: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-lg shadow-orange-500/30",
-            prompt: "select-none font-mono text-sm text-orange-400/80",
-            cta: "group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-orange-500 to-amber-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/25 transition-all hover:shadow-orange-500/40 hover:brightness-110 active:scale-[0.99]",
-        },
-    }
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -62,7 +30,18 @@ pub fn Page() -> Element {
     let name = vmux_core::agent_setup::display_name(&segment).unwrap_or("Vibe");
     let command = vmux_core::agent_setup::install_command(&segment).unwrap_or_default();
     let tagline = tagline(&segment);
-    let accent = accent(&segment);
+    let accent = agent_accent(&segment);
+    let mut installing = use_signal(|| false);
+    let prompt_class = format!("select-none font-mono text-sm {}", accent.accent_text);
+    let cta_base = format!(
+        "group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br {} px-4 py-2.5 text-sm font-medium text-white {} transition-all hover:brightness-110 active:scale-[0.99]",
+        accent.grad, accent.cta_shadow
+    );
+    let cta_full = if installing() {
+        format!("{cta_base} pointer-events-none opacity-70")
+    } else {
+        cta_base
+    };
     let emit_segment = segment.clone();
     rsx! {
         main { class: "relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-10 text-foreground",
@@ -71,11 +50,12 @@ pub fn Page() -> Element {
 
             section { class: "relative w-full max-w-lg rounded-3xl bg-white/[0.04] p-8 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_24px_80px_-24px_rgba(0,0,0,0.7)]",
                 div { class: "mb-6 flex items-center gap-4",
-                    div { class: "{accent.badge}",
-                        Icon { class: "h-6 w-6",
-                            path { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }
-                            path { d: "M7 10l5 5 5-5" }
-                            path { d: "M12 15V3" }
+                    div { class: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/[0.06] ring-1 ring-inset ring-white/10",
+                        Favicon {
+                            favicon_url: "".to_string(),
+                            url: format!("vmux://agent/{segment}/cli/"),
+                            class: "h-7 w-7 shrink-0 rounded-lg object-contain".to_string(),
+                            globe_class: "h-7 w-7 text-muted-foreground".to_string(),
                         }
                     }
                     div { class: "min-w-0",
@@ -91,20 +71,27 @@ pub fn Page() -> Element {
                 }
 
                 div { class: "mb-5 flex items-center gap-3 rounded-xl bg-black/40 p-4 ring-1 ring-inset ring-white/10",
-                    span { class: "{accent.prompt}", "$" }
+                    span { class: "{prompt_class}", "$" }
                     code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{command}" }
                 }
 
                 button {
-                    class: "{accent.cta}",
+                    class: "{cta_full}",
+                    disabled: installing(),
                     onclick: move |_| {
+                        installing.set(true);
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: emit_segment.clone() });
                     },
-                    Icon { class: "h-4 w-4",
-                        path { d: "M5 12h14" }
-                        path { d: "m12 5 7 7-7 7" }
+                    if installing() {
+                        span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" }
+                        "Installing…"
+                    } else {
+                        Icon { class: "h-4 w-4",
+                            path { d: "M5 12h14" }
+                            path { d: "m12 5 7 7-7 7" }
+                        }
+                        "Run install command"
                     }
-                    "Run install command"
                 }
 
                 p { class: "mt-3 text-center text-xs text-muted-foreground/70",

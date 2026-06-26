@@ -788,6 +788,7 @@ pub struct TermThemeEvent {
 pub struct TermLoadingEvent {
     pub loading: bool,
     pub label: String,
+    pub segment: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1482,6 +1483,7 @@ mod tests {
         let original = TermLoadingEvent {
             loading: true,
             label: "Vibe".to_string(),
+            segment: "vibe".to_string(),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =

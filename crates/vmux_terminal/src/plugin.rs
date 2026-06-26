@@ -1317,6 +1317,7 @@ fn poll_service_messages(
                                 &crate::event::TermLoadingEvent {
                                     loading: false,
                                     label: session.kind.display_name().to_string(),
+                                    segment: session.kind.as_url_segment().to_string(),
                                 },
                             ));
                             true
@@ -2693,6 +2694,7 @@ fn arm_agent_loading(
             &crate::event::TermLoadingEvent {
                 loading: true,
                 label: session.kind.display_name().to_string(),
+                segment: session.kind.as_url_segment().to_string(),
             },
         ));
     }
@@ -2725,6 +2727,7 @@ fn clear_agent_loading(
                 &crate::event::TermLoadingEvent {
                     loading: false,
                     label: session.kind.display_name().to_string(),
+                    segment: session.kind.as_url_segment().to_string(),
                 },
             ));
         }
