@@ -50,6 +50,9 @@ pub enum CommandBarResultItem {
 }
 
 fn looks_like_path(s: &str) -> bool {
+    if vmux_command::event::is_data_uri(s) {
+        return false;
+    }
     s.starts_with('/')
         || s.starts_with("~/")
         || s.starts_with("./")

@@ -18,7 +18,8 @@ use cef::{
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
     ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
     RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
-    dictionary_value_create, process_message_create, register_scheme_handler_factory,
+    dictionary_value_create, list_value_create, process_message_create,
+    register_scheme_handler_factory,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -66,6 +67,17 @@ static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CefDiskProfileRoot(pub Option<String>);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CefColorMode {
+    Light,
+    Dark,
+    #[default]
+    System,
+}
+
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct CefColorScheme(pub CefColorMode);
+
 pub struct WebviewBrowser {
     pub client: Browser,
     pub host: BrowserHost,
@@ -106,6 +118,7 @@ pub struct Browsers {
     /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
+    color_scheme: CefColorMode,
 }
 
 impl Default for Browsers {
@@ -119,6 +132,7 @@ impl Default for Browsers {
             accel_sender,
             accel_receiver,
             shared_disk_context: None,
+            color_scheme: CefColorMode::default(),
         }
     }
 }
@@ -246,6 +260,7 @@ impl Browsers {
         // Holds the per-browser ephemeral context when not using `shared_disk_context`.
         #[allow(unused_assignments)]
         let mut ephemeral_local: Option<RequestContext> = None;
+        let color_scheme = self.color_scheme;
         let context_for_browser = match disk_profile_root.filter(|s| !s.trim().is_empty()) {
             Some(root) => {
                 if self.shared_disk_context.is_none() {
@@ -313,6 +328,7 @@ impl Browsers {
         )
         .expect("Failed to create browser");
         let host = browser.host().expect("Failed to get browser host");
+        Self::apply_emulated_color_scheme(&host, color_scheme);
         if !windowed {
             host.was_hidden(0);
         }
@@ -623,7 +639,8 @@ impl Browsers {
     }
 
     pub fn request_snapshot(&self, webview: &Entity, request_id: &str) -> bool {
-        if let Some(mut process_message) = process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT.into()))
+        if let Some(mut process_message) =
+            process_message_create(Some(&PROCESS_MESSAGE_SNAPSHOT.into()))
             && let Some(argument_list) = process_message.argument_list()
             && let Some(browser) = self.browsers.get(webview)
             && let Some(frame) = browser.client.main_frame()
@@ -1501,6 +1518,40 @@ impl Browsers {
             );
         }
         context
+    }
+
+    pub fn set_color_scheme(&mut self, mode: CefColorMode) {
+        self.color_scheme = mode;
+        for wb in self.browsers.values() {
+            Self::apply_emulated_color_scheme(&wb.host, mode);
+        }
+    }
+
+    fn apply_emulated_color_scheme(host: &BrowserHost, mode: CefColorMode) {
+        let Some(mut params) = dictionary_value_create() else {
+            return;
+        };
+        let Some(mut features) = list_value_create() else {
+            return;
+        };
+        let value = match mode {
+            CefColorMode::Light => Some("light"),
+            CefColorMode::Dark => Some("dark"),
+            CefColorMode::System => None,
+        };
+        if let Some(value) = value
+            && let Some(mut feature) = dictionary_value_create()
+        {
+            feature.set_string(Some(&"name".into()), Some(&"prefers-color-scheme".into()));
+            feature.set_string(Some(&"value".into()), Some(&value.into()));
+            features.set_dictionary(0, Some(&mut feature));
+        }
+        params.set_list(Some(&"features".into()), Some(&mut features));
+        host.execute_dev_tools_method(
+            0,
+            Some(&"Emulation.setEmulatedMedia".into()),
+            Some(&mut params),
+        );
     }
 
     fn client_handler(

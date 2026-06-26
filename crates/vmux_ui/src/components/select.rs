@@ -44,7 +44,7 @@ pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
             icon::Icon {
                 width: "20px",
                 height: "20px",
-                stroke: "var(--primary-color-7)",
+                stroke: "currentColor",
                 polyline { points: "6 9 12 15 18 9" }
             }
         }
@@ -119,7 +119,7 @@ pub fn SelectItemIndicator() -> Element {
             icon::Icon {
                 width: "1rem",
                 height: "1rem",
-                stroke: "var(--secondary-color-5)",
+                stroke: "currentColor",
                 path { d: "M5 13l4 4L19 7" }
             }
         }

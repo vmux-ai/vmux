@@ -248,8 +248,12 @@ pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
 }
 
+pub fn is_data_uri(s: &str) -> bool {
+    s.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"))
+}
+
 pub fn looks_like_url(s: &str) -> bool {
-    if s.contains("://") {
+    if s.contains("://") || is_data_uri(s) {
         return true;
     }
     if s.contains(' ')
@@ -327,6 +331,18 @@ mod tests {
         assert!(looks_like_url("google.com"));
         assert!(looks_like_url("google.com/maps"));
         assert!(looks_like_url("example.co.uk/page"));
+    }
+
+    #[test]
+    fn looks_like_url_data_scheme() {
+        assert!(looks_like_url("data:text/html,<h1>hi</h1>"));
+        assert!(looks_like_url(
+            "data:text/html,<style>body{background:white}</style>"
+        ));
+        assert!(looks_like_url("DATA:text/html,<h1>hi</h1>"));
+        assert!(looks_like_url("Data:text/html,<h1>hi</h1>"));
+        assert!(!looks_like_path("data:text/html,<h1>hi</h1>"));
+        assert!(!looks_like_path("DATA:text/html,<h1>hi</h1>"));
     }
 
     #[test]

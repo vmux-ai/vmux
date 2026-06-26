@@ -1026,7 +1026,7 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
 }
 
 fn normalize_url(value: &str) -> String {
-    if value.contains("://") {
+    if value.contains("://") || vmux_command::event::is_data_uri(value) {
         value.to_string()
     } else if value.contains('.') && !value.contains(' ') {
         format!("https://{}", value)
@@ -2514,6 +2514,12 @@ mod tests {
     #[test]
     fn normalize_url_preserves_vmux_protocol() {
         assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
+    }
+
+    #[test]
+    fn normalize_url_preserves_data_scheme() {
+        let data = "data:text/html,<style>body{background:white}</style><h1>x</h1>";
+        assert_eq!(normalize_url(data), data);
     }
 
     #[test]

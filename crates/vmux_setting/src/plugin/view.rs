@@ -14,7 +14,7 @@ use crate::event::{
     SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
     SettingsListEvent, SettingsSchemaEvent,
 };
-use crate::schema::{FieldSpec, SectionSpec, SettingsSchema, WidgetKind};
+use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
 
 #[derive(Component)]
@@ -205,6 +205,13 @@ fn build_settings_schema() -> SettingsSchema {
     SettingsSchema {
         sections: vec![
             SectionSpec {
+                id: "appearance".to_string(),
+                title: "Appearance".to_string(),
+                description: None,
+                synthetic_keys: vec!["mode".to_string()],
+                root_path: "appearance".to_string(),
+            },
+            SectionSpec {
                 id: "general".to_string(),
                 title: "General".to_string(),
                 description: None,
@@ -243,6 +250,29 @@ fn build_settings_schema() -> SettingsSchema {
             },
         ],
         fields: vec![
+            field(
+                "appearance.mode",
+                FieldSpec {
+                    label: Some("Mode".into()),
+                    hint: Some("Color scheme for web pages. Device follows your system.".into()),
+                    widget: Some(WidgetKind::Select),
+                    options: vec![
+                        SelectOption {
+                            value: "device".into(),
+                            label: "Device".into(),
+                        },
+                        SelectOption {
+                            value: "light".into(),
+                            label: "Light".into(),
+                        },
+                        SelectOption {
+                            value: "dark".into(),
+                            label: "Dark".into(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ),
             field(
                 "auto_update",
                 FieldSpec {
@@ -381,4 +411,19 @@ fn build_settings_schema() -> SettingsSchema {
 
 fn field(path: &str, spec: FieldSpec) -> (String, FieldSpec) {
     (path.to_string(), spec)
+}
+
+#[cfg(test)]
+mod appearance_schema_tests {
+    use super::*;
+
+    #[test]
+    fn schema_exposes_appearance_mode_select() {
+        let schema = build_settings_schema();
+        assert!(schema.sections.iter().any(|s| s.id == "appearance"));
+        let mode = schema.field("appearance.mode").expect("mode field");
+        assert_eq!(mode.widget, Some(WidgetKind::Select));
+        let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
+        assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
 }

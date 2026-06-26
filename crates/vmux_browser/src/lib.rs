@@ -108,6 +108,12 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_debug_update_clear)
             .add_systems(
                 Update,
+                sync_appearance_to_cef
+                    .before(CefSystems::CreateAndResize)
+                    .run_if(resource_changed::<AppSettings>),
+            )
+            .add_systems(
+                Update,
                 sync_cef_backend_for_interaction_mode
                     .after(PageOpenSet::Fallback)
                     .after(spawn_popup_stacks)
@@ -230,6 +236,24 @@ fn on_webview_ready_send_theme(
             zoom.0 = 0.0;
         }
         browsers.set_zoom_level(&entity, 0.0);
+    }
+}
+
+fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefColorMode {
+    match mode {
+        vmux_setting::ColorScheme::Light => bevy_cef::prelude::CefColorMode::Light,
+        vmux_setting::ColorScheme::Dark => bevy_cef::prelude::CefColorMode::Dark,
+        vmux_setting::ColorScheme::Device => bevy_cef::prelude::CefColorMode::System,
+    }
+}
+
+fn sync_appearance_to_cef(
+    settings: Res<AppSettings>,
+    mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
+) {
+    let mode = map_color_scheme(settings.appearance.mode);
+    if scheme.0 != mode {
+        scheme.0 = mode;
     }
 }
 
@@ -3902,7 +3926,30 @@ mod tests {
             spaces: Default::default(),
             recording: Default::default(),
             editor: Default::default(),
+            appearance: Default::default(),
         }
+    }
+
+    #[test]
+    fn appearance_change_updates_cef_color_scheme() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_app_settings_with_radius(0.0))
+            .init_resource::<CefColorScheme>()
+            .add_systems(
+                Update,
+                sync_appearance_to_cef.run_if(resource_changed::<AppSettings>),
+            );
+        app.update();
+        app.world_mut()
+            .resource_mut::<AppSettings>()
+            .appearance
+            .mode = vmux_setting::ColorScheme::Light;
+        app.update();
+        assert_eq!(
+            app.world().resource::<CefColorScheme>().0,
+            CefColorMode::Light
+        );
     }
 
     #[test]
@@ -4756,6 +4803,7 @@ mod tests {
                 spaces: Default::default(),
                 recording: Default::default(),
                 editor: Default::default(),
+                appearance: Default::default(),
             }
         }
 
@@ -5681,5 +5729,19 @@ mod error_page_source_tests {
             error_page_source("Page not found", "", "vmux://debug/"),
             "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fdebug%2F"
         );
+    }
+}
+
+#[cfg(test)]
+mod appearance_bridge_tests {
+    use super::map_color_scheme;
+    use bevy_cef::prelude::CefColorMode;
+    use vmux_setting::ColorScheme;
+
+    #[test]
+    fn maps_color_scheme_to_cef_mode() {
+        assert_eq!(map_color_scheme(ColorScheme::Light), CefColorMode::Light);
+        assert_eq!(map_color_scheme(ColorScheme::Dark), CefColorMode::Dark);
+        assert_eq!(map_color_scheme(ColorScheme::Device), CefColorMode::System);
     }
 }
