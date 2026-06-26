@@ -13,8 +13,8 @@ pub fn Hero() -> Element {
 
     rsx! {
         section {
-            "data-tone": "dark",
-            class: "relative isolate min-h-screen overflow-hidden flex flex-col items-center justify-center px-6 py-24 text-center bg-bg text-text",
+            "data-tone": "light",
+            class: "relative isolate min-h-screen overflow-hidden flex flex-col items-center justify-start px-6 pt-28 sm:pt-36 pb-24 text-center bg-bg text-text",
             div { class: "pointer-events-none absolute inset-0 -z-10",
                 div { class: "absolute left-1/2 top-1/4 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[140px] animate-aurora motion-reduce:animate-none" }
                 div { class: "absolute left-[16%] top-1/3 h-80 w-80 rounded-full bg-aurora-cyan/20 blur-[120px] animate-aurora [animation-delay:-7s] motion-reduce:animate-none" }
@@ -23,7 +23,7 @@ pub fn Hero() -> Element {
             div { class: "relative mx-auto max-w-2xl reveal",
                 {headline("Ask for anything", "One prompt.", "Anything, done.")}
                 p { class: "mt-5 text-lg sm:text-xl text-text-muted max-w-xl mx-auto reveal",
-                    "The browser that gets sh*t done — a flight, a website, a PR, handled by your agents while you watch."
+                    "The browser that gets sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch."
                 }
             }
             div { class: "relative mt-12 w-full", {vmux_demo()} }

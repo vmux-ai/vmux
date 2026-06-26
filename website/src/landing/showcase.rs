@@ -23,7 +23,7 @@ pub fn vmux_demo() -> Element {
 fn shell(delay: &str, tabs: Element, body: Element, status: Element) -> Element {
     rsx! {
         div {
-            class: "scene-cycle glass flex h-full flex-col overflow-hidden rounded-xl border border-white/10",
+            class: "scene-cycle flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0b0b14] shadow-2xl shadow-black/40",
             style: "animation-delay: {delay}",
             div { class: "flex h-7 items-center gap-1.5 border-b border-white/10 px-3",
                 span { class: "h-2 w-2 rounded-full bg-white/15" }
