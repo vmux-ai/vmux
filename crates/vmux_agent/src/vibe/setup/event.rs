@@ -8,4 +8,6 @@
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct VibeInstallRunRequest;
+pub struct AgentInstallRunRequest {
+    pub agent: String,
+}

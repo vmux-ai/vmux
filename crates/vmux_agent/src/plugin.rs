@@ -1447,10 +1447,11 @@ fn handle_agent_page_open_task(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
 ) -> Result<(), String> {
-    // The Vibe-CLI setup page lives in the agent namespace but is a *served* page, not an agent
-    // session — attach it directly rather than mis-parsing "vibe/setup" as a Page-agent provider/model.
-    if task.url == "vmux://agent/vibe/setup" {
-        attach_vibe_cli_setup_to_stack(task.stack, children_q, commands, meshes, webview_mt);
+    if let Some(kind) = AgentKind::all()
+        .into_iter()
+        .find(|k| task.url == k.setup_url())
+    {
+        attach_cli_setup_to_stack(kind, task.stack, children_q, commands, meshes, webview_mt);
         return Ok(());
     }
     let parsed =
@@ -1583,11 +1584,6 @@ fn attach_agent_spawn_error_to_stack(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    if kind == AgentKind::Vibe && message == "vibe executable not found" {
-        attach_vibe_cli_setup_to_stack(stack, children_q, commands, meshes, webview_mt);
-        return;
-    }
-
     clear_stack_children(stack, children_q, commands);
     let title = "Agent failed to start";
     let url = format!("vmux://error/agent/{}/", kind.as_url_segment());
@@ -1613,7 +1609,8 @@ fn attach_agent_spawn_error_to_stack(
     commands.entity(browser).insert(CefKeyboardTarget);
 }
 
-fn attach_vibe_cli_setup_to_stack(
+fn attach_cli_setup_to_stack(
+    kind: AgentKind,
     stack: Entity,
     children_q: &Query<&Children>,
     commands: &mut Commands,
@@ -1621,17 +1618,20 @@ fn attach_vibe_cli_setup_to_stack(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     clear_stack_children(stack, children_q, commands);
-    let title = "Set up Vibe CLI";
-    let url = "vmux://agent/vibe/setup";
+    commands
+        .entity(stack)
+        .remove::<crate::vibe::setup::AgentSetupNavigated>();
+    let title = format!("Set up {} CLI", kind.display_name());
+    let url = kind.setup_url();
     commands.entity(stack).insert(PageMetadata {
-        url: url.to_string(),
-        title: title.to_string(),
+        url: url.clone(),
+        title: title.clone(),
         bg_color: Some("#101114".to_string()),
         ..default()
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(meshes, webview_mt, url, title),
+            vmux_layout::Browser::new_with_title(meshes, webview_mt, &url, &title),
             ChildOf(stack),
         ))
         .id();
@@ -1688,12 +1688,9 @@ fn handle_spawn_agent_requests(
             continue;
         };
         let Some(exe_path) = resolve_agent_executable(req.kind, exec_override.as_deref()) else {
-            let message = format!("{} executable not found", req.kind.executable());
-            bevy::log::warn!("agent spawn ({:?}) failed: {message}", req.kind);
-            attach_agent_spawn_error_to_stack(
-                req.stack,
+            attach_cli_setup_to_stack(
                 req.kind,
-                &message,
+                req.stack,
                 &children_q,
                 &mut commands,
                 &mut meshes,
@@ -2443,6 +2440,77 @@ mod tests {
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].title, "Set up Vibe CLI");
         assert_eq!(metas[0].url, "vmux://agent/vibe/setup");
+    }
+
+    #[test]
+    fn missing_claude_or_codex_cli_shows_setup_page() {
+        for (kind, segment) in [(AgentKind::Claude, "claude"), (AgentKind::Codex, "codex")] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<SpawnAgentInStackRequest>()
+                .insert_resource(AgentStrategies::default())
+                .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
+                    (kind, false),
+                ])))
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+                .add_systems(
+                    Update,
+                    (handle_agent_page_open, handle_spawn_agent_requests).chain(),
+                );
+
+            let stack = app
+                .world_mut()
+                .spawn(vmux_layout::stack::stack_bundle())
+                .id();
+            app.world_mut().spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: format!("vmux://agent/{segment}/"),
+                request_id: None,
+            });
+
+            app.update();
+            app.update();
+
+            let stack_meta = app.world().get::<PageMetadata>(stack).unwrap();
+            assert_eq!(stack_meta.url, format!("vmux://agent/{segment}/setup"));
+            assert_eq!(
+                stack_meta.title,
+                format!("Set up {} CLI", kind.display_name())
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_setup_url_attaches_setup_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(AgentStrategies::default())
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/codex/setup".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+        app.update();
+
+        let stack_meta = app.world().get::<PageMetadata>(stack).unwrap();
+        assert_eq!(stack_meta.url, "vmux://agent/codex/setup");
+        assert_eq!(stack_meta.title, "Set up Codex CLI");
     }
 
     #[test]

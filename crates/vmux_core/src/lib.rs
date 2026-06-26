@@ -1,3 +1,4 @@
+pub mod agent_setup;
 pub mod dom_snapshot;
 pub mod editor;
 pub mod event;
