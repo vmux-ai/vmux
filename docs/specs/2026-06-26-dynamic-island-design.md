@@ -78,14 +78,21 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
   floating panels).
 - `collectionBehavior = CanJoinAllSpaces | FullScreenAuxiliary | IgnoresCycle` → present on every
   Space and over fullscreen apps.
-- Pinned top-center of the **main** display; reposition on display/topology change; offset below a
-  physical notch when present.
+- Pinned top-center of the **main** display; reposition on display/topology change.
+- **Notch-wrapping (built-in display).** When the active display has a notch
+  (`NSScreen.safeAreaInsets.top > 0`; notch rect derived from `auxiliaryTopLeftArea` /
+  `auxiliaryTopRightArea`), the island grows out of the notch: **idle** ≈ notch width + a thin lip;
+  **compact** flanks the notch (content on both sides); **expanded** drops a glass panel below whose
+  top edge carves around the notch with rounded inner corners (concave shoulders), so the physical
+  notch + glass read as one shape. The carve is a custom `CGPath` mask on the glass view and the OSR
+  content layer (not a plain `cornerRadius`). On **non-notched / external** displays the same island
+  renders as a free-floating rounded pill at top-center (no carve).
 - `ignoresMouseEvents(true)` while idle/ambient (clicks pass through to apps below); set `false`
   only while expanded for search (result clicks/scroll).
 - Content view (`wantsLayer`, clear) hosts a rounded **`NSGlassEffectView`** backdrop — the same
   primitive `glass.rs::install_window_glass` uses — and, composited above it, a `CALayer` showing
-  the OSR IOSurface (transparent web content). Both are masked to the same rounded shape; a morph
-  animates their frame + `cornerRadius`.
+  the OSR IOSurface (transparent web content). Both are masked to the same shape — a rounded pill,
+  or the notch-wrap `CGPath` on the built-in display — and a morph animates frame + shape together.
 - **Glass style follows the appearance Mode (depends on PR #172).** The `NSGlassEffectView`
   style/tint is bound to the resolved color mode from #172 (`CefColorScheme` resource /
   `appearance.mode` setting): **Light → `Clear` + light tint** (mockup variant A), **Dark → `Clear`

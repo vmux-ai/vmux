@@ -758,6 +758,13 @@ fn position_top_center(win: &objc2_app_kit::NSWindow, screen: &Option<objc2::rc:
     win.setFrameOrigin(NSPoint::new(x, y));
 }
 
+// Notch-wrap (built-in display): if `NSScreen.safeAreaInsets.top > 0`, derive the notch rect from
+// `auxiliaryTopLeftArea`/`auxiliaryTopRightArea`, anchor the panel top flush at the notch bottom,
+// and mask the glass view + OSR content layer with a custom CGPath that carves the notch with
+// rounded inner corners (concave shoulders). On non-notched/external screens, use a plain rounded
+// pill mask. Build the CGPath in a `island_shape_path(width, height, notch: Option<Rect>)` helper
+// and apply it as the layers' `mask`/`CAShapeLayer`. Re-derive on display/topology change.
+
 #[cfg(target_os = "macos")]
 fn sync_island_overlay(
     mut state: NonSendMut<IslandPanel>,
