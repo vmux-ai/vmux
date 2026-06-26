@@ -30,7 +30,7 @@ struct AgentInstallPane {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component)]
-struct AgentSetupNavigated;
+pub(crate) struct AgentSetupNavigated;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentSetupPlugin;
