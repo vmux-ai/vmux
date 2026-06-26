@@ -6,8 +6,6 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
 use vmux_core::{Bookmark, Collapsed, Folder, LastActivatedAt, Order, PageMetadata, Pin, Uuid};
 
-/// Data-carrying bookmark mutation. Emitted by the page (translated from
-/// `BookmarksCommandEvent`), the Cmd+D adapter, and MCP.
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub enum BookmarkOp {
     ToggleForUrl {
@@ -50,9 +48,6 @@ pub enum BookmarkOp {
     },
 }
 
-/// Emitted when the page requests the native bookmarks context menu (e.g.
-/// right-click on the empty placeholder). Consumed host-side (vmux_desktop) to
-/// pop up an OS menu.
 #[derive(Message, Clone, Debug, Default)]
 pub struct ShowBookmarkMenuRequest;
 
@@ -89,11 +84,20 @@ fn next_top_order(orders: impl Iterator<Item = u32>) -> Order {
     Order(orders.max().map(|m| m + 1).unwrap_or(0))
 }
 
+fn page_metadata(title: &str, url: &str, favicon_url: &str) -> PageMetadata {
+    PageMetadata {
+        title: title.to_string(),
+        url: url.to_string(),
+        icon: vmux_core::icon::PageIcon::favicon(favicon_url.to_string()),
+        bg_color: None,
+    }
+}
+
 fn apply_bookmark_ops(
     mut reader: MessageReader<BookmarkOp>,
     ids: Query<(Entity, &Uuid)>,
     bookmarks: Query<(Entity, &PageMetadata), With<Bookmark>>,
-    pinned: Query<(), With<Pin>>,
+    pinned: Query<&PageMetadata, With<Pin>>,
     folder_q: Query<(), With<Folder>>,
     collapsed_q: Query<(), With<Collapsed>>,
     orders: Query<&Order>,
@@ -122,12 +126,7 @@ fn apply_bookmark_ops(
                     commands.spawn((
                         Bookmark,
                         new_uuid(),
-                        PageMetadata {
-                            title: title.clone(),
-                            url: url.clone(),
-                            icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
-                            bg_color: None,
-                        },
+                        page_metadata(title, url, favicon_url),
                         order,
                     ));
                 }
@@ -138,16 +137,14 @@ fn apply_bookmark_ops(
                 favicon_url,
                 folder,
             } => {
+                if bookmarks.iter().any(|(_, meta)| &meta.url == url) {
+                    continue;
+                }
                 let order = next_top_order(orders.iter().map(|o| o.0));
                 let mut e = commands.spawn((
                     Bookmark,
                     new_uuid(),
-                    PageMetadata {
-                        title: title.clone(),
-                        url: url.clone(),
-                        icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
-                        bg_color: None,
-                    },
+                    page_metadata(title, url, favicon_url),
                     order,
                 ));
                 if let Some(folder_uuid) = folder
@@ -158,7 +155,9 @@ fn apply_bookmark_ops(
                 }
             }
             BookmarkOp::Remove { uuid } => {
-                if let Some(entity) = find_by_uuid(uuid, &ids) {
+                if let Some(entity) = find_by_uuid(uuid, &ids)
+                    && bookmarks.get(entity).is_ok()
+                {
                     commands.entity(entity).despawn();
                 }
             }
@@ -167,7 +166,9 @@ fn apply_bookmark_ops(
                 commands.spawn((Folder, new_uuid(), Name::new(name.clone()), order));
             }
             BookmarkOp::RemoveFolder { uuid } => {
-                if let Some(folder_entity) = find_by_uuid(uuid, &ids) {
+                if let Some(folder_entity) = find_by_uuid(uuid, &ids)
+                    && folder_q.get(folder_entity).is_ok()
+                {
                     if let Ok(children) = children_q.get(folder_entity) {
                         for child in children.iter() {
                             commands.entity(child).remove::<ChildOf>();
@@ -177,14 +178,18 @@ fn apply_bookmark_ops(
                 }
             }
             BookmarkOp::RenameFolder { uuid, name } => {
-                if let Some(folder_entity) = find_by_uuid(uuid, &ids) {
+                if let Some(folder_entity) = find_by_uuid(uuid, &ids)
+                    && folder_q.get(folder_entity).is_ok()
+                {
                     commands
                         .entity(folder_entity)
                         .insert(Name::new(name.clone()));
                 }
             }
             BookmarkOp::ToggleFolder { uuid } => {
-                if let Some(folder_entity) = find_by_uuid(uuid, &ids) {
+                if let Some(folder_entity) = find_by_uuid(uuid, &ids)
+                    && folder_q.get(folder_entity).is_ok()
+                {
                     if collapsed_q.get(folder_entity).is_ok() {
                         commands.entity(folder_entity).remove::<Collapsed>();
                     } else {
@@ -193,7 +198,9 @@ fn apply_bookmark_ops(
                 }
             }
             BookmarkOp::Pin { uuid } => {
-                if let Some(entity) = find_by_uuid(uuid, &ids) {
+                if let Some(entity) = find_by_uuid(uuid, &ids)
+                    && bookmarks.get(entity).is_ok()
+                {
                     commands.entity(entity).insert(Pin).remove::<ChildOf>();
                 }
             }
@@ -202,21 +209,21 @@ fn apply_bookmark_ops(
                 title,
                 favicon_url,
             } => {
+                if pinned.iter().any(|meta| &meta.url == url) {
+                    continue;
+                }
                 let order = next_top_order(orders.iter().map(|o| o.0));
                 commands.spawn((
                     Pin,
                     new_uuid(),
-                    PageMetadata {
-                        title: title.clone(),
-                        url: url.clone(),
-                        icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
-                        bg_color: None,
-                    },
+                    page_metadata(title, url, favicon_url),
                     order,
                 ));
             }
             BookmarkOp::Unpin { uuid } => {
-                if let Some(entity) = find_by_uuid(uuid, &ids) {
+                if let Some(entity) = find_by_uuid(uuid, &ids)
+                    && pinned.get(entity).is_ok()
+                {
                     if bookmarks.get(entity).is_ok() {
                         commands.entity(entity).remove::<Pin>();
                     } else {
@@ -323,8 +330,6 @@ fn handle_bookmark_app_commands(
             AppCommand::Bookmark(BookmarkCommand::ToggleActive) => false,
             AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
             AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
-                // Empty name -> the page opens an inline rename input on the new
-                // folder so the user types the name and presses Enter.
                 ops.write(BookmarkOp::AddFolder {
                     name: String::new(),
                 });

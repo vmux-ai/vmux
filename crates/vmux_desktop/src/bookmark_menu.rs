@@ -20,10 +20,6 @@ mod macos {
             const { std::cell::RefCell::new(None) };
     }
 
-    /// Pop a native macOS context menu with a "New Folder" item when the page
-    /// requests it (right-click on the empty bookmarks placeholder). The item id
-    /// matches `AppCommand::from_menu_id("bookmark_new_folder")`, so the existing
-    /// `os_menu` event routing dispatches it.
     pub(super) fn show_bookmark_menu(
         _non_send: NonSendMarker,
         mut reader: MessageReader<vmux_layout::bookmark::ShowBookmarkMenuRequest>,

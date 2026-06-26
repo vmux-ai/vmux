@@ -3497,7 +3497,7 @@ fn push_bookmarks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    pins: Query<(&vmux_core::Uuid, &PageMetadata), With<vmux_core::Pin>>,
+    pins: Query<(&vmux_core::Uuid, &PageMetadata, &vmux_core::Order), With<vmux_core::Pin>>,
     folders: Query<
         (
             Entity,
@@ -3537,8 +3537,11 @@ fn push_bookmarks_host_emit(
         favicon_url: meta.icon.favicon_url().to_string(),
     };
 
+    let mut pin_entries: Vec<(u32, vmux_layout::event::BookmarkRow)> =
+        pins.iter().map(|(u, m, o)| (o.0, row(u, m))).collect();
+    pin_entries.sort_by_key(|(order, _)| *order);
     let pin_rows: Vec<vmux_layout::event::BookmarkRow> =
-        pins.iter().map(|(u, m)| row(u, m)).collect();
+        pin_entries.into_iter().map(|(_, r)| r).collect();
 
     let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
     for (_entity, uuid, name, children, collapsed, order) in folders.iter() {

@@ -136,7 +136,7 @@ context menus) via rkyv `BookmarkCommandEvent` → translated host-side; MCP too
 
 Flow:
 
-```
+```text
 keyboard / menu ── AppCommand::Bookmark(ToggleActive|PinActive) ──▶ adapter (reads active Stack)
 command bar / tab/entry/folder menu (wasm) ──rkyv──▶ BookmarkCommandEvent ──▶ translate
 MCP tool ── dispatch ─────────────────────────────────────────────────────────────────┐
