@@ -15,9 +15,15 @@ pill.
 The island **is** the command bar: both the global hotkey (`Cmd+Shift+Space`) and the in-app
 `Cmd+K` expand the island into search. The existing in-window command-bar modal is **removed**.
 
-Rendering is **OSR** (off-screen): the island web page is rendered to an alpha IOSurface and
-composited into the panel's layer, so the surface can be any shape with true transparency and can
-morph/animate freely — which an opaque windowed CEF view cannot do over arbitrary apps.
+The island **fill is opaque** (a solid pill, not liquid glass). Rendering is still **OSR**
+(off-screen): the island web page is rendered to an alpha IOSurface and composited into the panel's
+layer. The opaque fill removes the *translucency* motivation for OSR, but OSR remains required for
+two reasons that an opaque windowed CEF view cannot satisfy over arbitrary apps: (1) the rounded
+pill needs **per-pixel alpha at its corners** (the apps behind show through the rounding), and
+windowed CEF is a remote GPU layer immune to CoreAnimation clipping — the browse-mode corner-wedge
+workaround paints the *known* window background, which does not exist when floating over other apps;
+and (2) **smooth morphing** animates a CALayer/IOSurface rather than jank-resizing a windowed GPU
+layer. (Dropping OSR would require a fully rectangular, square-corner island.)
 
 ## Goals
 
@@ -83,6 +89,9 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
 
 - One OSR webview (entity marker `Island`) renders the island page; it is a `WebviewNativeOverlay`
   producing `NativeOverlayFrames` (reuse the existing accelerated path).
+- The page draws an **opaque fill** inside the rounded pill; the IOSurface carries alpha only
+  *outside* the rounded boundary (corner cutout) and for the drop shadow. The panel/layer stay
+  `opaque(false)` so that boundary alpha shows the apps behind through the rounding.
 - A `sync_island_overlay` system (sibling of the current `sync_command_bar_overlay`, which is
   deleted) composites the island's IOSurface into the panel's layer.
 - The panel frame follows the page's **reported content size**: the page emits a size event on each
