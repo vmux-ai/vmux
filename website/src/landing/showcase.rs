@@ -1,36 +1,20 @@
 use dioxus::prelude::*;
 
-use crate::landing::parts::headline;
-
-#[component]
-pub fn Showcase() -> Element {
+pub fn vmux_demo() -> Element {
     rsx! {
-        section {
-            "data-tone": "dark",
-            class: "relative isolate overflow-hidden px-6 py-28 sm:py-36 bg-bg text-text",
-            div { class: "pointer-events-none absolute inset-0 -z-10",
-                div { class: "absolute left-1/2 top-1/3 h-[32rem] w-[32rem] -translate-x-1/2 rounded-full bg-accent/15 blur-[140px] animate-aurora motion-reduce:animate-none" }
+        div { class: "mx-auto w-full max-w-4xl reveal", style: "transition-delay: 120ms",
+            div { class: "scene-stack relative h-[32rem] sm:h-[26rem]",
+                {scene_flight()}
+                {scene_site()}
+                {scene_pr()}
             }
-            div { class: "mx-auto max-w-2xl text-center mb-12",
-                {headline("Ask for anything", "One prompt.", "Anything, done.")}
-                p { class: "mt-5 text-base sm:text-lg text-text-muted reveal",
-                    "Travel, a website, a pull request — your agents do the work while you watch."
+            div { class: "scene-dots mt-6 flex flex-col items-center gap-3",
+                div { class: "flex items-center gap-2",
+                    span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent" }
+                    span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent", style: "animation-delay: -4s" }
+                    span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent", style: "animation-delay: -8s" }
                 }
-            }
-            div { class: "mx-auto w-full max-w-4xl reveal", style: "transition-delay: 120ms",
-                div { class: "scene-stack relative h-[32rem] sm:h-[26rem]",
-                    {scene_flight()}
-                    {scene_site()}
-                    {scene_pr()}
-                }
-                div { class: "scene-dots mt-6 flex flex-col items-center gap-3",
-                    div { class: "flex items-center gap-2",
-                        span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent" }
-                        span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent", style: "animation-delay: -4s" }
-                        span { class: "scene-dot h-1.5 w-7 rounded-full bg-accent", style: "animation-delay: -8s" }
-                    }
-                    p { class: "text-xs text-text-muted", "flight → restaurant site → theme PR" }
-                }
+                p { class: "text-xs text-text-muted", "flight → restaurant site → theme PR" }
             }
         }
     }
@@ -47,7 +31,7 @@ fn shell(delay: &str, tabs: Element, body: Element, status: Element) -> Element 
                 span { class: "h-2 w-2 rounded-full bg-white/15" }
                 div { class: "ml-2 flex gap-1.5", {tabs} }
             }
-            div { class: "flex min-h-0 flex-1 gap-1.5 p-1.5", {body} }
+            div { class: "flex min-h-0 flex-1 flex-col gap-1.5 p-1.5 sm:flex-row", {body} }
             {status}
         }
     }
@@ -142,9 +126,9 @@ fn scene_flight() -> Element {
                     "google.com/flights"
                 }
                 div { class: "mt-1",
-                    {flight_row("CDG → HND · May 18", "€548", true)}
-                    {flight_row("CDG → HND · May 14", "€612", false)}
-                    {flight_row("CDG → NRT · May 21", "€599", false)}
+                    {flight_row("CDG → HND · Jul 18", "€548", true)}
+                    {flight_row("CDG → HND · Jul 14", "€612", false)}
+                    {flight_row("CDG → NRT · Jul 21", "€599", false)}
                 }
             }
         },
@@ -202,7 +186,7 @@ fn scene_pr() -> Element {
         },
         rsx! {
             div { class: "flex flex-1 flex-col gap-1.5",
-                div { class: "flex min-h-0 flex-[1.4] gap-1.5",
+                div { class: "flex min-h-0 flex-[1.4] flex-col gap-1.5 sm:flex-row",
                     {agent_pane("Add theme support to vmux. Open a PR.", "PR #182 opened", "flex-1")}
                     div { class: "flex flex-1 min-w-0 flex-col overflow-hidden rounded-lg border border-accent/30 bg-[#0d0d18] font-mono text-[9px] leading-[1.7]",
                         {pane_head("text-accent", "theme.rs")}
