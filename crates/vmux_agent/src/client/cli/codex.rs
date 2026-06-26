@@ -7,6 +7,7 @@ use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
+const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
 
 pub struct CodexStrategy;
 
@@ -40,6 +41,11 @@ impl CliAgentStrategy for CodexStrategy {
                 quote_toml(&cwd.to_string_lossy())
             ));
         }
+        args.push("-c".into());
+        args.push(format!(
+            "features.code_mode.direct_only_tool_namespaces=[{}]",
+            quote_toml(DIRECT_ONLY_NAMESPACE)
+        ));
         for feature in DISABLED_FEATURES {
             args.push("--disable".into());
             args.push((*feature).to_string());
@@ -255,6 +261,21 @@ mod tests {
             .collect();
         assert!(disabled.contains(&"shell_tool"));
         assert!(disabled.contains(&"unified_exec"));
+    }
+
+    #[test]
+    fn build_args_forces_vmux_tools_direct_to_bypass_deferral() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        assert!(
+            args.iter()
+                .any(|a| a == "features.code_mode.direct_only_tool_namespaces=[\"mcp__vmux\"]"),
+            "vmux tools must be pinned direct so codex does not defer run behind tool_search"
+        );
     }
 
     #[test]
