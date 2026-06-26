@@ -2272,25 +2272,26 @@ fn push_stacks_host_emit(
     *last = ron_body;
 }
 
-/// Fill in a page's built-in icon on its [`PageMetadata`] from the matching
-/// [`PageManifest`] (by host) when none is set yet. Web pages keep their CEF
-/// favicon; `file:` pages get the file icon; agent pages keep their per-provider
-/// favicon (resolved from the URL at render time).
+/// Fill in a page's built-in icon and title on its [`PageMetadata`] from the
+/// matching [`PageManifest`] (by host). The icon is set only when none is set
+/// yet; the title is restored only when it is still the raw URL (e.g. after an
+/// in-place navigation, which the cef.rs guard otherwise freezes at the URL for
+/// native views). Web pages keep their CEF favicon/title; `file:` pages get the
+/// file icon; agent pages keep their per-provider favicon and handler-set title.
 fn apply_page_icons(
     manifests: Query<&vmux_core::page::PageManifest>,
     mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>,
 ) {
     for mut meta in &mut metas {
-        if !meta.icon.is_none() {
-            continue;
-        }
-        if meta.url.starts_with("file:") {
-            meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Files);
-            continue;
-        }
-        if meta.url.starts_with("chrome-extension://") {
-            meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Puzzle);
-            continue;
+        if meta.icon.is_none() {
+            if meta.url.starts_with("file:") {
+                meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Files);
+                continue;
+            }
+            if meta.url.starts_with("chrome-extension://") {
+                meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Puzzle);
+                continue;
+            }
         }
         let Some(host) = meta
             .url
@@ -2300,12 +2301,16 @@ fn apply_page_icons(
         else {
             continue;
         };
-        let builtin = manifests
-            .iter()
-            .find(|manifest| manifest.host == host)
-            .and_then(|manifest| manifest.icon);
-        if let Some(builtin) = builtin {
+        let Some(manifest) = manifests.iter().find(|manifest| manifest.host == host) else {
+            continue;
+        };
+        if meta.icon.is_none()
+            && let Some(builtin) = manifest.icon
+        {
             meta.icon = vmux_core::PageIcon::Builtin(builtin);
+        }
+        if !manifest.title.is_empty() && meta.title == meta.url {
+            meta.title = manifest.title.to_string();
         }
     }
 }
@@ -2385,6 +2390,40 @@ mod apply_page_icons_tests {
             resolve("vmux://team/", PageIcon::Favicon("x".into()), &[TEAM]),
             PageIcon::Favicon("x".into())
         );
+    }
+
+    fn resolve_title(url: &str, seed_title: &str, manifests: &[PageManifest]) -> String {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, apply_page_icons);
+        for manifest in manifests {
+            app.world_mut().spawn(*manifest);
+        }
+        let entity = app
+            .world_mut()
+            .spawn(PageMetadata {
+                title: seed_title.to_string(),
+                url: url.to_string(),
+                icon: PageIcon::None,
+                bg_color: None,
+            })
+            .id();
+        app.update();
+        app.world()
+            .get::<PageMetadata>(entity)
+            .unwrap()
+            .title
+            .clone()
+    }
+
+    #[test]
+    fn raw_url_title_is_replaced_with_manifest_title() {
+        assert_eq!(resolve_title("vmux://team/", "vmux://team/", &[TEAM]), "Team");
+    }
+
+    #[test]
+    fn handler_set_title_is_preserved() {
+        assert_eq!(resolve_title("vmux://team/", "Custom", &[TEAM]), "Custom");
     }
 }
 
