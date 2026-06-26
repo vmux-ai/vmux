@@ -331,7 +331,7 @@ fn handle_bookmark_app_commands(
             AppCommand::Bookmark(BookmarkCommand::PinActive) => true,
             AppCommand::Bookmark(BookmarkCommand::NewFolder) => {
                 ops.write(BookmarkOp::AddFolder {
-                    name: String::new(),
+                    name: "New Folder".to_string(),
                 });
                 continue;
             }
