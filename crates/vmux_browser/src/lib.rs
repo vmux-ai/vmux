@@ -16,6 +16,7 @@ use bevy::{
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
     window::{CursorMoved, PrimaryWindow, WindowResized},
+    winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, RenderTextureMessage, webview_debug_log};
@@ -1625,8 +1626,10 @@ fn sync_cef_webview_resize_after_ui(
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut last_entries: Local<Vec<(u64, Vec2, f32)>>,
     mut window_resized: MessageReader<WindowResized>,
+    mut first_run: Local<Option<std::time::Instant>>,
 ) {
     // Force-resize all CEF browsers (tabs, terminals, side sheets, modals) on
     // window resize so backgrounded surfaces also repaint at the new size
@@ -1635,8 +1638,11 @@ fn sync_cef_webview_resize_after_ui(
     if force {
         last_entries.clear();
     }
+    let mut pushed_any = false;
+    let mut awaiting_create = false;
     for (entity, size) in webviews.iter() {
         if !browsers.has_browser(entity) {
+            awaiting_create = true;
             continue;
         }
         let key = entity.to_bits();
@@ -1661,6 +1667,7 @@ fn sync_cef_webview_resize_after_ui(
             "resize entity={entity:?} size={:?} scale={device_scale_factor} force={force}",
             size.0
         ));
+        pushed_any = true;
         if let Some(entry) = last_entries.iter_mut().find(|(k, _, _)| *k == key) {
             entry.1 = size.0;
             entry.2 = device_scale_factor;
@@ -1668,6 +1675,23 @@ fn sync_cef_webview_resize_after_ui(
             last_entries.push((key, size.0, device_scale_factor));
         }
     }
+    let within_startup_grace = first_run
+        .get_or_insert_with(std::time::Instant::now)
+        .elapsed()
+        < std::time::Duration::from_secs(10);
+    if windowed_reconcile_should_wake(pushed_any, awaiting_create, within_startup_grace)
+        && let Some(proxy) = proxy.as_ref()
+    {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+fn windowed_reconcile_should_wake(
+    pushed_any: bool,
+    awaiting_create: bool,
+    within_startup_grace: bool,
+) -> bool {
+    pushed_any || (awaiting_create && within_startup_grace)
 }
 
 /// Walks up from a browser entity to find its enclosing Tab, then counts
@@ -4675,6 +4699,14 @@ mod tests {
             .unwrap_or_default();
 
         assert!(resize_fn.contains("Without<Modal>"));
+    }
+
+    #[test]
+    fn windowed_reconcile_wakes_until_native_pages_are_sized() {
+        assert!(windowed_reconcile_should_wake(true, false, false));
+        assert!(windowed_reconcile_should_wake(false, true, true));
+        assert!(!windowed_reconcile_should_wake(false, true, false));
+        assert!(!windowed_reconcile_should_wake(false, false, true));
     }
 
     #[test]

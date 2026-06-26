@@ -890,6 +890,22 @@ impl Browsers {
     pub fn set_windowed_corner_cover(&self, _: &Entity, _: f32, _: f32, _: bool, _: [f32; 3]) {}
 
     #[cfg(target_os = "macos")]
+    fn windowed_frame_should_apply(
+        last_frame: Option<(f64, f64, f64, f64)>,
+        target: (f64, f64, f64, f64),
+        actual: (f64, f64, f64, f64),
+    ) -> bool {
+        if last_frame != Some(target) {
+            return true;
+        }
+        const EPS: f64 = 1.0;
+        (actual.0 - target.0).abs() > EPS
+            || (actual.1 - target.1).abs() > EPS
+            || (actual.2 - target.2).abs() > EPS
+            || (actual.3 - target.3).abs() > EPS
+    }
+
+    #[cfg(target_os = "macos")]
     pub fn set_windowed_frame(
         &self,
         webview: &Entity,
@@ -934,8 +950,19 @@ impl Browsers {
             (parent_h - top_px as f64 / s - h).max(0.0)
         };
         let frame = (x, y, w, h);
+        let actual = if let Some(glass_view) = glass_view {
+            glass_view.frame()
+        } else {
+            view.frame()
+        };
+        let actual_frame = (
+            actual.origin.x,
+            actual.origin.y,
+            actual.size.width,
+            actual.size.height,
+        );
         Self::refresh_windowed_transparency(browser, view);
-        if browser.last_frame.get() == Some(frame) {
+        if !Self::windowed_frame_should_apply(browser.last_frame.get(), frame, actual_frame) {
             return;
         }
         browser.last_frame.set(Some(frame));
@@ -1746,6 +1773,24 @@ mod tests {
         assert_eq!(effective_windowless_frame_rate(60, true, true), 60);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn windowed_frame_reapplies_when_live_view_drifts() {
+        use super::Browsers;
+        let target = (0.0, 0.0, 1492.0, 992.0);
+        assert!(Browsers::windowed_frame_should_apply(None, target, target));
+        assert!(!Browsers::windowed_frame_should_apply(
+            Some(target),
+            target,
+            target
+        ));
+        assert!(Browsers::windowed_frame_should_apply(
+            Some(target),
+            target,
+            (0.0, 0.0, 1940.0, 1275.0)
+        ));
+    }
+
     #[test]
     fn visible_unfocused_window_is_throttled_but_never_above_monitor() {
         assert_eq!(
@@ -1959,7 +2004,7 @@ mod tests {
             .find("Self::refresh_windowed_transparency")
             .expect("windowed transparency refresh");
         let cache_idx = set_frame_fn
-            .find("browser.last_frame.get() == Some(frame)")
+            .find("Self::windowed_frame_should_apply")
             .expect("same frame cache check");
 
         assert!(refresh_idx < cache_idx);
