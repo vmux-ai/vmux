@@ -420,37 +420,21 @@ fn setup(
         ChildOf(root),
     ));
 
-    // Island: an always-active OSR webview composited natively into the floating panel. Modeled on
-    // the command-bar modal's prewarmed state — `display: Flex` keeps OSR rendering, `Hidden` keeps
-    // its (empty) mesh out of the main scene, and `WebviewNativeOverlay` routes frames to
-    // `NativeOverlayFrames` for the panel to composite. Size is updated from the page's morph.
+    // Island: an always-active OSR webview whose ONLY output is the native floating panel
+    // (`WebviewNativeOverlay` → `NativeOverlayFrames`, composited by `vmux_desktop::dynamic_island`).
+    // It deliberately has NO `Mesh3d`/`MeshMaterial3d` and is not in the layout UI tree, so it never
+    // renders a duplicate quad in the main window. Size tracks the page's morph.
     commands.spawn((
-        (
-            Island,
-            HostWindow(pw),
-            Browser,
-            WebviewTransparent,
-            bevy_cef::prelude::WebviewNativeOverlay,
-            bevy_cef::prelude::CefIgnorePinchZoom,
-        ),
-        Node {
-            width: Val::Px(360.0),
-            height: Val::Px(44.0),
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            ..default()
-        },
-        ZIndex(3),
+        Island,
+        HostWindow(pw),
+        Browser,
+        WebviewTransparent,
+        bevy_cef::prelude::WebviewNativeOverlay,
+        bevy_cef::prelude::CefIgnorePinchZoom,
         WebviewSource::new(ISLAND_PAGE_URL),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(360.0, 44.0)),
-        Transform::default(),
-        GlobalTransform::default(),
         Visibility::Hidden,
         Pickable::IGNORE,
-        ChildOf(root),
     ));
 
     commands.spawn((
