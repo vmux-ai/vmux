@@ -105,7 +105,9 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_debug_update_clear)
             .add_systems(
                 Update,
-                sync_appearance_to_cef.run_if(resource_changed::<AppSettings>),
+                sync_appearance_to_cef
+                    .before(CefSystems::CreateAndResize)
+                    .run_if(resource_changed::<AppSettings>),
             )
             .add_systems(
                 Update,

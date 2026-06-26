@@ -18,7 +18,8 @@ use vmux_command::event::{
     CommandBarRenderedEvent, CommandBarSizeEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_open_should_ack,
-    command_bar_open_should_reset_input, looks_like_url, should_open_typed_query_on_enter,
+    command_bar_open_should_reset_input, is_data_uri, looks_like_url,
+    should_open_typed_query_on_enter,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
@@ -637,7 +638,7 @@ pub fn Page() -> Element {
 }
 
 fn looks_like_path(s: &str) -> bool {
-    if s.starts_with("data:") {
+    if is_data_uri(s) {
         return false;
     }
     s.starts_with('/')

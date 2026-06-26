@@ -248,8 +248,12 @@ pub struct PathCompleteResponse {
     pub completions: Vec<PathEntry>,
 }
 
+pub fn is_data_uri(s: &str) -> bool {
+    s.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("data:"))
+}
+
 pub fn looks_like_url(s: &str) -> bool {
-    if s.contains("://") || s.starts_with("data:") {
+    if s.contains("://") || is_data_uri(s) {
         return true;
     }
     if s.contains(' ')
@@ -335,8 +339,10 @@ mod tests {
         assert!(looks_like_url(
             "data:text/html,<style>body{background:white}</style>"
         ));
-        // a data: URL must not be classified as a filesystem path
+        assert!(looks_like_url("DATA:text/html,<h1>hi</h1>"));
+        assert!(looks_like_url("Data:text/html,<h1>hi</h1>"));
         assert!(!looks_like_path("data:text/html,<h1>hi</h1>"));
+        assert!(!looks_like_path("DATA:text/html,<h1>hi</h1>"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ use crate::keyboard::KeyboardPlugin;
 use crate::loading_state::WebviewLoadingStatePlugin;
 use crate::mute::AudioMutePlugin;
 use crate::popup_state::WebviewPopupPlugin;
-use crate::prelude::{IpcPlugin, NavigationPlugin, WebviewPlugin};
+use crate::prelude::{CefSystems, IpcPlugin, NavigationPlugin, WebviewPlugin};
 use crate::zoom::ZoomPlugin;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::{
@@ -97,6 +97,7 @@ impl Plugin for CefPlugin {
             .add_systems(
                 Update,
                 sync_color_scheme
+                    .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
             );
         if !app.is_plugin_added::<RemotePlugin>() {

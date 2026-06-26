@@ -1026,7 +1026,7 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
 }
 
 fn normalize_url(value: &str) -> String {
-    if value.contains("://") || value.starts_with("data:") {
+    if value.contains("://") || vmux_command::event::is_data_uri(value) {
         value.to_string()
     } else if value.contains('.') && !value.contains(' ') {
         format!("https://{}", value)
