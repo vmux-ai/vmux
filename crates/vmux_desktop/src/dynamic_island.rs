@@ -7,6 +7,7 @@ impl Plugin for DynamicIslandPlugin {
     fn build(&self, app: &mut App) {
         app.init_non_send::<IslandPanel>()
             .add_systems(Startup, install_island_panel)
+            .add_systems(Update, temp_island_trigger)
             .add_systems(Last, (sync_island_overlay, apply_island_resize));
     }
 }
@@ -278,6 +279,29 @@ mod island_macos {
             content.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h)));
         }
         apply_mask(&state, w, h, notch);
+    }
+
+    // TEMP P1 morph trigger — removed in P2 (the real global hotkey lands in T9).
+    // F8 = agent activity, F9 = expand search, F10 = collapse.
+    pub(super) fn temp_island_trigger(
+        keys: Res<ButtonInput<KeyCode>>,
+        mut out: MessageWriter<vmux_layout::island::event::IslandEvent>,
+    ) {
+        use vmux_command::island::{IslandActivity, IslandActivityKind};
+        use vmux_layout::island::event::IslandEvent;
+        if keys.just_pressed(KeyCode::F8) {
+            out.write(IslandEvent::Activity(IslandActivity {
+                kind: IslandActivityKind::Agent,
+                label: "vibe · editing 3 files".into(),
+                progress: Some(0.6),
+            }));
+        }
+        if keys.just_pressed(KeyCode::F9) {
+            out.write(IslandEvent::ExpandSearch);
+        }
+        if keys.just_pressed(KeyCode::F10) {
+            out.write(IslandEvent::Collapse);
+        }
     }
 }
 
