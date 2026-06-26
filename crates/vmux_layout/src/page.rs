@@ -950,8 +950,7 @@ fn BookmarkEntry(row: BookmarkRow) -> Element {
 fn BookmarkFolder(folder: FolderRow) -> Element {
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
-    let was_new = folder.name.trim().is_empty();
-    let mut editing = use_signal(|| was_new);
+    let mut editing = use_signal(|| false);
     let mut draft = use_signal(|| folder.name.clone());
     let menu_val = use_signal(|| folder.uuid.clone());
 
@@ -968,6 +967,7 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
                         placeholder: "Folder name",
                         value: "{draft}",
                         autofocus: true,
+                        oncontextmenu: move |e| e.prevent_default(),
                         onmounted: move |e: Event<MountedData>| {
                             if let Some(el) = e.downcast::<web_sys::Element>()
                                 && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
@@ -987,9 +987,6 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
                                 Key::Escape => {
                                     e.prevent_default();
                                     editing.set(false);
-                                    if was_new {
-                                        bookmark_cmd("remove_folder", Some(id.clone()));
-                                    }
                                 }
                                 _ => {}
                             }
