@@ -1675,13 +1675,6 @@ fn sync_cef_webview_resize_after_ui(
             last_entries.push((key, size.0, device_scale_factor));
         }
     }
-    // Native (windowed) pages never paint into the OSR texture, so a freshly created CEF
-    // browser does not wake the reactive winit loop. At startup the loop can park after a
-    // page spawns at its placeholder size but before this system observes `has_browser` and
-    // pushes the real pane size, freezing the page at the stale size until the next input.
-    // Route the missing wake (see AGENTS.md): keep ticking while a push just landed or a
-    // spawned page still awaits its browser, bounded so a page that never creates cannot
-    // spin the loop.
     let within_startup_grace = first_run
         .get_or_insert_with(std::time::Instant::now)
         .elapsed()

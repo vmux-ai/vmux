@@ -889,11 +889,6 @@ impl Browsers {
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_corner_cover(&self, _: &Entity, _: f32, _: f32, _: bool, _: [f32; 3]) {}
 
-    /// A windowed view's frame must be re-applied not only when our target changes, but also when
-    /// the live `NSView` frame has drifted from that target. AppKit can resize the view behind us
-    /// (a window manager resizing the host window, a stale frame from creation time), and a
-    /// `last_frame` cache keyed only on our own target would skip the corrective `setFrame`,
-    /// leaving the page over- or under-sized until the next distinct target.
     #[cfg(target_os = "macos")]
     fn windowed_frame_should_apply(
         last_frame: Option<(f64, f64, f64, f64)>,
@@ -955,7 +950,11 @@ impl Browsers {
             (parent_h - top_px as f64 / s - h).max(0.0)
         };
         let frame = (x, y, w, h);
-        let actual = view.frame();
+        let actual = if let Some(glass_view) = glass_view {
+            glass_view.frame()
+        } else {
+            view.frame()
+        };
         let actual_frame = (
             actual.origin.x,
             actual.origin.y,
