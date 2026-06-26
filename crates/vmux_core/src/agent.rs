@@ -60,6 +60,10 @@ impl AgentKind {
         format!("vmux://agent/{}/", self.as_url_segment())
     }
 
+    pub fn setup_url(self) -> String {
+        format!("vmux://agent/{}/setup", self.as_url_segment())
+    }
+
     pub fn all() -> [AgentKind; 3] {
         [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
     }

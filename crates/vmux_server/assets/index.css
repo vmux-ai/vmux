@@ -1,6 +1,7 @@
 @import "../../vmux_ui/assets/theme.css";
 @import "tailwindcss";
 @source "../src";
+@source "../../vmux_agent/src";
 @source "../../vmux_editor/src";
 @source "../../vmux_history/src";
 @source "../../vmux_layout/src";

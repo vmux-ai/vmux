@@ -9775,6 +9775,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "web-sys",
 ]
 
 [[package]]
