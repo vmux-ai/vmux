@@ -31,11 +31,17 @@ pub fn Page() -> Element {
     let command = vmux_core::agent_setup::install_command(&segment).unwrap_or_default();
     let tagline = tagline(&segment);
     let accent = agent_accent(&segment);
+    let mut installing = use_signal(|| false);
     let prompt_class = format!("select-none font-mono text-sm {}", accent.accent_text);
-    let cta_class = format!(
+    let cta_base = format!(
         "group inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-br {} px-4 py-2.5 text-sm font-medium text-white {} transition-all hover:brightness-110 active:scale-[0.99]",
         accent.grad, accent.cta_shadow
     );
+    let cta_full = if installing() {
+        format!("{cta_base} pointer-events-none opacity-70")
+    } else {
+        cta_base
+    };
     let emit_segment = segment.clone();
     rsx! {
         main { class: "relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-10 text-foreground",
@@ -70,15 +76,22 @@ pub fn Page() -> Element {
                 }
 
                 button {
-                    class: "{cta_class}",
+                    class: "{cta_full}",
+                    disabled: installing(),
                     onclick: move |_| {
+                        installing.set(true);
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: emit_segment.clone() });
                     },
-                    Icon { class: "h-4 w-4",
-                        path { d: "M5 12h14" }
-                        path { d: "m12 5 7 7-7 7" }
+                    if installing() {
+                        span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" }
+                        "Installing…"
+                    } else {
+                        Icon { class: "h-4 w-4",
+                            path { d: "M5 12h14" }
+                            path { d: "m12 5 7 7-7 7" }
+                        }
+                        "Run install command"
                     }
-                    "Run install command"
                 }
 
                 p { class: "mt-3 text-center text-xs text-muted-foreground/70",
