@@ -2272,12 +2272,6 @@ fn push_stacks_host_emit(
     *last = ron_body;
 }
 
-/// Fill in a page's built-in icon and title on its [`PageMetadata`] from the
-/// matching [`PageManifest`] (by host). The icon is set only when none is set
-/// yet; the title is restored only when it is still the raw URL (e.g. after an
-/// in-place navigation, which the cef.rs guard otherwise freezes at the URL for
-/// native views). Web pages keep their CEF favicon/title; `file:` pages get the
-/// file icon; agent pages keep their per-provider favicon and handler-set title.
 fn apply_page_icons(
     manifests: Query<&vmux_core::page::PageManifest>,
     mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>,

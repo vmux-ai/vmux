@@ -1,11 +1,3 @@
-//! General page-icon components.
-//!
-//! [`builtin_icon`] renders a [`vmux_core::BuiltinIcon`] as an SVG, and
-//! [`PageIconView`] renders a whole [`vmux_core::PageIcon`] (built-in icon,
-//! favicon, or the globe/favicon fallback chain). The layout header, side
-//! sheet, and command bar all render through these so a page's icon is defined
-//! once on its `PageMetadata`/`PageManifest` and looks identical everywhere.
-
 #[cfg(target_arch = "wasm32")]
 pub use wasm::{PageIconView, builtin_icon};
 
@@ -63,10 +55,6 @@ mod wasm {
         }
     }
 
-    /// Render a page's icon: a built-in icon, or the favicon (falling back to
-    /// the multi-tier favicon chain and finally the globe for `None`).
-    /// `img_class` styles a favicon `<img>`; `icon_class` styles built-in icons
-    /// and the globe fallback.
     #[component]
     pub fn PageIconView(
         icon: PageIcon,

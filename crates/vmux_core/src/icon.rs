@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// A built-in vector icon shipped by the app, identified by a stable name.
-/// `vmux_ui` renders each variant; `PageManifest` and `PageMetadata` reference
-/// them so a page's icon is declared once and rendered the same in the header,
-/// side sheet, and command bar.
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_reflect::Reflect))]
 #[derive(
     Clone,
@@ -30,8 +26,6 @@ pub enum BuiltinIcon {
     Puzzle,
 }
 
-/// A page's visual identity: a remote favicon URL, a built-in icon, or nothing
-/// (render the globe / favicon fallback chain from the page URL).
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_reflect::Reflect))]
 #[derive(
     Clone,
@@ -53,7 +47,6 @@ pub enum PageIcon {
 }
 
 impl PageIcon {
-    /// A favicon icon, or `None` when the URL is empty.
     pub fn favicon(url: impl Into<String>) -> Self {
         let url = url.into();
         if url.is_empty() {
@@ -63,7 +56,6 @@ impl PageIcon {
         }
     }
 
-    /// The favicon URL, or `""` for non-favicon icons.
     pub fn favicon_url(&self) -> &str {
         match self {
             Self::Favicon(url) => url.as_str(),
