@@ -779,8 +779,6 @@ fn request_bookmark_menu() {
     });
 }
 
-/// Commit an inline folder-name edit. Empty name discards the folder (used both
-/// when cancelling a just-created folder and when clearing an existing name).
 fn commit_folder_rename(uuid: String, name: String) {
     let name = name.trim().to_string();
     let command = if name.is_empty() {
@@ -802,12 +800,10 @@ fn commit_folder_rename(uuid: String, name: String) {
 fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
 
-    // Empty: a placeholder card with a muted note. Right-click pops the native
-    // OS context menu (host shows it via ShowBookmarkMenuRequest).
     if pins.is_empty() && roots.is_empty() {
         return rsx! {
             div {
-                class: "glass mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
+                class: "glass relative z-30 mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
                 oncontextmenu: move |e| {
                     e.prevent_default();
                     request_bookmark_menu();
@@ -819,7 +815,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
 
     rsx! {
         div {
-            class: "glass mb-2 flex flex-col rounded-lg p-1.5",
+            class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
             oncontextmenu: move |e: Event<MouseData>| {
                 let data = e.data();
                 let on_card = data
@@ -1093,8 +1089,6 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     }
 }
 
-/// Shared side-sheet row shell used by stack rows, bookmark entries, and folder
-/// headers. `active` renders the inset glass box; otherwise a hover row.
 #[component]
 fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Element) -> Element {
     rsx! {
@@ -1110,7 +1104,6 @@ fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Elem
     }
 }
 
-/// Shared "+ New X" button used by New Stack and New Folder.
 #[component]
 fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent>) -> Element {
     rsx! {
