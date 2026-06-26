@@ -273,7 +273,12 @@ fn handle_team_page_open(
             ..default()
         });
         commands.spawn((
-            vmux_layout::Browser::new(&mut meshes, &mut webview_mt, TEAM_PAGE_URL),
+            vmux_layout::Browser::new_with_title(
+                &mut meshes,
+                &mut webview_mt,
+                TEAM_PAGE_URL,
+                "Team",
+            ),
             Team,
             ChildOf(task.stack),
         ));
@@ -438,6 +443,34 @@ mod tests {
         assert_eq!(parse_member_entity(&bits), Some(entity));
         assert_eq!(parse_member_entity("not-a-number"), None);
         assert_eq!(parse_member_entity(""), None);
+    }
+
+    #[test]
+    fn team_page_open_titles_webview_team() {
+        use vmux_core::page_open::PageOpenId;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_team_page_open);
+
+        let stack = app.world_mut().spawn(Stack::default()).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: TEAM_PAGE_URL.to_string(),
+            request_id: None,
+        });
+        app.update();
+
+        let title = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Team>>()
+            .single(app.world())
+            .expect("team webview spawned")
+            .title
+            .clone();
+        assert_eq!(title, "Team");
     }
 
     fn command_app() -> App {
