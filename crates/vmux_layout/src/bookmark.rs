@@ -125,7 +125,7 @@ fn apply_bookmark_ops(
                         PageMetadata {
                             title: title.clone(),
                             url: url.clone(),
-                            favicon_url: favicon_url.clone(),
+                            icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
                             bg_color: None,
                         },
                         order,
@@ -145,7 +145,7 @@ fn apply_bookmark_ops(
                     PageMetadata {
                         title: title.clone(),
                         url: url.clone(),
-                        favicon_url: favicon_url.clone(),
+                        icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
                         bg_color: None,
                     },
                     order,
@@ -209,7 +209,7 @@ fn apply_bookmark_ops(
                     PageMetadata {
                         title: title.clone(),
                         url: url.clone(),
-                        favicon_url: favicon_url.clone(),
+                        icon: vmux_core::icon::PageIcon::favicon(favicon_url.clone()),
                         bg_color: None,
                     },
                     order,
@@ -350,7 +350,7 @@ fn handle_bookmark_app_commands(
         let (url, title, favicon_url) = (
             meta.url.clone(),
             meta.title.clone(),
-            meta.favicon_url.clone(),
+            meta.icon.favicon_url().to_string(),
         );
         if pin {
             ops.write(BookmarkOp::PinUrl {
