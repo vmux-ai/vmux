@@ -5,6 +5,7 @@
 )]
 
 pub mod command_bar;
+pub mod island;
 #[cfg(target_arch = "wasm32")]
 pub mod debug_page;
 #[cfg(target_arch = "wasm32")]
