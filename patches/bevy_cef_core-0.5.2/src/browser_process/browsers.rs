@@ -39,6 +39,9 @@ use crate::browser_process::display_handler::{
     DisplayHandlerBuilder, SystemCursorIconSenderInner, WebviewCefStateSenderInner,
 };
 use crate::browser_process::life_span_handler::{LifeSpanHandlerBuilder, WebviewPopupSenderInner};
+use crate::browser_process::permission_handler::{
+    MediaPermissionSenderInner, PermissionHandlerBuilder,
+};
 use crate::browser_process::load_handler::{
     WebviewCommittedNavigationSenderInner, WebviewLoadHandlerBuilder,
     WebviewLoadingStateSenderInner,
@@ -154,6 +157,7 @@ impl Browsers {
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
         webview_cef_state_sender: WebviewCefStateSenderInner,
+        media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
         initialize_scripts: &[String],
@@ -192,6 +196,7 @@ impl Browsers {
             webview_loading_state_sender,
             webview_committed_nav_sender,
             webview_cef_state_sender,
+            media_permission_sender,
             webview_popup_sender,
             texture_wake,
             !allow_native_focus,
@@ -1594,6 +1599,7 @@ impl Browsers {
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
         webview_committed_nav_sender: WebviewCommittedNavigationSenderInner,
         webview_cef_state_sender: WebviewCefStateSenderInner,
+        media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
         cancel_native_focus: bool,
@@ -1628,6 +1634,10 @@ impl Browsers {
                 webview_popup_sender.clone(),
             ))
             .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
+            .with_permission_handler(PermissionHandlerBuilder::build(
+                webview,
+                media_permission_sender,
+            ))
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
             .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
             .with_message_handler(BrpHandler::new(brp_sender))

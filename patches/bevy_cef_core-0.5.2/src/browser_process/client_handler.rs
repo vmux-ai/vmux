@@ -10,8 +10,8 @@ use cef::rc::{Rc, RcImpl};
 use cef::{
     Browser, Client, ContextMenuHandler, DisplayHandler, FocusHandler, FocusSource, Frame,
     ImplClient, ImplFocusHandler, ImplFrame, ImplProcessMessage, LifeSpanHandler, ListValue,
-    LoadHandler, ProcessId, ProcessMessage, RenderHandler, RequestHandler, WrapClient,
-    WrapFocusHandler, sys,
+    LoadHandler, PermissionHandler, ProcessId, ProcessMessage, RenderHandler, RequestHandler,
+    WrapClient, WrapFocusHandler, sys,
 };
 use std::os::raw::c_int;
 
@@ -102,6 +102,7 @@ pub struct ClientHandlerBuilder {
     load_handler: Option<LoadHandler>,
     life_span_handler: Option<LifeSpanHandler>,
     request_handler: Option<RequestHandler>,
+    permission_handler: Option<PermissionHandler>,
     focus_handler: Option<FocusHandler>,
     /// Wakes the Bevy/winit loop after an IPC message is handled. On macOS the CEF pump is decoupled
     /// from the Bevy tick, so a command from a native webview (e.g. tab switch) would otherwise sit
@@ -120,6 +121,7 @@ impl ClientHandlerBuilder {
             load_handler: None,
             life_span_handler: None,
             request_handler: None,
+            permission_handler: None,
             focus_handler: None,
             wake: None,
         }
@@ -152,6 +154,11 @@ impl ClientHandlerBuilder {
 
     pub fn with_request_handler(mut self, request_handler: RequestHandler) -> Self {
         self.request_handler = Some(request_handler);
+        self
+    }
+
+    pub fn with_permission_handler(mut self, permission_handler: PermissionHandler) -> Self {
+        self.permission_handler = Some(permission_handler);
         self
     }
 
@@ -197,6 +204,7 @@ impl Clone for ClientHandlerBuilder {
             load_handler: self.load_handler.clone(),
             life_span_handler: self.life_span_handler.clone(),
             request_handler: self.request_handler.clone(),
+            permission_handler: self.permission_handler.clone(),
             focus_handler: self.focus_handler.clone(),
             wake: self.wake.clone(),
         }
@@ -222,6 +230,10 @@ impl ImplClient for ClientHandlerBuilder {
 
     fn request_handler(&self) -> Option<RequestHandler> {
         self.request_handler.clone()
+    }
+
+    fn permission_handler(&self) -> Option<PermissionHandler> {
+        self.permission_handler.clone()
     }
 
     fn focus_handler(&self) -> Option<FocusHandler> {
