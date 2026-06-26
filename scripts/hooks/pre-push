@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo fmt --all -- --check
-env -u CEF_PATH cargo clippy --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process --all-targets -- -D warnings
-env -u CEF_PATH cargo test --workspace --exclude bevy_cef --exclude bevy_cef_core --exclude bevy_cef_debug_render_process
+PKG_ARGS=$(cargo metadata --no-deps --format-version 1 \
+  | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | "-p " + .name' \
+  | tr '\n' ' ')
+
+cargo fmt $PKG_ARGS -- --check
+env -u CEF_PATH cargo clippy $PKG_ARGS --all-targets -- -D warnings
+env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core --exclude bevy_cef
