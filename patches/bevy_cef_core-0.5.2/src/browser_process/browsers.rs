@@ -14,13 +14,14 @@ use bevy_remote::BrpMessage;
 #[cfg(target_os = "macos")]
 use cef::Rect;
 use cef::{
-    Browser, BrowserHost, BrowserSettings, CefString, Client, ColorVariant, CompositionUnderline,
+    Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
     ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
     RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
-    dictionary_value_create, process_message_create, register_scheme_handler_factory,
+    dictionary_value_create, list_value_create, process_message_create,
+    register_scheme_handler_factory,
 };
-use cef_dll_sys::{cef_color_variant_t, cef_event_flags_t, cef_mouse_button_type_t};
+use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
 use raw_window_handle::RawWindowHandle;
 use std::cell::Cell;
@@ -72,17 +73,6 @@ pub enum CefColorMode {
     Dark,
     #[default]
     System,
-}
-
-impl CefColorMode {
-    pub fn variant(self) -> ColorVariant {
-        let v = match self {
-            CefColorMode::Light => cef_color_variant_t::CEF_COLOR_VARIANT_LIGHT,
-            CefColorMode::Dark => cef_color_variant_t::CEF_COLOR_VARIANT_DARK,
-            CefColorMode::System => cef_color_variant_t::CEF_COLOR_VARIANT_SYSTEM,
-        };
-        ColorVariant::from(v)
-    }
 }
 
 #[derive(Resource, Clone, Copy, Debug, Default)]
@@ -281,7 +271,7 @@ impl Browsers {
                 self.shared_disk_context.as_mut()
             }
             None => {
-                ephemeral_local = Self::ephemeral_request_context(requester, color_scheme);
+                ephemeral_local = Self::ephemeral_request_context(requester);
                 ephemeral_local.as_mut()
             }
         };
@@ -338,6 +328,7 @@ impl Browsers {
         )
         .expect("Failed to create browser");
         let host = browser.host().expect("Failed to get browser host");
+        Self::apply_emulated_color_scheme(&host, color_scheme);
         if !windowed {
             host.was_hidden(0);
         }
@@ -1499,15 +1490,11 @@ impl Browsers {
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
-            context.set_chrome_color_scheme(self.color_scheme.variant(), 0);
         }
         self.shared_disk_context = context;
     }
 
-    fn ephemeral_request_context(
-        requester: Requester,
-        mode: CefColorMode,
-    ) -> Option<RequestContext> {
+    fn ephemeral_request_context(requester: Requester) -> Option<RequestContext> {
         let mut context = cef::request_context_create_context(
             Some(&RequestContextSettings::default()),
             Some(&mut RequestContextHandlerBuilder::build()),
@@ -1529,16 +1516,42 @@ impl Browsers {
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
-            context.set_chrome_color_scheme(mode.variant(), 0);
         }
         context
     }
 
     pub fn set_color_scheme(&mut self, mode: CefColorMode) {
         self.color_scheme = mode;
-        if let Some(context) = self.shared_disk_context.as_ref() {
-            context.set_chrome_color_scheme(mode.variant(), 0);
+        for wb in self.browsers.values() {
+            Self::apply_emulated_color_scheme(&wb.host, mode);
         }
+    }
+
+    fn apply_emulated_color_scheme(host: &BrowserHost, mode: CefColorMode) {
+        let Some(mut params) = dictionary_value_create() else {
+            return;
+        };
+        let Some(mut features) = list_value_create() else {
+            return;
+        };
+        let value = match mode {
+            CefColorMode::Light => Some("light"),
+            CefColorMode::Dark => Some("dark"),
+            CefColorMode::System => None,
+        };
+        if let Some(value) = value
+            && let Some(mut feature) = dictionary_value_create()
+        {
+            feature.set_string(Some(&"name".into()), Some(&"prefers-color-scheme".into()));
+            feature.set_string(Some(&"value".into()), Some(&value.into()));
+            features.set_dictionary(0, Some(&mut feature));
+        }
+        params.set_list(Some(&"features".into()), Some(&mut features));
+        host.execute_dev_tools_method(
+            0,
+            Some(&"Emulation.setEmulatedMedia".into()),
+            Some(&mut params),
+        );
     }
 
     fn client_handler(
@@ -2100,22 +2113,5 @@ mod tests {
             .unwrap_or_default();
         assert!(implementation.contains("pub fn set_all_osr_hidden"));
         assert!(implementation.contains("browser.host.set_focus(false"));
-    }
-
-    #[test]
-    fn mode_maps_to_cef_variant() {
-        use cef_dll_sys::cef_color_variant_t;
-        assert_eq!(
-            cef_color_variant_t::from(super::CefColorMode::System.variant()),
-            cef_color_variant_t::CEF_COLOR_VARIANT_SYSTEM
-        );
-        assert_eq!(
-            cef_color_variant_t::from(super::CefColorMode::Light.variant()),
-            cef_color_variant_t::CEF_COLOR_VARIANT_LIGHT
-        );
-        assert_eq!(
-            cef_color_variant_t::from(super::CefColorMode::Dark.variant()),
-            cef_color_variant_t::CEF_COLOR_VARIANT_DARK
-        );
     }
 }
