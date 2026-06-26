@@ -3573,7 +3573,7 @@ pub fn handle_browser_navigate_requests(
                 });
                 match request_id {
                     Some(rid) => {
-                        pending_nav.0.insert(
+                        let displaced = pending_nav.0.insert(
                             webview,
                             NavPending {
                                 request_id: rid,
@@ -3581,6 +3581,9 @@ pub fn handle_browser_navigate_requests(
                                 saw_loading: false,
                             },
                         );
+                        if let Some(old) = displaced {
+                            send_page_open_response(&service, Some(old.request_id), Ok(()));
+                        }
                     }
                     None => send_page_open_response(&service, request_id, Ok(())),
                 }

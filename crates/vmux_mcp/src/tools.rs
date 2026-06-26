@@ -740,10 +740,17 @@ pub fn dispatch_with_anchor(
                 ));
             }
         };
-        let delta = arguments
-            .get("delta")
-            .and_then(Value::as_i64)
-            .map(|d| d as i32);
+        let delta = match arguments.get("delta") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let n = value
+                    .as_i64()
+                    .ok_or("browser_scroll.delta must be an integer")?;
+                let n = i32::try_from(n)
+                    .map_err(|_| "browser_scroll.delta is out of range".to_string())?;
+                Some(n)
+            }
+        };
         if to.is_some() == delta.is_some() {
             return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
         }
@@ -944,6 +951,19 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn browser_scroll_rejects_non_integer_or_out_of_range_delta() {
+        let err =
+            dispatch_query("browser_scroll", serde_json::json!({ "delta": "600" })).unwrap_err();
+        assert!(err.contains("delta must be an integer"));
+        let err = dispatch_query(
+            "browser_scroll",
+            serde_json::json!({ "delta": 5_000_000_000i64 }),
+        )
+        .unwrap_err();
+        assert!(err.contains("out of range"));
     }
 
     #[test]
