@@ -35,9 +35,9 @@ use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
-    BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, RecordStartRequest,
-    RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage,
-    ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
+    BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, NavAwaitingSnapshot,
+    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -104,6 +104,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
+            .init_resource::<NavAwaitingSnapshot>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
@@ -1342,13 +1343,25 @@ fn forward_screenshot_responses(
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
+    mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
-            request_id: AgentRequestId(response.request_id),
-            result: snapshot_response_to_query_result(&response.result),
-        });
+        if nav_awaiting.0.remove(&response.request_id) {
+            let result = match &response.result {
+                Ok(json) => AgentCommandResult::Text(json.clone()),
+                Err(message) => AgentCommandResult::Error(message.clone()),
+            };
+            service.0.send(ClientMessage::AgentCommandResponse {
+                request_id: AgentRequestId(response.request_id),
+                result,
+            });
+        } else {
+            service.0.send(ClientMessage::AgentQueryResponse {
+                request_id: AgentRequestId(response.request_id),
+                result: snapshot_response_to_query_result(&response.result),
+            });
+        }
     }
 }
 

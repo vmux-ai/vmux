@@ -159,6 +159,7 @@ impl Plugin for VmuxPlugin {
                 (
                     screenshot::start_screenshots,
                     screenshot::drain_screenshots,
+                    browser_snapshot::drive_pending_nav_snapshots,
                     browser_scroll::run_scrolls,
                     browser_snapshot::start_snapshots,
                     browser_snapshot::shape_snapshot_results,

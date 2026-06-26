@@ -198,6 +198,7 @@ impl Plugin for BrowserPlugin {
             )
             .add_systems(Last, refresh_active_windowed_hover)
             .init_resource::<HostFocusIntent>()
+            .init_resource::<PendingNavSnapshots>()
             .add_systems(
                 PostUpdate,
                 (
@@ -3502,6 +3503,19 @@ pub fn handle_open_in_new_stack_requests(
     }
 }
 
+/// A pending agent-initiated in-place navigation, keyed by the target webview.
+/// Populated by `handle_browser_navigate_requests`; drained in `vmux_desktop`
+/// (`drive_pending_nav_snapshots`) once the page settles, so the navigation's
+/// agent command returns the post-load snapshot inline.
+pub struct NavPending {
+    pub request_id: [u8; 16],
+    pub started: std::time::Duration,
+    pub saw_loading: bool,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>);
+
 pub fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -3511,6 +3525,8 @@ pub fn handle_browser_navigate_requests(
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
+    mut pending_nav: ResMut<PendingNavSnapshots>,
+    time: Res<Time>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -3555,7 +3571,19 @@ pub fn handle_browser_navigate_requests(
                     webview,
                     url: url.clone(),
                 });
-                send_page_open_response(&service, request_id, Ok(()));
+                match request_id {
+                    Some(rid) => {
+                        pending_nav.0.insert(
+                            webview,
+                            NavPending {
+                                request_id: rid,
+                                started: time.elapsed(),
+                                saw_loading: false,
+                            },
+                        );
+                    }
+                    None => send_page_open_response(&service, request_id, Ok(())),
+                }
             }
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
             page_open_writer.write(PageOpenRequest {
@@ -5003,6 +5031,7 @@ mod tests {
                 .add_message::<vmux_setting::SettingsWriteRequest>()
                 .add_message::<vmux_space::SpaceCommandRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
+                .init_resource::<crate::PendingNavSnapshots>()
                 .configure_sets(
                     Update,
                     (
