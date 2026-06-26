@@ -86,6 +86,13 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
   primitive `glass.rs::install_window_glass` uses — and, composited above it, a `CALayer` showing
   the OSR IOSurface (transparent web content). Both are masked to the same rounded shape; a morph
   animates their frame + `cornerRadius`.
+- **Glass style follows the appearance Mode (depends on PR #172).** The `NSGlassEffectView`
+  style/tint is bound to the resolved color mode from #172 (`CefColorScheme` resource /
+  `appearance.mode` setting): **Light → `Clear` + light tint** (mockup variant A), **Dark → `Clear`
+  + dark tint** (variant C), **Device → resolved OS appearance** (`NSApp.effectiveAppearance`). A
+  `sync_island_glass` system re-applies it live when the mode changes. Note this is a deliberate
+  exception to #172's "web chrome stays dark" scope: the island's *native* glass adapts even though
+  vmux's web pages do not. Mockup variants B (frost) and D (near-black) are dropped.
 
 ### Rendering (OSR composite)
 
@@ -221,6 +228,13 @@ Per the project's finish-then-test workflow, one runtime pass at the end of each
   the main window; blur and `Esc` collapse; the old in-window modal is gone.
 - Runtime — P3: trigger each feed (run an agent, finish a long shell job, fire an in-app
   notification, start a download / recording) and confirm the correct morph + collapse.
+
+## Dependencies
+
+- **PR #172 (appearance mode: Light/Dark/Device).** The island glass tint is driven by #172's
+  resolved color mode (`CefColorScheme` resource / `appearance.mode` setting): Light→A, Dark→C,
+  Device→OS. Land/rebase on #172 before implementing the `sync_island_glass` tint binding (T6);
+  until then the island can hard-default to the dark tint (variant C).
 
 ## Risks / mitigations
 

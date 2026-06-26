@@ -717,8 +717,12 @@ fn install_island_panel(mut state: NonSendMut<IslandPanel>) {
     );
     content.setWantsLayer(true);
 
-    // glass backdrop (rounded)
+    // glass backdrop (rounded). Default to the dark tint (mockup variant C) for P1.
+    // The appearance-mode binding (Light->A / Dark->C / Device->OS) depends on PR #172's
+    // CefColorScheme; add a `sync_island_glass` system to drive style/tint once #172 lands.
     let glass: Retained<NSGlassEffectView> = NSGlassEffectView::new(mtm);
+    glass.setStyle(objc2_app_kit::NSGlassEffectViewStyle::Clear);
+    glass.setTintColor(Some(&NSColor::colorWithWhite_alpha(0.0, 0.45)));
     let glass_view: &NSView = &glass;
     glass_view.setFrame(NSRect::new(NSPoint::new(0.0,0.0), NSSize::new(w,h)));
     if let Some(layer) = glass_view.layer() {
