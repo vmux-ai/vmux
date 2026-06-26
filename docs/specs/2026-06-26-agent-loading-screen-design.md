@@ -143,7 +143,7 @@ In `crates/vmux_agent/src/vibe/setup/page.rs`:
 
 ## Data Flow
 
-```
+```text
 AgentSession terminal becomes PageReady
   └─ arm_agent_loading  →  TermLoadingEvent { loading:true, label:"Claude", segment:"claude" }
         └─ terminal page (host=terminal) receives event
@@ -198,4 +198,3 @@ tracking in `crates/vmux_server/build.rs` already covers these crates' `src`.
 - `crates/vmux_ui/src/lib.rs` — register module.
 - `crates/vmux_agent/src/vibe/setup/page.rs` — glass-tile favicon + use shared accent.
 - `crates/vmux_server/assets/index.css` — `@source` entries if missing.
-```
