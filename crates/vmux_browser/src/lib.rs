@@ -2418,7 +2418,10 @@ mod apply_page_icons_tests {
 
     #[test]
     fn raw_url_title_is_replaced_with_manifest_title() {
-        assert_eq!(resolve_title("vmux://team/", "vmux://team/", &[TEAM]), "Team");
+        assert_eq!(
+            resolve_title("vmux://team/", "vmux://team/", &[TEAM]),
+            "Team"
+        );
     }
 
     #[test]
