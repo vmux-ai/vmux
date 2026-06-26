@@ -108,7 +108,7 @@ pub const ISLAND_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page:
     host: "island",
     title: "Island",
     keywords: &[],
-    icon: "",
+    icon: None,
     command_bar: false,
 };
 #[cfg(not(target_arch = "wasm32"))]
