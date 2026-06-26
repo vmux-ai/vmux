@@ -27,9 +27,8 @@ mod island_macos {
     use objc2::runtime::AnyObject;
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly};
     use objc2_app_kit::{
-        NSBackingStoreType, NSColor, NSFloatingWindowLevel, NSGlassEffectView,
-        NSGlassEffectViewStyle, NSPanel, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior,
-        NSWindowStyleMask,
+        NSBackingStoreType, NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSScreen,
+        NSStatusWindowLevel, NSView, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_core_foundation::CFRetained;
     use objc2_core_graphics::CGMutablePath;
@@ -72,9 +71,9 @@ mod island_macos {
                 Some((notch_w, notch_h)),
             )
         } else {
-            let vf = screen.visibleFrame();
-            let x = vf.origin.x + (vf.size.width - w) / 2.0;
-            let y = vf.origin.y + vf.size.height - h - 8.0;
+            // Float over the menu bar at the very top-center so it reads like the island.
+            let x = f.origin.x + (f.size.width - w) / 2.0;
+            let y = f.origin.y + f.size.height - h;
             (NSRect::new(NSPoint::new(x, y), NSSize::new(w, h)), None)
         }
     }
@@ -174,7 +173,7 @@ mod island_macos {
         win.setOpaque(false);
         win.setBackgroundColor(Some(&NSColor::clearColor()));
         win.setHasShadow(true);
-        win.setLevel(NSFloatingWindowLevel);
+        win.setLevel(NSStatusWindowLevel);
         win.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
                 | NSWindowCollectionBehavior::FullScreenAuxiliary
@@ -197,12 +196,13 @@ mod island_macos {
         glass_view.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h)));
         content.addSubview(glass_view);
 
-        // OSR content layer above the glass.
+        // OSR content layer placed on the glass view so it composites *above* the glass. (Adding it
+        // as a sublayer of the content view's layer would sit behind the glass *subview*.)
         let content_layer = CALayer::new();
         content_layer.setOpaque(false);
         content_layer.setZPosition(10.0);
         content_layer.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h)));
-        if let Some(host) = content.layer() {
+        if let Some(host) = glass_view.layer() {
             host.addSublayer(&content_layer);
         }
 
