@@ -15,15 +15,14 @@ pill.
 The island **is** the command bar: both the global hotkey (`Cmd+Shift+Space`) and the in-app
 `Cmd+K` expand the island into search. The existing in-window command-bar modal is **removed**.
 
-The island **fill is opaque** (a solid pill, not liquid glass). Rendering is still **OSR**
-(off-screen): the island web page is rendered to an alpha IOSurface and composited into the panel's
-layer. The opaque fill removes the *translucency* motivation for OSR, but OSR remains required for
-two reasons that an opaque windowed CEF view cannot satisfy over arbitrary apps: (1) the rounded
-pill needs **per-pixel alpha at its corners** (the apps behind show through the rounding), and
-windowed CEF is a remote GPU layer immune to CoreAnimation clipping — the browse-mode corner-wedge
-workaround paints the *known* window background, which does not exist when floating over other apps;
-and (2) **smooth morphing** animates a CALayer/IOSurface rather than jank-resizing a windowed GPU
-layer. (Dropping OSR would require a fully rectangular, square-corner island.)
+Rendering follows the **layout's model: OSR web content over a native Liquid Glass backdrop**. A
+native `NSGlassEffectView` (the same primitive `glass.rs` already installs behind the main window)
+is the rounded glass pill; the island web page is rendered **OSR** to an alpha IOSurface and
+composited in a `CALayer` *above* the glass, with a **transparent** web background so the glass
+shows through — exactly as the layout shell composites over the window glass. OSR (not windowed CEF)
+is required so the web content sits transparently over the native glass and can be masked/animated
+to the rounded, morphing shape; windowed CEF would be an opaque rectangle that hides the glass and
+can't be CoreAnimation-clipped over arbitrary apps.
 
 ## Goals
 
@@ -73,8 +72,8 @@ layer. (Dropping OSR would require a fully rectangular, square-corner island.)
 
 A persistent borderless transparent `NSPanel`, created at startup (objc2, modeled on `glass.rs`):
 
-- Style: `Borderless | NonactivatingPanel`, `opaque(false)`, clear background, `hasShadow(false)`
-  (the page draws its own shadow into the alpha surface).
+- Style: `Borderless | NonactivatingPanel`, `opaque(false)`, clear background, `hasShadow(true)`
+  (native drop shadow under the rounded glass pill).
 - Level: floating (`NSWindowLevel::Floating`, raised toward status level if it must sit above other
   floating panels).
 - `collectionBehavior = CanJoinAllSpaces | FullScreenAuxiliary | IgnoresCycle` → present on every
@@ -83,15 +82,20 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
   physical notch when present.
 - `ignoresMouseEvents(true)` while idle/ambient (clicks pass through to apps below); set `false`
   only while expanded for search (result clicks/scroll).
-- Content view hosts a `CALayer` that displays the OSR IOSurface (transparent, non-opaque).
+- Content view (`wantsLayer`, clear) hosts a rounded **`NSGlassEffectView`** backdrop — the same
+  primitive `glass.rs::install_window_glass` uses — and, composited above it, a `CALayer` showing
+  the OSR IOSurface (transparent web content). Both are masked to the same rounded shape; a morph
+  animates their frame + `cornerRadius`.
 
 ### Rendering (OSR composite)
 
 - One OSR webview (entity marker `Island`) renders the island page; it is a `WebviewNativeOverlay`
   producing `NativeOverlayFrames` (reuse the existing accelerated path).
-- The page draws an **opaque fill** inside the rounded pill; the IOSurface carries alpha only
-  *outside* the rounded boundary (corner cutout) and for the drop shadow. The panel/layer stay
-  `opaque(false)` so that boundary alpha shows the apps behind through the rounding.
+- The island web background is **transparent**; the OSR IOSurface composites in a `CALayer` *above*
+  the native `NSGlassEffectView` (mirroring `sync_layout_overlay`), so the glass shows through the
+  content's empty regions — exactly how the layout shell renders over the window glass. The content
+  layer and the glass view are masked to the same rounded shape; a morph animates frame +
+  `cornerRadius` together (optionally `NSGlassEffectContainerView` later for multi-shape merge).
 - A `sync_island_overlay` system (sibling of the current `sync_command_bar_overlay`, which is
   deleted) composites the island's IOSurface into the panel's layer.
 - The panel frame follows the page's **reported content size**: the page emits a size event on each
@@ -99,7 +103,9 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
 - **Idle budget**: the idle pill is fully static — no CSS animation, no DOM mutation → the OSR view
   produces no new frames → no compositing, no wake. Only morphs, spinners, progress, and typing
   schedule CEF paints (which wake the loop via the existing CEF wake throttler). A test mirrors
-  `no_continuous_update_mode` to guard against regressions.
+  `no_continuous_update_mode` to guard against regressions. The native `NSGlassEffectView` is
+  GPU-composited by WindowServer and adds the same idle cost profile as the layout's existing window
+  glass (no Bevy/CEF wake).
 
 ### Morph state machine
 
@@ -157,8 +163,10 @@ translates to an `IslandEvent` for the page. No feed reaches into the page direc
 ## Components (by crate)
 
 - `crates/vmux_desktop/src/dynamic_island.rs` (new, `#[cfg(target_os="macos")]`): NSPanel
-  lifecycle, positioning (top-center/main display/notch-aware), `sync_island_overlay` compositing,
-  key/first-responder `NSView` subclass + key forwarding, mouse passthrough toggle, `resignKey`
+  lifecycle, rounded `NSGlassEffectView` backdrop (reuse `glass.rs::install_window_glass` setup),
+  positioning (top-center/main display/notch-aware), `sync_island_overlay` compositing of OSR
+  content above the glass, key/first-responder `NSView` subclass + key forwarding, mouse passthrough
+  toggle, `resignKey`
   observer, `global-hotkey` manager + waker thread.
 - `crates/vmux_layout/src/island.rs` (+ `island/` dir, filename-module): `Island` webview entity,
   `IslandEvent`/`IslandActivity`/`IslandNotice` types, the state-machine bridge systems
