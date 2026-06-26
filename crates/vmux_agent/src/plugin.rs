@@ -2453,6 +2453,7 @@ mod tests {
             .add_message::<vmux_layout::OpenInNewStackRequest>()
             .add_message::<vmux_layout::ExtensionInstallRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::bookmark::BookmarkOp>()
             .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
             .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
             .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
