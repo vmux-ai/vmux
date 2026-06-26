@@ -64,6 +64,7 @@ tray-icon = "0.24"
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
+    "NSAlert",
     "NSApplication",
     "NSEvent",
     "NSView",
@@ -154,3 +155,4 @@ application-folder-position = { x = 480, y = 180 }
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"
 entitlements = "../../packaging/macos/Vmux.entitlements"
+info-plist-path = "../../packaging/macos/usage-descriptions.plist"

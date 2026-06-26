@@ -36,9 +36,10 @@ pub mod prelude {
     pub use bevy_cef_core::prelude::{
         Browsers, CefColorMode, CefColorScheme, CefDiskProfileRoot, CefEmbeddedHost,
         CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
-        CefTransitionQualifiers, CommandLineConfig, WebviewCefStateEvent,
+        CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, WebviewCefStateEvent,
         WebviewCommittedNavigationEvent, WebviewLoadingStateEvent, WebviewPopupEvent,
-        compile_time_cef_embedded_scheme, resolved_cef_embedded_page_config,
+        compile_time_cef_embedded_scheme, resolve_media_permission,
+        resolved_cef_embedded_page_config,
     };
 }
 

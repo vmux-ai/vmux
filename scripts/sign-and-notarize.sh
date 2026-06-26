@@ -19,7 +19,8 @@ set -euo pipefail
 #                             macOS groups it under Vmux.app instead of
 #                             showing a standalone "unidentified developer"
 #                             row in Login Items).
-#   VMUX_GIT_HASH           - required when VMUX_BUILD_PROFILE=local.
+#   VMUX_GIT_HASH           - identifier suffix for VMUX_BUILD_PROFILE=local;
+#                             defaults to `git rev-parse --short HEAD`.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="${APP_BUNDLE:-$ROOT/target/release/Vmux.app}"
@@ -31,7 +32,8 @@ case "$PROFILE" in
         IDENT_SUFFIX=""
         ;;
     local)
-        : "${VMUX_GIT_HASH:?VMUX_GIT_HASH must be set when VMUX_BUILD_PROFILE=local}"
+        VMUX_GIT_HASH="${VMUX_GIT_HASH:-$(git -C "$ROOT" rev-parse --short=7 HEAD 2>/dev/null || true)}"
+        : "${VMUX_GIT_HASH:?VMUX_GIT_HASH unset and git short hash unavailable}"
         IDENT_SUFFIX=".$VMUX_GIT_HASH"
         ;;
     dev)

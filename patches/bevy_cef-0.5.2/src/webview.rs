@@ -1,4 +1,4 @@
-use crate::cef_state::WebviewCefStateSender;
+use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
@@ -264,7 +264,7 @@ fn create_webview(
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
     committed_nav_sender: Res<WebviewCommittedNavigationSender>,
-    cef_state_sender: Res<WebviewCefStateSender>,
+    cef_senders: (Res<WebviewCefStateSender>, Res<MediaPermissionSender>),
     popup_sender: Res<WebviewPopupSender>,
     texture_wake: Res<TextureWakeCallback>,
     webviews: Query<
@@ -348,7 +348,8 @@ fn create_webview(
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),
                 committed_nav_sender.0.clone(),
-                cef_state_sender.0.clone(),
+                cef_senders.0.0.clone(),
+                cef_senders.1.0.clone(),
                 popup_sender.0.clone(),
                 texture_wake.0.clone(),
                 &initialize_scripts.0,

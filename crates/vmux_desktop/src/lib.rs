@@ -17,6 +17,7 @@ mod focus_native;
 mod glass;
 mod lechat_bridge;
 mod log_forward;
+mod media_permission;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
 mod notify;
@@ -127,6 +128,7 @@ impl Plugin for VmuxPlugin {
                 LayoutCefPlugin,
                 vmux_browser::ExtensionsPlugin,
                 BrowserPlugin,
+                media_permission::MediaPermissionPlugin,
                 lechat_bridge::LeChatBridgePlugin,
             ))
             .add_plugins((

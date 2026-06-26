@@ -24,7 +24,7 @@ case "$PROFILE" in
         BUNDLE_ID="ai.vmux.desktop"
         ;;
     local)
-        SHA="$(git -C "$ROOT" rev-parse --short HEAD)"
+        SHA="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
         PRODUCT_NAME="Vmux ($SHA)"
         BUNDLE_ID="ai.vmux.desktop.$SHA"
         ;;
@@ -98,7 +98,7 @@ if [[ "$PROFILE" == "local" && -d "$VMUX_APP_BUNDLE" ]]; then
     VMUX_GIT_HASH="$SHA" "$ROOT/scripts/embed-launch-agent-plist.sh"
 
     echo "==> Signing + notarizing local build"
-    APP_BUNDLE="$VMUX_APP_BUNDLE" "$ROOT/scripts/sign-and-notarize.sh"
+    APP_BUNDLE="$VMUX_APP_BUNDLE" VMUX_GIT_HASH="$SHA" "$ROOT/scripts/sign-and-notarize.sh"
 fi
 
 echo "==> Packaging complete: $VMUX_APP_BUNDLE"
