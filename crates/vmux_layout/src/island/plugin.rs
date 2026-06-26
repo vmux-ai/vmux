@@ -27,10 +27,12 @@ mod tests {
     #[test]
     fn plugin_registers_messages() {
         let mut app = App::new();
-        app.add_plugins(IslandPlugin)
-            .add_systems(Update, |mut s: MessageWriter<SummonCommandBar>| {
+        app.add_plugins(IslandPlugin).add_systems(
+            Update,
+            |mut s: MessageWriter<SummonCommandBar>| {
                 s.write(SummonCommandBar);
-            });
+            },
+        );
         app.update();
     }
 }

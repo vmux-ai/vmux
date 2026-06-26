@@ -26,12 +26,12 @@ mod island_macos {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{ClassType, MainThreadMarker, MainThreadOnly};
-    use objc2_core_foundation::CFRetained;
     use objc2_app_kit::{
         NSBackingStoreType, NSColor, NSFloatingWindowLevel, NSGlassEffectView,
         NSGlassEffectViewStyle, NSPanel, NSScreen, NSView, NSWindow, NSWindowCollectionBehavior,
         NSWindowStyleMask,
     };
+    use objc2_core_foundation::CFRetained;
     use objc2_core_graphics::CGMutablePath;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     use objc2_quartz_core::{CALayer, CAShapeLayer};
@@ -54,7 +54,10 @@ mod island_macos {
     /// wrap the notch. Non-notched/external: top-center just under the menu bar.
     fn island_frame(mtm: MainThreadMarker, w: f64, h: f64) -> (NSRect, Option<(f64, f64)>) {
         let Some(screen) = NSScreen::mainScreen(mtm) else {
-            return (NSRect::new(NSPoint::new(100.0, 100.0), NSSize::new(w, h)), None);
+            return (
+                NSRect::new(NSPoint::new(100.0, 100.0), NSSize::new(w, h)),
+                None,
+            );
         };
         let f = screen.frame();
         let notch_h = screen.safeAreaInsets().top;
