@@ -36,10 +36,10 @@ pub fn Hero() -> Element {
                 }
                 h1 { class: "font-bold tracking-tight leading-[1.02] mb-6",
                     span { class: "block text-2xl sm:text-3xl text-text-muted", "The browser" }
-                    span { class: "block text-6xl sm:text-8xl text-text", "that ships code." }
+                    span { class: "block text-6xl sm:text-8xl text-text", "that gets sh*t done." }
                 }
                 p { class: "text-lg sm:text-2xl text-text-muted mb-10 max-w-xl mx-auto",
-                    "Browse, prompt, and build with agents — in one space."
+                    "Book a flight, build a website, ship a PR — just ask your agents."
                 }
                 InstallCard {}
                 div { class: "mt-6 flex justify-center",

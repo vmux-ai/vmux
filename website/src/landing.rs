@@ -7,6 +7,7 @@ mod parts;
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod scroll;
+mod showcase;
 mod visit;
 
 use browser::Browser;
@@ -16,6 +17,7 @@ use dioxus::prelude::*;
 use hero::Hero;
 use ide::Ide;
 use platform::Platform;
+use showcase::Showcase;
 use visit::Visit;
 
 pub const ICON: Asset = asset!("/assets/icon.png");
@@ -34,6 +36,7 @@ pub fn Landing() -> Element {
             Hero {}
             Browser {}
             Visit {}
+            Showcase {}
             Ide {}
             Coworking {}
             Platform {}
