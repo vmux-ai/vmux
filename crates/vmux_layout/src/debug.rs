@@ -28,7 +28,7 @@ impl DebugView {
                 PageMetadata {
                     title: "Debug".to_string(),
                     url: DEBUG_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
+                    icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
                 Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
@@ -77,7 +77,7 @@ pub fn handle_debug_page_open(
         commands.entity(task.stack).insert(PageMetadata {
             title: "Debug".to_string(),
             url: DEBUG_PAGE_URL.to_string(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
         commands.spawn((

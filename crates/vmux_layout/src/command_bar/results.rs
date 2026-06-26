@@ -1,6 +1,7 @@
 use vmux_command::event::{
     CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, HistoryEntry,
 };
+use vmux_core::PageIcon;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
@@ -10,7 +11,7 @@ pub enum CommandBarResultItem {
     Stack {
         title: String,
         url: String,
-        icon: String,
+        icon: PageIcon,
         pane_id: u64,
         tab_index: usize,
     },
@@ -29,8 +30,7 @@ pub enum CommandBarResultItem {
     Page {
         url: String,
         title: String,
-        icon: String,
-        favicon: bool,
+        icon: PageIcon,
         shortcut: String,
     },
     Navigate {
@@ -81,11 +81,10 @@ fn urls_match(a: &str, b: &str) -> bool {
     a == b || a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 
-fn stack_icon_for(pages: &[CommandBarPage], url: &str) -> String {
+fn stack_icon_for(pages: &[CommandBarPage], url: &str) -> PageIcon {
     pages
         .iter()
         .find(|p| urls_match(&p.url, url))
-        .filter(|p| !p.favicon)
         .map(|p| p.icon.clone())
         .unwrap_or_default()
 }
@@ -112,7 +111,6 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
             url: page.url.clone(),
             title: page.title.clone(),
             icon: page.icon.clone(),
-            favicon: page.favicon,
             shortcut: page.shortcut.clone(),
         })
         .collect()
@@ -297,8 +295,7 @@ mod tests {
                 url: "vmux://settings/".into(),
                 title: "Settings".into(),
                 keywords: vec!["preferences".into()],
-                icon: "settings".into(),
-                favicon: false,
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Settings),
                 shortcut: String::new(),
             },
             CommandBarPage {
@@ -306,8 +303,7 @@ mod tests {
                 url: "vmux://spaces/".into(),
                 title: "Spaces".into(),
                 keywords: vec!["space".into()],
-                icon: "layers".into(),
-                favicon: false,
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
                 shortcut: String::new(),
             },
             CommandBarPage {
@@ -315,8 +311,7 @@ mod tests {
                 url: "vmux://history/".into(),
                 title: "History".into(),
                 keywords: vec!["recent".into()],
-                icon: "clock".into(),
-                favicon: false,
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Clock),
                 shortcut: "\u{2318}Y".into(),
             },
             CommandBarPage {
@@ -324,8 +319,7 @@ mod tests {
                 url: "vmux://agent/vibe/".into(),
                 title: "Vibe".into(),
                 keywords: vec!["vibe".into(), "agent".into()],
-                icon: "".into(),
-                favicon: true,
+                icon: vmux_core::PageIcon::None,
                 shortcut: String::new(),
             },
         ]
@@ -351,8 +345,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: "layers".into(),
-            favicon: false,
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.iter().any(|r| matches!(
@@ -384,8 +377,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: "layers".into(),
-            favicon: false,
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
@@ -408,8 +400,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: "layers".into(),
-            favicon: false,
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
@@ -440,8 +431,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
-            icon: "settings".into(),
-            favicon: false,
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Settings),
             shortcut: String::new(),
         }));
     }
@@ -451,8 +441,8 @@ mod tests {
         let results = filter_results("vmux://", &[], &[], &[], &sample_pages(), false, &[]);
         assert!(results.iter().any(|r| matches!(
             r,
-            CommandBarResultItem::Page { url, favicon, .. }
-                if url == "vmux://agent/vibe/" && *favicon
+            CommandBarResultItem::Page { url, icon, .. }
+                if url == "vmux://agent/vibe/" && matches!(icon, vmux_core::PageIcon::None)
         )));
     }
 
@@ -461,7 +451,8 @@ mod tests {
         let results = filter_results("vibe", &[], &[], &[], &sample_pages(), false, &[]);
         assert!(results.iter().any(|r| matches!(
             r,
-            CommandBarResultItem::Page { title, favicon, .. } if title == "Vibe" && *favicon
+            CommandBarResultItem::Page { title, icon, .. }
+                if title == "Vibe" && matches!(icon, vmux_core::PageIcon::None)
         )));
     }
 

@@ -858,7 +858,7 @@ mod tests {
                         url: "https://x".into(),
                         kind: "browser".into(),
                         is_loading: false,
-                        favicon_url: String::new(),
+                        icon: vmux_core::PageIcon::None,
                         is_self: false,
                         process_id: None,
                     }],

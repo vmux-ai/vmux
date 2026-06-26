@@ -18,7 +18,7 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
     host: "lsp",
     title: "Language Servers",
     keywords: &["lsp", "language", "server", "install", "mason"],
-    icon: "server",
+    icon: Some(vmux_core::BuiltinIcon::Server),
     command_bar: true,
 };
 

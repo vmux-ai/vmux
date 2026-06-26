@@ -38,7 +38,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "terminal",
     title: "Terminal",
     keywords: &["shell", "console"],
-    icon: "terminal",
+    icon: Some(vmux_core::BuiltinIcon::Terminal),
     command_bar: true,
 };
 

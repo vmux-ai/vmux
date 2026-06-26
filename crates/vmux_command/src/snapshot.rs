@@ -68,8 +68,10 @@ pub fn update_pages_snapshot(
             url: manifest.url(),
             title: manifest.title.to_string(),
             keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
-            icon: manifest.icon.to_string(),
-            favicon: false,
+            icon: manifest
+                .icon
+                .map(vmux_core::PageIcon::Builtin)
+                .unwrap_or_default(),
             shortcut: String::new(),
         })
         .collect();
@@ -104,14 +106,14 @@ mod tests {
             host: "settings",
             title: "Settings",
             keywords: &["preferences"],
-            icon: "settings",
+            icon: Some(vmux_core::BuiltinIcon::Settings),
             command_bar: true,
         });
         app.world_mut().spawn(PageManifest {
             host: "layout",
             title: "Layout",
             keywords: &[],
-            icon: "",
+            icon: None,
             command_bar: false,
         });
 

@@ -106,7 +106,7 @@ fn handle_spaces_page_open(
         commands.entity(task.stack).insert(PageMetadata {
             title: "Spaces".to_string(),
             url: SPACES_PAGE_URL.to_string(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
         commands.spawn((

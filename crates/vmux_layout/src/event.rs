@@ -1,3 +1,5 @@
+use vmux_core::PageIcon;
+
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
@@ -318,7 +320,7 @@ pub struct StackRow {
     pub title: String,
     pub url: String,
     #[serde(default)]
-    pub favicon_url: String,
+    pub icon: PageIcon,
     pub is_active: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
@@ -362,7 +364,7 @@ pub struct TabRow {
     #[serde(default)]
     pub url: String,
     #[serde(default)]
-    pub favicon_url: String,
+    pub icon: PageIcon,
     #[serde(default)]
     pub is_done_unseen: bool,
 }
@@ -426,7 +428,7 @@ pub struct StackNode {
     pub title: String,
     pub url: String,
     #[serde(default)]
-    pub favicon_url: String,
+    pub icon: PageIcon,
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]

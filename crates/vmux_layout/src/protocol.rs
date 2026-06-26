@@ -70,8 +70,8 @@ pub struct Stack {
     pub kind: String,
     #[serde(default)]
     pub is_loading: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub favicon_url: String,
+    #[serde(default)]
+    pub icon: vmux_core::PageIcon,
     #[serde(default)]
     pub is_self: bool,
     /// For terminal stacks: the terminal's `ProcessId` (its handle for `run` /
@@ -278,7 +278,7 @@ mod tests {
                                 url: "https://x".into(),
                                 kind: "browser".into(),
                                 is_loading: false,
-                                favicon_url: String::new(),
+                                icon: vmux_core::PageIcon::None,
                                 is_self: false,
                                 process_id: None,
                             }],

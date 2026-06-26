@@ -736,7 +736,7 @@ mod tests {
                 PageMetadata {
                     title: "Terminal".to_string(),
                     url: saved_url.clone(),
-                    favicon_url: String::new(),
+                    icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
                 ChildOf(pane),
@@ -774,7 +774,7 @@ mod tests {
                 PageMetadata {
                     url: "https://example.com".into(),
                     title: "Example".into(),
-                    favicon_url: "".into(),
+                    icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
                 vmux_core::VisitCount(3),
@@ -987,7 +987,9 @@ mod tests {
                 PageMetadata {
                     title: "Example".to_string(),
                     url: "https://example.com".to_string(),
-                    favicon_url: "https://example.com/favicon.ico".to_string(),
+                    icon: vmux_core::PageIcon::Favicon(
+                        "https://example.com/favicon.ico".to_string(),
+                    ),
                     bg_color: Some("#123456".to_string()),
                 },
                 ChildOf(pane),
@@ -1007,7 +1009,10 @@ mod tests {
         let meta = app.world().get::<PageMetadata>(browser).unwrap();
         assert_eq!(meta.title, "Example");
         assert_eq!(meta.url, "https://example.com");
-        assert_eq!(meta.favicon_url, "https://example.com/favicon.ico");
+        assert_eq!(
+            meta.icon,
+            vmux_core::PageIcon::Favicon("https://example.com/favicon.ico".to_string())
+        );
         assert_eq!(meta.bg_color.as_deref(), Some("#123456"));
     }
 
@@ -1077,7 +1082,7 @@ mod tests {
         "vmux_header::system::PageMetadata": (
           title: "",
           url: "",
-          favicon_url: "",
+          icon: None,
           bg_color: None,
         ),
       },

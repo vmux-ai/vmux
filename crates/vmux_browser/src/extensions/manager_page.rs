@@ -20,7 +20,7 @@ const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManife
     host: "extensions",
     title: "Extensions",
     keywords: &["extension", "extensions", "chrome", "addon", "install"],
-    icon: "puzzle",
+    icon: Some(vmux_core::BuiltinIcon::Puzzle),
     command_bar: true,
 };
 

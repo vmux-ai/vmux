@@ -18,7 +18,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "agent",
     title: "Agent",
     keywords: &["ai", "chat", "assistant"],
-    icon: "sparkles",
+    icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: false,
 };
 

@@ -17,7 +17,7 @@ pub struct PageManifest {
     pub host: &'static str,
     pub title: &'static str,
     pub keywords: &'static [&'static str],
-    pub icon: &'static str,
+    pub icon: Option<crate::icon::BuiltinIcon>,
     pub command_bar: bool,
 }
 
@@ -231,7 +231,7 @@ mod tests {
             host: "settings",
             title: "Settings",
             keywords: &["preferences"],
-            icon: "settings",
+            icon: Some(crate::icon::BuiltinIcon::Settings),
             command_bar: true,
         };
         assert_eq!(manifest.url(), "vmux://settings/");
@@ -271,7 +271,7 @@ mod tests {
             host: "history",
             title: "History",
             keywords: &["recent", "visited"],
-            icon: "clock",
+            icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
         });
         let mut query = app.world_mut().query::<&PageManifest>();
@@ -292,7 +292,7 @@ mod tests {
             host: "history",
             title: "History",
             keywords: &["recent", "visited"],
-            icon: "clock",
+            icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
         };
 

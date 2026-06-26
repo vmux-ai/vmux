@@ -13,6 +13,6 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "team",
     title: "Team",
     keywords: &["team", "agents", "profile"],
-    icon: "users",
+    icon: Some(vmux_core::BuiltinIcon::Users),
     command_bar: true,
 };

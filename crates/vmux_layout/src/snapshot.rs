@@ -153,7 +153,7 @@ fn build_stack(
         kind: stack_kind_for_url(&url).to_string(),
         url,
         is_loading: false,
-        favicon_url: page.map(|p| p.favicon_url.clone()).unwrap_or_default(),
+        icon: page.map(|p| p.icon.clone()).unwrap_or_default(),
         is_self: Some(stack_entity) == self_stack,
         process_id: None,
     }
@@ -197,7 +197,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/x".into(),
             title: String::new(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
 
@@ -245,7 +245,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "vmux://terminal/123".into(),
             title: String::new(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
 
@@ -298,7 +298,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
 
@@ -531,7 +531,7 @@ mod tests {
         app.world_mut().entity_mut(stack).insert(PageMetadata {
             url: "https://example.com".into(),
             title: "Ex".into(),
-            favicon_url: "https://example.com/icon.png".into(),
+            icon: vmux_core::PageIcon::Favicon("https://example.com/icon.png".into()),
             bg_color: None,
         });
 
@@ -565,6 +565,9 @@ mod tests {
         let LayoutNode::Pane { stacks, .. } = &snap.tabs[0].root else {
             panic!("expected pane root");
         };
-        assert_eq!(stacks[0].favicon_url, "https://example.com/icon.png");
+        assert_eq!(
+            stacks[0].icon,
+            vmux_core::PageIcon::Favicon("https://example.com/icon.png".into())
+        );
     }
 }

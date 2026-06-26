@@ -24,7 +24,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "spaces",
     title: "Spaces",
     keywords: &["space"],
-    icon: "layers",
+    icon: Some(vmux_core::BuiltinIcon::Layers),
     command_bar: true,
 };
 

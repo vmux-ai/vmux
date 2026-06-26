@@ -90,7 +90,7 @@ pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page:
     host: "layout",
     title: "Layout",
     keywords: &[],
-    icon: "",
+    icon: None,
     command_bar: false,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -99,7 +99,7 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         host: "command-bar",
         title: "Command Bar",
         keywords: &[],
-        icon: "",
+        icon: None,
         command_bar: false,
     };
 #[cfg(not(target_arch = "wasm32"))]
@@ -107,7 +107,7 @@ pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::
     host: "debug",
     title: "Debug",
     keywords: &[],
-    icon: "",
+    icon: None,
     command_bar: false,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -115,7 +115,7 @@ pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::
     host: "error",
     title: "Error",
     keywords: &[],
-    icon: "",
+    icon: None,
     command_bar: false,
 };
 

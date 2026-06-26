@@ -6,14 +6,16 @@ use crate::event::{
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
+use vmux_core::PageIcon;
 use vmux_core::event::extension::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::{GlobeIcon, favicon_src_for_url, host_for_favicon_fallback};
+use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -189,14 +191,6 @@ fn layout_overlay_ready(
         && (!state.side_sheet_open || (pane_tree_ready && spaces_ready))
 }
 
-fn favicon_src_for_stack_node(stack: &StackNode) -> Option<String> {
-    favicon_src_for_url(&stack.favicon_url, &stack.url)
-}
-
-fn favicon_src_for_tab(tab: &TabRow) -> Option<String> {
-    favicon_src_for_url(&tab.favicon_url, &tab.url)
-}
-
 fn format_address(stack: &StackRow) -> String {
     if stack.url.starts_with("vmux://") || stack.url.starts_with("file:") {
         return stack.url.clone();
@@ -364,51 +358,21 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
 }
 
 #[component]
-fn StackIcon(
-    url: String,
-    title: String,
-    favicon_src: Option<String>,
-    favicon_error: Signal<bool>,
-) -> Element {
-    rsx! {
-        if url.starts_with("vmux://terminal") {
-            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                path { d: "M4 17 10 11 4 5" }
-                path { d: "M12 19h8" }
-            }
-        } else if url.starts_with("file:") {
-            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }
-                path { d: "M14 2v6h6" }
-            }
-        } else if url.starts_with("vmux://lsp") {
-            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                path { d: "M4 4h16a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" }
-                path { d: "M4 14h16a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2Z" }
-                path { d: "M6 7h.01" }
-                path { d: "M6 17h.01" }
-            }
-        } else if url.starts_with("vmux://extensions") || url.starts_with("chrome-extension://") {
-            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
-            }
-        } else if let Some(src) = favicon_src.as_ref() {
-            if favicon_error() {
-                GlobeIcon {}
-            } else {
-                img {
-                    class: "h-4 w-4 shrink-0 rounded-sm object-contain",
-                    src: "{src}",
-                    onerror: move |_| favicon_error.set(true),
-                }
-            }
-        } else if title == "New Stack" && url.is_empty() {
+fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
+    if title == "New Stack" && url.is_empty() {
+        return rsx! {
             Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                 path { d: "M5 12h14" }
                 path { d: "M12 5v14" }
             }
-        } else {
-            GlobeIcon {}
+        };
+    }
+    rsx! {
+        PageIconView {
+            icon,
+            url,
+            img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+            icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
         }
     }
 }
@@ -465,14 +429,6 @@ fn Tab(tab: TabRow) -> Element {
     };
     let tooltip = display_title.clone();
     let is_active = tab.is_active;
-    let icon_src = favicon_src_for_tab(&tab);
-    let mut icon_error = use_signal(|| false);
-    let mut prev_src = use_signal(|| None::<String>);
-    if *prev_src.read() != icon_src {
-        prev_src.set(icon_src.clone());
-        icon_error.set(false);
-    }
-
     let skirt_classes = "relative \
         before:content-[''] before:absolute before:bottom-0 before:-left-2 before:h-2 before:w-2 before:pointer-events-none \
         before:[background:radial-gradient(circle_at_top_left,transparent_0,transparent_8px,var(--tab-bg)_8px)] \
@@ -513,10 +469,9 @@ fn Tab(tab: TabRow) -> Element {
                 title: "{tooltip}",
                 class: "flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden",
                 StackIcon {
+                    icon: tab.icon.clone(),
                     url: tab.url.clone(),
                     title: display_title.clone(),
-                    favicon_src: icon_src,
-                    favicon_error: icon_error,
                 }
                 span { class: "{title_class}", "{display_title}" }
             }
@@ -786,15 +741,8 @@ fn NewStackRow(pane_id: u64) -> Element {
 
 #[component]
 fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
-    let icon = favicon_src_for_stack_node(&stack);
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
-    let mut icon_error = use_signal(|| false);
-    let mut prev_src = use_signal(|| None::<String>);
-    if *prev_src.read() != icon {
-        prev_src.set(icon.clone());
-        icon_error.set(false);
-    }
 
     rsx! {
         div {
@@ -810,7 +758,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     stack_index,
                 });
             },
-            StackIcon { url: stack.url.clone(), title: stack.title.clone(), favicon_src: icon, favicon_error: icon_error }
+            StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
             span {
                 class: if is_active {
                     format!("min-w-0 flex-1 {} text-ui font-medium text-foreground", dir_truncate_class(&stack.title))
