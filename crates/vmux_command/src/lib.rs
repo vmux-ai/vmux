@@ -1,4 +1,5 @@
 pub mod event;
+pub mod island;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod open;
 pub mod open_target;
