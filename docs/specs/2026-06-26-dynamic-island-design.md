@@ -100,6 +100,12 @@ A persistent borderless transparent `NSPanel`, created at startup (objc2, modele
   `sync_island_glass` system re-applies it live when the mode changes. Note this is a deliberate
   exception to #172's "web chrome stays dark" scope: the island's *native* glass adapts even though
   vmux's web pages do not. Mockup variants B (frost) and D (near-black) are dropped.
+- **Top-tint gradation (seamless notch).** The island's fill is a vertical gradient that is
+  near-**black at the very top** — matching the always-black hardware notch so there is no seam at
+  the junction — fading to the appearance-mode tint by ~100px down. Because the physical notch is
+  black regardless of OS appearance, the gradient's **top stop stays black even in Light mode**;
+  only the lower portion fades to the mode tint (Dark → dark glass, Light → light glass). On a
+  free-floating pill (no notch) the gradient is optional / subtler.
 
 ### Rendering (OSR composite)
 
