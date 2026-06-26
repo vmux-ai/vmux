@@ -1,7 +1,8 @@
-use crate::event::COMMAND_BAR_PAGE_URL;
+use crate::event::{COMMAND_BAR_PAGE_URL, ISLAND_PAGE_URL};
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
+    island::Island,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     scene::MainCamera,
     settings::LayoutSettings,
@@ -412,6 +413,39 @@ fn setup(
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
         MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
+        Transform::default(),
+        GlobalTransform::default(),
+        Visibility::Hidden,
+        Pickable::IGNORE,
+        ChildOf(root),
+    ));
+
+    // Island: an always-active OSR webview composited natively into the floating panel. Modeled on
+    // the command-bar modal's prewarmed state — `display: Flex` keeps OSR rendering, `Hidden` keeps
+    // its (empty) mesh out of the main scene, and `WebviewNativeOverlay` routes frames to
+    // `NativeOverlayFrames` for the panel to composite. Size is updated from the page's morph.
+    commands.spawn((
+        (
+            Island,
+            HostWindow(pw),
+            Browser,
+            WebviewTransparent,
+            bevy_cef::prelude::WebviewNativeOverlay,
+            bevy_cef::prelude::CefIgnorePinchZoom,
+        ),
+        Node {
+            width: Val::Px(360.0),
+            height: Val::Px(44.0),
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
+            ..default()
+        },
+        ZIndex(3),
+        WebviewSource::new(ISLAND_PAGE_URL),
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+        WebviewSize(Vec2::new(360.0, 44.0)),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Hidden,
@@ -1083,6 +1117,29 @@ mod tests {
         let node = app.world().get::<Node>(root).expect("window node");
 
         assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
+    }
+
+    #[test]
+    fn island_webview_is_osr_native_overlay() {
+        let mut app = setup_window_app();
+        app.update();
+
+        let island = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::island::Island>>()
+            .single(app.world())
+            .expect("island");
+
+        assert!(
+            app.world()
+                .get::<bevy_cef::prelude::WebviewNativeOverlay>(island)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<bevy_cef::prelude::WebviewWindowed>(island)
+                .is_none()
+        );
     }
 
     #[test]
