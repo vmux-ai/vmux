@@ -3526,7 +3526,14 @@ fn handle_agent_queries(
         ),
         With<vmux_layout::space::Space>,
     >,
-    bm_pins: Query<(&vmux_core::Uuid, &vmux_core::PageMetadata), With<vmux_core::Pin>>,
+    bm_pins: Query<
+        (
+            &vmux_core::Uuid,
+            &vmux_core::PageMetadata,
+            &vmux_core::Order,
+        ),
+        With<vmux_core::Pin>,
+    >,
     bm_folders: Query<
         (
             &vmux_core::Uuid,
@@ -3611,7 +3618,10 @@ fn handle_agent_queries(
                         "favicon_url": m.icon.favicon_url(),
                     })
                 };
-                let pins: Vec<serde_json::Value> = bm_pins.iter().map(|(u, m)| row(u, m)).collect();
+                let mut pin_rows: Vec<(u32, serde_json::Value)> =
+                    bm_pins.iter().map(|(u, m, o)| (o.0, row(u, m))).collect();
+                pin_rows.sort_by_key(|(order, _)| *order);
+                let pins: Vec<serde_json::Value> = pin_rows.into_iter().map(|(_, v)| v).collect();
                 let mut roots: Vec<(u32, serde_json::Value)> = Vec::new();
                 for (uuid, name, children, collapsed, order) in bm_folders.iter() {
                     let mut kids: Vec<serde_json::Value> = Vec::new();
