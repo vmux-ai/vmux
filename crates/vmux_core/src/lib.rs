@@ -1,8 +1,10 @@
 pub mod dom_snapshot;
 pub mod editor;
 pub mod event;
+pub mod icon;
 pub mod process_id;
 pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
+pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,6 +48,8 @@ pub struct CorePlugin;
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PageMetadata>()
+            .register_type::<crate::icon::PageIcon>()
+            .register_type::<crate::icon::BuiltinIcon>()
             .register_type::<ArchivedPage>()
             .register_type::<crate::archive::ArchivedPagePosition>()
             .register_type::<crate::archive::PaneStep>()
@@ -85,7 +89,7 @@ pub fn now_millis() -> i64 {
 pub struct PageMetadata {
     pub title: String,
     pub url: String,
-    pub favicon_url: String,
+    pub icon: crate::icon::PageIcon,
     pub bg_color: Option<String>,
 }
 

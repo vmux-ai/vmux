@@ -17,11 +17,11 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 muda = "0.19"
-vmux_core = { path = "../vmux_core" }
 vmux_macro = { path = "../vmux_macro" }

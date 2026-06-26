@@ -47,8 +47,8 @@ pub fn mirror_metadata_to_url(
                 if !tab_meta.title.is_empty() {
                     url_meta.title.clone_from(&tab_meta.title);
                 }
-                if !tab_meta.favicon_url.is_empty() {
-                    url_meta.favicon_url.clone_from(&tab_meta.favicon_url);
+                if !tab_meta.icon.is_none() {
+                    url_meta.icon.clone_from(&tab_meta.icon);
                 }
                 if tab_meta.bg_color.is_some() {
                     url_meta.bg_color.clone_from(&tab_meta.bg_color);
@@ -82,13 +82,13 @@ pub(crate) fn apply_cef_state_to_meta(
     }
     if let Some(url) = ev.url {
         meta.url = url;
-        meta.favicon_url.clear();
+        meta.icon = vmux_core::PageIcon::None;
     }
     if let Some(title) = ev.title {
         meta.title = title;
     }
     if let Some(favicon) = ev.favicon_url {
-        meta.favicon_url = favicon;
+        meta.icon = vmux_core::PageIcon::favicon(favicon);
     }
 }
 
@@ -106,7 +106,7 @@ impl Browser {
             vmux_core::PageMetadata {
                 title: url.to_string(),
                 url: url.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(url),
@@ -143,7 +143,7 @@ impl Browser {
             vmux_core::PageMetadata {
                 title: title.to_string(),
                 url: url.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(url),
@@ -181,7 +181,7 @@ impl Browser {
             vmux_core::PageMetadata {
                 title: title.to_string(),
                 url: display_url.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(source_url),
@@ -335,7 +335,7 @@ mod apply_cef_state_tests {
         PageMetadata {
             url: "vmux://history/".into(),
             title: "History".into(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         }
     }
@@ -344,7 +344,7 @@ mod apply_cef_state_tests {
         PageMetadata {
             url: "https://example.com".into(),
             title: "old".into(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         }
     }
@@ -369,7 +369,7 @@ mod apply_cef_state_tests {
     fn vmux_url_preserves_favicon_against_cef_update() {
         let mut meta = vmux_meta();
         apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
-        assert_eq!(meta.favicon_url, "");
+        assert_eq!(meta.icon, vmux_core::PageIcon::None);
     }
 
     #[test]
@@ -406,7 +406,10 @@ mod apply_cef_state_tests {
     fn external_url_accepts_favicon_update() {
         let mut meta = external_meta();
         apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
-        assert_eq!(meta.favicon_url, "https://x/fav.ico");
+        assert_eq!(
+            meta.icon,
+            vmux_core::PageIcon::Favicon("https://x/fav.ico".into())
+        );
     }
 
     #[test]
@@ -414,12 +417,12 @@ mod apply_cef_state_tests {
         let mut meta = PageMetadata {
             url: "https://example.com".into(),
             title: "Old".into(),
-            favicon_url: "https://example.com/fav.ico".into(),
+            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         };
         apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
         assert_eq!(meta.url, "https://other.com");
-        assert_eq!(meta.favicon_url, "");
+        assert_eq!(meta.icon, vmux_core::PageIcon::None);
     }
 }
 
@@ -449,7 +452,7 @@ mod url_mirror_tests {
         app.world_mut().spawn(PageMetadata {
             url: "https://example.com".into(),
             title: "Example".into(),
-            favicon_url: "https://example.com/fav.ico".into(),
+            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
             bg_color: None,
         });
 
@@ -462,7 +465,10 @@ mod url_mirror_tests {
             .next()
             .unwrap();
         assert_eq!(url_meta.title, "Example");
-        assert_eq!(url_meta.favicon_url, "https://example.com/fav.ico");
+        assert_eq!(
+            url_meta.icon,
+            vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into())
+        );
     }
 
     #[test]

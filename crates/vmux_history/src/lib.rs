@@ -20,7 +20,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "history",
     title: "History",
     keywords: &["recent", "visited"],
-    icon: "clock",
+    icon: Some(vmux_core::BuiltinIcon::Clock),
     command_bar: true,
 };
 

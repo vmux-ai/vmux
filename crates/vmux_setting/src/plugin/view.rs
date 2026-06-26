@@ -34,7 +34,7 @@ impl Settings {
                 PageMetadata {
                     title: "Settings".to_string(),
                     url: SETTINGS_PAGE_URL.to_string(),
-                    favicon_url: String::new(),
+                    icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
                 Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(

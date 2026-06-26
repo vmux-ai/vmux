@@ -49,8 +49,7 @@ pub struct CommandBarPage {
     pub url: String,
     pub title: String,
     pub keywords: Vec<String>,
-    pub icon: String,
-    pub favicon: bool,
+    pub icon: vmux_core::PageIcon,
     pub shortcut: String,
 }
 
@@ -537,8 +536,7 @@ mod tests {
                 url: "vmux://settings/".to_string(),
                 title: "Settings".to_string(),
                 keywords: vec!["preferences".to_string()],
-                icon: "settings".to_string(),
-                favicon: false,
+                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Settings),
                 shortcut: String::new(),
             }],
             ..Default::default()

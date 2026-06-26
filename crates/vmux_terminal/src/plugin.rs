@@ -617,7 +617,7 @@ pub fn new_terminal_bundle_with_cwd(
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TERMINAL_PAGE_URL.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(TERMINAL_PAGE_URL),
@@ -715,7 +715,7 @@ pub fn reattach_terminal_bundle(
             PageMetadata {
                 title: format!("Terminal ({})", &process_id.to_string()[..8]),
                 url: TERMINAL_PAGE_URL.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(TERMINAL_PAGE_URL),
@@ -4178,7 +4178,7 @@ mod tests {
                 PageMetadata {
                     title: "Vibe (abc12345)".to_string(),
                     url: "vmux://agent/vibe/abc12345".to_string(),
-                    favicon_url: String::new(),
+                    icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
                 AgentSession {

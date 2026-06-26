@@ -132,6 +132,7 @@ impl Plugin for BrowserPlugin {
                 (
                     handle_browser_commands.in_set(ReadAppCommands),
                     vmux_layout::apply_cef_state_from_webview,
+                    apply_page_icons.after(vmux_layout::apply_cef_state_from_webview),
                     drain_loading_state,
                     drain_committed_navigation,
                     spawn_popup_stacks,
@@ -2237,7 +2238,7 @@ fn push_stacks_host_emit(
             rows.push(StackRow {
                 title: effective_title(osc, &meta.title).to_string(),
                 url: meta.url.clone(),
-                favicon_url: meta.favicon_url.clone(),
+                icon: meta.icon.clone(),
                 is_active,
                 bg_color: meta.bg_color.clone(),
             });
@@ -2248,7 +2249,7 @@ fn push_stacks_host_emit(
         rows.push(StackRow {
             title: "New Stack".to_string(),
             url: String::new(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             is_active: true,
             bg_color: None,
         });
@@ -2269,6 +2270,122 @@ fn push_stacks_host_emit(
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, STACKS_EVENT, &payload));
     *last = ron_body;
+}
+
+/// Fill in a page's built-in icon on its [`PageMetadata`] from the matching
+/// [`PageManifest`] (by host) when none is set yet. Web pages keep their CEF
+/// favicon; `file:` pages get the file icon; agent pages keep their per-provider
+/// favicon (resolved from the URL at render time).
+fn apply_page_icons(
+    manifests: Query<&vmux_core::page::PageManifest>,
+    mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>,
+) {
+    for mut meta in &mut metas {
+        if !meta.icon.is_none() {
+            continue;
+        }
+        if meta.url.starts_with("file:") {
+            meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Files);
+            continue;
+        }
+        if meta.url.starts_with("chrome-extension://") {
+            meta.icon = vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Puzzle);
+            continue;
+        }
+        let Some(host) = meta
+            .url
+            .strip_prefix("vmux://")
+            .and_then(|rest| rest.split('/').next())
+            .filter(|host| !host.is_empty() && *host != "agent")
+        else {
+            continue;
+        };
+        let builtin = manifests
+            .iter()
+            .find(|manifest| manifest.host == host)
+            .and_then(|manifest| manifest.icon);
+        if let Some(builtin) = builtin {
+            meta.icon = vmux_core::PageIcon::Builtin(builtin);
+        }
+    }
+}
+
+#[cfg(test)]
+mod apply_page_icons_tests {
+    use super::*;
+    use vmux_core::page::PageManifest;
+    use vmux_core::{BuiltinIcon, PageIcon, PageMetadata};
+
+    fn resolve(url: &str, seed: PageIcon, manifests: &[PageManifest]) -> PageIcon {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, apply_page_icons);
+        for manifest in manifests {
+            app.world_mut().spawn(*manifest);
+        }
+        let entity = app
+            .world_mut()
+            .spawn(PageMetadata {
+                title: String::new(),
+                url: url.to_string(),
+                icon: seed,
+                bg_color: None,
+            })
+            .id();
+        app.update();
+        app.world()
+            .get::<PageMetadata>(entity)
+            .unwrap()
+            .icon
+            .clone()
+    }
+
+    const TEAM: PageManifest = PageManifest {
+        host: "team",
+        title: "Team",
+        keywords: &[],
+        icon: Some(BuiltinIcon::Users),
+        command_bar: true,
+    };
+    const AGENT: PageManifest = PageManifest {
+        host: "agent",
+        title: "Agent",
+        keywords: &[],
+        icon: Some(BuiltinIcon::Sparkles),
+        command_bar: false,
+    };
+
+    #[test]
+    fn vmux_page_gets_manifest_builtin_icon() {
+        assert_eq!(
+            resolve("vmux://team/", PageIcon::None, &[TEAM]),
+            PageIcon::Builtin(BuiltinIcon::Users)
+        );
+    }
+
+    #[test]
+    fn file_url_gets_files_icon() {
+        assert_eq!(
+            resolve("file:///a/b.rs", PageIcon::None, &[]),
+            PageIcon::Builtin(BuiltinIcon::Files)
+        );
+    }
+
+    #[test]
+    fn agent_cli_session_keeps_none_for_provider_favicon() {
+        assert_eq!(
+            resolve("vmux://agent/vibe/abc", PageIcon::None, &[AGENT]),
+            PageIcon::None
+        );
+    }
+
+    #[test]
+    fn existing_favicon_is_not_overwritten() {
+        assert_eq!(
+            resolve("vmux://team/", PageIcon::Favicon("x".into()), &[TEAM]),
+            PageIcon::Favicon("x".into())
+        );
+    }
 }
 
 fn push_pane_tree_emit(
@@ -2334,10 +2451,10 @@ fn push_pane_tree_emit(
                                 } else {
                                     meta.url.clone()
                                 },
-                                favicon_url: if is_new_stack {
-                                    String::new()
+                                icon: if is_new_stack {
+                                    vmux_core::PageIcon::None
                                 } else {
-                                    meta.favicon_url.clone()
+                                    meta.icon.clone()
                                 },
                                 is_active: stack_is_active,
                                 stack_index: stack_index as u32,
@@ -2352,7 +2469,7 @@ fn push_pane_tree_emit(
                     stacks.push(StackNode {
                         title: "New Stack".to_string(),
                         url: String::new(),
-                        favicon_url: String::new(),
+                        icon: vmux_core::PageIcon::None,
                         is_active: stack_is_active,
                         stack_index: stack_index as u32,
                         is_loading: false,
@@ -2435,14 +2552,8 @@ fn push_tabs_host_emit(
             let title = found
                 .map(|(meta, osc)| effective_title(osc, &meta.title).to_string())
                 .unwrap_or_default();
-            let (url, favicon_url, bg_color) = found
-                .map(|(meta, _)| {
-                    (
-                        meta.url.clone(),
-                        meta.favicon_url.clone(),
-                        meta.bg_color.clone(),
-                    )
-                })
+            let (url, icon, bg_color) = found
+                .map(|(meta, _)| (meta.url.clone(), meta.icon.clone(), meta.bg_color.clone()))
                 .unwrap_or_default();
             let name = if tab.name.is_empty() {
                 "Tab".to_string()
@@ -2456,7 +2567,7 @@ fn push_tabs_host_emit(
                 bg_color,
                 title,
                 url,
-                favicon_url,
+                icon,
                 is_done_unseen: done_tabs.contains(&entity),
             }
         })
@@ -2601,7 +2712,7 @@ fn handle_browser_commands(
                     if let Ok(mut meta) = meta_q.get_mut(webview) {
                         meta.url = resolved.clone();
                         meta.title = resolved.clone();
-                        meta.favicon_url.clear();
+                        meta.icon = vmux_core::PageIcon::None;
                     }
                     commands
                         .entity(webview)
@@ -4675,7 +4786,7 @@ mod tests {
         let rows = [StackRow {
             title: "Google".to_string(),
             url: "https://www.google.com".to_string(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             is_active: true,
             bg_color: None,
         }];
@@ -5356,7 +5467,7 @@ mod tests {
                     vmux_core::PageMetadata {
                         url: native_url.to_string(),
                         title: native_url.to_string(),
-                        favicon_url: String::new(),
+                        icon: vmux_core::PageIcon::None,
                         bg_color: None,
                     },
                 ))

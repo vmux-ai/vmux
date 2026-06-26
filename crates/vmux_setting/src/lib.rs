@@ -17,7 +17,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "settings",
     title: "Settings",
     keywords: &["preferences", "config"],
-    icon: "settings",
+    icon: Some(vmux_core::BuiltinIcon::Settings),
     command_bar: true,
 };
 

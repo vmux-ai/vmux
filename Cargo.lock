@@ -10219,6 +10219,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "vmux_core",
  "wasm-bindgen",
  "web-sys",
 ]

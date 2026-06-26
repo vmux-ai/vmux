@@ -55,7 +55,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "services",
     title: "Services",
     keywords: &["processes", "monitor"],
-    icon: "activity",
+    icon: Some(vmux_core::BuiltinIcon::Activity),
     command_bar: true,
 };
 

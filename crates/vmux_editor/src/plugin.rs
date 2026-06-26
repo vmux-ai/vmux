@@ -139,7 +139,7 @@ fn new_file_view_bundle(
             PageMetadata {
                 title,
                 url: url.to_string(),
-                favicon_url: String::new(),
+                icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
             WebviewSource::new(url),
@@ -1420,7 +1420,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     host: "files",
     title: "Files",
     keywords: &["file", "open"],
-    icon: "file",
+    icon: Some(vmux_core::BuiltinIcon::Files),
     command_bar: false,
 };
 

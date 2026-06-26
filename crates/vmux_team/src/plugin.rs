@@ -118,8 +118,8 @@ fn agent_page(
     let mut title = String::new();
     for candidate in candidates {
         if let Ok(meta) = meta_q.get(candidate) {
-            if favicon.is_empty() && !meta.favicon_url.is_empty() {
-                favicon = meta.favicon_url.clone();
+            if favicon.is_empty() && !meta.icon.favicon_url().is_empty() {
+                favicon = meta.icon.favicon_url().to_string();
             }
             if title.is_empty() && !meta.title.is_empty() {
                 title = meta.title.clone();

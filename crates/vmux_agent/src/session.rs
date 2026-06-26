@@ -95,7 +95,7 @@ mod url_tests {
         PageMetadata {
             title: String::new(),
             url: String::new(),
-            favicon_url: String::new(),
+            icon: vmux_core::PageIcon::None,
             bg_color: None,
         }
     }

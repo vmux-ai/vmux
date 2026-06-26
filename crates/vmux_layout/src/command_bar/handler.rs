@@ -201,8 +201,7 @@ fn agent_pages() -> Vec<CommandBarPage> {
             url: kind.cli_url_prefix(),
             title: kind.display_name().to_string(),
             keywords: vec![kind.as_url_segment().to_string(), "agent".to_string()],
-            icon: String::new(),
-            favicon: true,
+            icon: vmux_core::PageIcon::None,
             shortcut: String::new(),
         })
         .collect()
@@ -2540,7 +2539,11 @@ mod tests {
     fn agent_pages_lists_all_kinds_with_favicon() {
         let pages = agent_pages();
         assert_eq!(pages.len(), 3);
-        assert!(pages.iter().all(|p| p.favicon && p.host == "agent"));
+        assert!(
+            pages
+                .iter()
+                .all(|p| matches!(p.icon, vmux_core::PageIcon::None) && p.host == "agent")
+        );
         assert!(
             pages
                 .iter()
