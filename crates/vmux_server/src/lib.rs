@@ -41,6 +41,7 @@ macro_rules! web_pages {
 web_pages! {
     render_layout: "layout" => vmux_layout::page::Page,
     render_command_bar: "command-bar" => vmux_layout::command_bar::page::Page,
+    render_island: "island" => vmux_layout::island::page::Page,
     render_debug: "debug" => vmux_layout::debug_page::Page,
     render_error: "error" => vmux_layout::error_page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,

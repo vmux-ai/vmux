@@ -104,6 +104,14 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         command_bar: false,
     };
 #[cfg(not(target_arch = "wasm32"))]
+pub const ISLAND_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "island",
+    title: "Island",
+    keywords: &[],
+    icon: "",
+    command_bar: false,
+};
+#[cfg(not(target_arch = "wasm32"))]
 pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "debug",
     title: "Debug",

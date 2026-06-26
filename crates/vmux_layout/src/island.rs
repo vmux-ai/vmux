@@ -1,5 +1,8 @@
 pub mod state;
 
+#[cfg(target_arch = "wasm32")]
+pub mod page;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
