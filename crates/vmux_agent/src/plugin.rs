@@ -551,11 +551,7 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     agent_terms: Query<
         'w,
         's,
-        (
-            Entity,
-            &'static vmux_service::protocol::ProcessId,
-            &'static ChildOf,
-        ),
+        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
         With<AgentSession>,
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
@@ -563,16 +559,6 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
 }
 
 impl AgentBrowserResolve<'_, '_> {
-    /// The agent's own terminal pane (its stack's parent pane).
-    fn agent_term_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
-        let (_, _, term_co) = self
-            .agent_terms
-            .iter()
-            .find(|(_, pid, _)| **pid == anchor)?;
-        self.child_of.get(term_co.get()).ok().map(|co| co.get())
-    }
-
     /// The browser pane the agent opened beside itself: a sibling leaf pane
     /// (same parent split) that hosts a browser. Resolved from the layout tree,
     /// never from the user's `FocusedStack`.
@@ -597,25 +583,39 @@ impl AgentBrowserResolve<'_, '_> {
     }
 
     /// Resolve the agent's browser pane from its anchor, and record it as that
-    /// agent's active pane (for its focus ring). Returns the pane entity.
-    fn claim_browser_pane(
-        &mut self,
-        anchor: vmux_service::protocol::ProcessId,
-        sid: Option<&String>,
-    ) -> Option<Entity> {
-        let pane = self.browser_pane_for(self.agent_term_pane(anchor)?)?;
-        if let Some(sid) = sid {
-            self.activate
-                .write(vmux_layout::active_panes::ActivatePane {
-                    profile: vmux_layout::active_panes::ProfileId::Agent(sid.clone()),
-                    active: vmux_layout::active_panes::ActiveStack {
-                        tab: None,
-                        pane: Some(pane),
-                        stack: None,
-                    },
-                });
-        }
+    /// agent's active pane (for its focus ring). Returns the pane entity, or
+    /// `None` if the agent has no browser pane yet (caller keeps the default).
+    fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        let agent_pane = self.child_of.get(term_co.get()).ok()?.get();
+        let pane = self.browser_pane_for(agent_pane)?;
+        self.activate
+            .write(vmux_layout::active_panes::ActivatePane {
+                profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                active: vmux_layout::active_panes::ActiveStack {
+                    tab: None,
+                    pane: Some(pane),
+                    stack: None,
+                },
+            });
         Some(pane)
+    }
+
+    /// Returns the explicit pane if given, else the agent's resolved browser
+    /// pane (formatted as a `pane:` target string). Never falls back to the
+    /// user's focus.
+    fn resolve_pane(
+        &mut self,
+        pane: &Option<String>,
+        anchor: &Option<vmux_service::protocol::ProcessId>,
+    ) -> Option<String> {
+        if pane.is_some() {
+            return pane.clone();
+        }
+        let anchor = (*anchor)?;
+        self.claim_browser_pane(anchor)
+            .map(|p| p.to_bits().to_string())
     }
 }
 
@@ -750,10 +750,9 @@ fn handle_agent_commands(
                 if pane.is_none()
                     && let CommandOrigin::Agent {
                         anchor: Some(anchor),
-                        sid,
+                        ..
                     } = &request.origin
-                    && let Some(browser_pane) =
-                        writers.browse.claim_browser_pane(*anchor, sid.as_ref())
+                    && let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor)
                 {
                     pane = Some(browser_pane.to_bits().to_string());
                 }
@@ -1275,6 +1274,7 @@ fn handle_agent_queries(
     mut browser_scroll_writer: MessageWriter<BrowserScrollRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
+    mut browse: AgentBrowserResolve,
 ) {
     let Some(service) = service else { return };
 
@@ -1323,20 +1323,24 @@ fn handle_agent_queries(
                     pane: pane.clone(),
                 });
             }
-            AgentQuery::BrowserSnapshot { ref pane } => {
+            AgentQuery::BrowserSnapshot {
+                ref pane,
+                ref anchor,
+            } => {
                 browser_snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
-                    pane: pane.clone(),
+                    pane: browse.resolve_pane(pane, anchor),
                 });
             }
             AgentQuery::BrowserScroll {
                 ref pane,
                 ref to,
                 delta,
+                ref anchor,
             } => {
                 browser_scroll_writer.write(BrowserScrollRequest {
                     request_id: request.request_id.0,
-                    pane: pane.clone(),
+                    pane: browse.resolve_pane(pane, anchor),
                     to: to.clone(),
                     delta,
                 });

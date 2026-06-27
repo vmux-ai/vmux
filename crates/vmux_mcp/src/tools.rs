@@ -719,7 +719,7 @@ pub fn dispatch_with_anchor(
             Some(_) => return Err("browser_snapshot.target must be a string".to_string()),
         };
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::BrowserSnapshot { pane },
+            vmux_service::protocol::AgentQuery::BrowserSnapshot { pane, anchor },
         ));
     }
     if name == "browser_scroll" {
@@ -755,7 +755,12 @@ pub fn dispatch_with_anchor(
             return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
         }
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::BrowserScroll { pane, to, delta },
+            vmux_service::protocol::AgentQuery::BrowserScroll {
+                pane,
+                to,
+                delta,
+                anchor,
+            },
         ));
     }
     if name == "record_start" {
@@ -888,7 +893,8 @@ mod tests {
         assert_eq!(
             q,
             AgentQuery::BrowserSnapshot {
-                pane: Some("pane:42".to_string())
+                pane: Some("pane:42".to_string()),
+                anchor: None,
             }
         );
     }
@@ -896,7 +902,13 @@ mod tests {
     #[test]
     fn browser_snapshot_defaults_pane_to_none() {
         let q = dispatch_query("browser_snapshot", serde_json::json!({})).unwrap();
-        assert_eq!(q, AgentQuery::BrowserSnapshot { pane: None });
+        assert_eq!(
+            q,
+            AgentQuery::BrowserSnapshot {
+                pane: None,
+                anchor: None,
+            }
+        );
     }
 
     #[test]
@@ -919,7 +931,8 @@ mod tests {
             AgentQuery::BrowserScroll {
                 pane: None,
                 to: None,
-                delta: Some(600)
+                delta: Some(600),
+                anchor: None,
             }
         );
     }
@@ -936,7 +949,8 @@ mod tests {
             AgentQuery::BrowserScroll {
                 pane: Some("pane:3".to_string()),
                 to: Some("bottom".to_string()),
-                delta: None
+                delta: None,
+                anchor: None,
             }
         );
     }
