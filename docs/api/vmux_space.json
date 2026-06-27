@@ -1,0 +1,235 @@
+{
+  "name": "vmux_space",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_space",
+    "docs_md": "Spaces (workspace groupings): CRUD over named spaces, per-space startup URL and\ndirectory, active-space tracking, and the spaces list webview.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_space::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_space::model",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "bootstrap_profile_name",
+            "path": "vmux_space::model::bootstrap_profile_name",
+            "signature": "pub fn bootstrap_profile_name() -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "BOOTSTRAP_SPACE_ID",
+            "path": "vmux_space::model::BOOTSTRAP_SPACE_ID",
+            "signature": "pub const BOOTSTRAP_SPACE_ID",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "BOOTSTRAP_SPACE_NAME",
+            "path": "vmux_space::model::BOOTSTRAP_SPACE_NAME",
+            "signature": "pub const BOOTSTRAP_SPACE_NAME",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpaceRecord",
+            "path": "vmux_space::model::SpaceRecord",
+            "signature": "pub struct SpaceRecord",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "profile",
+                "signature": "profile: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "bootstrap_space_record",
+            "path": "vmux_space::model::bootstrap_space_record",
+            "signature": "pub fn bootstrap_space_record() -> SpaceRecord",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "normalize_space_id",
+            "path": "vmux_space::model::normalize_space_id",
+            "signature": "pub fn normalize_space_id(input: &str) -> String",
+            "docs_md": "Slugs a space name into a filesystem-relative id, preserving `/` as a\nnested-directory separator (each segment is slugged independently).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "unique_space_id_among",
+            "path": "vmux_space::model::unique_space_id_among",
+            "signature": "pub fn unique_space_id_among(existing: &std::collections::HashSet<String>, name: &str) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_space::cwd",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "valid_cwd",
+            "path": "vmux_space::cwd::valid_cwd",
+            "signature": "pub fn valid_cwd(cwd: &str) -> Result<Option<std::path::PathBuf>, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_space::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SaveSpaceRequest",
+            "path": "vmux_space::plugin::SaveSpaceRequest",
+            "signature": "pub struct SaveSpaceRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: std::path::PathBuf",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpaceCommandRequest",
+            "path": "vmux_space::plugin::SpaceCommandRequest",
+            "signature": "pub struct SpaceCommandRequest",
+            "docs_md": "A space CRUD request from a non-web source (e.g. the agent/MCP). Relayed into\nthe same `SpaceCommandEvent` flow the web spaces page uses.",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: String",
+                "docs_md": ""
+              },
+              {
+                "name": "space_id",
+                "signature": "space_id: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpacePlugin",
+            "path": "vmux_space::plugin::SpacePlugin",
+            "signature": "pub struct SpacePlugin",
+            "docs_md": "Wires the spaces domain: space commands, active-space syncing, orphan pruning,\nstartup-URL resolution, and the spaces list webview.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_space::snapshot_updater",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "update_spaces_snapshot",
+            "path": "vmux_space::snapshot_updater::update_spaces_snapshot",
+            "signature": "pub fn update_spaces_snapshot(spaces: Query<'_, '_, (&vmux_layout::space::SpaceId, &Name, Option<&vmux_core::Order>), With<vmux_layout::space::Space>>, active_id: Res<'_, vmux_layout::space::ActiveSpaceId>, active_name: Query<'_, '_, &Name, (With<vmux_layout::space::Space>, With<vmux_core::Active>)>, snapshot: ResMut<'_, vmux_command::snapshot::CommandBarSpacesSnapshot>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_space::spaces",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ActiveSpace",
+            "path": "vmux_space::spaces::ActiveSpace",
+            "signature": "pub struct ActiveSpace",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "record",
+                "signature": "record: crate::model::SpaceRecord",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "space_profile_bundle",
+            "path": "vmux_space::spaces::space_profile_bundle",
+            "signature": "pub fn space_profile_bundle(record: &crate::model::SpaceRecord) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Spaces",
+            "path": "vmux_space::spaces::Spaces",
+            "signature": "pub struct Spaces",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

@@ -1,3 +1,5 @@
+//! Browser and page-open orchestration on top of `bevy_cef`: page resolution, CEF
+//! backend management, and input forwarding between the native layout and embedded pages.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 mod extensions;
@@ -59,6 +61,8 @@ use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
+/// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
+/// the CEF backend, and forwards pointer and cursor input between the layout and pages.
 pub struct BrowserPlugin;
 
 impl Plugin for BrowserPlugin {

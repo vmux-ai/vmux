@@ -91,6 +91,8 @@ fn detect_agent_provider_availability(
     }
 }
 
+/// Wires the agent domain: CLI agent strategies, session watching, discovery and exit
+/// detection, and handling of agent commands, queries, tool calls, screenshots, and recordings.
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {

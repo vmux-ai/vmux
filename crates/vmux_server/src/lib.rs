@@ -1,3 +1,6 @@
+//! Serves embedded webview page bundles over `vmux://` URLs on the host, and on wasm
+//! dispatches the web build to the correct per-host Dioxus page.
+
 #[cfg(feature = "build")]
 pub mod build;
 

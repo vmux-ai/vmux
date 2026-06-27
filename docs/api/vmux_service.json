@@ -1,0 +1,5152 @@
+{
+  "name": "vmux_service",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_service",
+    "docs_md": "Background daemon that hosts persistent terminal processes across app restarts, plus\nthe processes-monitor webview page.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_service::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "macro",
+        "name": "write_message_blocking",
+        "path": "vmux_service::write_message_blocking",
+        "signature": "macro_rules! write_message_blocking",
+        "docs_md": "Serialize a message to rkyv bytes, write as a length-prefixed frame (blocking).",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "macro",
+        "name": "write_message",
+        "path": "vmux_service::write_message",
+        "signature": "macro_rules! write_message",
+        "docs_md": "Serialize a message to rkyv bytes, write as a length-prefixed frame.\nUse: `write_message(&mut writer, &my_msg).await?`",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "macro",
+        "name": "read_message",
+        "path": "vmux_service::read_message",
+        "signature": "macro_rules! read_message",
+        "docs_md": "Read a length-prefixed frame, deserialize from rkyv bytes.\nUse: `let msg: Option<MyMsg> = read_message!(reader)?;`",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "macro",
+        "name": "read_message_blocking",
+        "path": "vmux_service::read_message_blocking",
+        "signature": "macro_rules! read_message_blocking",
+        "docs_md": "Read a length-prefixed frame (blocking), deserialize from rkyv bytes.\nUse: `let msg: Option<MyMsg> = read_message_blocking!(reader, MyMsg)?;`",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_service::event",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "PROCESSES_LIST_EVENT",
+            "path": "vmux_service::event::PROCESSES_LIST_EVENT",
+            "signature": "pub const PROCESSES_LIST_EVENT",
+            "docs_md": "Event name for process list updates (host -> webview).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "PROCESSES_NAVIGATE_EVENT",
+            "path": "vmux_service::event::PROCESSES_NAVIGATE_EVENT",
+            "signature": "pub const PROCESSES_NAVIGATE_EVENT",
+            "docs_md": "Event name for process navigation (webview -> host).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessesListEvent",
+            "path": "vmux_service::event::ProcessesListEvent",
+            "signature": "pub struct ProcessesListEvent",
+            "docs_md": "Service connection status + process list, sent periodically to the webview.",
+            "members": [
+              {
+                "name": "connected",
+                "signature": "connected: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "processes",
+                "signature": "processes: Vec<ProcessEntry>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessesListEvent",
+            "path": "vmux_service::event::ArchivedProcessesListEvent",
+            "signature": "pub struct ArchivedProcessesListEvent",
+            "docs_md": "An archived [`ProcessesListEvent`]",
+            "members": [
+              {
+                "name": "connected",
+                "signature": "connected: Archived",
+                "docs_md": "The archived counterpart of [`ProcessesListEvent::connected`]"
+              },
+              {
+                "name": "processes",
+                "signature": "processes: Archived",
+                "docs_md": "The archived counterpart of [`ProcessesListEvent::processes`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessesListEvent`",
+                "path": "vmux_service::event::ProcessesListEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessesListEventResolver",
+            "path": "vmux_service::event::ProcessesListEventResolver",
+            "signature": "pub struct ProcessesListEventResolver",
+            "docs_md": "The resolver for an archived [`ProcessesListEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessesListEvent`",
+                "path": "vmux_service::event::ProcessesListEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessEntry",
+            "path": "vmux_service::event::ProcessEntry",
+            "signature": "pub struct ProcessEntry",
+            "docs_md": "A single service-managed process's metadata.",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "shell",
+                "signature": "shell: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cols",
+                "signature": "cols: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "rows",
+                "signature": "rows: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "pid",
+                "signature": "pid: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "uptime_secs",
+                "signature": "uptime_secs: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "cpu_percent",
+                "signature": "cpu_percent: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "mem_bytes",
+                "signature": "mem_bytes: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "attached",
+                "signature": "attached: bool",
+                "docs_md": "Whether a GUI terminal is attached to this process."
+              },
+              {
+                "name": "preview_lines",
+                "signature": "preview_lines: Vec<PreviewLine>",
+                "docs_md": "Last few lines of terminal output for preview."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessEntry",
+            "path": "vmux_service::event::ArchivedProcessEntry",
+            "signature": "pub struct ArchivedProcessEntry",
+            "docs_md": "An archived [`ProcessEntry`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::id`]"
+              },
+              {
+                "name": "shell",
+                "signature": "shell: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::shell`]"
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::cwd`]"
+              },
+              {
+                "name": "cols",
+                "signature": "cols: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::cols`]"
+              },
+              {
+                "name": "rows",
+                "signature": "rows: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::rows`]"
+              },
+              {
+                "name": "pid",
+                "signature": "pid: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::pid`]"
+              },
+              {
+                "name": "uptime_secs",
+                "signature": "uptime_secs: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::uptime_secs`]"
+              },
+              {
+                "name": "cpu_percent",
+                "signature": "cpu_percent: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::cpu_percent`]"
+              },
+              {
+                "name": "mem_bytes",
+                "signature": "mem_bytes: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::mem_bytes`]"
+              },
+              {
+                "name": "attached",
+                "signature": "attached: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::attached`]"
+              },
+              {
+                "name": "preview_lines",
+                "signature": "preview_lines: Archived",
+                "docs_md": "The archived counterpart of [`ProcessEntry::preview_lines`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessEntry`",
+                "path": "vmux_service::event::ProcessEntry"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessEntryResolver",
+            "path": "vmux_service::event::ProcessEntryResolver",
+            "signature": "pub struct ProcessEntryResolver",
+            "docs_md": "The resolver for an archived [`ProcessEntry`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessEntry`",
+                "path": "vmux_service::event::ProcessEntry"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PreviewLine",
+            "path": "vmux_service::event::PreviewLine",
+            "signature": "pub struct PreviewLine",
+            "docs_md": "A simplified terminal line for the preview.",
+            "members": [
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedPreviewLine",
+            "path": "vmux_service::event::ArchivedPreviewLine",
+            "signature": "pub struct ArchivedPreviewLine",
+            "docs_md": "An archived [`PreviewLine`]",
+            "members": [
+              {
+                "name": "text",
+                "signature": "text: Archived",
+                "docs_md": "The archived counterpart of [`PreviewLine::text`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`PreviewLine`",
+                "path": "vmux_service::event::PreviewLine"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PreviewLineResolver",
+            "path": "vmux_service::event::PreviewLineResolver",
+            "signature": "pub struct PreviewLineResolver",
+            "docs_md": "The resolver for an archived [`PreviewLine`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`PreviewLine`",
+                "path": "vmux_service::event::PreviewLine"
+              }
+            ]
+          },
+          {
+            "kind": "function",
+            "name": "format_mem",
+            "path": "vmux_service::event::format_mem",
+            "signature": "pub fn format_mem(bytes: u64) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessNavigateEvent",
+            "path": "vmux_service::event::ProcessNavigateEvent",
+            "signature": "pub struct ProcessNavigateEvent",
+            "docs_md": "Emitted by the processes webview when user clicks a process card.",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "navigate",
+                "signature": "navigate: bool",
+                "docs_md": "Discriminator so serde doesn't confuse with ProcessKillEvent."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessNavigateEvent",
+            "path": "vmux_service::event::ArchivedProcessNavigateEvent",
+            "signature": "pub struct ArchivedProcessNavigateEvent",
+            "docs_md": "An archived [`ProcessNavigateEvent`]",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: Archived",
+                "docs_md": "The archived counterpart of [`ProcessNavigateEvent::process_id`]"
+              },
+              {
+                "name": "navigate",
+                "signature": "navigate: Archived",
+                "docs_md": "The archived counterpart of [`ProcessNavigateEvent::navigate`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessNavigateEvent`",
+                "path": "vmux_service::event::ProcessNavigateEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessNavigateEventResolver",
+            "path": "vmux_service::event::ProcessNavigateEventResolver",
+            "signature": "pub struct ProcessNavigateEventResolver",
+            "docs_md": "The resolver for an archived [`ProcessNavigateEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessNavigateEvent`",
+                "path": "vmux_service::event::ProcessNavigateEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessKillEvent",
+            "path": "vmux_service::event::ProcessKillEvent",
+            "signature": "pub struct ProcessKillEvent",
+            "docs_md": "Emitted to kill a single service-managed process.",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "kill",
+                "signature": "kill: bool",
+                "docs_md": "Discriminator so serde doesn't confuse with ProcessNavigateEvent."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessKillEvent",
+            "path": "vmux_service::event::ArchivedProcessKillEvent",
+            "signature": "pub struct ArchivedProcessKillEvent",
+            "docs_md": "An archived [`ProcessKillEvent`]",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: Archived",
+                "docs_md": "The archived counterpart of [`ProcessKillEvent::process_id`]"
+              },
+              {
+                "name": "kill",
+                "signature": "kill: Archived",
+                "docs_md": "The archived counterpart of [`ProcessKillEvent::kill`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessKillEvent`",
+                "path": "vmux_service::event::ProcessKillEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessKillEventResolver",
+            "path": "vmux_service::event::ProcessKillEventResolver",
+            "signature": "pub struct ProcessKillEventResolver",
+            "docs_md": "The resolver for an archived [`ProcessKillEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessKillEvent`",
+                "path": "vmux_service::event::ProcessKillEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessKillAllEvent",
+            "path": "vmux_service::event::ProcessKillAllEvent",
+            "signature": "pub struct ProcessKillAllEvent",
+            "docs_md": "Emitted to kill all service-managed processes.",
+            "members": [
+              {
+                "name": "kill_all",
+                "signature": "kill_all: bool",
+                "docs_md": "Discriminator field so serde doesn't match arbitrary IPC payloads."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessKillAllEvent",
+            "path": "vmux_service::event::ArchivedProcessKillAllEvent",
+            "signature": "pub struct ArchivedProcessKillAllEvent",
+            "docs_md": "An archived [`ProcessKillAllEvent`]",
+            "members": [
+              {
+                "name": "kill_all",
+                "signature": "kill_all: Archived",
+                "docs_md": "The archived counterpart of [`ProcessKillAllEvent::kill_all`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessKillAllEvent`",
+                "path": "vmux_service::event::ProcessKillAllEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessKillAllEventResolver",
+            "path": "vmux_service::event::ProcessKillAllEventResolver",
+            "signature": "pub struct ProcessKillAllEventResolver",
+            "docs_md": "The resolver for an archived [`ProcessKillAllEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessKillAllEvent`",
+                "path": "vmux_service::event::ProcessKillAllEvent"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::agent",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "PageProvider",
+            "path": "vmux_service::agent::PageProvider",
+            "signature": "pub struct PageProvider",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "build_request",
+                "signature": "build_request: crate::stream::BuildRequest",
+                "docs_md": ""
+              },
+              {
+                "name": "parse_sse",
+                "signature": "parse_sse: crate::stream::ParseSse",
+                "docs_md": ""
+              },
+              {
+                "name": "env_var",
+                "signature": "env_var: &'static str",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "resolve_provider",
+            "path": "vmux_service::agent::resolve_provider",
+            "signature": "pub fn resolve_provider(provider: &str) -> Option<PageProvider>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "SessionInput",
+            "path": "vmux_service::agent::SessionInput",
+            "signature": "pub enum SessionInput",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "User",
+                "signature": "User",
+                "docs_md": ""
+              },
+              {
+                "name": "Approve",
+                "signature": "Approve",
+                "docs_md": ""
+              },
+              {
+                "name": "Close",
+                "signature": "Close",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SessionHandle",
+            "path": "vmux_service::agent::SessionHandle",
+            "signature": "pub struct SessionHandle",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "input_tx",
+                "signature": "input_tx: mpsc::UnboundedSender<SessionInput>",
+                "docs_md": ""
+              },
+              {
+                "name": "stream_tx",
+                "signature": "stream_tx: broadcast::Sender<crate::protocol::ServiceMessage>",
+                "docs_md": ""
+              },
+              {
+                "name": "messages",
+                "signature": "messages: std::sync::Arc<tokio::sync::Mutex<Vec<crate::message::Message>>>",
+                "docs_md": ""
+              },
+              {
+                "name": "task",
+                "signature": "task: tokio::task::JoinHandle<()>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentSessionManager",
+            "path": "vmux_service::agent::AgentSessionManager",
+            "signature": "pub struct AgentSessionManager",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::agent_broker",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "type_alias",
+            "name": "PendingCommands",
+            "path": "vmux_service::agent_broker::PendingCommands",
+            "signature": "pub type PendingCommands",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "PendingQueries",
+            "path": "vmux_service::agent_broker::PendingQueries",
+            "signature": "pub type PendingQueries",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "PendingToolCalls",
+            "path": "vmux_service::agent_broker::PendingToolCalls",
+            "signature": "pub type PendingToolCalls",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentBroker",
+            "path": "vmux_service::agent_broker::AgentBroker",
+            "signature": "pub struct AgentBroker",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::agent_events",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "CommandOrigin",
+            "path": "vmux_service::agent_events::CommandOrigin",
+            "signature": "pub enum CommandOrigin",
+            "docs_md": "Who issued a command relayed through the agent request plumbing. Most\n`AgentCommandRequest`s originate from an agent (`Agent`), but some user\nactions (e.g. opening a history entry) reuse the same path. A CLI agent is\nidentified by its MCP `anchor` (`ProcessId`); a page agent by its `sid`.",
+            "members": [
+              {
+                "name": "User",
+                "signature": "User",
+                "docs_md": ""
+              },
+              {
+                "name": "Agent",
+                "signature": "Agent",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentCommandRequest",
+            "path": "vmux_service::agent_events::AgentCommandRequest",
+            "signature": "pub struct AgentCommandRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: crate::protocol::AgentRequestId",
+                "docs_md": ""
+              },
+              {
+                "name": "origin",
+                "signature": "origin: CommandOrigin",
+                "docs_md": ""
+              },
+              {
+                "name": "command",
+                "signature": "command: crate::protocol::AgentCommand",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentQueryRequest",
+            "path": "vmux_service::agent_events::AgentQueryRequest",
+            "signature": "pub struct AgentQueryRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: crate::protocol::AgentRequestId",
+                "docs_md": ""
+              },
+              {
+                "name": "query",
+                "signature": "query: crate::protocol::AgentQuery",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentToolCallRequest",
+            "path": "vmux_service::agent_events::AgentToolCallRequest",
+            "signature": "pub struct AgentToolCallRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: crate::protocol::AgentRequestId",
+                "docs_md": ""
+              },
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "args_json",
+                "signature": "args_json: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentCommandResultEvent",
+            "path": "vmux_service::agent_events::AgentCommandResultEvent",
+            "signature": "pub struct AgentCommandResultEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: crate::protocol::AgentRequestId",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: crate::protocol::AgentCommandResult",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentQueryResultEvent",
+            "path": "vmux_service::agent_events::AgentQueryResultEvent",
+            "signature": "pub struct AgentQueryResultEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: crate::protocol::AgentRequestId",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: crate::protocol::AgentQueryResult",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PageAgentDelta",
+            "path": "vmux_service::agent_events::PageAgentDelta",
+            "signature": "pub struct PageAgentDelta",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PageAgentRunStatus",
+            "path": "vmux_service::agent_events::PageAgentRunStatus",
+            "signature": "pub struct PageAgentRunStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "status",
+                "signature": "status: crate::protocol::AgentRunStatus",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PageAgentAwaitingApproval",
+            "path": "vmux_service::agent_events::PageAgentAwaitingApproval",
+            "signature": "pub struct PageAgentAwaitingApproval",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "call_id",
+                "signature": "call_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "args_json",
+                "signature": "args_json: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PageAgentSnapshot",
+            "path": "vmux_service::agent_events::PageAgentSnapshot",
+            "signature": "pub struct PageAgentSnapshot",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "messages_json",
+                "signature": "messages_json: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::bundle",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "is_bundled_path",
+            "path": "vmux_service::bundle::is_bundled_path",
+            "signature": "pub fn is_bundled_path(exe: &std::path::Path) -> bool",
+            "docs_md": "True if `exe` lives at `<X>.app/Contents/MacOS/<binary>`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "bundle_root_for",
+            "path": "vmux_service::bundle::bundle_root_for",
+            "signature": "pub fn bundle_root_for(exe: &std::path::Path) -> Option<std::path::PathBuf>",
+            "docs_md": "Returns the `.app` root if `exe` lives inside a macOS bundle.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "current_bundle_root",
+            "path": "vmux_service::bundle::current_bundle_root",
+            "signature": "pub fn current_bundle_root() -> Option<std::path::PathBuf>",
+            "docs_md": "Resolve bundle root for the currently-running executable.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "is_bundled",
+            "path": "vmux_service::bundle::is_bundled",
+            "signature": "pub fn is_bundled() -> bool",
+            "docs_md": "True if the running process lives inside a `.app` bundle.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "EMBEDDED_AGENT_PLIST",
+            "path": "vmux_service::bundle::EMBEDDED_AGENT_PLIST",
+            "signature": "pub const EMBEDDED_AGENT_PLIST",
+            "docs_md": "Plist filename of the embedded launchd agent (matches packaging/macos/ai.vmux.service.plist).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "EMBEDDED_AGENT_LABEL",
+            "path": "vmux_service::bundle::EMBEDDED_AGENT_LABEL",
+            "signature": "pub const EMBEDDED_AGENT_LABEL",
+            "docs_md": "launchd label of the embedded agent (matches the <Label> in\npackaging/macos/ai.vmux.service.plist).",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::cleanup",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "launch_agents_dir",
+            "path": "vmux_service::cleanup::launch_agents_dir",
+            "signature": "pub fn launch_agents_dir() -> Option<std::path::PathBuf>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "label_from_filename",
+            "path": "vmux_service::cleanup::label_from_filename",
+            "signature": "pub fn label_from_filename(name: &str) -> Option<&str>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "find_legacy_plists_in",
+            "path": "vmux_service::cleanup::find_legacy_plists_in",
+            "signature": "pub fn find_legacy_plists_in(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "remove_plist_files",
+            "path": "vmux_service::cleanup::remove_plist_files",
+            "signature": "pub fn remove_plist_files(paths: &[std::path::PathBuf]) -> std::io::Result<()>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "bootout_label",
+            "path": "vmux_service::cleanup::bootout_label",
+            "signature": "pub fn bootout_label(label: &str)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cleanup_legacy_registrations",
+            "path": "vmux_service::cleanup::cleanup_legacy_registrations",
+            "signature": "pub fn cleanup_legacy_registrations() -> std::io::Result<usize>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::cli",
+        "docs_md": "Implementation of `vmux service ...` subcommands.",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "StatusInfo",
+            "path": "vmux_service::cli::StatusInfo",
+            "signature": "pub struct StatusInfo",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "profile",
+                "signature": "profile: String",
+                "docs_md": ""
+              },
+              {
+                "name": "pid",
+                "signature": "pid: Option<i32>",
+                "docs_md": ""
+              },
+              {
+                "name": "uptime",
+                "signature": "uptime: Option<std::time::Duration>",
+                "docs_md": ""
+              },
+              {
+                "name": "socket",
+                "signature": "socket: std::path::PathBuf",
+                "docs_md": ""
+              },
+              {
+                "name": "identity_short",
+                "signature": "identity_short: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "process_count",
+                "signature": "process_count: Option<u32>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "format_status",
+            "path": "vmux_service::cli::format_status",
+            "signature": "pub fn format_status(s: &StatusInfo) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_status",
+            "path": "vmux_service::cli::cmd_status",
+            "signature": "pub fn cmd_status() -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_install",
+            "path": "vmux_service::cli::cmd_install",
+            "signature": "pub fn cmd_install(binary_path: &std::path::Path) -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_uninstall",
+            "path": "vmux_service::cli::cmd_uninstall",
+            "signature": "pub fn cmd_uninstall() -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_start",
+            "path": "vmux_service::cli::cmd_start",
+            "signature": "pub fn cmd_start(binary_path: &std::path::Path) -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_stop",
+            "path": "vmux_service::cli::cmd_stop",
+            "signature": "pub fn cmd_stop() -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_restart",
+            "path": "vmux_service::cli::cmd_restart",
+            "signature": "pub fn cmd_restart(binary_path: &std::path::Path) -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cmd_logs",
+            "path": "vmux_service::cli::cmd_logs",
+            "signature": "pub fn cmd_logs(follow: bool) -> std::io::Result<i32>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::client",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ServiceClient",
+            "path": "vmux_service::client::ServiceClient",
+            "signature": "pub struct ServiceClient",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ServiceConnection",
+            "path": "vmux_service::client::ServiceConnection",
+            "signature": "pub struct ServiceConnection",
+            "docs_md": "Async client connection to the vmux service.\nWraps the Unix socket with framing/serialization.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ServiceHandle",
+            "path": "vmux_service::client::ServiceHandle",
+            "signature": "pub struct ServiceHandle",
+            "docs_md": "Non-async handle for Bevy systems to communicate with the service.\nUses a background tokio task and std mpsc channels.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "ServiceWake",
+            "path": "vmux_service::client::ServiceWake",
+            "signature": "pub type ServiceWake",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::framing",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "write_raw_frame",
+            "path": "vmux_service::framing::write_raw_frame",
+            "signature": "pub fn write_raw_frame(writer: &mut W, data: &[u8]) -> std::io::Result<()>",
+            "docs_md": "Write a length-prefixed frame to an async writer.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "read_raw_frame",
+            "path": "vmux_service::framing::read_raw_frame",
+            "signature": "pub fn read_raw_frame(reader: &mut R) -> std::io::Result<Option<Vec<u8>>>",
+            "docs_md": "Read a length-prefixed frame from an async reader.\nReturns `None` on clean EOF.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "write_raw_frame_blocking",
+            "path": "vmux_service::framing::write_raw_frame_blocking",
+            "signature": "pub fn write_raw_frame_blocking(writer: &mut W, data: &[u8]) -> std::io::Result<()>",
+            "docs_md": "Write a length-prefixed frame to a blocking writer.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "read_raw_frame_blocking",
+            "path": "vmux_service::framing::read_raw_frame_blocking",
+            "signature": "pub fn read_raw_frame_blocking(reader: &mut R) -> std::io::Result<Option<Vec<u8>>>",
+            "docs_md": "Read a length-prefixed frame from a blocking reader.\nReturns `None` on clean EOF.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::http",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "drive_sse",
+            "path": "vmux_service::http::drive_sse",
+            "signature": "pub fn drive_sse(request: reqwest::Request, parse_sse: crate::stream::ParseSse, tx: crossbeam_channel::Sender<crate::stream::StreamEvent>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::launchd",
+        "docs_md": "macOS LaunchAgent integration for vmux_service.",
+        "items": [
+          {
+            "kind": "function",
+            "name": "generate_plist",
+            "path": "vmux_service::launchd::generate_plist",
+            "signature": "pub fn generate_plist(profile: &str, binary_path: &std::path::Path, log_path: &std::path::Path) -> String",
+            "docs_md": "Render the LaunchAgent plist XML for a profile.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "install",
+            "path": "vmux_service::launchd::install",
+            "signature": "pub fn install(profile: &str, binary_path: &std::path::Path) -> std::io::Result<std::path::PathBuf>",
+            "docs_md": "Write the plist for `profile` pointing at `binary_path`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "uninstall",
+            "path": "vmux_service::launchd::uninstall",
+            "signature": "pub fn uninstall(profile: &str) -> std::io::Result<()>",
+            "docs_md": "Remove the plist and unload from launchd.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "bootstrap",
+            "path": "vmux_service::launchd::bootstrap",
+            "signature": "pub fn bootstrap(plist: &std::path::Path) -> std::io::Result<()>",
+            "docs_md": "`launchctl bootstrap gui/<uid> <plist>`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "bootout",
+            "path": "vmux_service::launchd::bootout",
+            "signature": "pub fn bootout(profile: &str) -> std::io::Result<()>",
+            "docs_md": "`launchctl bootout gui/<uid>/<label>`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "kickstart",
+            "path": "vmux_service::launchd::kickstart",
+            "signature": "pub fn kickstart(label: &str) -> std::io::Result<()>",
+            "docs_md": "`launchctl kickstart -k gui/<uid>/<label>` -- restart cleanly.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "ensure_running",
+            "path": "vmux_service::launchd::ensure_running",
+            "signature": "pub fn ensure_running(profile: &str, binary_path: &std::path::Path) -> std::io::Result<()>",
+            "docs_md": "Make sure the daemon is installed and running. Idempotent.\n`binary_path` is the daemon executable (resolved by the caller).",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::message",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "Message",
+            "path": "vmux_service::message::Message",
+            "signature": "pub enum Message",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "User",
+                "signature": "User",
+                "docs_md": ""
+              },
+              {
+                "name": "Assistant",
+                "signature": "Assistant",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolResult",
+                "signature": "ToolResult",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "AssistantBlock",
+            "path": "vmux_service::message::AssistantBlock",
+            "signature": "pub enum AssistantBlock",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolUse",
+                "signature": "ToolUse",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ServicePlugin",
+            "path": "vmux_service::plugin::ServicePlugin",
+            "signature": "pub struct ServicePlugin",
+            "docs_md": "Registers the services/processes-monitor webview page; the persistent-process server\nitself runs in the `vmux_service` binary.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::process",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "type_alias",
+            "name": "PtyInputWriter",
+            "path": "vmux_service::process::PtyInputWriter",
+            "signature": "pub type PtyInputWriter",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Process",
+            "path": "vmux_service::process::Process",
+            "signature": "pub struct Process",
+            "docs_md": "A single terminal process managed by the service.",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: crate::protocol::ProcessId",
+                "docs_md": ""
+              },
+              {
+                "name": "shell",
+                "signature": "shell: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cols",
+                "signature": "cols: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "rows",
+                "signature": "rows: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "pid",
+                "signature": "pid: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "created_at",
+                "signature": "created_at: std::time::Instant",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessManager",
+            "path": "vmux_service::process::ProcessManager",
+            "signature": "pub struct ProcessManager",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "processes",
+                "signature": "processes: std::collections::HashMap<crate::protocol::ProcessId, Process>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::protocol",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentRequestId",
+            "path": "vmux_service::protocol::AgentRequestId",
+            "signature": "pub struct AgentRequestId",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedAgentRequestId",
+            "path": "vmux_service::protocol::ArchivedAgentRequestId",
+            "signature": "pub struct ArchivedAgentRequestId",
+            "docs_md": "An archived [`AgentRequestId`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`AgentRequestId`",
+                "path": "vmux_service::protocol::AgentRequestId"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "AgentRequestIdResolver",
+            "path": "vmux_service::protocol::AgentRequestIdResolver",
+            "signature": "pub struct AgentRequestIdResolver",
+            "docs_md": "The resolver for an archived [`AgentRequestId`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`AgentRequestId`",
+                "path": "vmux_service::protocol::AgentRequestId"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentShellMode",
+            "path": "vmux_service::protocol::AgentShellMode",
+            "signature": "pub enum AgentShellMode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "NewTab",
+                "signature": "NewTab",
+                "docs_md": ""
+              },
+              {
+                "name": "Active",
+                "signature": "Active",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentShellMode",
+            "path": "vmux_service::protocol::ArchivedAgentShellMode",
+            "signature": "pub enum ArchivedAgentShellMode",
+            "docs_md": "An archived [`AgentShellMode`]",
+            "members": [
+              {
+                "name": "NewTab",
+                "signature": "NewTab",
+                "docs_md": "The archived counterpart of [`AgentShellMode::NewTab`]"
+              },
+              {
+                "name": "Active",
+                "signature": "Active",
+                "docs_md": "The archived counterpart of [`AgentShellMode::Active`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentShellMode`",
+                "path": "vmux_service::protocol::AgentShellMode"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentShellModeResolver",
+            "path": "vmux_service::protocol::AgentShellModeResolver",
+            "signature": "pub enum AgentShellModeResolver",
+            "docs_md": "The resolver for an archived [`AgentShellMode`]",
+            "members": [
+              {
+                "name": "NewTab",
+                "signature": "NewTab",
+                "docs_md": "The resolver for [`AgentShellMode::NewTab`]"
+              },
+              {
+                "name": "Active",
+                "signature": "Active",
+                "docs_md": "The resolver for [`AgentShellMode::Active`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentShellMode`",
+                "path": "vmux_service::protocol::AgentShellMode"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentPaneDirection",
+            "path": "vmux_service::protocol::AgentPaneDirection",
+            "signature": "pub enum AgentPaneDirection",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": ""
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": ""
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": ""
+              },
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentPaneDirection",
+            "path": "vmux_service::protocol::ArchivedAgentPaneDirection",
+            "signature": "pub enum ArchivedAgentPaneDirection",
+            "docs_md": "An archived [`AgentPaneDirection`]",
+            "members": [
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": "The archived counterpart of [`AgentPaneDirection::Top`]"
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": "The archived counterpart of [`AgentPaneDirection::Right`]"
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": "The archived counterpart of [`AgentPaneDirection::Bottom`]"
+              },
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": "The archived counterpart of [`AgentPaneDirection::Left`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentPaneDirection`",
+                "path": "vmux_service::protocol::AgentPaneDirection"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentPaneDirectionResolver",
+            "path": "vmux_service::protocol::AgentPaneDirectionResolver",
+            "signature": "pub enum AgentPaneDirectionResolver",
+            "docs_md": "The resolver for an archived [`AgentPaneDirection`]",
+            "members": [
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": "The resolver for [`AgentPaneDirection::Top`]"
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": "The resolver for [`AgentPaneDirection::Right`]"
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": "The resolver for [`AgentPaneDirection::Bottom`]"
+              },
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": "The resolver for [`AgentPaneDirection::Left`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentPaneDirection`",
+                "path": "vmux_service::protocol::AgentPaneDirection"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "PlacementMode",
+            "path": "vmux_service::protocol::PlacementMode",
+            "signature": "pub enum PlacementMode",
+            "docs_md": "How a spawned page is placed relative to its anchor pane.",
+            "members": [
+              {
+                "name": "Auto",
+                "signature": "Auto",
+                "docs_md": "Default: don't spawn a new pane unless necessary. Reuse the agent's\nexisting terminal region (stack the new terminal into it); split one pane\noff the agent only when no region exists yet."
+              },
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": "New pane split off the anchor pane (X/Y), in the given direction."
+              },
+              {
+                "name": "Stack",
+                "signature": "Stack",
+                "docs_md": "New stack added to the anchor pane itself (Z); the pane keeps its size."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedPlacementMode",
+            "path": "vmux_service::protocol::ArchivedPlacementMode",
+            "signature": "pub enum ArchivedPlacementMode",
+            "docs_md": "An archived [`PlacementMode`]",
+            "members": [
+              {
+                "name": "Auto",
+                "signature": "Auto",
+                "docs_md": "The archived counterpart of [`PlacementMode::Auto`]"
+              },
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": "The archived counterpart of [`PlacementMode::Split`]"
+              },
+              {
+                "name": "Stack",
+                "signature": "Stack",
+                "docs_md": "The archived counterpart of [`PlacementMode::Stack`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`PlacementMode`",
+                "path": "vmux_service::protocol::PlacementMode"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "PlacementModeResolver",
+            "path": "vmux_service::protocol::PlacementModeResolver",
+            "signature": "pub enum PlacementModeResolver",
+            "docs_md": "The resolver for an archived [`PlacementMode`]",
+            "members": [
+              {
+                "name": "Auto",
+                "signature": "Auto",
+                "docs_md": "The resolver for [`PlacementMode::Auto`]"
+              },
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": "The resolver for [`PlacementMode::Split`]"
+              },
+              {
+                "name": "Stack",
+                "signature": "Stack",
+                "docs_md": "The resolver for [`PlacementMode::Stack`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`PlacementMode`",
+                "path": "vmux_service::protocol::PlacementMode"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentCommand",
+            "path": "vmux_service::protocol::AgentCommand",
+            "signature": "pub enum AgentCommand",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "AppCommand",
+                "signature": "AppCommand",
+                "docs_md": ""
+              },
+              {
+                "name": "NewTerminalTab",
+                "signature": "NewTerminalTab",
+                "docs_md": ""
+              },
+              {
+                "name": "RunShell",
+                "signature": "RunShell",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserNavigate",
+                "signature": "BrowserNavigate",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserInstallExtension",
+                "signature": "BrowserInstallExtension",
+                "docs_md": ""
+              },
+              {
+                "name": "TerminalSend",
+                "signature": "TerminalSend",
+                "docs_md": ""
+              },
+              {
+                "name": "FocusPane",
+                "signature": "FocusPane",
+                "docs_md": ""
+              },
+              {
+                "name": "RenameProfile",
+                "signature": "RenameProfile",
+                "docs_md": ""
+              },
+              {
+                "name": "UpdateSettings",
+                "signature": "UpdateSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "UpdateLayout",
+                "signature": "UpdateLayout",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserGoBack",
+                "signature": "BrowserGoBack",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserGoForward",
+                "signature": "BrowserGoForward",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserHistorySearch",
+                "signature": "BrowserHistorySearch",
+                "docs_md": ""
+              },
+              {
+                "name": "OpenInNewStack",
+                "signature": "OpenInNewStack",
+                "docs_md": ""
+              },
+              {
+                "name": "SpaceCommand",
+                "signature": "SpaceCommand",
+                "docs_md": ""
+              },
+              {
+                "name": "OpenBeside",
+                "signature": "OpenBeside",
+                "docs_md": ""
+              },
+              {
+                "name": "Run",
+                "signature": "Run",
+                "docs_md": ""
+              },
+              {
+                "name": "Notify",
+                "signature": "Notify",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentCommand",
+            "path": "vmux_service::protocol::ArchivedAgentCommand",
+            "signature": "pub enum ArchivedAgentCommand",
+            "docs_md": "An archived [`AgentCommand`]",
+            "members": [
+              {
+                "name": "AppCommand",
+                "signature": "AppCommand",
+                "docs_md": "The archived counterpart of [`AgentCommand::AppCommand`]"
+              },
+              {
+                "name": "NewTerminalTab",
+                "signature": "NewTerminalTab",
+                "docs_md": "The archived counterpart of [`AgentCommand::NewTerminalTab`]"
+              },
+              {
+                "name": "RunShell",
+                "signature": "RunShell",
+                "docs_md": "The archived counterpart of [`AgentCommand::RunShell`]"
+              },
+              {
+                "name": "BrowserNavigate",
+                "signature": "BrowserNavigate",
+                "docs_md": "The archived counterpart of [`AgentCommand::BrowserNavigate`]"
+              },
+              {
+                "name": "BrowserInstallExtension",
+                "signature": "BrowserInstallExtension",
+                "docs_md": "The archived counterpart of [`AgentCommand::BrowserInstallExtension`]"
+              },
+              {
+                "name": "TerminalSend",
+                "signature": "TerminalSend",
+                "docs_md": "The archived counterpart of [`AgentCommand::TerminalSend`]"
+              },
+              {
+                "name": "FocusPane",
+                "signature": "FocusPane",
+                "docs_md": "The archived counterpart of [`AgentCommand::FocusPane`]"
+              },
+              {
+                "name": "RenameProfile",
+                "signature": "RenameProfile",
+                "docs_md": "The archived counterpart of [`AgentCommand::RenameProfile`]"
+              },
+              {
+                "name": "UpdateSettings",
+                "signature": "UpdateSettings",
+                "docs_md": "The archived counterpart of [`AgentCommand::UpdateSettings`]"
+              },
+              {
+                "name": "UpdateLayout",
+                "signature": "UpdateLayout",
+                "docs_md": "The archived counterpart of [`AgentCommand::UpdateLayout`]"
+              },
+              {
+                "name": "BrowserGoBack",
+                "signature": "BrowserGoBack",
+                "docs_md": "The archived counterpart of [`AgentCommand::BrowserGoBack`]"
+              },
+              {
+                "name": "BrowserGoForward",
+                "signature": "BrowserGoForward",
+                "docs_md": "The archived counterpart of [`AgentCommand::BrowserGoForward`]"
+              },
+              {
+                "name": "BrowserHistorySearch",
+                "signature": "BrowserHistorySearch",
+                "docs_md": "The archived counterpart of [`AgentCommand::BrowserHistorySearch`]"
+              },
+              {
+                "name": "OpenInNewStack",
+                "signature": "OpenInNewStack",
+                "docs_md": "The archived counterpart of [`AgentCommand::OpenInNewStack`]"
+              },
+              {
+                "name": "SpaceCommand",
+                "signature": "SpaceCommand",
+                "docs_md": "The archived counterpart of [`AgentCommand::SpaceCommand`]"
+              },
+              {
+                "name": "OpenBeside",
+                "signature": "OpenBeside",
+                "docs_md": "The archived counterpart of [`AgentCommand::OpenBeside`]"
+              },
+              {
+                "name": "Run",
+                "signature": "Run",
+                "docs_md": "The archived counterpart of [`AgentCommand::Run`]"
+              },
+              {
+                "name": "Notify",
+                "signature": "Notify",
+                "docs_md": "The archived counterpart of [`AgentCommand::Notify`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentCommand`",
+                "path": "vmux_service::protocol::AgentCommand"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentCommandResolver",
+            "path": "vmux_service::protocol::AgentCommandResolver",
+            "signature": "pub enum AgentCommandResolver",
+            "docs_md": "The resolver for an archived [`AgentCommand`]",
+            "members": [
+              {
+                "name": "AppCommand",
+                "signature": "AppCommand",
+                "docs_md": "The resolver for [`AgentCommand::AppCommand`]"
+              },
+              {
+                "name": "NewTerminalTab",
+                "signature": "NewTerminalTab",
+                "docs_md": "The resolver for [`AgentCommand::NewTerminalTab`]"
+              },
+              {
+                "name": "RunShell",
+                "signature": "RunShell",
+                "docs_md": "The resolver for [`AgentCommand::RunShell`]"
+              },
+              {
+                "name": "BrowserNavigate",
+                "signature": "BrowserNavigate",
+                "docs_md": "The resolver for [`AgentCommand::BrowserNavigate`]"
+              },
+              {
+                "name": "BrowserInstallExtension",
+                "signature": "BrowserInstallExtension",
+                "docs_md": "The resolver for [`AgentCommand::BrowserInstallExtension`]"
+              },
+              {
+                "name": "TerminalSend",
+                "signature": "TerminalSend",
+                "docs_md": "The resolver for [`AgentCommand::TerminalSend`]"
+              },
+              {
+                "name": "FocusPane",
+                "signature": "FocusPane",
+                "docs_md": "The resolver for [`AgentCommand::FocusPane`]"
+              },
+              {
+                "name": "RenameProfile",
+                "signature": "RenameProfile",
+                "docs_md": "The resolver for [`AgentCommand::RenameProfile`]"
+              },
+              {
+                "name": "UpdateSettings",
+                "signature": "UpdateSettings",
+                "docs_md": "The resolver for [`AgentCommand::UpdateSettings`]"
+              },
+              {
+                "name": "UpdateLayout",
+                "signature": "UpdateLayout",
+                "docs_md": "The resolver for [`AgentCommand::UpdateLayout`]"
+              },
+              {
+                "name": "BrowserGoBack",
+                "signature": "BrowserGoBack",
+                "docs_md": "The resolver for [`AgentCommand::BrowserGoBack`]"
+              },
+              {
+                "name": "BrowserGoForward",
+                "signature": "BrowserGoForward",
+                "docs_md": "The resolver for [`AgentCommand::BrowserGoForward`]"
+              },
+              {
+                "name": "BrowserHistorySearch",
+                "signature": "BrowserHistorySearch",
+                "docs_md": "The resolver for [`AgentCommand::BrowserHistorySearch`]"
+              },
+              {
+                "name": "OpenInNewStack",
+                "signature": "OpenInNewStack",
+                "docs_md": "The resolver for [`AgentCommand::OpenInNewStack`]"
+              },
+              {
+                "name": "SpaceCommand",
+                "signature": "SpaceCommand",
+                "docs_md": "The resolver for [`AgentCommand::SpaceCommand`]"
+              },
+              {
+                "name": "OpenBeside",
+                "signature": "OpenBeside",
+                "docs_md": "The resolver for [`AgentCommand::OpenBeside`]"
+              },
+              {
+                "name": "Run",
+                "signature": "Run",
+                "docs_md": "The resolver for [`AgentCommand::Run`]"
+              },
+              {
+                "name": "Notify",
+                "signature": "Notify",
+                "docs_md": "The resolver for [`AgentCommand::Notify`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentCommand`",
+                "path": "vmux_service::protocol::AgentCommand"
+              }
+            ]
+          },
+          {
+            "kind": "constant",
+            "name": "AGENT_QUERY_TIMEOUT",
+            "path": "vmux_service::protocol::AGENT_QUERY_TIMEOUT",
+            "signature": "pub const AGENT_QUERY_TIMEOUT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "RECORD_STOP_TIMEOUT",
+            "path": "vmux_service::protocol::RECORD_STOP_TIMEOUT",
+            "signature": "pub const RECORD_STOP_TIMEOUT",
+            "docs_md": "Stop-recording round-trip bound. `finishWriting` after live encoding is\nfast, but a large clip's moov flush can take a few seconds. Comfortably\nunder vibe's 60s MCP tool timeout.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "AGENT_COMMAND_TIMEOUT",
+            "path": "vmux_service::protocol::AGENT_COMMAND_TIMEOUT",
+            "signature": "pub const AGENT_COMMAND_TIMEOUT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "AGENT_TOOL_TIMEOUT",
+            "path": "vmux_service::protocol::AGENT_TOOL_TIMEOUT",
+            "signature": "pub const AGENT_TOOL_TIMEOUT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "AgentCommandResult",
+            "path": "vmux_service::protocol::AgentCommandResult",
+            "signature": "pub enum AgentCommandResult",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Ok",
+                "signature": "Ok",
+                "docs_md": ""
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": ""
+              },
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentCommandResult",
+            "path": "vmux_service::protocol::ArchivedAgentCommandResult",
+            "signature": "pub enum ArchivedAgentCommandResult",
+            "docs_md": "An archived [`AgentCommandResult`]",
+            "members": [
+              {
+                "name": "Ok",
+                "signature": "Ok",
+                "docs_md": "The archived counterpart of [`AgentCommandResult::Ok`]"
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": "The archived counterpart of [`AgentCommandResult::Text`]"
+              },
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": "The archived counterpart of [`AgentCommandResult::Layout`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The archived counterpart of [`AgentCommandResult::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentCommandResult`",
+                "path": "vmux_service::protocol::AgentCommandResult"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentCommandResultResolver",
+            "path": "vmux_service::protocol::AgentCommandResultResolver",
+            "signature": "pub enum AgentCommandResultResolver",
+            "docs_md": "The resolver for an archived [`AgentCommandResult`]",
+            "members": [
+              {
+                "name": "Ok",
+                "signature": "Ok",
+                "docs_md": "The resolver for [`AgentCommandResult::Ok`]"
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": "The resolver for [`AgentCommandResult::Text`]"
+              },
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": "The resolver for [`AgentCommandResult::Layout`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The resolver for [`AgentCommandResult::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentCommandResult`",
+                "path": "vmux_service::protocol::AgentCommandResult"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentQuery",
+            "path": "vmux_service::protocol::AgentQuery",
+            "signature": "pub enum AgentQuery",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "ReadLayout",
+                "signature": "ReadLayout",
+                "docs_md": ""
+              },
+              {
+                "name": "ReadTerminal",
+                "signature": "ReadTerminal",
+                "docs_md": ""
+              },
+              {
+                "name": "ReadTerminalFull",
+                "signature": "ReadTerminalFull",
+                "docs_md": "Like `ReadTerminal` but returns the full scrollback history plus the\nvisible screen as plain text (used to capture a command's complete\noutput, not just the current viewport)."
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": ""
+              },
+              {
+                "name": "GetSettings",
+                "signature": "GetSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "ListSpaces",
+                "signature": "ListSpaces",
+                "docs_md": ""
+              },
+              {
+                "name": "Screenshot",
+                "signature": "Screenshot",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserSnapshot",
+                "signature": "BrowserSnapshot",
+                "docs_md": ""
+              },
+              {
+                "name": "RecordStart",
+                "signature": "RecordStart",
+                "docs_md": ""
+              },
+              {
+                "name": "RecordStop",
+                "signature": "RecordStop",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentQuery",
+            "path": "vmux_service::protocol::ArchivedAgentQuery",
+            "signature": "pub enum ArchivedAgentQuery",
+            "docs_md": "An archived [`AgentQuery`]",
+            "members": [
+              {
+                "name": "ReadLayout",
+                "signature": "ReadLayout",
+                "docs_md": "The archived counterpart of [`AgentQuery::ReadLayout`]"
+              },
+              {
+                "name": "ReadTerminal",
+                "signature": "ReadTerminal",
+                "docs_md": "The archived counterpart of [`AgentQuery::ReadTerminal`]"
+              },
+              {
+                "name": "ReadTerminalFull",
+                "signature": "ReadTerminalFull",
+                "docs_md": "The archived counterpart of [`AgentQuery::ReadTerminalFull`]"
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": "The archived counterpart of [`AgentQuery::CommandExit`]"
+              },
+              {
+                "name": "GetSettings",
+                "signature": "GetSettings",
+                "docs_md": "The archived counterpart of [`AgentQuery::GetSettings`]"
+              },
+              {
+                "name": "ListSpaces",
+                "signature": "ListSpaces",
+                "docs_md": "The archived counterpart of [`AgentQuery::ListSpaces`]"
+              },
+              {
+                "name": "Screenshot",
+                "signature": "Screenshot",
+                "docs_md": "The archived counterpart of [`AgentQuery::Screenshot`]"
+              },
+              {
+                "name": "BrowserSnapshot",
+                "signature": "BrowserSnapshot",
+                "docs_md": "The archived counterpart of [`AgentQuery::BrowserSnapshot`]"
+              },
+              {
+                "name": "RecordStart",
+                "signature": "RecordStart",
+                "docs_md": "The archived counterpart of [`AgentQuery::RecordStart`]"
+              },
+              {
+                "name": "RecordStop",
+                "signature": "RecordStop",
+                "docs_md": "The archived counterpart of [`AgentQuery::RecordStop`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentQuery`",
+                "path": "vmux_service::protocol::AgentQuery"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentQueryResolver",
+            "path": "vmux_service::protocol::AgentQueryResolver",
+            "signature": "pub enum AgentQueryResolver",
+            "docs_md": "The resolver for an archived [`AgentQuery`]",
+            "members": [
+              {
+                "name": "ReadLayout",
+                "signature": "ReadLayout",
+                "docs_md": "The resolver for [`AgentQuery::ReadLayout`]"
+              },
+              {
+                "name": "ReadTerminal",
+                "signature": "ReadTerminal",
+                "docs_md": "The resolver for [`AgentQuery::ReadTerminal`]"
+              },
+              {
+                "name": "ReadTerminalFull",
+                "signature": "ReadTerminalFull",
+                "docs_md": "The resolver for [`AgentQuery::ReadTerminalFull`]"
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": "The resolver for [`AgentQuery::CommandExit`]"
+              },
+              {
+                "name": "GetSettings",
+                "signature": "GetSettings",
+                "docs_md": "The resolver for [`AgentQuery::GetSettings`]"
+              },
+              {
+                "name": "ListSpaces",
+                "signature": "ListSpaces",
+                "docs_md": "The resolver for [`AgentQuery::ListSpaces`]"
+              },
+              {
+                "name": "Screenshot",
+                "signature": "Screenshot",
+                "docs_md": "The resolver for [`AgentQuery::Screenshot`]"
+              },
+              {
+                "name": "BrowserSnapshot",
+                "signature": "BrowserSnapshot",
+                "docs_md": "The resolver for [`AgentQuery::BrowserSnapshot`]"
+              },
+              {
+                "name": "RecordStart",
+                "signature": "RecordStart",
+                "docs_md": "The resolver for [`AgentQuery::RecordStart`]"
+              },
+              {
+                "name": "RecordStop",
+                "signature": "RecordStop",
+                "docs_md": "The resolver for [`AgentQuery::RecordStop`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentQuery`",
+                "path": "vmux_service::protocol::AgentQuery"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentQueryResult",
+            "path": "vmux_service::protocol::AgentQueryResult",
+            "signature": "pub enum AgentQueryResult",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": ""
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": ""
+              },
+              {
+                "name": "Settings",
+                "signature": "Settings",
+                "docs_md": ""
+              },
+              {
+                "name": "Spaces",
+                "signature": "Spaces",
+                "docs_md": ""
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": ""
+              },
+              {
+                "name": "Image",
+                "signature": "Image",
+                "docs_md": ""
+              },
+              {
+                "name": "Recording",
+                "signature": "Recording",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentQueryResult",
+            "path": "vmux_service::protocol::ArchivedAgentQueryResult",
+            "signature": "pub enum ArchivedAgentQueryResult",
+            "docs_md": "An archived [`AgentQueryResult`]",
+            "members": [
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Layout`]"
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Text`]"
+              },
+              {
+                "name": "Settings",
+                "signature": "Settings",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Settings`]"
+              },
+              {
+                "name": "Spaces",
+                "signature": "Spaces",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Spaces`]"
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::CommandExit`]"
+              },
+              {
+                "name": "Image",
+                "signature": "Image",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Image`]"
+              },
+              {
+                "name": "Recording",
+                "signature": "Recording",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Recording`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The archived counterpart of [`AgentQueryResult::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentQueryResult`",
+                "path": "vmux_service::protocol::AgentQueryResult"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentQueryResultResolver",
+            "path": "vmux_service::protocol::AgentQueryResultResolver",
+            "signature": "pub enum AgentQueryResultResolver",
+            "docs_md": "The resolver for an archived [`AgentQueryResult`]",
+            "members": [
+              {
+                "name": "Layout",
+                "signature": "Layout",
+                "docs_md": "The resolver for [`AgentQueryResult::Layout`]"
+              },
+              {
+                "name": "Text",
+                "signature": "Text",
+                "docs_md": "The resolver for [`AgentQueryResult::Text`]"
+              },
+              {
+                "name": "Settings",
+                "signature": "Settings",
+                "docs_md": "The resolver for [`AgentQueryResult::Settings`]"
+              },
+              {
+                "name": "Spaces",
+                "signature": "Spaces",
+                "docs_md": "The resolver for [`AgentQueryResult::Spaces`]"
+              },
+              {
+                "name": "CommandExit",
+                "signature": "CommandExit",
+                "docs_md": "The resolver for [`AgentQueryResult::CommandExit`]"
+              },
+              {
+                "name": "Image",
+                "signature": "Image",
+                "docs_md": "The resolver for [`AgentQueryResult::Image`]"
+              },
+              {
+                "name": "Recording",
+                "signature": "Recording",
+                "docs_md": "The resolver for [`AgentQueryResult::Recording`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The resolver for [`AgentQueryResult::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentQueryResult`",
+                "path": "vmux_service::protocol::AgentQueryResult"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ApprovalDecision",
+            "path": "vmux_service::protocol::ApprovalDecision",
+            "signature": "pub enum ApprovalDecision",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Allow",
+                "signature": "Allow",
+                "docs_md": ""
+              },
+              {
+                "name": "Deny",
+                "signature": "Deny",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedApprovalDecision",
+            "path": "vmux_service::protocol::ArchivedApprovalDecision",
+            "signature": "pub enum ArchivedApprovalDecision",
+            "docs_md": "An archived [`ApprovalDecision`]",
+            "members": [
+              {
+                "name": "Allow",
+                "signature": "Allow",
+                "docs_md": "The archived counterpart of [`ApprovalDecision::Allow`]"
+              },
+              {
+                "name": "Deny",
+                "signature": "Deny",
+                "docs_md": "The archived counterpart of [`ApprovalDecision::Deny`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ApprovalDecision`",
+                "path": "vmux_service::protocol::ApprovalDecision"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ApprovalDecisionResolver",
+            "path": "vmux_service::protocol::ApprovalDecisionResolver",
+            "signature": "pub enum ApprovalDecisionResolver",
+            "docs_md": "The resolver for an archived [`ApprovalDecision`]",
+            "members": [
+              {
+                "name": "Allow",
+                "signature": "Allow",
+                "docs_md": "The resolver for [`ApprovalDecision::Allow`]"
+              },
+              {
+                "name": "Deny",
+                "signature": "Deny",
+                "docs_md": "The resolver for [`ApprovalDecision::Deny`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ApprovalDecision`",
+                "path": "vmux_service::protocol::ApprovalDecision"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentRunStatus",
+            "path": "vmux_service::protocol::AgentRunStatus",
+            "signature": "pub enum AgentRunStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Streaming",
+                "signature": "Streaming",
+                "docs_md": ""
+              },
+              {
+                "name": "Idle",
+                "signature": "Idle",
+                "docs_md": ""
+              },
+              {
+                "name": "Errored",
+                "signature": "Errored",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedAgentRunStatus",
+            "path": "vmux_service::protocol::ArchivedAgentRunStatus",
+            "signature": "pub enum ArchivedAgentRunStatus",
+            "docs_md": "An archived [`AgentRunStatus`]",
+            "members": [
+              {
+                "name": "Streaming",
+                "signature": "Streaming",
+                "docs_md": "The archived counterpart of [`AgentRunStatus::Streaming`]"
+              },
+              {
+                "name": "Idle",
+                "signature": "Idle",
+                "docs_md": "The archived counterpart of [`AgentRunStatus::Idle`]"
+              },
+              {
+                "name": "Errored",
+                "signature": "Errored",
+                "docs_md": "The archived counterpart of [`AgentRunStatus::Errored`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentRunStatus`",
+                "path": "vmux_service::protocol::AgentRunStatus"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "AgentRunStatusResolver",
+            "path": "vmux_service::protocol::AgentRunStatusResolver",
+            "signature": "pub enum AgentRunStatusResolver",
+            "docs_md": "The resolver for an archived [`AgentRunStatus`]",
+            "members": [
+              {
+                "name": "Streaming",
+                "signature": "Streaming",
+                "docs_md": "The resolver for [`AgentRunStatus::Streaming`]"
+              },
+              {
+                "name": "Idle",
+                "signature": "Idle",
+                "docs_md": "The resolver for [`AgentRunStatus::Idle`]"
+              },
+              {
+                "name": "Errored",
+                "signature": "Errored",
+                "docs_md": "The resolver for [`AgentRunStatus::Errored`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentRunStatus`",
+                "path": "vmux_service::protocol::AgentRunStatus"
+              }
+            ]
+          },
+          {
+            "kind": "function",
+            "name": "validate_agent_command",
+            "path": "vmux_service::protocol::validate_agent_command",
+            "signature": "pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ClientMessage",
+            "path": "vmux_service::protocol::ClientMessage",
+            "signature": "pub enum ClientMessage",
+            "docs_md": "Messages sent from the GUI client to the service.",
+            "members": [
+              {
+                "name": "CreateProcess",
+                "signature": "CreateProcess",
+                "docs_md": ""
+              },
+              {
+                "name": "AttachProcess",
+                "signature": "AttachProcess",
+                "docs_md": ""
+              },
+              {
+                "name": "DetachProcess",
+                "signature": "DetachProcess",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessInput",
+                "signature": "ProcessInput",
+                "docs_md": ""
+              },
+              {
+                "name": "MouseWheel",
+                "signature": "MouseWheel",
+                "docs_md": ""
+              },
+              {
+                "name": "ResizeProcess",
+                "signature": "ResizeProcess",
+                "docs_md": ""
+              },
+              {
+                "name": "ListProcesses",
+                "signature": "ListProcesses",
+                "docs_md": ""
+              },
+              {
+                "name": "KillProcess",
+                "signature": "KillProcess",
+                "docs_md": ""
+              },
+              {
+                "name": "RequestSnapshot",
+                "signature": "RequestSnapshot",
+                "docs_md": ""
+              },
+              {
+                "name": "SetSelection",
+                "signature": "SetSelection",
+                "docs_md": ""
+              },
+              {
+                "name": "ExtendSelectionTo",
+                "signature": "ExtendSelectionTo",
+                "docs_md": ""
+              },
+              {
+                "name": "SelectWordAt",
+                "signature": "SelectWordAt",
+                "docs_md": ""
+              },
+              {
+                "name": "SelectLineAt",
+                "signature": "SelectLineAt",
+                "docs_md": ""
+              },
+              {
+                "name": "GetSelectionText",
+                "signature": "GetSelectionText",
+                "docs_md": ""
+              },
+              {
+                "name": "EnterCopyMode",
+                "signature": "EnterCopyMode",
+                "docs_md": ""
+              },
+              {
+                "name": "ExitCopyMode",
+                "signature": "ExitCopyMode",
+                "docs_md": ""
+              },
+              {
+                "name": "CopyModeKey",
+                "signature": "CopyModeKey",
+                "docs_md": ""
+              },
+              {
+                "name": "SubscribeAgentCommands",
+                "signature": "SubscribeAgentCommands",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": ""
+              },
+              {
+                "name": "Shutdown",
+                "signature": "Shutdown",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentQueryResponse",
+                "signature": "AgentQueryResponse",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentCommandResponse",
+                "signature": "AgentCommandResponse",
+                "docs_md": ""
+              },
+              {
+                "name": "SpawnPageAgent",
+                "signature": "SpawnPageAgent",
+                "docs_md": ""
+              },
+              {
+                "name": "AttachPageAgent",
+                "signature": "AttachPageAgent",
+                "docs_md": ""
+              },
+              {
+                "name": "DetachPageAgent",
+                "signature": "DetachPageAgent",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentInput",
+                "signature": "AgentInput",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentApprove",
+                "signature": "AgentApprove",
+                "docs_md": ""
+              },
+              {
+                "name": "ClosePageAgent",
+                "signature": "ClosePageAgent",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentToolResult",
+                "signature": "AgentToolResult",
+                "docs_md": ""
+              },
+              {
+                "name": "Status",
+                "signature": "Status",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedClientMessage",
+            "path": "vmux_service::protocol::ArchivedClientMessage",
+            "signature": "pub enum ArchivedClientMessage",
+            "docs_md": "An archived [`ClientMessage`]",
+            "members": [
+              {
+                "name": "CreateProcess",
+                "signature": "CreateProcess",
+                "docs_md": "The archived counterpart of [`ClientMessage::CreateProcess`]"
+              },
+              {
+                "name": "AttachProcess",
+                "signature": "AttachProcess",
+                "docs_md": "The archived counterpart of [`ClientMessage::AttachProcess`]"
+              },
+              {
+                "name": "DetachProcess",
+                "signature": "DetachProcess",
+                "docs_md": "The archived counterpart of [`ClientMessage::DetachProcess`]"
+              },
+              {
+                "name": "ProcessInput",
+                "signature": "ProcessInput",
+                "docs_md": "The archived counterpart of [`ClientMessage::ProcessInput`]"
+              },
+              {
+                "name": "MouseWheel",
+                "signature": "MouseWheel",
+                "docs_md": "The archived counterpart of [`ClientMessage::MouseWheel`]"
+              },
+              {
+                "name": "ResizeProcess",
+                "signature": "ResizeProcess",
+                "docs_md": "The archived counterpart of [`ClientMessage::ResizeProcess`]"
+              },
+              {
+                "name": "ListProcesses",
+                "signature": "ListProcesses",
+                "docs_md": "The archived counterpart of [`ClientMessage::ListProcesses`]"
+              },
+              {
+                "name": "KillProcess",
+                "signature": "KillProcess",
+                "docs_md": "The archived counterpart of [`ClientMessage::KillProcess`]"
+              },
+              {
+                "name": "RequestSnapshot",
+                "signature": "RequestSnapshot",
+                "docs_md": "The archived counterpart of [`ClientMessage::RequestSnapshot`]"
+              },
+              {
+                "name": "SetSelection",
+                "signature": "SetSelection",
+                "docs_md": "The archived counterpart of [`ClientMessage::SetSelection`]"
+              },
+              {
+                "name": "ExtendSelectionTo",
+                "signature": "ExtendSelectionTo",
+                "docs_md": "The archived counterpart of [`ClientMessage::ExtendSelectionTo`]"
+              },
+              {
+                "name": "SelectWordAt",
+                "signature": "SelectWordAt",
+                "docs_md": "The archived counterpart of [`ClientMessage::SelectWordAt`]"
+              },
+              {
+                "name": "SelectLineAt",
+                "signature": "SelectLineAt",
+                "docs_md": "The archived counterpart of [`ClientMessage::SelectLineAt`]"
+              },
+              {
+                "name": "GetSelectionText",
+                "signature": "GetSelectionText",
+                "docs_md": "The archived counterpart of [`ClientMessage::GetSelectionText`]"
+              },
+              {
+                "name": "EnterCopyMode",
+                "signature": "EnterCopyMode",
+                "docs_md": "The archived counterpart of [`ClientMessage::EnterCopyMode`]"
+              },
+              {
+                "name": "ExitCopyMode",
+                "signature": "ExitCopyMode",
+                "docs_md": "The archived counterpart of [`ClientMessage::ExitCopyMode`]"
+              },
+              {
+                "name": "CopyModeKey",
+                "signature": "CopyModeKey",
+                "docs_md": "The archived counterpart of [`ClientMessage::CopyModeKey`]"
+              },
+              {
+                "name": "SubscribeAgentCommands",
+                "signature": "SubscribeAgentCommands",
+                "docs_md": "The archived counterpart of [`ClientMessage::SubscribeAgentCommands`]"
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentCommand`]"
+              },
+              {
+                "name": "Shutdown",
+                "signature": "Shutdown",
+                "docs_md": "The archived counterpart of [`ClientMessage::Shutdown`]"
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentQuery`]"
+              },
+              {
+                "name": "AgentQueryResponse",
+                "signature": "AgentQueryResponse",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentQueryResponse`]"
+              },
+              {
+                "name": "AgentCommandResponse",
+                "signature": "AgentCommandResponse",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentCommandResponse`]"
+              },
+              {
+                "name": "SpawnPageAgent",
+                "signature": "SpawnPageAgent",
+                "docs_md": "The archived counterpart of [`ClientMessage::SpawnPageAgent`]"
+              },
+              {
+                "name": "AttachPageAgent",
+                "signature": "AttachPageAgent",
+                "docs_md": "The archived counterpart of [`ClientMessage::AttachPageAgent`]"
+              },
+              {
+                "name": "DetachPageAgent",
+                "signature": "DetachPageAgent",
+                "docs_md": "The archived counterpart of [`ClientMessage::DetachPageAgent`]"
+              },
+              {
+                "name": "AgentInput",
+                "signature": "AgentInput",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentInput`]"
+              },
+              {
+                "name": "AgentApprove",
+                "signature": "AgentApprove",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentApprove`]"
+              },
+              {
+                "name": "ClosePageAgent",
+                "signature": "ClosePageAgent",
+                "docs_md": "The archived counterpart of [`ClientMessage::ClosePageAgent`]"
+              },
+              {
+                "name": "AgentToolResult",
+                "signature": "AgentToolResult",
+                "docs_md": "The archived counterpart of [`ClientMessage::AgentToolResult`]"
+              },
+              {
+                "name": "Status",
+                "signature": "Status",
+                "docs_md": "The archived counterpart of [`ClientMessage::Status`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ClientMessage`",
+                "path": "vmux_service::protocol::ClientMessage"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ClientMessageResolver",
+            "path": "vmux_service::protocol::ClientMessageResolver",
+            "signature": "pub enum ClientMessageResolver",
+            "docs_md": "The resolver for an archived [`ClientMessage`]",
+            "members": [
+              {
+                "name": "CreateProcess",
+                "signature": "CreateProcess",
+                "docs_md": "The resolver for [`ClientMessage::CreateProcess`]"
+              },
+              {
+                "name": "AttachProcess",
+                "signature": "AttachProcess",
+                "docs_md": "The resolver for [`ClientMessage::AttachProcess`]"
+              },
+              {
+                "name": "DetachProcess",
+                "signature": "DetachProcess",
+                "docs_md": "The resolver for [`ClientMessage::DetachProcess`]"
+              },
+              {
+                "name": "ProcessInput",
+                "signature": "ProcessInput",
+                "docs_md": "The resolver for [`ClientMessage::ProcessInput`]"
+              },
+              {
+                "name": "MouseWheel",
+                "signature": "MouseWheel",
+                "docs_md": "The resolver for [`ClientMessage::MouseWheel`]"
+              },
+              {
+                "name": "ResizeProcess",
+                "signature": "ResizeProcess",
+                "docs_md": "The resolver for [`ClientMessage::ResizeProcess`]"
+              },
+              {
+                "name": "ListProcesses",
+                "signature": "ListProcesses",
+                "docs_md": "The resolver for [`ClientMessage::ListProcesses`]"
+              },
+              {
+                "name": "KillProcess",
+                "signature": "KillProcess",
+                "docs_md": "The resolver for [`ClientMessage::KillProcess`]"
+              },
+              {
+                "name": "RequestSnapshot",
+                "signature": "RequestSnapshot",
+                "docs_md": "The resolver for [`ClientMessage::RequestSnapshot`]"
+              },
+              {
+                "name": "SetSelection",
+                "signature": "SetSelection",
+                "docs_md": "The resolver for [`ClientMessage::SetSelection`]"
+              },
+              {
+                "name": "ExtendSelectionTo",
+                "signature": "ExtendSelectionTo",
+                "docs_md": "The resolver for [`ClientMessage::ExtendSelectionTo`]"
+              },
+              {
+                "name": "SelectWordAt",
+                "signature": "SelectWordAt",
+                "docs_md": "The resolver for [`ClientMessage::SelectWordAt`]"
+              },
+              {
+                "name": "SelectLineAt",
+                "signature": "SelectLineAt",
+                "docs_md": "The resolver for [`ClientMessage::SelectLineAt`]"
+              },
+              {
+                "name": "GetSelectionText",
+                "signature": "GetSelectionText",
+                "docs_md": "The resolver for [`ClientMessage::GetSelectionText`]"
+              },
+              {
+                "name": "EnterCopyMode",
+                "signature": "EnterCopyMode",
+                "docs_md": "The resolver for [`ClientMessage::EnterCopyMode`]"
+              },
+              {
+                "name": "ExitCopyMode",
+                "signature": "ExitCopyMode",
+                "docs_md": "The resolver for [`ClientMessage::ExitCopyMode`]"
+              },
+              {
+                "name": "CopyModeKey",
+                "signature": "CopyModeKey",
+                "docs_md": "The resolver for [`ClientMessage::CopyModeKey`]"
+              },
+              {
+                "name": "SubscribeAgentCommands",
+                "signature": "SubscribeAgentCommands",
+                "docs_md": "The resolver for [`ClientMessage::SubscribeAgentCommands`]"
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": "The resolver for [`ClientMessage::AgentCommand`]"
+              },
+              {
+                "name": "Shutdown",
+                "signature": "Shutdown",
+                "docs_md": "The resolver for [`ClientMessage::Shutdown`]"
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": "The resolver for [`ClientMessage::AgentQuery`]"
+              },
+              {
+                "name": "AgentQueryResponse",
+                "signature": "AgentQueryResponse",
+                "docs_md": "The resolver for [`ClientMessage::AgentQueryResponse`]"
+              },
+              {
+                "name": "AgentCommandResponse",
+                "signature": "AgentCommandResponse",
+                "docs_md": "The resolver for [`ClientMessage::AgentCommandResponse`]"
+              },
+              {
+                "name": "SpawnPageAgent",
+                "signature": "SpawnPageAgent",
+                "docs_md": "The resolver for [`ClientMessage::SpawnPageAgent`]"
+              },
+              {
+                "name": "AttachPageAgent",
+                "signature": "AttachPageAgent",
+                "docs_md": "The resolver for [`ClientMessage::AttachPageAgent`]"
+              },
+              {
+                "name": "DetachPageAgent",
+                "signature": "DetachPageAgent",
+                "docs_md": "The resolver for [`ClientMessage::DetachPageAgent`]"
+              },
+              {
+                "name": "AgentInput",
+                "signature": "AgentInput",
+                "docs_md": "The resolver for [`ClientMessage::AgentInput`]"
+              },
+              {
+                "name": "AgentApprove",
+                "signature": "AgentApprove",
+                "docs_md": "The resolver for [`ClientMessage::AgentApprove`]"
+              },
+              {
+                "name": "ClosePageAgent",
+                "signature": "ClosePageAgent",
+                "docs_md": "The resolver for [`ClientMessage::ClosePageAgent`]"
+              },
+              {
+                "name": "AgentToolResult",
+                "signature": "AgentToolResult",
+                "docs_md": "The resolver for [`ClientMessage::AgentToolResult`]"
+              },
+              {
+                "name": "Status",
+                "signature": "Status",
+                "docs_md": "The resolver for [`ClientMessage::Status`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ClientMessage`",
+                "path": "vmux_service::protocol::ClientMessage"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "CopyModeKey",
+            "path": "vmux_service::protocol::CopyModeKey",
+            "signature": "pub enum CopyModeKey",
+            "docs_md": "Vim-style visual/copy-mode action sent by the GUI to the service.\n\nAll movement keys (Left/Right/Up/Down/LineStart/LineEnd/PageUp/PageDown)\nreposition the copy-mode cursor. If visual selection is active, movement\nalso extends the selection to the new cursor position.",
+            "members": [
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": "Move cursor one cell left (clamped to col 0)."
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": "Move cursor one cell right (clamped to last column)."
+              },
+              {
+                "name": "Up",
+                "signature": "Up",
+                "docs_md": "Move cursor one row up (clamped to row 0)."
+              },
+              {
+                "name": "Down",
+                "signature": "Down",
+                "docs_md": "Move cursor one row down (clamped to last row)."
+              },
+              {
+                "name": "LineStart",
+                "signature": "LineStart",
+                "docs_md": "Jump cursor to column 0 of the current row."
+              },
+              {
+                "name": "LineEnd",
+                "signature": "LineEnd",
+                "docs_md": "Jump cursor to the last column of the current row."
+              },
+              {
+                "name": "LastNonBlank",
+                "signature": "LastNonBlank",
+                "docs_md": "Jump cursor to the last non-blank cell of the current row (`g_`)."
+              },
+              {
+                "name": "FirstNonBlank",
+                "signature": "FirstNonBlank",
+                "docs_md": "Jump cursor to the first non-blank cell of the current row (`^`)."
+              },
+              {
+                "name": "WordForward",
+                "signature": "WordForward",
+                "docs_md": "Move to the next vi word start (`w`)."
+              },
+              {
+                "name": "BigWordForward",
+                "signature": "BigWordForward",
+                "docs_md": "Move to the next whitespace-delimited WORD start (`W`)."
+              },
+              {
+                "name": "WordBackward",
+                "signature": "WordBackward",
+                "docs_md": "Move to the previous vi word start (`b`)."
+              },
+              {
+                "name": "BigWordBackward",
+                "signature": "BigWordBackward",
+                "docs_md": "Move to the previous whitespace-delimited WORD start (`B`)."
+              },
+              {
+                "name": "WordEndForward",
+                "signature": "WordEndForward",
+                "docs_md": "Move to the next vi word end (`e`)."
+              },
+              {
+                "name": "BigWordEndForward",
+                "signature": "BigWordEndForward",
+                "docs_md": "Move to the next whitespace-delimited WORD end (`E`)."
+              },
+              {
+                "name": "WordEndBackward",
+                "signature": "WordEndBackward",
+                "docs_md": "Move to the previous vi word end (`ge`)."
+              },
+              {
+                "name": "BigWordEndBackward",
+                "signature": "BigWordEndBackward",
+                "docs_md": "Move to the previous whitespace-delimited WORD end (`gE`)."
+              },
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": "Move to the first visible row (`gg`)."
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": "Move to the last visible row (`G`)."
+              },
+              {
+                "name": "ScreenTop",
+                "signature": "ScreenTop",
+                "docs_md": "Move to the top visible row (`H`)."
+              },
+              {
+                "name": "ScreenMiddle",
+                "signature": "ScreenMiddle",
+                "docs_md": "Move to the middle visible row (`M`)."
+              },
+              {
+                "name": "ScreenBottom",
+                "signature": "ScreenBottom",
+                "docs_md": "Move to the bottom visible row (`L`)."
+              },
+              {
+                "name": "PrevParagraph",
+                "signature": "PrevParagraph",
+                "docs_md": "Move to the previous paragraph/blank-line boundary (`{`)."
+              },
+              {
+                "name": "NextParagraph",
+                "signature": "NextParagraph",
+                "docs_md": "Move to the next paragraph/blank-line boundary (`}`)."
+              },
+              {
+                "name": "FindForward",
+                "signature": "FindForward",
+                "docs_md": "Find a character forward on the current line (`f{char}`)."
+              },
+              {
+                "name": "FindBackward",
+                "signature": "FindBackward",
+                "docs_md": "Find a character backward on the current line (`F{char}`)."
+              },
+              {
+                "name": "TillForward",
+                "signature": "TillForward",
+                "docs_md": "Move until before a character forward on the current line (`t{char}`)."
+              },
+              {
+                "name": "TillBackward",
+                "signature": "TillBackward",
+                "docs_md": "Move until after a character backward on the current line (`T{char}`)."
+              },
+              {
+                "name": "RepeatFind",
+                "signature": "RepeatFind",
+                "docs_md": "Repeat the last find/till motion (`;`)."
+              },
+              {
+                "name": "RepeatFindReverse",
+                "signature": "RepeatFindReverse",
+                "docs_md": "Repeat the last find/till motion in reverse (`,`)."
+              },
+              {
+                "name": "SwapSelectionEnds",
+                "signature": "SwapSelectionEnds",
+                "docs_md": "Swap visual anchor and cursor (`o`)."
+              },
+              {
+                "name": "PageUp",
+                "signature": "PageUp",
+                "docs_md": "Move cursor up by half a screen."
+              },
+              {
+                "name": "PageDown",
+                "signature": "PageDown",
+                "docs_md": "Move cursor down by half a screen."
+              },
+              {
+                "name": "StartSelection",
+                "signature": "StartSelection",
+                "docs_md": "Re-anchor the selection at the current cursor position. Subsequent\nmovement keys extend the selection from this anchor."
+              },
+              {
+                "name": "StartLineSelection",
+                "signature": "StartLineSelection",
+                "docs_md": "Select full lines from the current cursor row. Subsequent movement\nextends the linewise selection by row."
+              },
+              {
+                "name": "Copy",
+                "signature": "Copy",
+                "docs_md": "Return the current selection text and exit copy mode."
+              },
+              {
+                "name": "Exit",
+                "signature": "Exit",
+                "docs_md": "Discard any selection and exit copy mode."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedCopyModeKey",
+            "path": "vmux_service::protocol::ArchivedCopyModeKey",
+            "signature": "pub enum ArchivedCopyModeKey",
+            "docs_md": "An archived [`CopyModeKey`]",
+            "members": [
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Left`]"
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Right`]"
+              },
+              {
+                "name": "Up",
+                "signature": "Up",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Up`]"
+              },
+              {
+                "name": "Down",
+                "signature": "Down",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Down`]"
+              },
+              {
+                "name": "LineStart",
+                "signature": "LineStart",
+                "docs_md": "The archived counterpart of [`CopyModeKey::LineStart`]"
+              },
+              {
+                "name": "LineEnd",
+                "signature": "LineEnd",
+                "docs_md": "The archived counterpart of [`CopyModeKey::LineEnd`]"
+              },
+              {
+                "name": "LastNonBlank",
+                "signature": "LastNonBlank",
+                "docs_md": "The archived counterpart of [`CopyModeKey::LastNonBlank`]"
+              },
+              {
+                "name": "FirstNonBlank",
+                "signature": "FirstNonBlank",
+                "docs_md": "The archived counterpart of [`CopyModeKey::FirstNonBlank`]"
+              },
+              {
+                "name": "WordForward",
+                "signature": "WordForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::WordForward`]"
+              },
+              {
+                "name": "BigWordForward",
+                "signature": "BigWordForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::BigWordForward`]"
+              },
+              {
+                "name": "WordBackward",
+                "signature": "WordBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::WordBackward`]"
+              },
+              {
+                "name": "BigWordBackward",
+                "signature": "BigWordBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::BigWordBackward`]"
+              },
+              {
+                "name": "WordEndForward",
+                "signature": "WordEndForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::WordEndForward`]"
+              },
+              {
+                "name": "BigWordEndForward",
+                "signature": "BigWordEndForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::BigWordEndForward`]"
+              },
+              {
+                "name": "WordEndBackward",
+                "signature": "WordEndBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::WordEndBackward`]"
+              },
+              {
+                "name": "BigWordEndBackward",
+                "signature": "BigWordEndBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::BigWordEndBackward`]"
+              },
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Top`]"
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Bottom`]"
+              },
+              {
+                "name": "ScreenTop",
+                "signature": "ScreenTop",
+                "docs_md": "The archived counterpart of [`CopyModeKey::ScreenTop`]"
+              },
+              {
+                "name": "ScreenMiddle",
+                "signature": "ScreenMiddle",
+                "docs_md": "The archived counterpart of [`CopyModeKey::ScreenMiddle`]"
+              },
+              {
+                "name": "ScreenBottom",
+                "signature": "ScreenBottom",
+                "docs_md": "The archived counterpart of [`CopyModeKey::ScreenBottom`]"
+              },
+              {
+                "name": "PrevParagraph",
+                "signature": "PrevParagraph",
+                "docs_md": "The archived counterpart of [`CopyModeKey::PrevParagraph`]"
+              },
+              {
+                "name": "NextParagraph",
+                "signature": "NextParagraph",
+                "docs_md": "The archived counterpart of [`CopyModeKey::NextParagraph`]"
+              },
+              {
+                "name": "FindForward",
+                "signature": "FindForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::FindForward`]"
+              },
+              {
+                "name": "FindBackward",
+                "signature": "FindBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::FindBackward`]"
+              },
+              {
+                "name": "TillForward",
+                "signature": "TillForward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::TillForward`]"
+              },
+              {
+                "name": "TillBackward",
+                "signature": "TillBackward",
+                "docs_md": "The archived counterpart of [`CopyModeKey::TillBackward`]"
+              },
+              {
+                "name": "RepeatFind",
+                "signature": "RepeatFind",
+                "docs_md": "The archived counterpart of [`CopyModeKey::RepeatFind`]"
+              },
+              {
+                "name": "RepeatFindReverse",
+                "signature": "RepeatFindReverse",
+                "docs_md": "The archived counterpart of [`CopyModeKey::RepeatFindReverse`]"
+              },
+              {
+                "name": "SwapSelectionEnds",
+                "signature": "SwapSelectionEnds",
+                "docs_md": "The archived counterpart of [`CopyModeKey::SwapSelectionEnds`]"
+              },
+              {
+                "name": "PageUp",
+                "signature": "PageUp",
+                "docs_md": "The archived counterpart of [`CopyModeKey::PageUp`]"
+              },
+              {
+                "name": "PageDown",
+                "signature": "PageDown",
+                "docs_md": "The archived counterpart of [`CopyModeKey::PageDown`]"
+              },
+              {
+                "name": "StartSelection",
+                "signature": "StartSelection",
+                "docs_md": "The archived counterpart of [`CopyModeKey::StartSelection`]"
+              },
+              {
+                "name": "StartLineSelection",
+                "signature": "StartLineSelection",
+                "docs_md": "The archived counterpart of [`CopyModeKey::StartLineSelection`]"
+              },
+              {
+                "name": "Copy",
+                "signature": "Copy",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Copy`]"
+              },
+              {
+                "name": "Exit",
+                "signature": "Exit",
+                "docs_md": "The archived counterpart of [`CopyModeKey::Exit`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`CopyModeKey`",
+                "path": "vmux_service::protocol::CopyModeKey"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "CopyModeKeyResolver",
+            "path": "vmux_service::protocol::CopyModeKeyResolver",
+            "signature": "pub enum CopyModeKeyResolver",
+            "docs_md": "The resolver for an archived [`CopyModeKey`]",
+            "members": [
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": "The resolver for [`CopyModeKey::Left`]"
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": "The resolver for [`CopyModeKey::Right`]"
+              },
+              {
+                "name": "Up",
+                "signature": "Up",
+                "docs_md": "The resolver for [`CopyModeKey::Up`]"
+              },
+              {
+                "name": "Down",
+                "signature": "Down",
+                "docs_md": "The resolver for [`CopyModeKey::Down`]"
+              },
+              {
+                "name": "LineStart",
+                "signature": "LineStart",
+                "docs_md": "The resolver for [`CopyModeKey::LineStart`]"
+              },
+              {
+                "name": "LineEnd",
+                "signature": "LineEnd",
+                "docs_md": "The resolver for [`CopyModeKey::LineEnd`]"
+              },
+              {
+                "name": "LastNonBlank",
+                "signature": "LastNonBlank",
+                "docs_md": "The resolver for [`CopyModeKey::LastNonBlank`]"
+              },
+              {
+                "name": "FirstNonBlank",
+                "signature": "FirstNonBlank",
+                "docs_md": "The resolver for [`CopyModeKey::FirstNonBlank`]"
+              },
+              {
+                "name": "WordForward",
+                "signature": "WordForward",
+                "docs_md": "The resolver for [`CopyModeKey::WordForward`]"
+              },
+              {
+                "name": "BigWordForward",
+                "signature": "BigWordForward",
+                "docs_md": "The resolver for [`CopyModeKey::BigWordForward`]"
+              },
+              {
+                "name": "WordBackward",
+                "signature": "WordBackward",
+                "docs_md": "The resolver for [`CopyModeKey::WordBackward`]"
+              },
+              {
+                "name": "BigWordBackward",
+                "signature": "BigWordBackward",
+                "docs_md": "The resolver for [`CopyModeKey::BigWordBackward`]"
+              },
+              {
+                "name": "WordEndForward",
+                "signature": "WordEndForward",
+                "docs_md": "The resolver for [`CopyModeKey::WordEndForward`]"
+              },
+              {
+                "name": "BigWordEndForward",
+                "signature": "BigWordEndForward",
+                "docs_md": "The resolver for [`CopyModeKey::BigWordEndForward`]"
+              },
+              {
+                "name": "WordEndBackward",
+                "signature": "WordEndBackward",
+                "docs_md": "The resolver for [`CopyModeKey::WordEndBackward`]"
+              },
+              {
+                "name": "BigWordEndBackward",
+                "signature": "BigWordEndBackward",
+                "docs_md": "The resolver for [`CopyModeKey::BigWordEndBackward`]"
+              },
+              {
+                "name": "Top",
+                "signature": "Top",
+                "docs_md": "The resolver for [`CopyModeKey::Top`]"
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": "The resolver for [`CopyModeKey::Bottom`]"
+              },
+              {
+                "name": "ScreenTop",
+                "signature": "ScreenTop",
+                "docs_md": "The resolver for [`CopyModeKey::ScreenTop`]"
+              },
+              {
+                "name": "ScreenMiddle",
+                "signature": "ScreenMiddle",
+                "docs_md": "The resolver for [`CopyModeKey::ScreenMiddle`]"
+              },
+              {
+                "name": "ScreenBottom",
+                "signature": "ScreenBottom",
+                "docs_md": "The resolver for [`CopyModeKey::ScreenBottom`]"
+              },
+              {
+                "name": "PrevParagraph",
+                "signature": "PrevParagraph",
+                "docs_md": "The resolver for [`CopyModeKey::PrevParagraph`]"
+              },
+              {
+                "name": "NextParagraph",
+                "signature": "NextParagraph",
+                "docs_md": "The resolver for [`CopyModeKey::NextParagraph`]"
+              },
+              {
+                "name": "FindForward",
+                "signature": "FindForward",
+                "docs_md": "The resolver for [`CopyModeKey::FindForward`]"
+              },
+              {
+                "name": "FindBackward",
+                "signature": "FindBackward",
+                "docs_md": "The resolver for [`CopyModeKey::FindBackward`]"
+              },
+              {
+                "name": "TillForward",
+                "signature": "TillForward",
+                "docs_md": "The resolver for [`CopyModeKey::TillForward`]"
+              },
+              {
+                "name": "TillBackward",
+                "signature": "TillBackward",
+                "docs_md": "The resolver for [`CopyModeKey::TillBackward`]"
+              },
+              {
+                "name": "RepeatFind",
+                "signature": "RepeatFind",
+                "docs_md": "The resolver for [`CopyModeKey::RepeatFind`]"
+              },
+              {
+                "name": "RepeatFindReverse",
+                "signature": "RepeatFindReverse",
+                "docs_md": "The resolver for [`CopyModeKey::RepeatFindReverse`]"
+              },
+              {
+                "name": "SwapSelectionEnds",
+                "signature": "SwapSelectionEnds",
+                "docs_md": "The resolver for [`CopyModeKey::SwapSelectionEnds`]"
+              },
+              {
+                "name": "PageUp",
+                "signature": "PageUp",
+                "docs_md": "The resolver for [`CopyModeKey::PageUp`]"
+              },
+              {
+                "name": "PageDown",
+                "signature": "PageDown",
+                "docs_md": "The resolver for [`CopyModeKey::PageDown`]"
+              },
+              {
+                "name": "StartSelection",
+                "signature": "StartSelection",
+                "docs_md": "The resolver for [`CopyModeKey::StartSelection`]"
+              },
+              {
+                "name": "StartLineSelection",
+                "signature": "StartLineSelection",
+                "docs_md": "The resolver for [`CopyModeKey::StartLineSelection`]"
+              },
+              {
+                "name": "Copy",
+                "signature": "Copy",
+                "docs_md": "The resolver for [`CopyModeKey::Copy`]"
+              },
+              {
+                "name": "Exit",
+                "signature": "Exit",
+                "docs_md": "The resolver for [`CopyModeKey::Exit`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`CopyModeKey`",
+                "path": "vmux_service::protocol::CopyModeKey"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "CommandLifecycleKind",
+            "path": "vmux_service::protocol::CommandLifecycleKind",
+            "signature": "pub enum CommandLifecycleKind",
+            "docs_md": "Messages sent from the service to the GUI client.",
+            "members": [
+              {
+                "name": "Started",
+                "signature": "Started",
+                "docs_md": ""
+              },
+              {
+                "name": "Ended",
+                "signature": "Ended",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedCommandLifecycleKind",
+            "path": "vmux_service::protocol::ArchivedCommandLifecycleKind",
+            "signature": "pub enum ArchivedCommandLifecycleKind",
+            "docs_md": "An archived [`CommandLifecycleKind`]",
+            "members": [
+              {
+                "name": "Started",
+                "signature": "Started",
+                "docs_md": "The archived counterpart of [`CommandLifecycleKind::Started`]"
+              },
+              {
+                "name": "Ended",
+                "signature": "Ended",
+                "docs_md": "The archived counterpart of [`CommandLifecycleKind::Ended`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`CommandLifecycleKind`",
+                "path": "vmux_service::protocol::CommandLifecycleKind"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "CommandLifecycleKindResolver",
+            "path": "vmux_service::protocol::CommandLifecycleKindResolver",
+            "signature": "pub enum CommandLifecycleKindResolver",
+            "docs_md": "The resolver for an archived [`CommandLifecycleKind`]",
+            "members": [
+              {
+                "name": "Started",
+                "signature": "Started",
+                "docs_md": "The resolver for [`CommandLifecycleKind::Started`]"
+              },
+              {
+                "name": "Ended",
+                "signature": "Ended",
+                "docs_md": "The resolver for [`CommandLifecycleKind::Ended`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`CommandLifecycleKind`",
+                "path": "vmux_service::protocol::CommandLifecycleKind"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ServiceMessage",
+            "path": "vmux_service::protocol::ServiceMessage",
+            "signature": "pub enum ServiceMessage",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "ProcessCreated",
+                "signature": "ProcessCreated",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessCreateFailed",
+                "signature": "ProcessCreateFailed",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessOutput",
+                "signature": "ProcessOutput",
+                "docs_md": ""
+              },
+              {
+                "name": "ViewportPatch",
+                "signature": "ViewportPatch",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessExited",
+                "signature": "ProcessExited",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessTitle",
+                "signature": "ProcessTitle",
+                "docs_md": ""
+              },
+              {
+                "name": "CommandLifecycle",
+                "signature": "CommandLifecycle",
+                "docs_md": ""
+              },
+              {
+                "name": "ProcessList",
+                "signature": "ProcessList",
+                "docs_md": ""
+              },
+              {
+                "name": "Snapshot",
+                "signature": "Snapshot",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              },
+              {
+                "name": "SelectionText",
+                "signature": "SelectionText",
+                "docs_md": ""
+              },
+              {
+                "name": "TerminalMode",
+                "signature": "TerminalMode",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentQueryResult",
+                "signature": "AgentQueryResult",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentCommandResult",
+                "signature": "AgentCommandResult",
+                "docs_md": ""
+              },
+              {
+                "name": "Bell",
+                "signature": "Bell",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentDelta",
+                "signature": "AgentDelta",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentRunStatusChanged",
+                "signature": "AgentRunStatusChanged",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentAwaitingApproval",
+                "signature": "AgentAwaitingApproval",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentToolCall",
+                "signature": "AgentToolCall",
+                "docs_md": ""
+              },
+              {
+                "name": "AgentMessagesSnapshot",
+                "signature": "AgentMessagesSnapshot",
+                "docs_md": ""
+              },
+              {
+                "name": "StatusResponse",
+                "signature": "StatusResponse",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedServiceMessage",
+            "path": "vmux_service::protocol::ArchivedServiceMessage",
+            "signature": "pub enum ArchivedServiceMessage",
+            "docs_md": "An archived [`ServiceMessage`]",
+            "members": [
+              {
+                "name": "ProcessCreated",
+                "signature": "ProcessCreated",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessCreated`]"
+              },
+              {
+                "name": "ProcessCreateFailed",
+                "signature": "ProcessCreateFailed",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessCreateFailed`]"
+              },
+              {
+                "name": "ProcessOutput",
+                "signature": "ProcessOutput",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessOutput`]"
+              },
+              {
+                "name": "ViewportPatch",
+                "signature": "ViewportPatch",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ViewportPatch`]"
+              },
+              {
+                "name": "ProcessExited",
+                "signature": "ProcessExited",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessExited`]"
+              },
+              {
+                "name": "ProcessTitle",
+                "signature": "ProcessTitle",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessTitle`]"
+              },
+              {
+                "name": "CommandLifecycle",
+                "signature": "CommandLifecycle",
+                "docs_md": "The archived counterpart of [`ServiceMessage::CommandLifecycle`]"
+              },
+              {
+                "name": "ProcessList",
+                "signature": "ProcessList",
+                "docs_md": "The archived counterpart of [`ServiceMessage::ProcessList`]"
+              },
+              {
+                "name": "Snapshot",
+                "signature": "Snapshot",
+                "docs_md": "The archived counterpart of [`ServiceMessage::Snapshot`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The archived counterpart of [`ServiceMessage::Error`]"
+              },
+              {
+                "name": "SelectionText",
+                "signature": "SelectionText",
+                "docs_md": "The archived counterpart of [`ServiceMessage::SelectionText`]"
+              },
+              {
+                "name": "TerminalMode",
+                "signature": "TerminalMode",
+                "docs_md": "The archived counterpart of [`ServiceMessage::TerminalMode`]"
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentCommand`]"
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentQuery`]"
+              },
+              {
+                "name": "AgentQueryResult",
+                "signature": "AgentQueryResult",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentQueryResult`]"
+              },
+              {
+                "name": "AgentCommandResult",
+                "signature": "AgentCommandResult",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentCommandResult`]"
+              },
+              {
+                "name": "Bell",
+                "signature": "Bell",
+                "docs_md": "The archived counterpart of [`ServiceMessage::Bell`]"
+              },
+              {
+                "name": "AgentDelta",
+                "signature": "AgentDelta",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentDelta`]"
+              },
+              {
+                "name": "AgentRunStatusChanged",
+                "signature": "AgentRunStatusChanged",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentRunStatusChanged`]"
+              },
+              {
+                "name": "AgentAwaitingApproval",
+                "signature": "AgentAwaitingApproval",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentAwaitingApproval`]"
+              },
+              {
+                "name": "AgentToolCall",
+                "signature": "AgentToolCall",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentToolCall`]"
+              },
+              {
+                "name": "AgentMessagesSnapshot",
+                "signature": "AgentMessagesSnapshot",
+                "docs_md": "The archived counterpart of [`ServiceMessage::AgentMessagesSnapshot`]"
+              },
+              {
+                "name": "StatusResponse",
+                "signature": "StatusResponse",
+                "docs_md": "The archived counterpart of [`ServiceMessage::StatusResponse`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ServiceMessage`",
+                "path": "vmux_service::protocol::ServiceMessage"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ServiceMessageResolver",
+            "path": "vmux_service::protocol::ServiceMessageResolver",
+            "signature": "pub enum ServiceMessageResolver",
+            "docs_md": "The resolver for an archived [`ServiceMessage`]",
+            "members": [
+              {
+                "name": "ProcessCreated",
+                "signature": "ProcessCreated",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessCreated`]"
+              },
+              {
+                "name": "ProcessCreateFailed",
+                "signature": "ProcessCreateFailed",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessCreateFailed`]"
+              },
+              {
+                "name": "ProcessOutput",
+                "signature": "ProcessOutput",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessOutput`]"
+              },
+              {
+                "name": "ViewportPatch",
+                "signature": "ViewportPatch",
+                "docs_md": "The resolver for [`ServiceMessage::ViewportPatch`]"
+              },
+              {
+                "name": "ProcessExited",
+                "signature": "ProcessExited",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessExited`]"
+              },
+              {
+                "name": "ProcessTitle",
+                "signature": "ProcessTitle",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessTitle`]"
+              },
+              {
+                "name": "CommandLifecycle",
+                "signature": "CommandLifecycle",
+                "docs_md": "The resolver for [`ServiceMessage::CommandLifecycle`]"
+              },
+              {
+                "name": "ProcessList",
+                "signature": "ProcessList",
+                "docs_md": "The resolver for [`ServiceMessage::ProcessList`]"
+              },
+              {
+                "name": "Snapshot",
+                "signature": "Snapshot",
+                "docs_md": "The resolver for [`ServiceMessage::Snapshot`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The resolver for [`ServiceMessage::Error`]"
+              },
+              {
+                "name": "SelectionText",
+                "signature": "SelectionText",
+                "docs_md": "The resolver for [`ServiceMessage::SelectionText`]"
+              },
+              {
+                "name": "TerminalMode",
+                "signature": "TerminalMode",
+                "docs_md": "The resolver for [`ServiceMessage::TerminalMode`]"
+              },
+              {
+                "name": "AgentCommand",
+                "signature": "AgentCommand",
+                "docs_md": "The resolver for [`ServiceMessage::AgentCommand`]"
+              },
+              {
+                "name": "AgentQuery",
+                "signature": "AgentQuery",
+                "docs_md": "The resolver for [`ServiceMessage::AgentQuery`]"
+              },
+              {
+                "name": "AgentQueryResult",
+                "signature": "AgentQueryResult",
+                "docs_md": "The resolver for [`ServiceMessage::AgentQueryResult`]"
+              },
+              {
+                "name": "AgentCommandResult",
+                "signature": "AgentCommandResult",
+                "docs_md": "The resolver for [`ServiceMessage::AgentCommandResult`]"
+              },
+              {
+                "name": "Bell",
+                "signature": "Bell",
+                "docs_md": "The resolver for [`ServiceMessage::Bell`]"
+              },
+              {
+                "name": "AgentDelta",
+                "signature": "AgentDelta",
+                "docs_md": "The resolver for [`ServiceMessage::AgentDelta`]"
+              },
+              {
+                "name": "AgentRunStatusChanged",
+                "signature": "AgentRunStatusChanged",
+                "docs_md": "The resolver for [`ServiceMessage::AgentRunStatusChanged`]"
+              },
+              {
+                "name": "AgentAwaitingApproval",
+                "signature": "AgentAwaitingApproval",
+                "docs_md": "The resolver for [`ServiceMessage::AgentAwaitingApproval`]"
+              },
+              {
+                "name": "AgentToolCall",
+                "signature": "AgentToolCall",
+                "docs_md": "The resolver for [`ServiceMessage::AgentToolCall`]"
+              },
+              {
+                "name": "AgentMessagesSnapshot",
+                "signature": "AgentMessagesSnapshot",
+                "docs_md": "The resolver for [`ServiceMessage::AgentMessagesSnapshot`]"
+              },
+              {
+                "name": "StatusResponse",
+                "signature": "StatusResponse",
+                "docs_md": "The resolver for [`ServiceMessage::StatusResponse`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ServiceMessage`",
+                "path": "vmux_service::protocol::ServiceMessage"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessInfo",
+            "path": "vmux_service::protocol::ProcessInfo",
+            "signature": "pub struct ProcessInfo",
+            "docs_md": "Metadata about a process, returned in ProcessList.",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: ProcessId",
+                "docs_md": ""
+              },
+              {
+                "name": "shell",
+                "signature": "shell: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cols",
+                "signature": "cols: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "rows",
+                "signature": "rows: u16",
+                "docs_md": ""
+              },
+              {
+                "name": "pid",
+                "signature": "pid: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "created_at_secs",
+                "signature": "created_at_secs: u64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedProcessInfo",
+            "path": "vmux_service::protocol::ArchivedProcessInfo",
+            "signature": "pub struct ArchivedProcessInfo",
+            "docs_md": "An archived [`ProcessInfo`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::id`]"
+              },
+              {
+                "name": "shell",
+                "signature": "shell: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::shell`]"
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::cwd`]"
+              },
+              {
+                "name": "cols",
+                "signature": "cols: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::cols`]"
+              },
+              {
+                "name": "rows",
+                "signature": "rows: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::rows`]"
+              },
+              {
+                "name": "pid",
+                "signature": "pid: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::pid`]"
+              },
+              {
+                "name": "created_at_secs",
+                "signature": "created_at_secs: Archived",
+                "docs_md": "The archived counterpart of [`ProcessInfo::created_at_secs`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ProcessInfo`",
+                "path": "vmux_service::protocol::ProcessInfo"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessInfoResolver",
+            "path": "vmux_service::protocol::ProcessInfoResolver",
+            "signature": "pub struct ProcessInfoResolver",
+            "docs_md": "The resolver for an archived [`ProcessInfo`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ProcessInfo`",
+                "path": "vmux_service::protocol::ProcessInfo"
+              }
+            ]
+          }
+        ],
+        "submodules": [
+          {
+            "path": "vmux_service::protocol::layout",
+            "docs_md": "",
+            "items": [],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_service::providers",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_service::providers::anthropic",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "constant",
+                "name": "PROVIDER",
+                "path": "vmux_service::providers::anthropic::PROVIDER",
+                "signature": "pub const PROVIDER",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENDPOINT",
+                "path": "vmux_service::providers::anthropic::ENDPOINT",
+                "signature": "pub const ENDPOINT",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENV_VAR",
+                "path": "vmux_service::providers::anthropic::ENV_VAR",
+                "signature": "pub const ENV_VAR",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "DEFAULT_MODEL",
+                "path": "vmux_service::providers::anthropic::DEFAULT_MODEL",
+                "signature": "pub const DEFAULT_MODEL",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "build_request",
+                "path": "vmux_service::providers::anthropic::build_request",
+                "signature": "pub fn build_request(model: &str, messages: &[crate::message::Message], tools: &[crate::stream::ToolDef], api_key: &str) -> reqwest::Request",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_sse",
+                "path": "vmux_service::providers::anthropic::parse_sse",
+                "signature": "pub fn parse_sse(payload: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_messages_sse",
+                "path": "vmux_service::providers::anthropic::parse_messages_sse",
+                "signature": "pub fn parse_messages_sse(frame: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_service::providers::builtin",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "BuiltinProvider",
+                "path": "vmux_service::providers::builtin::BuiltinProvider",
+                "signature": "pub struct BuiltinProvider",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "provider",
+                    "signature": "provider: &'static str",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "kind",
+                    "signature": "kind: vmux_core::agent::AgentKind",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "default_model",
+                    "signature": "default_model: &'static str",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "env_var",
+                    "signature": "env_var: &'static str",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ECHO_DEFAULT",
+                "path": "vmux_service::providers::builtin::ECHO_DEFAULT",
+                "signature": "pub const ECHO_DEFAULT",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "BUILTIN_PROVIDERS",
+                "path": "vmux_service::providers::builtin::BUILTIN_PROVIDERS",
+                "signature": "pub const BUILTIN_PROVIDERS",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolve_default_app_provider",
+                "path": "vmux_service::providers::builtin::resolve_default_app_provider",
+                "signature": "pub fn resolve_default_app_provider() -> Option<&'static BuiltinProvider>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_service::providers::mistral",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "constant",
+                "name": "PROVIDER",
+                "path": "vmux_service::providers::mistral::PROVIDER",
+                "signature": "pub const PROVIDER",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENDPOINT",
+                "path": "vmux_service::providers::mistral::ENDPOINT",
+                "signature": "pub const ENDPOINT",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENV_VAR",
+                "path": "vmux_service::providers::mistral::ENV_VAR",
+                "signature": "pub const ENV_VAR",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "DEFAULT_MODEL",
+                "path": "vmux_service::providers::mistral::DEFAULT_MODEL",
+                "signature": "pub const DEFAULT_MODEL",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "build_request",
+                "path": "vmux_service::providers::mistral::build_request",
+                "signature": "pub fn build_request(model: &str, messages: &[crate::message::Message], tools: &[crate::stream::ToolDef], api_key: &str) -> reqwest::Request",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_sse",
+                "path": "vmux_service::providers::mistral::parse_sse",
+                "signature": "pub fn parse_sse(payload: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_service::providers::openai",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "constant",
+                "name": "PROVIDER",
+                "path": "vmux_service::providers::openai::PROVIDER",
+                "signature": "pub const PROVIDER",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENDPOINT",
+                "path": "vmux_service::providers::openai::ENDPOINT",
+                "signature": "pub const ENDPOINT",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "ENV_VAR",
+                "path": "vmux_service::providers::openai::ENV_VAR",
+                "signature": "pub const ENV_VAR",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "constant",
+                "name": "DEFAULT_MODEL",
+                "path": "vmux_service::providers::openai::DEFAULT_MODEL",
+                "signature": "pub const DEFAULT_MODEL",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "build_request",
+                "path": "vmux_service::providers::openai::build_request",
+                "signature": "pub fn build_request(model: &str, messages: &[crate::message::Message], tools: &[crate::stream::ToolDef], api_key: &str) -> reqwest::Request",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_sse",
+                "path": "vmux_service::providers::openai::parse_sse",
+                "signature": "pub fn parse_sse(payload: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_responses_sse",
+                "path": "vmux_service::providers::openai::parse_responses_sse",
+                "signature": "pub fn parse_responses_sse(frame: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_service::providers::openai_shared",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "parse_chat_completions_sse",
+                "path": "vmux_service::providers::openai_shared::parse_chat_completions_sse",
+                "signature": "pub fn parse_chat_completions_sse(frame: &str) -> Option<crate::stream::StreamEvent>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "messages_to_chat_completions",
+                "path": "vmux_service::providers::openai_shared::messages_to_chat_completions",
+                "signature": "pub fn messages_to_chat_completions(messages: &[crate::message::Message]) -> Vec<serde_json::Value>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "tools_to_function_specs",
+                "path": "vmux_service::providers::openai_shared::tools_to_function_specs",
+                "signature": "pub fn tools_to_function_specs(tools: &[crate::stream::ToolDef]) -> Vec<serde_json::Value>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_service::registry",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "Backend",
+            "path": "vmux_service::registry::Backend",
+            "signature": "pub enum Backend",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "SmAppService",
+                "signature": "SmAppService",
+                "docs_md": ""
+              },
+              {
+                "name": "Launchctl",
+                "signature": "Launchctl",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "choose_backend",
+            "path": "vmux_service::registry::choose_backend",
+            "signature": "pub fn choose_backend(exe: &std::path::Path) -> Backend",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "StartMode",
+            "path": "vmux_service::registry::StartMode",
+            "signature": "pub enum StartMode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Register",
+                "signature": "Register",
+                "docs_md": ""
+              },
+              {
+                "name": "SpawnDetached",
+                "signature": "SpawnDetached",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "start_mode_for",
+            "path": "vmux_service::registry::start_mode_for",
+            "signature": "pub fn start_mode_for(exe: &std::path::Path) -> StartMode",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "RegistrationError",
+            "path": "vmux_service::registry::RegistrationError",
+            "signature": "pub enum RegistrationError",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Io",
+                "signature": "Io",
+                "docs_md": ""
+              },
+              {
+                "name": "SmAppService",
+                "signature": "SmAppService",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "ensure_running",
+            "path": "vmux_service::registry::ensure_running",
+            "signature": "pub fn ensure_running(profile: &str, exe: &std::path::Path) -> Result<(), RegistrationError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::server",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "run_server",
+            "path": "vmux_service::server::run_server",
+            "signature": "pub fn run_server(listener: tokio::net::UnixListener)",
+            "docs_md": "Run the IPC server loop, accepting connections and dispatching messages.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::service",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "run",
+            "path": "vmux_service::service::run",
+            "signature": "pub fn run()",
+            "docs_md": "Daemon entry point. Initializes logging, writes pid/identity, binds the socket,\ninstalls SIGTERM/SIGINT handlers, and runs the IPC server until shutdown.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::sm_app_service",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "SmError",
+            "path": "vmux_service::sm_app_service::SmError",
+            "signature": "pub enum SmError",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "NotEnabled",
+                "signature": "NotEnabled",
+                "docs_md": ""
+              },
+              {
+                "name": "NotRegistered",
+                "signature": "NotRegistered",
+                "docs_md": ""
+              },
+              {
+                "name": "RequiresApproval",
+                "signature": "RequiresApproval",
+                "docs_md": ""
+              },
+              {
+                "name": "Other",
+                "signature": "Other",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "register_main_app",
+            "path": "vmux_service::sm_app_service::register_main_app",
+            "signature": "pub fn register_main_app() -> Result<(), SmError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "unregister_main_app",
+            "path": "vmux_service::sm_app_service::unregister_main_app",
+            "signature": "pub fn unregister_main_app() -> Result<(), SmError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "register_agent",
+            "path": "vmux_service::sm_app_service::register_agent",
+            "signature": "pub fn register_agent(plist_name: &str) -> Result<(), SmError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "unregister_agent",
+            "path": "vmux_service::sm_app_service::unregister_agent",
+            "signature": "pub fn unregister_agent(plist_name: &str) -> Result<(), SmError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "Status",
+            "path": "vmux_service::sm_app_service::Status",
+            "signature": "pub enum Status",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "NotRegistered",
+                "signature": "NotRegistered",
+                "docs_md": ""
+              },
+              {
+                "name": "Enabled",
+                "signature": "Enabled",
+                "docs_md": ""
+              },
+              {
+                "name": "RequiresApproval",
+                "signature": "RequiresApproval",
+                "docs_md": ""
+              },
+              {
+                "name": "NotFound",
+                "signature": "NotFound",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "main_app_status",
+            "path": "vmux_service::sm_app_service::main_app_status",
+            "signature": "pub fn main_app_status() -> Status",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "agent_status",
+            "path": "vmux_service::sm_app_service::agent_status",
+            "signature": "pub fn agent_status(plist_name: &str) -> Status",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::stream",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "type_alias",
+            "name": "BuildRequest",
+            "path": "vmux_service::stream::BuildRequest",
+            "signature": "pub type BuildRequest",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "ParseSse",
+            "path": "vmux_service::stream::ParseSse",
+            "signature": "pub type ParseSse",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "StreamEvent",
+            "path": "vmux_service::stream::StreamEvent",
+            "signature": "pub enum StreamEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "TextDelta",
+                "signature": "TextDelta",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolUseStart",
+                "signature": "ToolUseStart",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolUseArgsDelta",
+                "signature": "ToolUseArgsDelta",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolUseEnd",
+                "signature": "ToolUseEnd",
+                "docs_md": ""
+              },
+              {
+                "name": "StopTurn",
+                "signature": "StopTurn",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "StopReason",
+            "path": "vmux_service::stream::StopReason",
+            "signature": "pub enum StopReason",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "EndTurn",
+                "signature": "EndTurn",
+                "docs_md": ""
+              },
+              {
+                "name": "ToolUse",
+                "signature": "ToolUse",
+                "docs_md": ""
+              },
+              {
+                "name": "MaxTokens",
+                "signature": "MaxTokens",
+                "docs_md": ""
+              },
+              {
+                "name": "Other",
+                "signature": "Other",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ToolDef",
+            "path": "vmux_service::stream::ToolDef",
+            "signature": "pub struct ToolDef",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "description",
+                "signature": "description: String",
+                "docs_md": ""
+              },
+              {
+                "name": "input_schema",
+                "signature": "input_schema: serde_json::Value",
+                "docs_md": ""
+              },
+              {
+                "name": "read_only",
+                "signature": "read_only: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PartialToolUse",
+            "path": "vmux_service::stream::PartialToolUse",
+            "signature": "pub struct PartialToolUse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "call_id",
+                "signature": "call_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "args_buf",
+                "signature": "args_buf: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_service::supervisor",
+        "docs_md": "Replace a running daemon: graceful Shutdown over the socket,\nescalate to SIGTERM, finally SIGKILL.",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "ReplaceOutcome",
+            "path": "vmux_service::supervisor::ReplaceOutcome",
+            "signature": "pub enum ReplaceOutcome",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "GracefulShutdown",
+                "signature": "GracefulShutdown",
+                "docs_md": ""
+              },
+              {
+                "name": "SigtermExit",
+                "signature": "SigtermExit",
+                "docs_md": ""
+              },
+              {
+                "name": "SigkillExit",
+                "signature": "SigkillExit",
+                "docs_md": ""
+              },
+              {
+                "name": "AlreadyDead",
+                "signature": "AlreadyDead",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "wait_for_pid_exit",
+            "path": "vmux_service::supervisor::wait_for_pid_exit",
+            "signature": "pub fn wait_for_pid_exit(pid: i32, deadline: std::time::Instant) -> bool",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "pid_alive",
+            "path": "vmux_service::supervisor::pid_alive",
+            "signature": "pub fn pid_alive(pid: i32) -> bool",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "send_signal",
+            "path": "vmux_service::supervisor::send_signal",
+            "signature": "pub fn send_signal(pid: i32, sig: i32) -> std::io::Result<()>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "replace_running",
+            "path": "vmux_service::supervisor::replace_running",
+            "signature": "pub fn replace_running(pid: i32, send_shutdown: F) -> ReplaceOutcome",
+            "docs_md": "Replace the running daemon for the given pid.\n\n`send_shutdown` performs the IPC Shutdown round-trip.\n`Ok` means acknowledged or connection closed; `Err` means unreachable\n(falls through to SIGTERM).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "clean_runtime_files",
+            "path": "vmux_service::supervisor::clean_runtime_files",
+            "signature": "pub fn clean_runtime_files()",
+            "docs_md": "Best-effort cleanup of stale runtime files for the current profile.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

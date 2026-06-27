@@ -25,3 +25,5 @@ build/
 website/target/
 # Tailwind output (run `make build-website-css` to regenerate)
 website/public/style.css
+# API model copied from docs/api by `make build-website-css`
+website/public/api/

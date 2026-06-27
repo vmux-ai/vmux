@@ -1,0 +1,37 @@
+{
+  "name": "vmux_team",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_team",
+    "docs_md": "Team and profiles view: represents the user and the agents in the active space as\nteam members and renders the team webview.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_team::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_team::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "TeamPlugin",
+            "path": "vmux_team::plugin::TeamPlugin",
+            "signature": "pub struct TeamPlugin",
+            "docs_md": "Wires the team domain: spawns the user profile, emits the team-member list (user and\nagents) to ready views, and handles team commands.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

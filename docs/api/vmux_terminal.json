@@ -1,0 +1,740 @@
+{
+  "name": "vmux_terminal",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_terminal",
+    "docs_md": "Terminal page: spawns and drives shell processes through the background service and\nrenders them in a CEF + Dioxus terminal webview.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_terminal::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_terminal::event",
+        "docs_md": "",
+        "items": [],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::render_model",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SpanBackgroundOverlay",
+            "path": "vmux_terminal::render_model::SpanBackgroundOverlay",
+            "signature": "pub struct SpanBackgroundOverlay",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "class",
+                "signature": "class: String",
+                "docs_md": ""
+              },
+              {
+                "name": "style",
+                "signature": "style: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "span_classes",
+            "path": "vmux_terminal::render_model::span_classes",
+            "signature": "pub fn span_classes(span: &crate::event::TermSpan) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "span_inline_style",
+            "path": "vmux_terminal::render_model::span_inline_style",
+            "signature": "pub fn span_inline_style(span: &crate::event::TermSpan) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "span_background_overlay",
+            "path": "vmux_terminal::render_model::span_background_overlay",
+            "signature": "pub fn span_background_overlay(span: &crate::event::TermSpan) -> Option<SpanBackgroundOverlay>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "span_looks_like_suggestion",
+            "path": "vmux_terminal::render_model::span_looks_like_suggestion",
+            "signature": "pub fn span_looks_like_suggestion(span: &crate::event::TermSpan) -> bool",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "cursor_cell_style",
+            "path": "vmux_terminal::render_model::cursor_cell_style",
+            "signature": "pub fn cursor_cell_style(span_classes: &str, span_style: &str, cursor_style: &str, suggestion: bool) -> (String, String)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::clipboard",
+        "docs_md": "OS clipboard read/write, isolated by platform.\n\nUses absolute paths to system binaries (no `$PATH` lookup) to defend\nagainst PATH-hijack on shared systems. Writes happen on a background\nthread so the Bevy main thread never blocks on subprocess I/O.",
+        "items": [
+          {
+            "kind": "function",
+            "name": "write",
+            "path": "vmux_terminal::clipboard::write",
+            "signature": "pub fn write(text: String)",
+            "docs_md": "Asynchronously write `text` to the system clipboard. Returns immediately;\nerrors are logged.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "read_blocking",
+            "path": "vmux_terminal::clipboard::read_blocking",
+            "signature": "pub fn read_blocking() -> Option<String>",
+            "docs_md": "Read text from the system clipboard, blocking. Returns None on any error.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::component",
+        "docs_md": "",
+        "items": [],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::launch",
+        "docs_md": "",
+        "items": [],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::pid",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "Pid",
+            "path": "vmux_terminal::pid::Pid",
+            "signature": "pub struct Pid",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PidToEntity",
+            "path": "vmux_terminal::pid::PidToEntity",
+            "signature": "pub struct PidToEntity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "track_pid_inserts",
+            "path": "vmux_terminal::pid::track_pid_inserts",
+            "signature": "pub fn track_pid_inserts(map: ResMut<'_, PidToEntity>, inserted: Query<'_, '_, (Entity, &Pid), Added<Pid>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "track_pid_removals",
+            "path": "vmux_terminal::pid::track_pid_removals",
+            "signature": "pub fn track_pid_removals(map: ResMut<'_, PidToEntity>, removed: RemovedComponents<'_, '_, Pid>, survivors: Query<'_, '_, &Pid>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "should_confirm_close",
+            "path": "vmux_terminal::plugin::should_confirm_close",
+            "signature": "pub fn should_confirm_close(settings: &vmux_setting::AppSettings) -> bool",
+            "docs_md": "Check if confirmation is needed based on settings.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "has_live_terminal",
+            "path": "vmux_terminal::plugin::has_live_terminal",
+            "signature": "pub fn has_live_terminal(tab: Entity, children_q: &Query<'_, '_, &Children>, terminal_q: &Query<'_, '_, (), (With<crate::Terminal>, Without<crate::ProcessExited>)>) -> bool",
+            "docs_md": "Check if a tab entity has any child terminal that is still running.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "confirm_quit_dialog",
+            "path": "vmux_terminal::plugin::confirm_quit_dialog",
+            "signature": "pub fn confirm_quit_dialog(count: usize) -> bool",
+            "docs_md": "Show confirmation dialog for quitting with N running terminals.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TerminalModeMap",
+            "path": "vmux_terminal::plugin::TerminalModeMap",
+            "signature": "pub struct TerminalModeMap",
+            "docs_md": "Per-process terminal mode flags, last broadcast by the service.",
+            "members": [
+              {
+                "name": "modes",
+                "signature": "modes: std::collections::HashMap<vmux_service::protocol::ProcessId, TerminalModeFlags>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TerminalModeFlags",
+            "path": "vmux_terminal::plugin::TerminalModeFlags",
+            "signature": "pub struct TerminalModeFlags",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "mouse_capture",
+                "signature": "mouse_capture: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "copy_mode",
+                "signature": "copy_mode: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "alt_screen",
+                "signature": "alt_screen: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "focus_reporting",
+                "signature": "focus_reporting: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentFocusBlurred",
+            "path": "vmux_terminal::plugin::AgentFocusBlurred",
+            "signature": "pub struct AgentFocusBlurred",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentLoading",
+            "path": "vmux_terminal::plugin::AgentLoading",
+            "signature": "pub struct AgentLoading",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "since",
+                "signature": "since: std::time::Instant",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RestartPty",
+            "path": "vmux_terminal::plugin::RestartPty",
+            "signature": "pub struct RestartPty",
+            "docs_md": "Triggered to restart the terminal process for a terminal entity.",
+            "members": [
+              {
+                "name": "entity",
+                "signature": "entity: Entity",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TerminalSendRequest",
+            "path": "vmux_terminal::plugin::TerminalSendRequest",
+            "signature": "pub struct TerminalSendRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              },
+              {
+                "name": "terminal",
+                "signature": "terminal: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ShellMode",
+            "path": "vmux_terminal::plugin::ShellMode",
+            "signature": "pub enum ShellMode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "NewTab",
+                "signature": "NewTab",
+                "docs_md": ""
+              },
+              {
+                "name": "Active",
+                "signature": "Active",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RunShellRequest",
+            "path": "vmux_terminal::plugin::RunShellRequest",
+            "signature": "pub struct RunShellRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: String",
+                "docs_md": ""
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: String",
+                "docs_md": ""
+              },
+              {
+                "name": "mode",
+                "signature": "mode: ShellMode",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TerminalStackSpawnRequest",
+            "path": "vmux_terminal::plugin::TerminalStackSpawnRequest",
+            "signature": "pub struct TerminalStackSpawnRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "pane",
+                "signature": "pane: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "cwd",
+                "signature": "cwd: Option<std::path::PathBuf>",
+                "docs_md": ""
+              },
+              {
+                "name": "pending_input",
+                "signature": "pending_input: Option<Vec<u8>>",
+                "docs_md": ""
+              },
+              {
+                "name": "process_id",
+                "signature": "process_id: Option<vmux_service::protocol::ProcessId>",
+                "docs_md": "Pin this `ProcessId` on the spawned terminal (so the caller can address\nit later); `None` lets the bundle mint a fresh one."
+              },
+              {
+                "name": "activate",
+                "signature": "activate: bool",
+                "docs_md": "When true, the new stack is activated (focus moves to it). When false,\nfocus stays where it is."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TerminalPlugin",
+            "path": "vmux_terminal::plugin::TerminalPlugin",
+            "signature": "pub struct TerminalPlugin",
+            "docs_md": "Wires the terminal domain: PTY spawning via the background service, terminal/stack/\nprocess-monitor requests, keyboard and mouse forwarding, and snapshot updates.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ServiceMessageSet",
+            "path": "vmux_terminal::plugin::ServiceMessageSet",
+            "signature": "pub struct ServiceMessageSet",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "format_terminal_url",
+            "path": "vmux_terminal::plugin::format_terminal_url",
+            "signature": "pub fn format_terminal_url(q: Query<'_, '_, (Option<&crate::pid::Pid>, &mut vmux_core::PageMetadata), (With<crate::Terminal>, Without<vmux_core::agent::AgentSession>, Or<(Changed<crate::pid::Pid>, Added<vmux_core::PageMetadata>)>)>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "new_terminal_bundle",
+            "path": "vmux_terminal::plugin::new_terminal_bundle",
+            "signature": "pub fn new_terminal_bundle(meshes: &mut ResMut<'_, Assets<Mesh>>, webview_mt: &mut ResMut<'_, Assets<WebviewExtendStandardMaterial>>, settings: &vmux_setting::AppSettings) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "new_terminal_bundle_with_cwd",
+            "path": "vmux_terminal::plugin::new_terminal_bundle_with_cwd",
+            "signature": "pub fn new_terminal_bundle_with_cwd(meshes: &mut ResMut<'_, Assets<Mesh>>, webview_mt: &mut ResMut<'_, Assets<WebviewExtendStandardMaterial>>, settings: &vmux_setting::AppSettings, cwd: Option<&std::path::Path>) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "reattach_terminal_bundle",
+            "path": "vmux_terminal::plugin::reattach_terminal_bundle",
+            "signature": "pub fn reattach_terminal_bundle(meshes: &mut ResMut<'_, Assets<Mesh>>, webview_mt: &mut ResMut<'_, Assets<WebviewExtendStandardMaterial>>, process_id: vmux_service::protocol::ProcessId) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PendingServiceCreate",
+            "path": "vmux_terminal::plugin::PendingServiceCreate",
+            "signature": "pub struct PendingServiceCreate",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PendingTerminalInput",
+            "path": "vmux_terminal::plugin::PendingTerminalInput",
+            "signature": "pub struct PendingTerminalInput",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "data",
+                "signature": "data: Vec<u8>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_process_created",
+            "path": "vmux_terminal::plugin::apply_process_created",
+            "signature": "pub fn apply_process_created(commands: &mut Commands<'_, '_>, entity: Entity, process_id: vmux_service::protocol::ProcessId, process_pid: u32)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "TerminalFontSizeCommand",
+            "path": "vmux_terminal::plugin::TerminalFontSizeCommand",
+            "signature": "pub enum TerminalFontSizeCommand",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Increase",
+                "signature": "Increase",
+                "docs_md": ""
+              },
+              {
+                "name": "Decrease",
+                "signature": "Decrease",
+                "docs_md": ""
+              },
+              {
+                "name": "Reset",
+                "signature": "Reset",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "handle_terminal_font_size",
+            "path": "vmux_terminal::plugin::handle_terminal_font_size",
+            "signature": "pub fn handle_terminal_font_size(reader: MessageReader<'_, '_, TerminalFontSizeCommand>, settings: ResMut<'_, vmux_setting::AppSettings>, saves: MessageWriter<'_, vmux_setting::SettingsSaveRequest>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessExitedEvent",
+            "path": "vmux_terminal::plugin::ProcessExitedEvent",
+            "signature": "pub struct ProcessExitedEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: vmux_service::protocol::ProcessId",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "OscTitleChanged",
+            "path": "vmux_terminal::plugin::OscTitleChanged",
+            "signature": "pub struct OscTitleChanged",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "process_id",
+                "signature": "process_id: vmux_service::protocol::ProcessId",
+                "docs_md": ""
+              },
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_osc_title",
+            "path": "vmux_terminal::plugin::apply_osc_title",
+            "signature": "pub fn apply_osc_title(reader: MessageReader<'_, '_, OscTitleChanged>, commands: Commands<'_, '_>, terminals: Query<'_, '_, (Entity, &vmux_service::protocol::ProcessId, Option<&vmux_core::OscTitle>), With<crate::Terminal>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "clear_osc_title_on_exit",
+            "path": "vmux_terminal::plugin::clear_osc_title_on_exit",
+            "signature": "pub fn clear_osc_title_on_exit(reader: MessageReader<'_, '_, ProcessExitedEvent>, commands: Commands<'_, '_>, terminals: Query<'_, '_, (Entity, &vmux_service::protocol::ProcessId), (With<crate::Terminal>, With<vmux_core::OscTitle>)>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "handle_terminal_send_requests",
+            "path": "vmux_terminal::plugin::handle_terminal_send_requests",
+            "signature": "pub fn handle_terminal_send_requests(reader: MessageReader<'_, '_, crate::TerminalSendRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, terminals: Query<'_, '_, (Entity, &vmux_service::protocol::ProcessId, &ChildOf), (With<crate::Terminal>, Without<crate::ProcessExited>)>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "handle_run_shell_requests",
+            "path": "vmux_terminal::plugin::handle_run_shell_requests",
+            "signature": "pub fn handle_run_shell_requests(reader: MessageReader<'_, '_, crate::RunShellRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, panes: Query<'_, '_, Entity, (With<vmux_layout::pane::Pane>, Without<vmux_layout::pane::PaneSplit>)>, terminals: Query<'_, '_, (Entity, &vmux_service::protocol::ProcessId, &ChildOf), (With<crate::Terminal>, Without<crate::ProcessExited>)>, commands: Commands<'_, '_>, terminal_stack_spawns: Option<MessageWriter<'_, TerminalStackSpawnRequest>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::processes_monitor",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ProcessesMonitor",
+            "path": "vmux_terminal::processes_monitor::ProcessesMonitor",
+            "signature": "pub struct ProcessesMonitor",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ServiceProcessList",
+            "path": "vmux_terminal::processes_monitor::ServiceProcessList",
+            "signature": "pub struct ServiceProcessList",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "processes",
+                "signature": "processes: Vec<vmux_service::protocol::ProcessInfo>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Usage",
+            "path": "vmux_terminal::processes_monitor::Usage",
+            "signature": "pub struct Usage",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "cpu_percent",
+                "signature": "cpu_percent: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "mem_bytes",
+                "signature": "mem_bytes: u64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessUsage",
+            "path": "vmux_terminal::processes_monitor::ProcessUsage",
+            "signature": "pub struct ProcessUsage",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ProcessesMonitorPlugin",
+            "path": "vmux_terminal::processes_monitor::ProcessesMonitorPlugin",
+            "signature": "pub struct ProcessesMonitorPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::shell_env",
+        "docs_md": "Capture the user's login-shell environment so agent processes inherit it.\n\nA vmux terminal runs the user's shell, which sources its config (`env.nu`,\n`.zshrc`, …) and thus has the user's exported vars (API keys, etc.). An\n*agent* (vibe/claude/codex) is launched as a bare executable, so it only\ninherits the daemon's environment — which is missing those vars when the\ndaemon was started by launchd rather than from a shell. We capture the login\nshell's exported environment once and merge it into agent spawns.",
+        "items": [
+          {
+            "kind": "function",
+            "name": "login_shell_env",
+            "path": "vmux_terminal::shell_env::login_shell_env",
+            "signature": "pub fn login_shell_env(shell: &str) -> &'static [(String, String)]",
+            "docs_md": "The environment the user's login shell exports, captured once per process.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "merge_login_shell_env",
+            "path": "vmux_terminal::shell_env::merge_login_shell_env",
+            "signature": "pub fn merge_login_shell_env(env: &mut Vec<(String, String)>, shell: &str)",
+            "docs_md": "Merge the login-shell env into `env` (shell values win), then drop duplicate\nkeys keeping the last. Use when spawning an agent so it gets the same\nenvironment a terminal would, regardless of how the daemon was launched.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::shell_input",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "shell_command_input",
+            "path": "vmux_terminal::shell_input::shell_command_input",
+            "signature": "pub fn shell_command_input(command: &str) -> Vec<u8>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::snapshot_updater",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "update_terminals_snapshot",
+            "path": "vmux_terminal::snapshot_updater::update_terminals_snapshot",
+            "signature": "pub fn update_terminals_snapshot(pid_map: Option<Res<'_, crate::pid::PidToEntity>>, snapshot: ResMut<'_, vmux_command::snapshot::CommandBarTerminalsSnapshot>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_terminal::target",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "active_terminal_for_tab",
+            "path": "vmux_terminal::target::active_terminal_for_tab",
+            "signature": "pub fn active_terminal_for_tab(tab: Option<Entity>, terminals: &Query<'_, '_, (Entity, &vmux_core::ProcessId, &ChildOf), (With<vmux_core::terminal::Terminal>, Without<vmux_core::terminal::ProcessExited>)>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "parse_terminal_target",
+            "path": "vmux_terminal::target::parse_terminal_target",
+            "signature": "pub fn parse_terminal_target(s: &str, terminals: &Query<'_, '_, (Entity, &vmux_core::ProcessId, &ChildOf), (With<vmux_core::terminal::Terminal>, Without<vmux_core::terminal::ProcessExited>)>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

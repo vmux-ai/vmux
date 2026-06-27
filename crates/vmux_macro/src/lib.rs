@@ -1,3 +1,6 @@
+//! Internal procedural-macro crate: derive macros that generate command-bar, shortcut,
+//! MCP-tool, and OS-menu boilerplate from enums.
+
 mod expand;
 mod named_fields;
 

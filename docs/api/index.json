@@ -1,0 +1,100 @@
+{
+  "generated_with": "nightly-2026-06-26",
+  "crates": [
+    {
+      "name": "vmux_core",
+      "version": "0.0.19",
+      "blurb_md": "Shared component types and reflection registration used across all vmux crates."
+    },
+    {
+      "name": "vmux_browser",
+      "version": "0.0.19",
+      "blurb_md": "Browser and page-open orchestration on top of `bevy_cef`: page resolution, CEF\nbackend management, and input forwarding between the native layout and embedded pages."
+    },
+    {
+      "name": "vmux_terminal",
+      "version": "0.0.19",
+      "blurb_md": "Terminal page: spawns and drives shell processes through the background service and\nrenders them in a CEF + Dioxus terminal webview."
+    },
+    {
+      "name": "vmux_agent",
+      "version": "0.0.19",
+      "blurb_md": "Agent integration: pluggable CLI agent strategies (vibe, claude, codex), session\nlifecycle and discovery, and the ECS messaging that lets agents drive screenshots,\nrecordings, browser snapshots, and layout commands."
+    },
+    {
+      "name": "vmux_editor",
+      "version": "0.0.19",
+      "blurb_md": "File viewer and editor page: loading, editing, syntax highlighting, file watching,\nimage preview, and LSP integration in a CEF + Dioxus webview."
+    },
+    {
+      "name": "vmux_layout",
+      "version": "0.0.19",
+      "blurb_md": "The window and layout shell: spaces, tabs, panes, stacks, focus ring, header and\nside-sheet, command-bar input, and the single CEF layout webview that composes every page."
+    },
+    {
+      "name": "vmux_git",
+      "version": "0.0.19",
+      "blurb_md": "Host-side git engine: runs git operations on background threads and bridges results\nto the `files://` editor page."
+    },
+    {
+      "name": "vmux_space",
+      "version": "0.0.19",
+      "blurb_md": "Spaces (workspace groupings): CRUD over named spaces, per-space startup URL and\ndirectory, active-space tracking, and the spaces list webview."
+    },
+    {
+      "name": "vmux_history",
+      "version": "0.0.19",
+      "blurb_md": "Browsing history: records visits, prunes old entries, serves history queries and\ncommand-bar suggestions, and renders the history webview."
+    },
+    {
+      "name": "vmux_command",
+      "version": "0.0.19",
+      "blurb_md": "The command vocabulary and command-bar wire protocol: the `AppCommand` type, the\nissue/read system-set ordering, and the snapshots the command bar consumes."
+    },
+    {
+      "name": "vmux_service",
+      "version": "0.0.19",
+      "blurb_md": "Background daemon that hosts persistent terminal processes across app restarts, plus\nthe processes-monitor webview page."
+    },
+    {
+      "name": "vmux_setting",
+      "version": "0.0.19",
+      "blurb_md": "Application settings: a typed schema (appearance, editor, browser, agent, lsp,\nshortcuts, spaces), RON load/save with debounce, theme definitions, and the settings webview."
+    },
+    {
+      "name": "vmux_mcp",
+      "version": "0.0.19",
+      "blurb_md": "MCP (Model Context Protocol) stdio server exposing Vmux workspace controls as tools\nfor external agents."
+    },
+    {
+      "name": "vmux_team",
+      "version": "0.0.19",
+      "blurb_md": "Team and profiles view: represents the user and the agents in the active space as\nteam members and renders the team webview."
+    },
+    {
+      "name": "vmux_ui",
+      "version": "0.0.19",
+      "blurb_md": "Dioxus WASM UI library: [`components`] and [`hooks`] for CEF IPC."
+    },
+    {
+      "name": "vmux_server",
+      "version": "0.0.19",
+      "blurb_md": "Serves embedded webview page bundles over `vmux://` URLs on the host, and on wasm\ndispatches the web build to the correct per-host Dioxus page."
+    },
+    {
+      "name": "vmux_desktop",
+      "version": "0.0.19",
+      "blurb_md": "The desktop application: the top-level binary and [`VmuxPlugin`] that wire every crate\ntogether, plus macOS-native integrations (glass/blur, event tap, native focus, tray,\nmenu, recording, persistence)."
+    },
+    {
+      "name": "vmux_cli",
+      "version": "0.0.19",
+      "blurb_md": "The `vmux` command-line entry point: launches and controls the app and dispatches the\nMCP server, OS notifications, and the background service."
+    },
+    {
+      "name": "vmux_macro",
+      "version": "0.0.19",
+      "blurb_md": "Internal procedural-macro crate: derive macros that generate command-bar, shortcut,\nMCP-tool, and OS-menu boilerplate from enums."
+    }
+  ]
+}

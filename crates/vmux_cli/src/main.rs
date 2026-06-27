@@ -1,3 +1,6 @@
+//! The `vmux` command-line entry point: launches and controls the app and dispatches the
+//! MCP server, OS notifications, and the background service.
+
 use clap::Parser;
 
 mod commands;

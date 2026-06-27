@@ -1,3 +1,6 @@
+//! Browsing history: records visits, prunes old entries, serves history queries and
+//! command-bar suggestions, and renders the history webview.
+
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
