@@ -14,7 +14,8 @@ pub fn Hero() -> Element {
     rsx! {
         section {
             "data-tone": "light",
-            class: "relative isolate min-h-screen overflow-hidden flex flex-col items-center justify-start px-6 pt-28 sm:pt-36 pb-24 text-center bg-bg text-text",
+            class: "relative isolate min-h-screen overflow-hidden flex flex-col items-center justify-start px-6 pb-24 text-center bg-bg text-text",
+            style: "padding-top: 7.5rem",
             div { class: "pointer-events-none absolute inset-0 -z-10",
                 div { class: "absolute left-1/2 top-1/4 h-[34rem] w-[34rem] -translate-x-1/2 rounded-full bg-accent/20 blur-[140px] animate-aurora motion-reduce:animate-none" }
                 div { class: "absolute left-[16%] top-1/3 h-80 w-80 rounded-full bg-aurora-cyan/20 blur-[120px] animate-aurora [animation-delay:-7s] motion-reduce:animate-none" }
