@@ -159,6 +159,20 @@ pub struct AgentLoading {
     pub since: Instant,
 }
 
+/// Last char-grid size (cols/rows) the page measured for this terminal, so a PTY
+/// restart can recreate the process at the current pane size instead of 80x24.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct TerminalGridSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl Default for TerminalGridSize {
+    fn default() -> Self {
+        Self { cols: 80, rows: 24 }
+    }
+}
+
 /// Triggered to restart the terminal process for a terminal entity.
 #[derive(Event)]
 pub struct RestartPty {
@@ -315,6 +329,7 @@ impl Plugin for TerminalPlugin {
                 Update,
                 (
                     arm_agent_loading,
+                    arm_agent_loading_on_restart,
                     clear_agent_loading.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
                 ),
@@ -632,6 +647,7 @@ pub fn new_terminal_bundle_with_cwd(
         (
             MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
+            TerminalGridSize::default(),
             Transform::default(),
             GlobalTransform::default(),
             Node {
@@ -730,6 +746,7 @@ pub fn reattach_terminal_bundle(
         (
             MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
+            TerminalGridSize::default(),
             Transform::default(),
             GlobalTransform::default(),
             Node {
@@ -2702,6 +2719,34 @@ fn arm_agent_loading(
     }
 }
 
+fn arm_agent_loading_on_restart(
+    restarted: Query<
+        (Entity, &vmux_core::agent::AgentSession),
+        (
+            With<Terminal>,
+            With<PageReady>,
+            Without<AgentLoading>,
+            Changed<ProcessId>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for (entity, session) in &restarted {
+        commands.entity(entity).insert(AgentLoading {
+            since: Instant::now(),
+        });
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            TERM_LOADING_EVENT,
+            &crate::event::TermLoadingEvent {
+                loading: true,
+                label: session.kind.display_name().to_string(),
+                segment: session.kind.as_url_segment().to_string(),
+            },
+        ));
+    }
+}
+
 fn clear_agent_loading(
     loading_q: Query<
         (
@@ -2770,16 +2815,13 @@ fn on_term_resize(
     trigger: On<BinReceive<TermResizeEvent>>,
     webview_q: Query<&WebviewSize, With<Terminal>>,
     pid_q: Query<&ProcessId, With<Terminal>>,
+    mut grid_q: Query<&mut TerminalGridSize, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
-    let Some(service) = service else { return };
 
     let Ok(webview_size) = webview_q.get(entity) else {
-        return;
-    };
-    let Ok(pid) = pid_q.get(entity) else {
         return;
     };
 
@@ -2800,6 +2842,16 @@ fn on_term_resize(
 
     let cols = (vw / event.char_width).floor().max(1.0) as u16;
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
+
+    if let Ok(mut grid) = grid_q.get_mut(entity) {
+        grid.cols = cols;
+        grid.rows = rows;
+    }
+
+    let Some(service) = service else { return };
+    let Ok(pid) = pid_q.get(entity) else {
+        return;
+    };
 
     service.0.send(ClientMessage::ResizeProcess {
         process_id: *pid,
@@ -2925,6 +2977,7 @@ fn on_restart_pty(
         &mut PageMetadata,
         Option<&mut crate::launch::TerminalLaunch>,
         Option<&vmux_core::agent::AgentSession>,
+        Option<&TerminalGridSize>,
     )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
@@ -2932,7 +2985,7 @@ fn on_restart_pty(
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut pid, mut meta, mut launch, agent_session)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta, mut launch, agent_session, grid)) = q.get_mut(entity) else {
         return;
     };
 
@@ -2962,6 +3015,7 @@ fn on_restart_pty(
         }
     };
 
+    let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
     let new_id = ProcessId::new();
     service.0.send(ClientMessage::CreateProcess {
         process_id: new_id,
@@ -2969,8 +3023,8 @@ fn on_restart_pty(
         args: args.clone(),
         cwd: cwd.clone(),
         env: env.clone(),
-        cols: 80,
-        rows: 24,
+        cols,
+        rows,
     });
     service
         .0
@@ -4084,6 +4138,38 @@ mod tests {
                 PageReady {},
             ))
             .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn agent_loading_armed_on_pty_restart() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading_on_restart);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                ProcessId::new(),
+            ))
+            .id();
+
+        // ProcessId added before the page is ready must not arm.
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+
+        // Page becomes ready without a pid change: this system must not arm
+        // (first launch is handled by arm_agent_loading).
+        app.world_mut().entity_mut(e).insert(PageReady {});
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_none());
+
+        // A restart mutates ProcessId while the page is ready: must arm.
+        *app.world_mut().get_mut::<ProcessId>(e).unwrap() = ProcessId::new();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_some());
     }
