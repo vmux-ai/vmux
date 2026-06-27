@@ -3612,6 +3612,18 @@ mod tests {
     }
 
     #[test]
+    fn agent_loading_uses_matrix_rain() {
+        let page = include_str!("page.rs");
+        assert!(page.contains("MatrixRain {"));
+        assert!(page.contains("accent.rain_rgb"));
+
+        let rain = include_str!("matrix_rain.rs");
+        assert!(rain.contains("request_animation_frame"));
+        assert!(rain.contains("use_drop"));
+        assert!(rain.contains("prefers-reduced-motion"));
+    }
+
+    #[test]
     fn terminal_web_shortcut_wakes_next_command_frame() {
         let source = include_str!("plugin.rs");
         let on_term_key = source
