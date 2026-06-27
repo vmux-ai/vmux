@@ -57,9 +57,9 @@ pub use client::page::plugin::PageAgentPlugin;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::{
-    BrowserSnapshotRequest, BrowserSnapshotResponse, RecordStartRequest, RecordStartResponse,
-    RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest,
-    ScreenshotResponse,
+    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, RecordStartRequest,
+    RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage,
+    ScreenshotRequest, ScreenshotResponse,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use launch::build_agent_launch;

@@ -188,6 +188,11 @@ pub enum AgentQuery {
     BrowserSnapshot {
         pane: Option<String>,
     },
+    BrowserScroll {
+        pane: Option<String>,
+        to: Option<String>,
+        delta: Option<i32>,
+    },
     RecordStart {
         gif: bool,
         max_secs: u32,

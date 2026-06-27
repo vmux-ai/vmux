@@ -85,6 +85,14 @@ pub struct BrowserSnapshotResponse {
     pub result: Result<String, String>,
 }
 
+#[derive(Message, Clone)]
+pub struct BrowserScrollRequest {
+    pub request_id: [u8; 16],
+    pub pane: Option<String>,
+    pub to: Option<String>,
+    pub delta: Option<i32>,
+}
+
 pub fn snapshot_response_to_query_result(
     result: &Result<String, String>,
 ) -> vmux_service::protocol::AgentQueryResult {
