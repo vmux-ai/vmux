@@ -1,0 +1,4938 @@
+{
+  "name": "vmux_layout",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_layout",
+    "docs_md": "The window and layout shell: spaces, tabs, panes, stacks, focus ring, header and\nside-sheet, command-bar input, and the single CEF layout webview that composes every page.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "LAYOUT_PAGE_MANIFEST",
+        "path": "vmux_layout::LAYOUT_PAGE_MANIFEST",
+        "signature": "pub const LAYOUT_PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "constant",
+        "name": "COMMAND_BAR_PAGE_MANIFEST",
+        "path": "vmux_layout::COMMAND_BAR_PAGE_MANIFEST",
+        "signature": "pub const COMMAND_BAR_PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "constant",
+        "name": "DEBUG_PAGE_MANIFEST",
+        "path": "vmux_layout::DEBUG_PAGE_MANIFEST",
+        "signature": "pub const DEBUG_PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "constant",
+        "name": "ERROR_PAGE_MANIFEST",
+        "path": "vmux_layout::ERROR_PAGE_MANIFEST",
+        "signature": "pub const ERROR_PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "enum",
+        "name": "LayoutStartupSet",
+        "path": "vmux_layout::LayoutStartupSet",
+        "signature": "pub enum LayoutStartupSet",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "Window",
+            "signature": "Window",
+            "docs_md": ""
+          },
+          {
+            "name": "Persistence",
+            "signature": "Persistence",
+            "docs_md": ""
+          },
+          {
+            "name": "DefaultTab",
+            "signature": "DefaultTab",
+            "docs_md": ""
+          },
+          {
+            "name": "Post",
+            "signature": "Post",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "Open",
+        "path": "vmux_layout::Open",
+        "signature": "pub struct Open",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "NewStackContext",
+        "path": "vmux_layout::NewStackContext",
+        "signature": "pub struct NewStackContext",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "stack",
+            "signature": "stack: Option<Entity>",
+            "docs_md": ""
+          },
+          {
+            "name": "previous_stack",
+            "signature": "previous_stack: Option<Entity>",
+            "docs_md": ""
+          },
+          {
+            "name": "needs_open",
+            "signature": "needs_open: bool",
+            "docs_md": ""
+          },
+          {
+            "name": "dismiss_modal",
+            "signature": "dismiss_modal: bool",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "CloseRequiresConfirmation",
+        "path": "vmux_layout::CloseRequiresConfirmation",
+        "signature": "pub struct CloseRequiresConfirmation",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "SpaceFilePresent",
+        "path": "vmux_layout::SpaceFilePresent",
+        "signature": "pub struct SpaceFilePresent",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "StagedUpdate",
+        "path": "vmux_layout::StagedUpdate",
+        "signature": "pub struct StagedUpdate",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "enum",
+        "name": "LayoutSpawnRequest",
+        "path": "vmux_layout::LayoutSpawnRequest",
+        "signature": "pub enum LayoutSpawnRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "Terminal",
+            "signature": "Terminal",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "enum",
+        "name": "TabLayoutSpawnContent",
+        "path": "vmux_layout::TabLayoutSpawnContent",
+        "signature": "pub enum TabLayoutSpawnContent",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "StartupUrlOrPrompt",
+            "signature": "StartupUrlOrPrompt",
+            "docs_md": ""
+          },
+          {
+            "name": "Url",
+            "signature": "Url",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "TabLayoutSpawnRequest",
+        "path": "vmux_layout::TabLayoutSpawnRequest",
+        "signature": "pub struct TabLayoutSpawnRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "main",
+            "signature": "main: Entity",
+            "docs_md": ""
+          },
+          {
+            "name": "primary_window",
+            "signature": "primary_window: Entity",
+            "docs_md": ""
+          },
+          {
+            "name": "name",
+            "signature": "name: Option<String>",
+            "docs_md": ""
+          },
+          {
+            "name": "content",
+            "signature": "content: TabLayoutSpawnContent",
+            "docs_md": ""
+          },
+          {
+            "name": "clear_pending_stack",
+            "signature": "clear_pending_stack: bool",
+            "docs_md": ""
+          },
+          {
+            "name": "focus",
+            "signature": "focus: bool",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "BrowserNavigateRequest",
+        "path": "vmux_layout::BrowserNavigateRequest",
+        "signature": "pub struct BrowserNavigateRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "url",
+            "signature": "url: String",
+            "docs_md": ""
+          },
+          {
+            "name": "pane",
+            "signature": "pane: Option<String>",
+            "docs_md": ""
+          },
+          {
+            "name": "request_id",
+            "signature": "request_id: Option<[u8; 16]>",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "BrowserGoBackRequest",
+        "path": "vmux_layout::BrowserGoBackRequest",
+        "signature": "pub struct BrowserGoBackRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "pane",
+            "signature": "pane: Option<String>",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "BrowserGoForwardRequest",
+        "path": "vmux_layout::BrowserGoForwardRequest",
+        "signature": "pub struct BrowserGoForwardRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "pane",
+            "signature": "pane: Option<String>",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "OpenInNewStackRequest",
+        "path": "vmux_layout::OpenInNewStackRequest",
+        "signature": "pub struct OpenInNewStackRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "url",
+            "signature": "url: String",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "ExtensionInstallRequest",
+        "path": "vmux_layout::ExtensionInstallRequest",
+        "signature": "pub struct ExtensionInstallRequest",
+        "docs_md": "",
+        "members": [
+          {
+            "name": "source",
+            "signature": "source: String",
+            "docs_md": ""
+          }
+        ],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_layout::command_bar",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_layout::command_bar::keyboard",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "enum",
+                "name": "CtrlEditAction",
+                "path": "vmux_layout::command_bar::keyboard::CtrlEditAction",
+                "signature": "pub enum CtrlEditAction",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Home",
+                    "signature": "Home",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "End",
+                    "signature": "End",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Forward",
+                    "signature": "Forward",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Back",
+                    "signature": "Back",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Delete",
+                    "signature": "Delete",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Backspace",
+                    "signature": "Backspace",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteWord",
+                    "signature": "DeleteWord",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteToBeginning",
+                    "signature": "DeleteToBeginning",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "CtrlKeyCapture",
+                "path": "vmux_layout::command_bar::keyboard::CtrlKeyCapture",
+                "signature": "pub enum CtrlKeyCapture",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Ignore",
+                    "signature": "Ignore",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Edit",
+                    "signature": "Edit",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "PassToDioxus",
+                    "signature": "PassToDioxus",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "RerouteToDioxus",
+                    "signature": "RerouteToDioxus",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "ctrl_key_capture_for_code",
+                "path": "vmux_layout::command_bar::keyboard::ctrl_key_capture_for_code",
+                "signature": "pub fn ctrl_key_capture_for_code(code: &str) -> CtrlKeyCapture",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "ignore_physical_rerouted_ctrl_keydown",
+                "path": "vmux_layout::command_bar::keyboard::ignore_physical_rerouted_ctrl_keydown",
+                "signature": "pub fn ignore_physical_rerouted_ctrl_keydown(code: &str, is_synthetic: bool) -> bool",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_layout::command_bar::results",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "enum",
+                "name": "CommandBarResultItem",
+                "path": "vmux_layout::command_bar::results::CommandBarResultItem",
+                "signature": "pub enum CommandBarResultItem",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Terminal",
+                    "signature": "Terminal",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Stack",
+                    "signature": "Stack",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Space",
+                    "signature": "Space",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Command",
+                    "signature": "Command",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Page",
+                    "signature": "Page",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Navigate",
+                    "signature": "Navigate",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "File",
+                    "signature": "File",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "History",
+                    "signature": "History",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "filter_results",
+                "path": "vmux_layout::command_bar::results::filter_results",
+                "signature": "pub fn filter_results(query: &str, tabs: &[vmux_command::event::CommandBarTab], commands: &[vmux_command::event::CommandBarCommandEntry], spaces: &[vmux_command::event::CommandBarSpace], pages: &[vmux_command::event::CommandBarPage], new_tab: bool, history: &[vmux_command::event::HistoryEntry]) -> Vec<CommandBarResultItem>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_layout::command_bar::style",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "result_item_class",
+                "path": "vmux_layout::command_bar::style::result_item_class",
+                "signature": "pub fn result_item_class(is_selected: bool) -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_bar_root_class",
+                "path": "vmux_layout::command_bar::style::command_bar_root_class",
+                "signature": "pub fn command_bar_root_class(native_windowed: bool) -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_bar_shell_class",
+                "path": "vmux_layout::command_bar::style::command_bar_shell_class",
+                "signature": "pub fn command_bar_shell_class(native_windowed: bool) -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_bar_input_row_class",
+                "path": "vmux_layout::command_bar::style::command_bar_input_row_class",
+                "signature": "pub fn command_bar_input_row_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_bar_input_wrap_class",
+                "path": "vmux_layout::command_bar::style::command_bar_input_wrap_class",
+                "signature": "pub fn command_bar_input_wrap_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_bar_input_class",
+                "path": "vmux_layout::command_bar::style::command_bar_input_class",
+                "signature": "pub fn command_bar_input_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_list_class",
+                "path": "vmux_layout::command_bar::style::result_list_class",
+                "signature": "pub fn result_list_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_content_row_class",
+                "path": "vmux_layout::command_bar::style::result_content_row_class",
+                "signature": "pub fn result_content_row_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_favicon_class",
+                "path": "vmux_layout::command_bar::style::result_favicon_class",
+                "signature": "pub fn result_favicon_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_leading_icon_class",
+                "path": "vmux_layout::command_bar::style::result_leading_icon_class",
+                "signature": "pub fn result_leading_icon_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_primary_text_class",
+                "path": "vmux_layout::command_bar::style::result_primary_text_class",
+                "signature": "pub fn result_primary_text_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_secondary_text_class",
+                "path": "vmux_layout::command_bar::style::result_secondary_text_class",
+                "signature": "pub fn result_secondary_text_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_terminal_path_class",
+                "path": "vmux_layout::command_bar::style::result_terminal_path_class",
+                "signature": "pub fn result_terminal_path_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_history_url_class",
+                "path": "vmux_layout::command_bar::style::result_history_url_class",
+                "signature": "pub fn result_history_url_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_trailing_slot_class",
+                "path": "vmux_layout::command_bar::style::result_trailing_slot_class",
+                "signature": "pub fn result_trailing_slot_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "result_shortcut_badge_class",
+                "path": "vmux_layout::command_bar::style::result_shortcut_badge_class",
+                "signature": "pub fn result_shortcut_badge_class() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_layout::command_bar::handler",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "CommandBarNativeSize",
+                "path": "vmux_layout::command_bar::handler::CommandBarNativeSize",
+                "signature": "pub struct CommandBarNativeSize",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "width",
+                    "signature": "width: f32",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "height",
+                    "signature": "height: f32",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "PendingCommandBarReveal",
+                "path": "vmux_layout::command_bar::handler::PendingCommandBarReveal",
+                "signature": "pub struct PendingCommandBarReveal",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "CommandBarEntry",
+                "path": "vmux_layout::command_bar::handler::CommandBarEntry",
+                "signature": "pub struct CommandBarEntry",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "id",
+                    "signature": "id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "shortcut",
+                    "signature": "shortcut: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AppAgentEntry",
+                "path": "vmux_layout::command_bar::handler::AppAgentEntry",
+                "signature": "pub struct AppAgentEntry",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "id",
+                    "signature": "id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "app_agent_id",
+                "path": "vmux_layout::command_bar::handler::app_agent_id",
+                "signature": "pub fn app_agent_id(provider: &str, model: &str) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_app_agent_id",
+                "path": "vmux_layout::command_bar::handler::parse_app_agent_id",
+                "signature": "pub fn parse_app_agent_id(id: &str) -> Option<(String, String)>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "command_list",
+                "path": "vmux_layout::command_bar::handler::command_list",
+                "signature": "pub fn command_list(app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "match_command",
+                "path": "vmux_layout::command_bar::handler::match_command",
+                "signature": "pub fn match_command(id: &str) -> Option<vmux_command::AppCommand>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "is_command_bar_open",
+                "path": "vmux_layout::command_bar::handler::is_command_bar_open",
+                "signature": "pub fn is_command_bar_open(modal_q: &Query<'_, '_, (&Node, Has<CefKeyboardTarget>), With<crate::window::Modal>>) -> bool",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_layout::command_bar::plugin",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "CommandBarPagePlugin",
+                "path": "vmux_layout::command_bar::plugin::CommandBarPagePlugin",
+                "signature": "pub struct CommandBarPagePlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_layout::command_bar::shortcut",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "ChordState",
+                "path": "vmux_layout::command_bar::shortcut::ChordState",
+                "signature": "pub struct ChordState",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "pending_prefix",
+                    "signature": "pending_prefix: Option<(KeyCombo, std::time::Instant)>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "Modifiers",
+                "path": "vmux_layout::command_bar::shortcut::Modifiers",
+                "signature": "pub struct Modifiers",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "ctrl",
+                    "signature": "ctrl: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "shift",
+                    "signature": "shift: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "alt",
+                    "signature": "alt: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "super_key",
+                    "signature": "super_key: bool",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "KeyCombo",
+                "path": "vmux_layout::command_bar::shortcut::KeyCombo",
+                "signature": "pub struct KeyCombo",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "key",
+                    "signature": "key: bevy::input::keyboard::KeyCode",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "modifiers",
+                    "signature": "modifiers: Modifiers",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "Shortcut",
+                "path": "vmux_layout::command_bar::shortcut::Shortcut",
+                "signature": "pub enum Shortcut",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Direct",
+                    "signature": "Direct",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Chord",
+                    "signature": "Chord",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ResolvedKey",
+                "path": "vmux_layout::command_bar::shortcut::ResolvedKey",
+                "signature": "pub struct ResolvedKey",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "key",
+                    "signature": "key: bevy::input::keyboard::KeyCode",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "implicit_shift",
+                    "signature": "implicit_shift: bool",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolve_key",
+                "path": "vmux_layout::command_bar::shortcut::resolve_key",
+                "signature": "pub fn resolve_key(s: &str) -> Option<ResolvedKey>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_layout::event",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "LAYOUT_PAGE_URL",
+            "path": "vmux_layout::event::LAYOUT_PAGE_URL",
+            "signature": "pub const LAYOUT_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "COMMAND_BAR_PAGE_URL",
+            "path": "vmux_layout::event::COMMAND_BAR_PAGE_URL",
+            "signature": "pub const COMMAND_BAR_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "TERMINAL_PAGE_URL",
+            "path": "vmux_layout::event::TERMINAL_PAGE_URL",
+            "signature": "pub const TERMINAL_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SERVICES_PAGE_URL",
+            "path": "vmux_layout::event::SERVICES_PAGE_URL",
+            "signature": "pub const SERVICES_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "LAYOUT_STATE_EVENT",
+            "path": "vmux_layout::event::LAYOUT_STATE_EVENT",
+            "signature": "pub const LAYOUT_STATE_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "STACKS_EVENT",
+            "path": "vmux_layout::event::STACKS_EVENT",
+            "signature": "pub const STACKS_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "RELOAD_EVENT",
+            "path": "vmux_layout::event::RELOAD_EVENT",
+            "signature": "pub const RELOAD_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ReloadEvent",
+            "path": "vmux_layout::event::ReloadEvent",
+            "signature": "pub struct ReloadEvent",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedReloadEvent",
+            "path": "vmux_layout::event::ArchivedReloadEvent",
+            "signature": "pub struct ArchivedReloadEvent",
+            "docs_md": "An archived [`ReloadEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ReloadEvent`",
+                "path": "vmux_layout::event::ReloadEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ReloadEventResolver",
+            "path": "vmux_layout::event::ReloadEventResolver",
+            "signature": "pub struct ReloadEventResolver",
+            "docs_md": "The resolver for an archived [`ReloadEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ReloadEvent`",
+                "path": "vmux_layout::event::ReloadEvent"
+              }
+            ]
+          },
+          {
+            "kind": "constant",
+            "name": "TABS_EVENT",
+            "path": "vmux_layout::event::TABS_EVENT",
+            "signature": "pub const TABS_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "PANE_TREE_EVENT",
+            "path": "vmux_layout::event::PANE_TREE_EVENT",
+            "signature": "pub const PANE_TREE_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SIDE_SHEET_COMMAND_EVENT",
+            "path": "vmux_layout::event::SIDE_SHEET_COMMAND_EVENT",
+            "signature": "pub const SIDE_SHEET_COMMAND_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SIDE_SHEET_DRAG_EVENT",
+            "path": "vmux_layout::event::SIDE_SHEET_DRAG_EVENT",
+            "signature": "pub const SIDE_SHEET_DRAG_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutStateEvent",
+            "path": "vmux_layout::event::LayoutStateEvent",
+            "signature": "pub struct LayoutStateEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "header_open",
+                "signature": "header_open: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "side_sheet_open",
+                "signature": "side_sheet_open: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "header_height",
+                "signature": "header_height: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "side_sheet_width",
+                "signature": "side_sheet_width: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "pane_gap",
+                "signature": "pane_gap: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "radius",
+                "signature": "radius: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "header_left",
+                "signature": "header_left: Option<f32>",
+                "docs_md": ""
+              },
+              {
+                "name": "header_top",
+                "signature": "header_top: Option<f32>",
+                "docs_md": ""
+              },
+              {
+                "name": "header_right",
+                "signature": "header_right: Option<f32>",
+                "docs_md": ""
+              },
+              {
+                "name": "window_pad_top",
+                "signature": "window_pad_top: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "window_pad_right",
+                "signature": "window_pad_right: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "window_pad_bottom",
+                "signature": "window_pad_bottom: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "window_pad_left",
+                "signature": "window_pad_left: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedLayoutStateEvent",
+            "path": "vmux_layout::event::ArchivedLayoutStateEvent",
+            "signature": "pub struct ArchivedLayoutStateEvent",
+            "docs_md": "An archived [`LayoutStateEvent`]",
+            "members": [
+              {
+                "name": "header_open",
+                "signature": "header_open: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::header_open`]"
+              },
+              {
+                "name": "side_sheet_open",
+                "signature": "side_sheet_open: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::side_sheet_open`]"
+              },
+              {
+                "name": "header_height",
+                "signature": "header_height: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::header_height`]"
+              },
+              {
+                "name": "side_sheet_width",
+                "signature": "side_sheet_width: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::side_sheet_width`]"
+              },
+              {
+                "name": "pane_gap",
+                "signature": "pane_gap: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::pane_gap`]"
+              },
+              {
+                "name": "radius",
+                "signature": "radius: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::radius`]"
+              },
+              {
+                "name": "header_left",
+                "signature": "header_left: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::header_left`]"
+              },
+              {
+                "name": "header_top",
+                "signature": "header_top: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::header_top`]"
+              },
+              {
+                "name": "header_right",
+                "signature": "header_right: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::header_right`]"
+              },
+              {
+                "name": "window_pad_top",
+                "signature": "window_pad_top: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::window_pad_top`]"
+              },
+              {
+                "name": "window_pad_right",
+                "signature": "window_pad_right: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::window_pad_right`]"
+              },
+              {
+                "name": "window_pad_bottom",
+                "signature": "window_pad_bottom: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::window_pad_bottom`]"
+              },
+              {
+                "name": "window_pad_left",
+                "signature": "window_pad_left: Archived",
+                "docs_md": "The archived counterpart of [`LayoutStateEvent::window_pad_left`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`LayoutStateEvent`",
+                "path": "vmux_layout::event::LayoutStateEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutStateEventResolver",
+            "path": "vmux_layout::event::LayoutStateEventResolver",
+            "signature": "pub struct LayoutStateEventResolver",
+            "docs_md": "The resolver for an archived [`LayoutStateEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`LayoutStateEvent`",
+                "path": "vmux_layout::event::LayoutStateEvent"
+              }
+            ]
+          },
+          {
+            "kind": "function",
+            "name": "url_bar_top",
+            "path": "vmux_layout::event::url_bar_top",
+            "signature": "pub fn url_bar_top() -> f32",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "HEADER_HEIGHT_PX",
+            "path": "vmux_layout::event::HEADER_HEIGHT_PX",
+            "signature": "pub const HEADER_HEIGHT_PX",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SPACES_ROW_HEIGHT_PX",
+            "path": "vmux_layout::event::SPACES_ROW_HEIGHT_PX",
+            "signature": "pub const SPACES_ROW_HEIGHT_PX",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "TRAFFIC_LIGHTS_PAD_PX",
+            "path": "vmux_layout::event::TRAFFIC_LIGHTS_PAD_PX",
+            "signature": "pub const TRAFFIC_LIGHTS_PAD_PX",
+            "docs_md": "Left padding (px) reserved on the tab row for the macOS traffic\nlights when the side sheet is closed.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "CEF_RESERVED_HEIGHT_PX",
+            "path": "vmux_layout::event::CEF_RESERVED_HEIGHT_PX",
+            "signature": "pub const CEF_RESERVED_HEIGHT_PX",
+            "docs_md": "Vertical space the CEF shell reserves in the layout above the pane.\nThe CEF shell puts tabs at the very top (traffic lights sit on the\nleft of the tab row, in the reserved padding) so no extra titlebar\nstrip is needed.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WINDOW_PAD_PX",
+            "path": "vmux_layout::event::WINDOW_PAD_PX",
+            "signature": "pub const WINDOW_PAD_PX",
+            "docs_md": "Default window edge padding (px). Overridable via `settings.layout.window.padding`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "TERMINAL_CEF_BG_COLOR",
+            "path": "vmux_layout::event::TERMINAL_CEF_BG_COLOR",
+            "signature": "pub const TERMINAL_CEF_BG_COLOR",
+            "docs_md": "Default page bg color for terminal-like stacks (terminals, processes,\nagent CLIs). Matches catppuccin-mocha `base` so the CEF URL row\nblends with the terminal surface below it.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "PANE_GAP_PX",
+            "path": "vmux_layout::event::PANE_GAP_PX",
+            "signature": "pub const PANE_GAP_PX",
+            "docs_md": "Gap (px) between split panes inside a tab.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SIDE_SHEET_WIDTH_PX",
+            "path": "vmux_layout::event::SIDE_SHEET_WIDTH_PX",
+            "signature": "pub const SIDE_SHEET_WIDTH_PX",
+            "docs_md": "Default side-sheet width (px).",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "HeaderCommandEvent",
+            "path": "vmux_layout::event::HeaderCommandEvent",
+            "signature": "pub struct HeaderCommandEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "header_command",
+                "signature": "header_command: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHeaderCommandEvent",
+            "path": "vmux_layout::event::ArchivedHeaderCommandEvent",
+            "signature": "pub struct ArchivedHeaderCommandEvent",
+            "docs_md": "An archived [`HeaderCommandEvent`]",
+            "members": [
+              {
+                "name": "header_command",
+                "signature": "header_command: Archived",
+                "docs_md": "The archived counterpart of [`HeaderCommandEvent::header_command`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HeaderCommandEvent`",
+                "path": "vmux_layout::event::HeaderCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HeaderCommandEventResolver",
+            "path": "vmux_layout::event::HeaderCommandEventResolver",
+            "signature": "pub struct HeaderCommandEventResolver",
+            "docs_md": "The resolver for an archived [`HeaderCommandEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HeaderCommandEvent`",
+                "path": "vmux_layout::event::HeaderCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StacksHostEvent",
+            "path": "vmux_layout::event::StacksHostEvent",
+            "signature": "pub struct StacksHostEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "stacks",
+                "signature": "stacks: Vec<StackRow>",
+                "docs_md": ""
+              },
+              {
+                "name": "can_go_back",
+                "signature": "can_go_back: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "can_go_forward",
+                "signature": "can_go_forward: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "is_zoomed",
+                "signature": "is_zoomed: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedStacksHostEvent",
+            "path": "vmux_layout::event::ArchivedStacksHostEvent",
+            "signature": "pub struct ArchivedStacksHostEvent",
+            "docs_md": "An archived [`StacksHostEvent`]",
+            "members": [
+              {
+                "name": "stacks",
+                "signature": "stacks: Archived",
+                "docs_md": "The archived counterpart of [`StacksHostEvent::stacks`]"
+              },
+              {
+                "name": "can_go_back",
+                "signature": "can_go_back: Archived",
+                "docs_md": "The archived counterpart of [`StacksHostEvent::can_go_back`]"
+              },
+              {
+                "name": "can_go_forward",
+                "signature": "can_go_forward: Archived",
+                "docs_md": "The archived counterpart of [`StacksHostEvent::can_go_forward`]"
+              },
+              {
+                "name": "is_zoomed",
+                "signature": "is_zoomed: Archived",
+                "docs_md": "The archived counterpart of [`StacksHostEvent::is_zoomed`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`StacksHostEvent`",
+                "path": "vmux_layout::event::StacksHostEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StacksHostEventResolver",
+            "path": "vmux_layout::event::StacksHostEventResolver",
+            "signature": "pub struct StacksHostEventResolver",
+            "docs_md": "The resolver for an archived [`StacksHostEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`StacksHostEvent`",
+                "path": "vmux_layout::event::StacksHostEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StackRow",
+            "path": "vmux_layout::event::StackRow",
+            "signature": "pub struct StackRow",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "icon",
+                "signature": "icon: vmux_core::PageIcon",
+                "docs_md": ""
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedStackRow",
+            "path": "vmux_layout::event::ArchivedStackRow",
+            "signature": "pub struct ArchivedStackRow",
+            "docs_md": "An archived [`StackRow`]",
+            "members": [
+              {
+                "name": "title",
+                "signature": "title: Archived",
+                "docs_md": "The archived counterpart of [`StackRow::title`]"
+              },
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`StackRow::url`]"
+              },
+              {
+                "name": "icon",
+                "signature": "icon: Archived",
+                "docs_md": "The archived counterpart of [`StackRow::icon`]"
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: Archived",
+                "docs_md": "The archived counterpart of [`StackRow::is_active`]"
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Archived",
+                "docs_md": "The archived counterpart of [`StackRow::bg_color`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`StackRow`",
+                "path": "vmux_layout::event::StackRow"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StackRowResolver",
+            "path": "vmux_layout::event::StackRowResolver",
+            "signature": "pub struct StackRowResolver",
+            "docs_md": "The resolver for an archived [`StackRow`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`StackRow`",
+                "path": "vmux_layout::event::StackRow"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabsHostEvent",
+            "path": "vmux_layout::event::TabsHostEvent",
+            "signature": "pub struct TabsHostEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "tabs",
+                "signature": "tabs: Vec<TabRow>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedTabsHostEvent",
+            "path": "vmux_layout::event::ArchivedTabsHostEvent",
+            "signature": "pub struct ArchivedTabsHostEvent",
+            "docs_md": "An archived [`TabsHostEvent`]",
+            "members": [
+              {
+                "name": "tabs",
+                "signature": "tabs: Archived",
+                "docs_md": "The archived counterpart of [`TabsHostEvent::tabs`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`TabsHostEvent`",
+                "path": "vmux_layout::event::TabsHostEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabsHostEventResolver",
+            "path": "vmux_layout::event::TabsHostEventResolver",
+            "signature": "pub struct TabsHostEventResolver",
+            "docs_md": "The resolver for an archived [`TabsHostEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`TabsHostEvent`",
+                "path": "vmux_layout::event::TabsHostEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabRow",
+            "path": "vmux_layout::event::TabRow",
+            "signature": "pub struct TabRow",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "icon",
+                "signature": "icon: vmux_core::PageIcon",
+                "docs_md": ""
+              },
+              {
+                "name": "is_done_unseen",
+                "signature": "is_done_unseen: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedTabRow",
+            "path": "vmux_layout::event::ArchivedTabRow",
+            "signature": "pub struct ArchivedTabRow",
+            "docs_md": "An archived [`TabRow`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::id`]"
+              },
+              {
+                "name": "name",
+                "signature": "name: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::name`]"
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::is_active`]"
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::bg_color`]"
+              },
+              {
+                "name": "title",
+                "signature": "title: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::title`]"
+              },
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::url`]"
+              },
+              {
+                "name": "icon",
+                "signature": "icon: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::icon`]"
+              },
+              {
+                "name": "is_done_unseen",
+                "signature": "is_done_unseen: Archived",
+                "docs_md": "The archived counterpart of [`TabRow::is_done_unseen`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`TabRow`",
+                "path": "vmux_layout::event::TabRow"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabRowResolver",
+            "path": "vmux_layout::event::TabRowResolver",
+            "signature": "pub struct TabRowResolver",
+            "docs_md": "The resolver for an archived [`TabRow`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`TabRow`",
+                "path": "vmux_layout::event::TabRow"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabsCommandEvent",
+            "path": "vmux_layout::event::TabsCommandEvent",
+            "signature": "pub struct TabsCommandEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: String",
+                "docs_md": ""
+              },
+              {
+                "name": "tab_id",
+                "signature": "tab_id: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedTabsCommandEvent",
+            "path": "vmux_layout::event::ArchivedTabsCommandEvent",
+            "signature": "pub struct ArchivedTabsCommandEvent",
+            "docs_md": "An archived [`TabsCommandEvent`]",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: Archived",
+                "docs_md": "The archived counterpart of [`TabsCommandEvent::command`]"
+              },
+              {
+                "name": "tab_id",
+                "signature": "tab_id: Archived",
+                "docs_md": "The archived counterpart of [`TabsCommandEvent::tab_id`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`TabsCommandEvent`",
+                "path": "vmux_layout::event::TabsCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabsCommandEventResolver",
+            "path": "vmux_layout::event::TabsCommandEventResolver",
+            "signature": "pub struct TabsCommandEventResolver",
+            "docs_md": "The resolver for an archived [`TabsCommandEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`TabsCommandEvent`",
+                "path": "vmux_layout::event::TabsCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PaneTreeEvent",
+            "path": "vmux_layout::event::PaneTreeEvent",
+            "signature": "pub struct PaneTreeEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "panes",
+                "signature": "panes: Vec<PaneNode>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedPaneTreeEvent",
+            "path": "vmux_layout::event::ArchivedPaneTreeEvent",
+            "signature": "pub struct ArchivedPaneTreeEvent",
+            "docs_md": "An archived [`PaneTreeEvent`]",
+            "members": [
+              {
+                "name": "panes",
+                "signature": "panes: Archived",
+                "docs_md": "The archived counterpart of [`PaneTreeEvent::panes`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`PaneTreeEvent`",
+                "path": "vmux_layout::event::PaneTreeEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PaneTreeEventResolver",
+            "path": "vmux_layout::event::PaneTreeEventResolver",
+            "signature": "pub struct PaneTreeEventResolver",
+            "docs_md": "The resolver for an archived [`PaneTreeEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`PaneTreeEvent`",
+                "path": "vmux_layout::event::PaneTreeEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PaneNode",
+            "path": "vmux_layout::event::PaneNode",
+            "signature": "pub struct PaneNode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "stacks",
+                "signature": "stacks: Vec<StackNode>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedPaneNode",
+            "path": "vmux_layout::event::ArchivedPaneNode",
+            "signature": "pub struct ArchivedPaneNode",
+            "docs_md": "An archived [`PaneNode`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`PaneNode::id`]"
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: Archived",
+                "docs_md": "The archived counterpart of [`PaneNode::is_active`]"
+              },
+              {
+                "name": "stacks",
+                "signature": "stacks: Archived",
+                "docs_md": "The archived counterpart of [`PaneNode::stacks`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`PaneNode`",
+                "path": "vmux_layout::event::PaneNode"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "PaneNodeResolver",
+            "path": "vmux_layout::event::PaneNodeResolver",
+            "signature": "pub struct PaneNodeResolver",
+            "docs_md": "The resolver for an archived [`PaneNode`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`PaneNode`",
+                "path": "vmux_layout::event::PaneNode"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StackNode",
+            "path": "vmux_layout::event::StackNode",
+            "signature": "pub struct StackNode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "icon",
+                "signature": "icon: vmux_core::PageIcon",
+                "docs_md": ""
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "stack_index",
+                "signature": "stack_index: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "is_loading",
+                "signature": "is_loading: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedStackNode",
+            "path": "vmux_layout::event::ArchivedStackNode",
+            "signature": "pub struct ArchivedStackNode",
+            "docs_md": "An archived [`StackNode`]",
+            "members": [
+              {
+                "name": "title",
+                "signature": "title: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::title`]"
+              },
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::url`]"
+              },
+              {
+                "name": "icon",
+                "signature": "icon: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::icon`]"
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::is_active`]"
+              },
+              {
+                "name": "stack_index",
+                "signature": "stack_index: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::stack_index`]"
+              },
+              {
+                "name": "is_loading",
+                "signature": "is_loading: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::is_loading`]"
+              },
+              {
+                "name": "bg_color",
+                "signature": "bg_color: Archived",
+                "docs_md": "The archived counterpart of [`StackNode::bg_color`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`StackNode`",
+                "path": "vmux_layout::event::StackNode"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StackNodeResolver",
+            "path": "vmux_layout::event::StackNodeResolver",
+            "signature": "pub struct StackNodeResolver",
+            "docs_md": "The resolver for an archived [`StackNode`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`StackNode`",
+                "path": "vmux_layout::event::StackNode"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SideSheetCommandEvent",
+            "path": "vmux_layout::event::SideSheetCommandEvent",
+            "signature": "pub struct SideSheetCommandEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: String",
+                "docs_md": ""
+              },
+              {
+                "name": "pane_id",
+                "signature": "pane_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "stack_index",
+                "signature": "stack_index: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedSideSheetCommandEvent",
+            "path": "vmux_layout::event::ArchivedSideSheetCommandEvent",
+            "signature": "pub struct ArchivedSideSheetCommandEvent",
+            "docs_md": "An archived [`SideSheetCommandEvent`]",
+            "members": [
+              {
+                "name": "command",
+                "signature": "command: Archived",
+                "docs_md": "The archived counterpart of [`SideSheetCommandEvent::command`]"
+              },
+              {
+                "name": "pane_id",
+                "signature": "pane_id: Archived",
+                "docs_md": "The archived counterpart of [`SideSheetCommandEvent::pane_id`]"
+              },
+              {
+                "name": "stack_index",
+                "signature": "stack_index: Archived",
+                "docs_md": "The archived counterpart of [`SideSheetCommandEvent::stack_index`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SideSheetCommandEvent`",
+                "path": "vmux_layout::event::SideSheetCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SideSheetCommandEventResolver",
+            "path": "vmux_layout::event::SideSheetCommandEventResolver",
+            "signature": "pub struct SideSheetCommandEventResolver",
+            "docs_md": "The resolver for an archived [`SideSheetCommandEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`SideSheetCommandEvent`",
+                "path": "vmux_layout::event::SideSheetCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "SplitDirection",
+            "path": "vmux_layout::event::SplitDirection",
+            "signature": "pub enum SplitDirection",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": ""
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedSplitDirection",
+            "path": "vmux_layout::event::ArchivedSplitDirection",
+            "signature": "pub enum ArchivedSplitDirection",
+            "docs_md": "An archived [`SplitDirection`]",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": "The archived counterpart of [`SplitDirection::Row`]"
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": "The archived counterpart of [`SplitDirection::Column`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SplitDirection`",
+                "path": "vmux_layout::event::SplitDirection"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "SplitDirectionResolver",
+            "path": "vmux_layout::event::SplitDirectionResolver",
+            "signature": "pub enum SplitDirectionResolver",
+            "docs_md": "The resolver for an archived [`SplitDirection`]",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": "The resolver for [`SplitDirection::Row`]"
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": "The resolver for [`SplitDirection::Column`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SplitDirection`",
+                "path": "vmux_layout::event::SplitDirection"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "LayoutNode",
+            "path": "vmux_layout::event::LayoutNode",
+            "signature": "pub enum LayoutNode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": ""
+              },
+              {
+                "name": "Pane",
+                "signature": "Pane",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "UPDATE_READY_EVENT",
+            "path": "vmux_layout::event::UPDATE_READY_EVENT",
+            "signature": "pub const UPDATE_READY_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "UPDATE_CLEARED_EVENT",
+            "path": "vmux_layout::event::UPDATE_CLEARED_EVENT",
+            "signature": "pub const UPDATE_CLEARED_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "UpdateReadyEvent",
+            "path": "vmux_layout::event::UpdateReadyEvent",
+            "signature": "pub struct UpdateReadyEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "version",
+                "signature": "version: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedUpdateReadyEvent",
+            "path": "vmux_layout::event::ArchivedUpdateReadyEvent",
+            "signature": "pub struct ArchivedUpdateReadyEvent",
+            "docs_md": "An archived [`UpdateReadyEvent`]",
+            "members": [
+              {
+                "name": "version",
+                "signature": "version: Archived",
+                "docs_md": "The archived counterpart of [`UpdateReadyEvent::version`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`UpdateReadyEvent`",
+                "path": "vmux_layout::event::UpdateReadyEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "UpdateReadyEventResolver",
+            "path": "vmux_layout::event::UpdateReadyEventResolver",
+            "signature": "pub struct UpdateReadyEventResolver",
+            "docs_md": "The resolver for an archived [`UpdateReadyEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`UpdateReadyEvent`",
+                "path": "vmux_layout::event::UpdateReadyEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "UpdateClearedEvent",
+            "path": "vmux_layout::event::UpdateClearedEvent",
+            "signature": "pub struct UpdateClearedEvent",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedUpdateClearedEvent",
+            "path": "vmux_layout::event::ArchivedUpdateClearedEvent",
+            "signature": "pub struct ArchivedUpdateClearedEvent",
+            "docs_md": "An archived [`UpdateClearedEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`UpdateClearedEvent`",
+                "path": "vmux_layout::event::UpdateClearedEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "UpdateClearedEventResolver",
+            "path": "vmux_layout::event::UpdateClearedEventResolver",
+            "signature": "pub struct UpdateClearedEventResolver",
+            "docs_md": "The resolver for an archived [`UpdateClearedEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`UpdateClearedEvent`",
+                "path": "vmux_layout::event::UpdateClearedEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "RestartRequestEvent",
+            "path": "vmux_layout::event::RestartRequestEvent",
+            "signature": "pub struct RestartRequestEvent",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedRestartRequestEvent",
+            "path": "vmux_layout::event::ArchivedRestartRequestEvent",
+            "signature": "pub struct ArchivedRestartRequestEvent",
+            "docs_md": "An archived [`RestartRequestEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`RestartRequestEvent`",
+                "path": "vmux_layout::event::RestartRequestEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "RestartRequestEventResolver",
+            "path": "vmux_layout::event::RestartRequestEventResolver",
+            "signature": "pub struct RestartRequestEventResolver",
+            "docs_md": "The resolver for an archived [`RestartRequestEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`RestartRequestEvent`",
+                "path": "vmux_layout::event::RestartRequestEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DebugUpdateReady",
+            "path": "vmux_layout::event::DebugUpdateReady",
+            "signature": "pub struct DebugUpdateReady",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "version",
+                "signature": "version: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedDebugUpdateReady",
+            "path": "vmux_layout::event::ArchivedDebugUpdateReady",
+            "signature": "pub struct ArchivedDebugUpdateReady",
+            "docs_md": "An archived [`DebugUpdateReady`]",
+            "members": [
+              {
+                "name": "version",
+                "signature": "version: Archived",
+                "docs_md": "The archived counterpart of [`DebugUpdateReady::version`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`DebugUpdateReady`",
+                "path": "vmux_layout::event::DebugUpdateReady"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DebugUpdateReadyResolver",
+            "path": "vmux_layout::event::DebugUpdateReadyResolver",
+            "signature": "pub struct DebugUpdateReadyResolver",
+            "docs_md": "The resolver for an archived [`DebugUpdateReady`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`DebugUpdateReady`",
+                "path": "vmux_layout::event::DebugUpdateReady"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DebugUpdateClear",
+            "path": "vmux_layout::event::DebugUpdateClear",
+            "signature": "pub struct DebugUpdateClear",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedDebugUpdateClear",
+            "path": "vmux_layout::event::ArchivedDebugUpdateClear",
+            "signature": "pub struct ArchivedDebugUpdateClear",
+            "docs_md": "An archived [`DebugUpdateClear`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`DebugUpdateClear`",
+                "path": "vmux_layout::event::DebugUpdateClear"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DebugUpdateClearResolver",
+            "path": "vmux_layout::event::DebugUpdateClearResolver",
+            "signature": "pub struct DebugUpdateClearResolver",
+            "docs_md": "The resolver for an archived [`DebugUpdateClear`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`DebugUpdateClear`",
+                "path": "vmux_layout::event::DebugUpdateClear"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::protocol",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "NodeKind",
+            "path": "vmux_layout::protocol::NodeKind",
+            "signature": "pub enum NodeKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Tab",
+                "signature": "Tab",
+                "docs_md": ""
+              },
+              {
+                "name": "Pane",
+                "signature": "Pane",
+                "docs_md": ""
+              },
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": ""
+              },
+              {
+                "name": "Stack",
+                "signature": "Stack",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "SplitDirection",
+            "path": "vmux_layout::protocol::SplitDirection",
+            "signature": "pub enum SplitDirection",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": ""
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedSplitDirection",
+            "path": "vmux_layout::protocol::ArchivedSplitDirection",
+            "signature": "pub enum ArchivedSplitDirection",
+            "docs_md": "An archived [`SplitDirection`]",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": "The archived counterpart of [`SplitDirection::Row`]"
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": "The archived counterpart of [`SplitDirection::Column`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SplitDirection`",
+                "path": "vmux_layout::protocol::SplitDirection"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "SplitDirectionResolver",
+            "path": "vmux_layout::protocol::SplitDirectionResolver",
+            "signature": "pub enum SplitDirectionResolver",
+            "docs_md": "The resolver for an archived [`SplitDirection`]",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": "The resolver for [`SplitDirection::Row`]"
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": "The resolver for [`SplitDirection::Column`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SplitDirection`",
+                "path": "vmux_layout::protocol::SplitDirection"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "Focus",
+            "path": "vmux_layout::protocol::Focus",
+            "signature": "pub struct Focus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "tab",
+                "signature": "tab: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "stack",
+                "signature": "stack: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedFocus",
+            "path": "vmux_layout::protocol::ArchivedFocus",
+            "signature": "pub struct ArchivedFocus",
+            "docs_md": "An archived [`Focus`]",
+            "members": [
+              {
+                "name": "tab",
+                "signature": "tab: Archived",
+                "docs_md": "The archived counterpart of [`Focus::tab`]"
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Archived",
+                "docs_md": "The archived counterpart of [`Focus::pane`]"
+              },
+              {
+                "name": "stack",
+                "signature": "stack: Archived",
+                "docs_md": "The archived counterpart of [`Focus::stack`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`Focus`",
+                "path": "vmux_layout::protocol::Focus"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "FocusResolver",
+            "path": "vmux_layout::protocol::FocusResolver",
+            "signature": "pub struct FocusResolver",
+            "docs_md": "The resolver for an archived [`Focus`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`Focus`",
+                "path": "vmux_layout::protocol::Focus"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "Stack",
+            "path": "vmux_layout::protocol::Stack",
+            "signature": "pub struct Stack",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "kind",
+                "signature": "kind: String",
+                "docs_md": ""
+              },
+              {
+                "name": "is_loading",
+                "signature": "is_loading: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "icon",
+                "signature": "icon: vmux_core::PageIcon",
+                "docs_md": ""
+              },
+              {
+                "name": "is_self",
+                "signature": "is_self: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "process_id",
+                "signature": "process_id: Option<String>",
+                "docs_md": "For terminal stacks: the terminal's `ProcessId` (its handle for `run` /\n`read_terminal`). `None` for browser stacks."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedStack",
+            "path": "vmux_layout::protocol::ArchivedStack",
+            "signature": "pub struct ArchivedStack",
+            "docs_md": "An archived [`Stack`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`Stack::id`]"
+              },
+              {
+                "name": "title",
+                "signature": "title: Archived",
+                "docs_md": "The archived counterpart of [`Stack::title`]"
+              },
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`Stack::url`]"
+              },
+              {
+                "name": "kind",
+                "signature": "kind: Archived",
+                "docs_md": "The archived counterpart of [`Stack::kind`]"
+              },
+              {
+                "name": "is_loading",
+                "signature": "is_loading: Archived",
+                "docs_md": "The archived counterpart of [`Stack::is_loading`]"
+              },
+              {
+                "name": "icon",
+                "signature": "icon: Archived",
+                "docs_md": "The archived counterpart of [`Stack::icon`]"
+              },
+              {
+                "name": "is_self",
+                "signature": "is_self: Archived",
+                "docs_md": "The archived counterpart of [`Stack::is_self`]"
+              },
+              {
+                "name": "process_id",
+                "signature": "process_id: Archived",
+                "docs_md": "The archived counterpart of [`Stack::process_id`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`Stack`",
+                "path": "vmux_layout::protocol::Stack"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StackResolver",
+            "path": "vmux_layout::protocol::StackResolver",
+            "signature": "pub struct StackResolver",
+            "docs_md": "The resolver for an archived [`Stack`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`Stack`",
+                "path": "vmux_layout::protocol::Stack"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "LayoutNode",
+            "path": "vmux_layout::protocol::LayoutNode",
+            "signature": "pub enum LayoutNode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": ""
+              },
+              {
+                "name": "Pane",
+                "signature": "Pane",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedLayoutNode",
+            "path": "vmux_layout::protocol::ArchivedLayoutNode",
+            "signature": "pub enum ArchivedLayoutNode",
+            "docs_md": "An archived [`LayoutNode`]",
+            "members": [
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": "The archived counterpart of [`LayoutNode::Split`]"
+              },
+              {
+                "name": "Pane",
+                "signature": "Pane",
+                "docs_md": "The archived counterpart of [`LayoutNode::Pane`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`LayoutNode`",
+                "path": "vmux_layout::protocol::LayoutNode"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "LayoutNodeResolver",
+            "path": "vmux_layout::protocol::LayoutNodeResolver",
+            "signature": "pub enum LayoutNodeResolver",
+            "docs_md": "The resolver for an archived [`LayoutNode`]",
+            "members": [
+              {
+                "name": "Split",
+                "signature": "Split",
+                "docs_md": "The resolver for [`LayoutNode::Split`]"
+              },
+              {
+                "name": "Pane",
+                "signature": "Pane",
+                "docs_md": "The resolver for [`LayoutNode::Pane`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`LayoutNode`",
+                "path": "vmux_layout::protocol::LayoutNode"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "Tab",
+            "path": "vmux_layout::protocol::Tab",
+            "signature": "pub struct Tab",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "root",
+                "signature": "root: LayoutNode",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedTab",
+            "path": "vmux_layout::protocol::ArchivedTab",
+            "signature": "pub struct ArchivedTab",
+            "docs_md": "An archived [`Tab`]",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: Archived",
+                "docs_md": "The archived counterpart of [`Tab::id`]"
+              },
+              {
+                "name": "name",
+                "signature": "name: Archived",
+                "docs_md": "The archived counterpart of [`Tab::name`]"
+              },
+              {
+                "name": "is_active",
+                "signature": "is_active: Archived",
+                "docs_md": "The archived counterpart of [`Tab::is_active`]"
+              },
+              {
+                "name": "root",
+                "signature": "root: Archived",
+                "docs_md": "The archived counterpart of [`Tab::root`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`Tab`",
+                "path": "vmux_layout::protocol::Tab"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "TabResolver",
+            "path": "vmux_layout::protocol::TabResolver",
+            "signature": "pub struct TabResolver",
+            "docs_md": "The resolver for an archived [`Tab`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`Tab`",
+                "path": "vmux_layout::protocol::Tab"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutSnapshot",
+            "path": "vmux_layout::protocol::LayoutSnapshot",
+            "signature": "pub struct LayoutSnapshot",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "tabs",
+                "signature": "tabs: Vec<Tab>",
+                "docs_md": ""
+              },
+              {
+                "name": "focused",
+                "signature": "focused: Focus",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedLayoutSnapshot",
+            "path": "vmux_layout::protocol::ArchivedLayoutSnapshot",
+            "signature": "pub struct ArchivedLayoutSnapshot",
+            "docs_md": "An archived [`LayoutSnapshot`]",
+            "members": [
+              {
+                "name": "tabs",
+                "signature": "tabs: Archived",
+                "docs_md": "The archived counterpart of [`LayoutSnapshot::tabs`]"
+              },
+              {
+                "name": "focused",
+                "signature": "focused: Archived",
+                "docs_md": "The archived counterpart of [`LayoutSnapshot::focused`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`LayoutSnapshot`",
+                "path": "vmux_layout::protocol::LayoutSnapshot"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutSnapshotResolver",
+            "path": "vmux_layout::protocol::LayoutSnapshotResolver",
+            "signature": "pub struct LayoutSnapshotResolver",
+            "docs_md": "The resolver for an archived [`LayoutSnapshot`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`LayoutSnapshot`",
+                "path": "vmux_layout::protocol::LayoutSnapshot"
+              }
+            ]
+          },
+          {
+            "kind": "function",
+            "name": "format_id",
+            "path": "vmux_layout::protocol::format_id",
+            "signature": "pub fn format_id(kind: NodeKind, value: u64) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "parse_id",
+            "path": "vmux_layout::protocol::parse_id",
+            "signature": "pub fn parse_id(s: &str) -> Result<(NodeKind, u64), String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::reconcile",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "ValidationError",
+            "path": "vmux_layout::reconcile::ValidationError",
+            "signature": "pub enum ValidationError",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "DuplicateId",
+                "signature": "DuplicateId",
+                "docs_md": ""
+              },
+              {
+                "name": "InvalidIdFormat",
+                "signature": "InvalidIdFormat",
+                "docs_md": ""
+              },
+              {
+                "name": "WrongKindForPosition",
+                "signature": "WrongKindForPosition",
+                "docs_md": ""
+              },
+              {
+                "name": "NewStackMissingUrl",
+                "signature": "NewStackMissingUrl",
+                "docs_md": ""
+              },
+              {
+                "name": "NewStackMissingKind",
+                "signature": "NewStackMissingKind",
+                "docs_md": ""
+              },
+              {
+                "name": "NewPaneMissingStacks",
+                "signature": "NewPaneMissingStacks",
+                "docs_md": ""
+              },
+              {
+                "name": "NewTabMissingName",
+                "signature": "NewTabMissingName",
+                "docs_md": ""
+              },
+              {
+                "name": "FlexWeightsLengthMismatch",
+                "signature": "FlexWeightsLengthMismatch",
+                "docs_md": ""
+              },
+              {
+                "name": "FocusReferencesUnknownId",
+                "signature": "FocusReferencesUnknownId",
+                "docs_md": ""
+              },
+              {
+                "name": "MissingReferencedEntity",
+                "signature": "MissingReferencedEntity",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "validate",
+            "path": "vmux_layout::reconcile::validate",
+            "signature": "pub fn validate(snapshot: &crate::protocol::LayoutSnapshot) -> Result<(), ValidationError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "NodeAction",
+            "path": "vmux_layout::reconcile::NodeAction",
+            "signature": "pub enum NodeAction",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Match",
+                "signature": "Match",
+                "docs_md": ""
+              },
+              {
+                "name": "Create",
+                "signature": "Create",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "DiffPlan",
+            "path": "vmux_layout::reconcile::DiffPlan",
+            "signature": "pub struct DiffPlan",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "actions_by_id",
+                "signature": "actions_by_id: std::collections::HashMap<String, NodeAction>",
+                "docs_md": ""
+              },
+              {
+                "name": "closes",
+                "signature": "closes: Vec<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "focus",
+                "signature": "focus: crate::protocol::Focus",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "plan_diff",
+            "path": "vmux_layout::reconcile::plan_diff",
+            "signature": "pub fn plan_diff(snapshot: &crate::protocol::LayoutSnapshot, existing_ids: &std::collections::HashSet<String>) -> Result<DiffPlan, ValidationError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutApplyRequest",
+            "path": "vmux_layout::reconcile::LayoutApplyRequest",
+            "signature": "pub struct LayoutApplyRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "snapshot",
+                "signature": "snapshot: crate::protocol::LayoutSnapshot",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutApplyResponse",
+            "path": "vmux_layout::reconcile::LayoutApplyResponse",
+            "signature": "pub struct LayoutApplyResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: Result<crate::protocol::LayoutSnapshot, String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutSnapshotRequest",
+            "path": "vmux_layout::reconcile::LayoutSnapshotRequest",
+            "signature": "pub struct LayoutSnapshotRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "anchor",
+                "signature": "anchor: Option<vmux_core::ProcessId>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutSnapshotResponse",
+            "path": "vmux_layout::reconcile::LayoutSnapshotResponse",
+            "signature": "pub struct LayoutSnapshotResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "snapshot",
+                "signature": "snapshot: crate::protocol::LayoutSnapshot",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "serve_snapshot_requests",
+            "path": "vmux_layout::reconcile::serve_snapshot_requests",
+            "signature": "pub fn serve_snapshot_requests(reader: bevy::ecs::message::MessageReader<'_, '_, LayoutSnapshotRequest>, tabs_q: Query<'_, '_, (Entity, &crate::tab::Tab, Option<&Children>)>, splits_q: Query<'_, '_, (Entity, &crate::pane::PaneSplit, Option<&Children>), With<crate::pane::Pane>>, leaves_q: Query<'_, '_, (Entity, Option<&Children>), (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, stacks_q: Query<'_, '_, (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<crate::stack::Stack>>, pane_sizes_q: Query<'_, '_, &crate::pane::PaneSize>, zoomed_q: Query<'_, '_, &crate::pane::Zoomed>, focused: Res<'_, crate::stack::FocusedStack>, process_ids: Query<'_, '_, (&vmux_core::ProcessId, &ChildOf)>, child_of_q: Query<'_, '_, &ChildOf>, space_q: Query<'_, '_, (), With<crate::space::Space>>, active_space_q: Query<'_, '_, Entity, (With<crate::space::Space>, With<vmux_core::Active>)>, writer: bevy::ecs::message::MessageWriter<'_, LayoutSnapshotResponse>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_layout_requests",
+            "path": "vmux_layout::reconcile::apply_layout_requests",
+            "signature": "pub fn apply_layout_requests(reader: bevy::ecs::message::MessageReader<'_, '_, LayoutApplyRequest>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply",
+            "path": "vmux_layout::reconcile::apply",
+            "signature": "pub fn apply(world: &mut World, snapshot: &crate::protocol::LayoutSnapshot) -> Result<(), ValidationError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_with_existing",
+            "path": "vmux_layout::reconcile::apply_with_existing",
+            "signature": "pub fn apply_with_existing(world: &mut World, snapshot: &crate::protocol::LayoutSnapshot, existing: &std::collections::HashSet<String>) -> Result<(), ValidationError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::snapshot",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "build_layout_snapshot",
+            "path": "vmux_layout::snapshot::build_layout_snapshot",
+            "signature": "pub fn build_layout_snapshot(tabs_q: &Query<'_, '_, (Entity, &crate::tab::Tab, Option<&Children>)>, splits_q: &Query<'_, '_, (Entity, &crate::pane::PaneSplit, Option<&Children>), With<crate::pane::Pane>>, leaves_q: &Query<'_, '_, (Entity, Option<&Children>), (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, stacks_q: &Query<'_, '_, (Entity, Option<&Children>, Option<&vmux_core::PageMetadata>), With<crate::stack::Stack>>, pane_sizes_q: &Query<'_, '_, &crate::pane::PaneSize>, zoomed_q: &Query<'_, '_, &crate::pane::Zoomed>, focused: &crate::stack::FocusedStack, self_stack: Option<Entity>) -> crate::protocol::LayoutSnapshot",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::cef",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "Browser",
+            "path": "vmux_layout::cef::Browser",
+            "signature": "pub struct Browser",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutCef",
+            "path": "vmux_layout::cef::LayoutCef",
+            "signature": "pub struct LayoutCef",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Loading",
+            "path": "vmux_layout::cef::Loading",
+            "signature": "pub struct Loading",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "NavigationState",
+            "path": "vmux_layout::cef::NavigationState",
+            "signature": "pub struct NavigationState",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "can_go_back",
+                "signature": "can_go_back: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "can_go_forward",
+                "signature": "can_go_forward: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LayoutCefPlugin",
+            "path": "vmux_layout::cef::LayoutCefPlugin",
+            "signature": "pub struct LayoutCefPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "mirror_metadata_to_url",
+            "path": "vmux_layout::cef::mirror_metadata_to_url",
+            "signature": "pub fn mirror_metadata_to_url(cef_q: Query<'_, '_, &vmux_core::PageMetadata, (Without<vmux_core::Url>, Changed<vmux_core::PageMetadata>)>, urls: Query<'_, '_, &mut vmux_core::PageMetadata, With<vmux_core::Url>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_cef_state_from_webview",
+            "path": "vmux_layout::cef::apply_cef_state_from_webview",
+            "signature": "pub fn apply_cef_state_from_webview(cef_rx: Res<'_, WebviewCefStateReceiver>, browser_meta: Query<'_, '_, &mut vmux_core::PageMetadata>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "layout_cef_bundle",
+            "path": "vmux_layout::cef::layout_cef_bundle",
+            "signature": "pub fn layout_cef_bundle(host_window: Entity, meshes: &mut ResMut<'_, Assets<Mesh>>, webview_mt: &mut ResMut<'_, Assets<WebviewExtendStandardMaterial>>) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::debug",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "DEBUG_PAGE_URL",
+            "path": "vmux_layout::debug::DEBUG_PAGE_URL",
+            "signature": "pub const DEBUG_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "DebugView",
+            "path": "vmux_layout::debug::DebugView",
+            "signature": "pub struct DebugView",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "handle_debug_page_open",
+            "path": "vmux_layout::debug::handle_debug_page_open",
+            "signature": "pub fn handle_debug_page_open(tasks: Query<'_, '_, (Entity, &vmux_core::PageOpenTask), (Without<vmux_core::PageOpenHandled>, Without<vmux_core::PageOpenError>)>, children_q: Query<'_, '_, &Children>, commands: Commands<'_, '_>, meshes: ResMut<'_, Assets<Mesh>>, webview_mt: ResMut<'_, Assets<WebviewExtendStandardMaterial>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "LayoutPlugin",
+            "path": "vmux_layout::plugin::LayoutPlugin",
+            "signature": "pub struct LayoutPlugin",
+            "docs_md": "Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,\ncommand-bar input, and layout apply/snapshot, aggregating the per-area sub-plugins.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::profile",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ProfilePlugin",
+            "path": "vmux_layout::profile::ProfilePlugin",
+            "signature": "pub struct ProfilePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Profile",
+            "path": "vmux_layout::profile::Profile",
+            "signature": "pub struct Profile",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::scene",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "FOV_Y",
+            "path": "vmux_layout::scene::FOV_Y",
+            "signature": "pub const FOV_Y",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "MainCamera",
+            "path": "vmux_layout::scene::MainCamera",
+            "signature": "pub struct MainCamera",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "InteractionMode",
+            "path": "vmux_layout::scene::InteractionMode",
+            "signature": "pub enum InteractionMode",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "User",
+                "signature": "User",
+                "docs_md": ""
+              },
+              {
+                "name": "Player",
+                "signature": "Player",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "CameraHome",
+            "path": "vmux_layout::scene::CameraHome",
+            "signature": "pub struct CameraHome",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ModeTransition",
+            "path": "vmux_layout::scene::ModeTransition",
+            "signature": "pub struct ModeTransition",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "direction",
+                "signature": "direction: TransitionDirection",
+                "docs_md": ""
+              },
+              {
+                "name": "timer",
+                "signature": "timer: Timer",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "TransitionDirection",
+            "path": "vmux_layout::scene::TransitionDirection",
+            "signature": "pub enum TransitionDirection",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "EnterPlayer",
+                "signature": "EnterPlayer",
+                "docs_md": ""
+              },
+              {
+                "name": "ExitPlayer",
+                "signature": "ExitPlayer",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ScenePlugin",
+            "path": "vmux_layout::scene::ScenePlugin",
+            "signature": "pub struct ScenePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "setup",
+            "path": "vmux_layout::scene::setup",
+            "signature": "pub fn setup(commands: Commands<'_, '_>, window: Single<'_, '_, &Window, With<bevy::window::PrimaryWindow>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "frame_main_camera_transform",
+            "path": "vmux_layout::scene::frame_main_camera_transform",
+            "signature": "pub fn frame_main_camera_transform(window: &Window, aspect: f32, margin_px: f32) -> Transform",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::settings",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "LayoutSettings",
+            "path": "vmux_layout::settings::LayoutSettings",
+            "signature": "pub struct LayoutSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "radius",
+                "signature": "radius: f32",
+                "docs_md": "Corner radius (px) applied across the design system: pane corner clip,\nfocus ring, and the CEF CSS `--radius` variable."
+              },
+              {
+                "name": "window",
+                "signature": "window: WindowSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: PaneSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "side_sheet",
+                "signature": "side_sheet: SideSheetSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "focus_ring",
+                "signature": "focus_ring: FocusRingSettings",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ConfirmCloseSettings",
+            "path": "vmux_layout::settings::ConfirmCloseSettings",
+            "signature": "pub struct ConfirmCloseSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "enabled",
+                "signature": "enabled: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "EffectiveStartupUrl",
+            "path": "vmux_layout::settings::EffectiveStartupUrl",
+            "signature": "pub struct EffectiveStartupUrl",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SideSheetSettings",
+            "path": "vmux_layout::settings::SideSheetSettings",
+            "signature": "pub struct SideSheetSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "width",
+                "signature": "width: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "WindowSettings",
+            "path": "vmux_layout::settings::WindowSettings",
+            "signature": "pub struct WindowSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "padding",
+                "signature": "padding: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "FocusRingColor",
+            "path": "vmux_layout::settings::FocusRingColor",
+            "signature": "pub struct FocusRingColor",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "r",
+                "signature": "r: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "g",
+                "signature": "g: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "b",
+                "signature": "b: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "FocusRingSettings",
+            "path": "vmux_layout::settings::FocusRingSettings",
+            "signature": "pub struct FocusRingSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "width",
+                "signature": "width: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "color",
+                "signature": "color: FocusRingColor",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneSettings",
+            "path": "vmux_layout::settings::PaneSettings",
+            "signature": "pub struct PaneSettings",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "gap",
+                "signature": "gap: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::stack",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "FocusedStack",
+            "path": "vmux_layout::stack::FocusedStack",
+            "signature": "pub struct FocusedStack",
+            "docs_md": "Cached result of `focused_stack()`, computed once per frame in `Update`\nafter all command handlers. Read by push/sync systems to avoid redundant\ntree walks.",
+            "members": [
+              {
+                "name": "tab",
+                "signature": "tab: Option<Entity>",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Option<Entity>",
+                "docs_md": ""
+              },
+              {
+                "name": "stack",
+                "signature": "stack: Option<Entity>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ComputeFocusSet",
+            "path": "vmux_layout::stack::ComputeFocusSet",
+            "signature": "pub struct ComputeFocusSet",
+            "docs_md": "System set for `compute_focused_stack`. Systems that read `Res<FocusedStack>`\nshould be ordered `.after(ComputeFocusSet)` in `Update`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PendingStackClose",
+            "path": "vmux_layout::stack::PendingStackClose",
+            "signature": "pub struct PendingStackClose",
+            "docs_md": "Marker: tab is waiting for close confirmation dialog.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "CloseConfirmed",
+            "path": "vmux_layout::stack::CloseConfirmed",
+            "signature": "pub struct CloseConfirmed",
+            "docs_md": "Marker: close was confirmed, skip dialog next time.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "StackCommandSet",
+            "path": "vmux_layout::stack::StackCommandSet",
+            "signature": "pub struct StackCommandSet",
+            "docs_md": "System set for `handle_stack_commands`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "StackPlugin",
+            "path": "vmux_layout::stack::StackPlugin",
+            "signature": "pub struct StackPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Stack",
+            "path": "vmux_layout::stack::Stack",
+            "signature": "pub struct Stack",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "scroll_x",
+                "signature": "scroll_x: f32",
+                "docs_md": ""
+              },
+              {
+                "name": "scroll_y",
+                "signature": "scroll_y: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "active_among",
+            "path": "vmux_layout::stack::active_among",
+            "signature": "pub fn active_among(entities: impl Trait) -> Option<Entity>",
+            "docs_md": "Returns the entity with the highest `LastActivatedAt` timestamp.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "collect_leaf_panes",
+            "path": "vmux_layout::stack::collect_leaf_panes",
+            "signature": "pub fn collect_leaf_panes(root: Entity, all_children: &Query<'_, '_, &Children>, leaf_panes: &Query<'_, '_, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, result: &mut Vec<Entity>)",
+            "docs_md": "Recursively collects leaf panes (panes without PaneSplit) under `root`.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "active_pane_in_tab",
+            "path": "vmux_layout::stack::active_pane_in_tab",
+            "signature": "pub fn active_pane_in_tab(tab: Entity, all_children: &Query<'_, '_, &Children>, leaf_panes: &Query<'_, '_, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, pane_ts: &Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<crate::pane::Pane>>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "active_stack_in_pane",
+            "path": "vmux_layout::stack::active_stack_in_pane",
+            "signature": "pub fn active_stack_in_pane(pane: Entity, pane_children: &Query<'_, '_, &Children, With<crate::pane::Pane>>, tab_ts: &Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<Stack>>) -> Option<Entity>",
+            "docs_md": "Find the active tab (max LastActivatedAt) in a pane.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ActiveTabParam",
+            "path": "vmux_layout::stack::ActiveTabParam",
+            "signature": "pub struct ActiveTabParam",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "focused_stack",
+            "path": "vmux_layout::stack::focused_stack",
+            "signature": "pub fn focused_stack(active_tab: Option<Entity>, all_children: &Query<'_, '_, &Children>, leaf_panes: &Query<'_, '_, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, pane_ts: &Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<crate::pane::Pane>>, pane_children: &Query<'_, '_, &Children, With<crate::pane::Pane>>, stack_ts: &Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<Stack>>) -> (Option<Entity>, Option<Entity>, Option<Entity>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "stack_bundle",
+            "path": "vmux_layout::stack::stack_bundle",
+            "signature": "pub fn stack_bundle() -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "open_startup_url_if_no_stacks",
+            "path": "vmux_layout::stack::open_startup_url_if_no_stacks",
+            "signature": "pub fn open_startup_url_if_no_stacks(active_tab_param: ActiveTabParam<'_, '_>, all_children: Query<'_, '_, &Children>, leaf_panes: Query<'_, '_, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, pane_ts: Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<crate::pane::Pane>>, pane_children: Query<'_, '_, &Children, With<crate::pane::Pane>>, stack_ts: Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<Stack>>, stack_q: Query<'_, '_, Entity, With<Stack>>, closing_primary: Query<'_, '_, (), (With<bevy::window::PrimaryWindow>, With<bevy::window::ClosingWindow>)>, effective_startup_url: Option<Res<'_, crate::settings::EffectiveStartupUrl>>, new_stack_ctx: ResMut<'_, crate::NewStackContext>, page_open_requests: MessageWriter<'_, vmux_core::PageOpenRequest>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::unit",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "PIXELS_PER_METER",
+            "path": "vmux_layout::unit::PIXELS_PER_METER",
+            "signature": "pub const PIXELS_PER_METER",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "trait",
+            "name": "WindowExt",
+            "path": "vmux_layout::unit::WindowExt",
+            "signature": "pub trait WindowExt",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::active",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "ensure_active_space",
+            "path": "vmux_layout::active::ensure_active_space",
+            "signature": "pub fn ensure_active_space(spaces: Query<'_, '_, (Entity, Option<&vmux_history::LastActivatedAt>, Has<vmux_core::Active>), With<crate::space::Space>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "ensure_active_tab",
+            "path": "vmux_layout::active::ensure_active_tab",
+            "signature": "pub fn ensure_active_tab(spaces: Query<'_, '_, &Children, With<crate::space::Space>>, tabs: Query<'_, '_, (&vmux_history::LastActivatedAt, Has<vmux_core::Active>), With<crate::tab::Tab>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "ensure_active_stack",
+            "path": "vmux_layout::active::ensure_active_stack",
+            "signature": "pub fn ensure_active_stack(leaves: Query<'_, '_, &Children, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>, stacks: Query<'_, '_, (&vmux_history::LastActivatedAt, Has<vmux_core::Active>), With<crate::stack::Stack>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "ensure_active_branch",
+            "path": "vmux_layout::active::ensure_active_branch",
+            "signature": "pub fn ensure_active_branch(splits: Query<'_, '_, &Children, With<crate::pane::PaneSplit>>, branches: Query<'_, '_, (Option<&vmux_history::LastActivatedAt>, Has<vmux_core::Active>), With<crate::pane::Pane>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::archive",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ArchivePlugin",
+            "path": "vmux_layout::archive::ArchivePlugin",
+            "signature": "pub struct ArchivePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::pane",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "PendingPaneClose",
+            "path": "vmux_layout::pane::PendingPaneClose",
+            "signature": "pub struct PendingPaneClose",
+            "docs_md": "Marker: pane is waiting for close confirmation dialog.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ForcePaneClose",
+            "path": "vmux_layout::pane::ForcePaneClose",
+            "signature": "pub struct ForcePaneClose",
+            "docs_md": "Marker: close this pane immediately, without a confirmation dialog. Used when\nthe pane's process has already exited (e.g. an agent CLI quit), so there is\nnothing to confirm and the pane should be removed + the split collapsed.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PanePlugin",
+            "path": "vmux_layout::pane::PanePlugin",
+            "signature": "pub struct PanePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneHoverIntent",
+            "path": "vmux_layout::pane::PaneHoverIntent",
+            "signature": "pub struct PaneHoverIntent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "target",
+                "signature": "target: Option<Entity>",
+                "docs_md": ""
+              },
+              {
+                "name": "last_activation",
+                "signature": "last_activation: Option<std::time::Instant>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PendingCursorWarp",
+            "path": "vmux_layout::pane::PendingCursorWarp",
+            "signature": "pub struct PendingCursorWarp",
+            "docs_md": "Signals that the cursor should be warped to the active pane once layout is computed.",
+            "members": [
+              {
+                "name": "target",
+                "signature": "target: Option<Entity>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Pane",
+            "path": "vmux_layout::pane::Pane",
+            "signature": "pub struct Pane",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneId",
+            "path": "vmux_layout::pane::PaneId",
+            "signature": "pub struct PaneId",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "assign_pane_ids",
+            "path": "vmux_layout::pane::assign_pane_ids",
+            "signature": "pub fn assign_pane_ids(panes: Query<'_, '_, Entity, (With<Pane>, Without<PaneId>)>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Zoomed",
+            "path": "vmux_layout::pane::Zoomed",
+            "signature": "pub struct Zoomed",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "leaf",
+                "signature": "leaf: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "hidden",
+                "signature": "hidden: Vec<Entity>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneSplit",
+            "path": "vmux_layout::pane::PaneSplit",
+            "signature": "pub struct PaneSplit",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "direction",
+                "signature": "direction: PaneSplitDirection",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "PaneSplitDirection",
+            "path": "vmux_layout::pane::PaneSplitDirection",
+            "signature": "pub enum PaneSplitDirection",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Row",
+                "signature": "Row",
+                "docs_md": ""
+              },
+              {
+                "name": "Column",
+                "signature": "Column",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneSize",
+            "path": "vmux_layout::pane::PaneSize",
+            "signature": "pub struct PaneSize",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "flex_grow",
+                "signature": "flex_grow: f32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpawnSeq",
+            "path": "vmux_layout::pane::SpawnSeq",
+            "signature": "pub struct SpawnSeq",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpawnCounter",
+            "path": "vmux_layout::pane::SpawnCounter",
+            "signature": "pub struct SpawnCounter",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "stamp_spawn_seq",
+            "path": "vmux_layout::pane::stamp_spawn_seq",
+            "signature": "pub fn stamp_spawn_seq(counter: ResMut<'_, SpawnCounter>, new_panes: Query<'_, '_, Entity, (With<Pane>, Without<SpawnSeq>)>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "reseed_spawn_counter",
+            "path": "vmux_layout::pane::reseed_spawn_counter",
+            "signature": "pub fn reseed_spawn_counter(seqs: Query<'_, '_, &SpawnSeq>, counter: ResMut<'_, SpawnCounter>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "MIN_PANE_PX",
+            "path": "vmux_layout::pane::MIN_PANE_PX",
+            "signature": "pub const MIN_PANE_PX",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "RESIZE_STEP",
+            "path": "vmux_layout::pane::RESIZE_STEP",
+            "signature": "pub const RESIZE_STEP",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneSplitGaps",
+            "path": "vmux_layout::pane::PaneSplitGaps",
+            "signature": "pub struct PaneSplitGaps",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "column_gap",
+                "signature": "column_gap: Val",
+                "docs_md": ""
+              },
+              {
+                "name": "row_gap",
+                "signature": "row_gap: Val",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "pane_split_gaps",
+            "path": "vmux_layout::pane::pane_split_gaps",
+            "signature": "pub fn pane_split_gaps(direction: PaneSplitDirection, gap: f32) -> PaneSplitGaps",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_pane_split_gaps",
+            "path": "vmux_layout::pane::apply_pane_split_gaps",
+            "signature": "pub fn apply_pane_split_gaps(split: &PaneSplit, node: &mut Node, gap: f32)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PaneDrag",
+            "path": "vmux_layout::pane::PaneDrag",
+            "signature": "pub struct PaneDrag",
+            "docs_md": "Temporary component inserted on a PaneSplit entity while the user is\ndragging the gap between two of its children.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "leaf_pane_bundle",
+            "path": "vmux_layout::pane::leaf_pane_bundle",
+            "signature": "pub fn leaf_pane_bundle() -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "split_root_bundle",
+            "path": "vmux_layout::pane::split_root_bundle",
+            "signature": "pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "first_leaf_descendant",
+            "path": "vmux_layout::pane::first_leaf_descendant",
+            "signature": "pub fn first_leaf_descendant(entity: Entity, children_q: &Query<'_, '_, &Children, With<Pane>>, leaf_q: &Query<'_, '_, Entity, (With<Pane>, Without<PaneSplit>)>) -> Entity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "first_stack_in_pane",
+            "path": "vmux_layout::pane::first_stack_in_pane",
+            "signature": "pub fn first_stack_in_pane(pane: Entity, pane_children: &Query<'_, '_, &Children, With<Pane>>, tab_q: &Query<'_, '_, Entity, With<crate::stack::Stack>>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "direction_to_split",
+            "path": "vmux_layout::pane::direction_to_split",
+            "signature": "pub fn direction_to_split(direction: &vmux_command::open::PaneDirection) -> PaneSplitDirection",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "split_leaf_into_two",
+            "path": "vmux_layout::pane::split_leaf_into_two",
+            "signature": "pub fn split_leaf_into_two(commands: &mut Commands<'_, '_>, active: Entity, split_dir: PaneSplitDirection, existing_tabs: &[Entity], activate_new: bool) -> Entity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "split_or_extend",
+            "path": "vmux_layout::pane::split_or_extend",
+            "signature": "pub fn split_or_extend(commands: &mut Commands<'_, '_>, anchor: Entity, split_dir: PaneSplitDirection, existing_tabs: &[Entity], activate_new: bool, already_split: bool) -> Entity",
+            "docs_md": "Return a fresh empty leaf pane beside `anchor`, to host an agent-spawned\nterminal. When `anchor` is still a leaf (`already_split == false`), it is\nsplit in two via [`split_leaf_into_two`] (its stacks move into the first\nchild, the returned pane is the second). When `anchor` is already a split —\neither from a previous frame, or from an earlier call in the *same* command\nbuffer — the new leaf is appended as another child of that split.\n\nCalling [`split_leaf_into_two`] repeatedly on the same leaf within one\ncommand buffer (e.g. several agent `run`s dispatched in one tick) would wrap\nit again on each call and orphan an empty `pane1` every time; routing the\n2nd+ split through here keeps the result a clean N-ary split with no empties.",
+            "members": [],
+            "links": [
+              {
+                "text": "`split_leaf_into_two`",
+                "path": "vmux_layout::pane::split_leaf_into_two"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "OpenBesideRequest",
+            "path": "vmux_layout::pane::OpenBesideRequest",
+            "signature": "pub struct OpenBesideRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "pane",
+                "signature": "pane: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "direction",
+                "signature": "direction: Option<vmux_command::open::PaneDirection>",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "focus",
+                "signature": "focus: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ResolverCtx",
+            "path": "vmux_layout::pane::ResolverCtx",
+            "signature": "pub struct ResolverCtx",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "handle_open_beside_requests",
+            "path": "vmux_layout::pane::handle_open_beside_requests",
+            "signature": "pub fn handle_open_beside_requests(reader: MessageReader<'_, '_, OpenBesideRequest>, pane_children: Query<'_, '_, &Children, With<Pane>>, split_dir_q: Query<'_, '_, &PaneSplit>, tab_filter: Query<'_, '_, Entity, With<crate::stack::Stack>>, child_of_q: Query<'_, '_, &ChildOf>, leaf_panes: Query<'_, '_, Entity, (With<Pane>, Without<PaneSplit>)>, rc: ResolverCtx<'_, '_>, commands: Commands<'_, '_>, page_open_requests: MessageWriter<'_, vmux_core::PageOpenRequest>, new_stack_ctx: ResMut<'_, crate::NewStackContext>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PlacementCtx",
+            "path": "vmux_layout::pane::PlacementCtx",
+            "signature": "pub struct PlacementCtx",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "child_of_q",
+                "signature": "child_of_q: Query<'w, 's, &'static ChildOf>",
+                "docs_md": ""
+              },
+              {
+                "name": "tab_q",
+                "signature": "tab_q: Query<'w, 's, Entity, With<crate::tab::Tab>>",
+                "docs_md": ""
+              },
+              {
+                "name": "all_children",
+                "signature": "all_children: Query<'w, 's, &'static Children>",
+                "docs_md": ""
+              },
+              {
+                "name": "leaf_panes",
+                "signature": "leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>",
+                "docs_md": ""
+              },
+              {
+                "name": "pane_children",
+                "signature": "pane_children: Query<'w, 's, &'static Children, With<Pane>>",
+                "docs_md": ""
+              },
+              {
+                "name": "split_dir_q",
+                "signature": "split_dir_q: Query<'w, 's, &'static PaneSplit>",
+                "docs_md": ""
+              },
+              {
+                "name": "tab_filter",
+                "signature": "tab_filter: Query<'w, 's, Entity, With<crate::stack::Stack>>",
+                "docs_md": ""
+              },
+              {
+                "name": "seq_q",
+                "signature": "seq_q: Query<'w, 's, &'static SpawnSeq>",
+                "docs_md": ""
+              },
+              {
+                "name": "node_q",
+                "signature": "node_q: Query<'w, 's, &'static ComputedNode>",
+                "docs_md": ""
+              },
+              {
+                "name": "page_q",
+                "signature": "page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<crate::stack::Stack>>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "resolve_spiral_pane",
+            "path": "vmux_layout::pane::resolve_spiral_pane",
+            "signature": "pub fn resolve_spiral_pane(commands: &mut Commands<'_, '_>, anchor_pane: Entity, url: &str, focus: bool, split_batch: &mut std::collections::HashSet<Entity>, ctx: &PlacementCtx<'_, '_>) -> Entity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "pane_hover_cursor_position",
+            "path": "vmux_layout::pane::pane_hover_cursor_position",
+            "signature": "pub fn pane_hover_cursor_position(window_entity: Entity, window: &Window) -> Option<Vec2>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::placement",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "PageKind",
+            "path": "vmux_layout::placement::PageKind",
+            "signature": "pub enum PageKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Agent",
+                "signature": "Agent",
+                "docs_md": ""
+              },
+              {
+                "name": "Terminal",
+                "signature": "Terminal",
+                "docs_md": ""
+              },
+              {
+                "name": "File",
+                "signature": "File",
+                "docs_md": ""
+              },
+              {
+                "name": "Browser",
+                "signature": "Browser",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "page_kind_for_url",
+            "path": "vmux_layout::placement::page_kind_for_url",
+            "signature": "pub fn page_kind_for_url(url: &str) -> PageKind",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "Placement",
+            "path": "vmux_layout::placement::Placement",
+            "signature": "pub enum Placement",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Focus",
+                "signature": "Focus",
+                "docs_md": ""
+              },
+              {
+                "name": "AddTab",
+                "signature": "AddTab",
+                "docs_md": ""
+              },
+              {
+                "name": "Spiral",
+                "signature": "Spiral",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LeafInfo",
+            "path": "vmux_layout::placement::LeafInfo",
+            "signature": "pub struct LeafInfo",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "pane",
+                "signature": "pane: bevy::prelude::Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "kinds",
+                "signature": "kinds: Vec<PageKind>",
+                "docs_md": ""
+              },
+              {
+                "name": "spawn_seq",
+                "signature": "spawn_seq: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "size",
+                "signature": "size: bevy::math::Vec2",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ReuseHit",
+            "path": "vmux_layout::placement::ReuseHit",
+            "signature": "pub struct ReuseHit",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "tab",
+                "signature": "tab: bevy::prelude::Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "stack",
+                "signature": "stack: bevy::prelude::Entity",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "resolve_placement",
+            "path": "vmux_layout::placement::resolve_placement",
+            "signature": "pub fn resolve_placement(url: &str, reuse: Option<ReuseHit>, leaves: &[LeafInfo], self_pane: bevy::prelude::Entity) -> Placement",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::side_sheet",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SideSheet",
+            "path": "vmux_layout::side_sheet::SideSheet",
+            "signature": "pub struct SideSheet",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "SideSheetPosition",
+            "path": "vmux_layout::side_sheet::SideSheetPosition",
+            "signature": "pub enum SideSheetPosition",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Left",
+                "signature": "Left",
+                "docs_md": ""
+              },
+              {
+                "name": "Right",
+                "signature": "Right",
+                "docs_md": ""
+              },
+              {
+                "name": "Bottom",
+                "signature": "Bottom",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SideSheetWidth",
+            "path": "vmux_layout::side_sheet::SideSheetWidth",
+            "signature": "pub struct SideSheetWidth",
+            "docs_md": "Current width of the left side sheet (mutable during drag).",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::space",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SpacePlugin",
+            "path": "vmux_layout::space::SpacePlugin",
+            "signature": "pub struct SpacePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Space",
+            "path": "vmux_layout::space::Space",
+            "signature": "pub struct Space",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SpaceId",
+            "path": "vmux_layout::space::SpaceId",
+            "signature": "pub struct SpaceId",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ActiveSpaceEntity",
+            "path": "vmux_layout::space::ActiveSpaceEntity",
+            "signature": "pub struct ActiveSpaceEntity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ActiveSpaceId",
+            "path": "vmux_layout::space::ActiveSpaceId",
+            "signature": "pub struct ActiveSpaceId",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "sync_active_space_entity",
+            "path": "vmux_layout::space::sync_active_space_entity",
+            "signature": "pub fn sync_active_space_entity(tagged: Query<'_, '_, Entity, (With<Space>, With<vmux_core::Active>)>, active: ResMut<'_, ActiveSpaceEntity>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "sync_active_space_id",
+            "path": "vmux_layout::space::sync_active_space_id",
+            "signature": "pub fn sync_active_space_id(active: Res<'_, ActiveSpaceEntity>, ids: Query<'_, '_, &SpaceId>, active_id: ResMut<'_, ActiveSpaceId>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "space_of",
+            "path": "vmux_layout::space::space_of",
+            "signature": "pub fn space_of(entity: Entity, child_of: &Query<'_, '_, &ChildOf>, spaces: &Query<'_, '_, (), With<Space>>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "space_container_node",
+            "path": "vmux_layout::space::space_container_node",
+            "signature": "pub fn space_container_node() -> Node",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "space_view_bundle",
+            "path": "vmux_layout::space::space_view_bundle",
+            "signature": "pub fn space_view_bundle() -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "sync_space_container_visibility",
+            "path": "vmux_layout::space::sync_space_container_visibility",
+            "signature": "pub fn sync_space_container_visibility(spaces: Query<'_, '_, (&mut Node, &mut Visibility, Has<vmux_core::Active>), With<Space>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::tab",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "TabPlugin",
+            "path": "vmux_layout::tab::TabPlugin",
+            "signature": "pub struct TabPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TabCommandSet",
+            "path": "vmux_layout::tab::TabCommandSet",
+            "signature": "pub struct TabCommandSet",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Tab",
+            "path": "vmux_layout::tab::Tab",
+            "signature": "pub struct Tab",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LastTabCloseAt",
+            "path": "vmux_layout::tab::LastTabCloseAt",
+            "signature": "pub struct LastTabCloseAt",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "tab_bundle",
+            "path": "vmux_layout::tab::tab_bundle",
+            "signature": "pub fn tab_bundle() -> impl Trait",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "active_tab_siblings",
+            "path": "vmux_layout::tab::active_tab_siblings",
+            "signature": "pub fn active_tab_siblings(active: Entity, child_of_q: &Query<'_, '_, &ChildOf>, all_children: &Query<'_, '_, &Children>, tab_q: &Query<'_, '_, Entity, With<Tab>>) -> Vec<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::target",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "parse_pane_target",
+            "path": "vmux_layout::target::parse_pane_target",
+            "signature": "pub fn parse_pane_target(s: &str, panes: &Query<'_, '_, Entity, (With<crate::pane::Pane>, Without<crate::pane::PaneSplit>)>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "active_webview_for_tab",
+            "path": "vmux_layout::target::active_webview_for_tab",
+            "signature": "pub fn active_webview_for_tab(tab: Option<Entity>, browsers: &Query<'_, '_, (Entity, &ChildOf), With<B>>, terminals: &Query<'_, '_, (Entity, &ChildOf), (With<vmux_core::terminal::Terminal>, Without<vmux_core::terminal::ProcessExited>)>) -> Option<Entity>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::toggle",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "LayoutHidden",
+            "path": "vmux_layout::toggle::LayoutHidden",
+            "signature": "pub struct LayoutHidden",
+            "docs_md": "Tracks whether the layout CEF shell (header + side sheet) is currently hidden.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TogglePlugin",
+            "path": "vmux_layout::toggle::TogglePlugin",
+            "signature": "pub struct TogglePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_layout::window",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "SIDE_SHEET_TOP_PADDING_PX",
+            "path": "vmux_layout::window::SIDE_SHEET_TOP_PADDING_PX",
+            "signature": "pub const SIDE_SHEET_TOP_PADDING_PX",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_Z_MAIN",
+            "path": "vmux_layout::window::WEBVIEW_Z_MAIN",
+            "signature": "pub const WEBVIEW_Z_MAIN",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_Z_FOCUS_RING",
+            "path": "vmux_layout::window::WEBVIEW_Z_FOCUS_RING",
+            "signature": "pub const WEBVIEW_Z_FOCUS_RING",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_Z_HEADER",
+            "path": "vmux_layout::window::WEBVIEW_Z_HEADER",
+            "signature": "pub const WEBVIEW_Z_HEADER",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_Z_SIDE_SHEET",
+            "path": "vmux_layout::window::WEBVIEW_Z_SIDE_SHEET",
+            "signature": "pub const WEBVIEW_Z_SIDE_SHEET",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_Z_MODAL",
+            "path": "vmux_layout::window::WEBVIEW_Z_MODAL",
+            "signature": "pub const WEBVIEW_Z_MODAL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WEBVIEW_MESH_DEPTH_BIAS",
+            "path": "vmux_layout::window::WEBVIEW_MESH_DEPTH_BIAS",
+            "signature": "pub const WEBVIEW_MESH_DEPTH_BIAS",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "WindowPlugin",
+            "path": "vmux_layout::window::WindowPlugin",
+            "signature": "pub struct WindowPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "WindowCorners",
+            "path": "vmux_layout::window::WindowCorners",
+            "signature": "pub struct WindowCorners",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "clip",
+                "signature": "clip: Vec4",
+                "docs_md": ""
+              },
+              {
+                "name": "corner_mode",
+                "signature": "corner_mode: Vec4",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "WindowMaterial",
+            "path": "vmux_layout::window::WindowMaterial",
+            "signature": "pub type WindowMaterial",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "WINDOW_BACKGROUND_SRGB",
+            "path": "vmux_layout::window::WINDOW_BACKGROUND_SRGB",
+            "signature": "pub const WINDOW_BACKGROUND_SRGB",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "VmuxWindow",
+            "path": "vmux_layout::window::VmuxWindow",
+            "signature": "pub struct VmuxWindow",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Main",
+            "path": "vmux_layout::window::Main",
+            "signature": "pub struct Main",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "MainColumn",
+            "path": "vmux_layout::window::MainColumn",
+            "signature": "pub struct MainColumn",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Modal",
+            "path": "vmux_layout::window::Modal",
+            "signature": "pub struct Modal",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "WindowSurface",
+            "path": "vmux_layout::window::WindowSurface",
+            "signature": "pub struct WindowSurface",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "WindowGeometry",
+            "path": "vmux_layout::window::WindowGeometry",
+            "signature": "pub struct WindowGeometry",
+            "docs_md": "Persisted primary-window geometry, saved as a singleton entity in `store.ron`.\n`position`/`size` always describe the windowed frame, even while `fullscreen`,\nso exiting fullscreen lands on a sane frame.",
+            "members": [
+              {
+                "name": "fullscreen",
+                "signature": "fullscreen: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "position",
+                "signature": "position: Option<IVec2>",
+                "docs_md": ""
+              },
+              {
+                "name": "size",
+                "signature": "size: Option<Vec2>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "TabScaffold",
+            "path": "vmux_layout::window::TabScaffold",
+            "signature": "pub struct TabScaffold",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "tab",
+                "signature": "tab: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "stack",
+                "signature": "stack: Entity",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "spawn_tab_scaffold_in_space",
+            "path": "vmux_layout::window::spawn_tab_scaffold_in_space",
+            "signature": "pub fn spawn_tab_scaffold_in_space(commands: &mut Commands<'_, '_>, space: Entity, primary_window: Entity, gap_px: f32) -> TabScaffold",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "spawn_requested_tab_layouts",
+            "path": "vmux_layout::window::spawn_requested_tab_layouts",
+            "signature": "pub fn spawn_requested_tab_layouts(reader: MessageReader<'_, '_, crate::TabLayoutSpawnRequest>, settings: Res<'_, crate::settings::LayoutSettings>, effective_startup_url: Option<Res<'_, crate::settings::EffectiveStartupUrl>>, new_stack_ctx: ResMut<'_, crate::NewStackContext>, page_open_requests: MessageWriter<'_, vmux_core::PageOpenRequest>, focus: Option<ResMut<'_, crate::stack::FocusedStack>>, active_space: Query<'_, '_, Entity, (With<crate::space::Space>, With<vmux_core::Active>)>, any_space: Query<'_, '_, Entity, With<crate::space::Space>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "fit_window_to_screen",
+            "path": "vmux_layout::window::fit_window_to_screen",
+            "signature": "pub fn fit_window_to_screen(window: Single<'_, '_, &bevy::window::Window, With<bevy::window::PrimaryWindow>>, settings: Res<'_, crate::settings::LayoutSettings>, materials: ResMut<'_, Assets<WindowMaterial>>, last_size: Local<'_, Vec2>, q: Query<'_, '_, (&mut Transform, &MeshMaterial3d<WindowMaterial>), With<VmuxWindow>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}
