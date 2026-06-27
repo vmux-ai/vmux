@@ -4,7 +4,7 @@
 **Status:** Design — pending spec review
 **Depends on:** `feat/per-profile-active-pane` (`docs/specs/2026-06-27-per-profile-active-pane-design.md`) — `ActivePanes`, `ActivatePane`, `ProfileId::Agent`, per-agent focus rings. Ships as a **separate PR stacked on** that branch.
 
-> **Note:** that branch's "Migration from `FocusedStack`" is being changed — `FocusedStack` is **removed**, not kept as a mirror. `ActivePanes[ProfileId::Local]` is the single source of truth for the local human's active pane (`compute_focused_stack` writes it directly from `LastActivatedAt`; consumers `host_focus`/command bar/clipboard migrate to it). This spec references `ActivePanes[Local]` accordingly.
+> **Note — `FocusedStack` removal is owned by the per-profile PR**, not this branch. That PR deletes `FocusedStack` in favor of `ActivePanes[ProfileId::Local]` as the single source of truth and adds an `ActivePanes::local()` accessor (handed to that branch's agent as a separate task; ~17 files). **This branch stacks on per-profile and rebases once the removal lands.** It reads `ActivePanes::local()` for the human's pane and `ActivePanes[Agent(anchor)]` for the follow-pane — so it is forward-compatible whether or not the removal has landed yet.
 
 ## Problem
 
