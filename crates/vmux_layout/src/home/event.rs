@@ -1,3 +1,5 @@
+/// Page→host request: the `vmux://home/` page emits this on mount to ask the host
+/// for its launcher entries. The host answers with a `CommandBarOpenEvent`.
 #[derive(
     Clone,
     Copy,

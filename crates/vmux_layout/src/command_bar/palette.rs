@@ -27,21 +27,33 @@ use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
+/// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://home/` page.
 #[derive(Clone, Copy, PartialEq)]
 pub enum PaletteVariant {
+    /// The Cmd+K command-bar modal overlay.
     Modal,
+    /// The `vmux://home/` launcher page.
     Home,
 }
 
+/// Props for [`CommandPalette`].
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
+    /// Launcher payload (entries + open target); the input resets when its `open_id` changes.
     pub state: ReadSignal<CommandBarOpenEvent>,
+    /// Presentation context (placeholder text and host expectations).
     pub variant: PaletteVariant,
+    /// Called after an entry executes (the modal hides itself; home is a no-op).
     pub on_close: EventHandler<()>,
+    /// Called when the user cancels (Esc / Ctrl-C).
     pub on_dismiss: EventHandler<()>,
+    /// Called on query/selection change (the modal re-emits its size).
     pub on_activity: EventHandler<()>,
 }
 
+/// The shared command-bar body: input, live-filtered results, file-path completion,
+/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
+/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the home launcher ([`PaletteVariant::Home`]).
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
@@ -600,10 +612,12 @@ fn completion_query(input: &str) -> Option<String> {
     }
 }
 
+/// Emit a command-bar action to the host with no explicit open target.
 pub(crate) fn emit_action(action: &str, value: &str) {
     emit_action_with_target(action, value, None);
 }
 
+/// Emit a [`CommandBarActionEvent`] to the host (open / command / space / terminal / switch_tab).
 pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<OpenTarget>) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
         action: action.to_string(),

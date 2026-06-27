@@ -909,6 +909,7 @@ fn command_bar_open_payload(
 }
 
 #[derive(SystemParam)]
+/// Bundled ECS queries for walking the active tab's panes/stacks into command-bar tab entries.
 pub(crate) struct TabGatherParams<'w, 's> {
     pub active_tab: ActiveTabParam<'w, 's>,
     pub all_children: Query<'w, 's, &'static Children>,
@@ -921,6 +922,8 @@ pub(crate) struct TabGatherParams<'w, 's> {
     pub child_of_q: Query<'w, 's, &'static ChildOf>,
 }
 
+/// Collect the active tab's open stacks as [`CommandBarTab`] entries, shared by the
+/// command-bar modal and the home launcher.
 pub(crate) fn gather_command_bar_tabs(
     active_tab: Option<Entity>,
     all_children: &Query<&Children>,
@@ -977,6 +980,8 @@ pub(crate) fn gather_command_bar_tabs(
     bar_tabs
 }
 
+/// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
+/// bar and the home launcher, from the current snapshots and gathered tabs.
 pub(crate) fn build_command_bar_open_payload(
     open_id: u64,
     native_windowed: bool,

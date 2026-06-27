@@ -11,6 +11,8 @@ use crate::command_bar::handler::{
 };
 use crate::home::event::HomeDataRequest;
 
+/// Bevy plugin for `vmux://home/`: spawns the page manifest and answers
+/// [`HomeDataRequest`] with the shared command-bar launcher payload.
 pub struct HomePlugin;
 
 impl Plugin for HomePlugin {
@@ -23,6 +25,8 @@ impl Plugin for HomePlugin {
     }
 }
 
+/// Builds the command-bar launcher payload and emits it back to the requesting
+/// `vmux://home/` webview as a `CommandBarOpenEvent` (opening in place).
 fn on_home_data_request(
     trigger: On<BinReceive<HomeDataRequest>>,
     tab_gather: TabGatherParams,

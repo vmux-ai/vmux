@@ -8,6 +8,8 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::home::event::HomeDataRequest;
 
+/// The `vmux://home/` launcher page: a centered shell that requests its entries on
+/// mount and renders [`CommandPalette`] in [`PaletteVariant::Home`].
 #[component]
 pub fn Page() -> Element {
     use_theme();

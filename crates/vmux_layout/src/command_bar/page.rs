@@ -11,6 +11,8 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
+/// The Cmd+K command-bar modal page: renders [`CommandPalette`] in a modal shell and
+/// owns the open/ack/reveal handshake, native sizing, and outside-pointer dismiss.
 #[component]
 pub fn Page() -> Element {
     use_theme();
