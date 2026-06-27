@@ -53,6 +53,16 @@ This is two efforts in one spec:
 | Generator placement | `vmux_docs` — standalone crate **excluded** from the workspace (mirrors `website`) |
 | Model representation | Our own stable serde schema (decoupled from `rustdoc-types` `FORMAT_VERSION`) |
 
+**Resolved at implementation (M0):**
+- Pinned pair: **`nightly-2026-06-26`** ↔ **`rustdoc-types 0.59`** (`FORMAT_VERSION` 59).
+- Website became **lib-centric** (`App`/`Route` in `vmux_website` lib; `main.rs` is a thin
+  launcher) so integration tests can render components.
+- Freshness CI ships **`workflow_dispatch`-first** (the `pull_request` path-gate is present
+  but commented) — the nightly CEF build is too heavy to run on every code PR unvalidated.
+- Crate/module pages are prerendered (SSG); **item pages render client-side** via
+  `use_resource` (deep-linked items rely on SPA nav). Promoting item prerender + SSR-data
+  is a later refinement.
+
 Hard constraints discovered:
 
 - **rustdoc JSON is nightly-only** (`-Z unstable-options --output-format json`). The
