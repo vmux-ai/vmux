@@ -34,10 +34,10 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserSnapshotRequest,
-    BrowserSnapshotResponse, CommandOrigin, RecordStartRequest, RecordStartResponse,
-    RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest,
-    ScreenshotResponse, snapshot_response_to_query_result,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
+    BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, RecordStartRequest,
+    RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage,
+    ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -112,6 +112,7 @@ impl Plugin for AgentPlugin {
             .add_message::<ScreenshotResponse>()
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollRequest>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
@@ -1184,6 +1185,7 @@ fn handle_agent_queries(
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut browser_scroll_writer: MessageWriter<BrowserScrollRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
 ) {
@@ -1238,6 +1240,18 @@ fn handle_agent_queries(
                 browser_snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
                     pane: pane.clone(),
+                });
+            }
+            AgentQuery::BrowserScroll {
+                ref pane,
+                ref to,
+                delta,
+            } => {
+                browser_scroll_writer.write(BrowserScrollRequest {
+                    request_id: request.request_id.0,
+                    pane: pane.clone(),
+                    to: to.clone(),
+                    delta,
                 });
             }
             AgentQuery::RecordStart {
