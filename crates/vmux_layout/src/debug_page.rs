@@ -1,6 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::event::{DebugUpdateClear, DebugUpdateReady, RestartRequestEvent};
+use crate::event::{
+    DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, RestartRequestEvent,
+};
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_theme};
 
@@ -30,6 +32,14 @@ pub fn Page() -> Element {
                             let _ = try_cef_bin_emit_rkyv(&DebugUpdateReady { version: version() });
                         },
                         "Simulate update available"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "{BTN}",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&DebugSimulateDownload);
+                        },
+                        "Simulate download"
                     }
                     button {
                         r#type: "button",

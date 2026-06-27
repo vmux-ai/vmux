@@ -36,12 +36,13 @@ use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarR
 use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, StagedUpdate,
+    Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
     event::{
-        DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX, HeaderCommandEvent,
-        LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent,
-        RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT,
-        TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent,
+        DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
+        HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
+        PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
+        StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT,
+        UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent, UpdateProgressEvent,
         UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
@@ -87,19 +88,23 @@ impl Plugin for BrowserPlugin {
                     .chain()
                     .after(ReadAppCommands),
             )
-            .add_plugins((
-                CefPlugin {
-                    root_cache_path: cef_root_cache_path(),
-                    embedded_hosts,
-                    ..default()
-                },
-                BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::for_hosts(&[
-                    "layout",
-                ]),
-                BinEventEmitterPlugin::<(DebugUpdateReady, DebugUpdateClear)>::for_hosts(&[
-                    "debug",
-                ]),
-            ))
+            .add_plugins(
+                (
+                    CefPlugin {
+                        root_cache_path: cef_root_cache_path(),
+                        embedded_hosts,
+                        ..default()
+                    },
+                    BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::for_hosts(
+                        &["layout"],
+                    ),
+                    BinEventEmitterPlugin::<(
+                        DebugUpdateReady,
+                        DebugUpdateClear,
+                        DebugSimulateDownload,
+                    )>::for_hosts(&["debug"]),
+                ),
+            )
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
@@ -2841,20 +2846,20 @@ fn handle_browser_commands(
     }
 }
 
-fn should_emit_update_notice(
-    current: &Option<String>,
-    last: &Option<String>,
+fn should_emit_update(
+    current: &UpdateState,
+    last: &Option<UpdateState>,
     page_ready_changed: bool,
 ) -> bool {
-    current != last || (page_ready_changed && current.is_some())
+    last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
 }
 
 fn push_update_notice_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    staged: Res<StagedUpdate>,
-    mut last: Local<Option<String>>,
+    state: Res<UpdateState>,
+    mut last: Local<Option<UpdateState>>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
@@ -2862,38 +2867,64 @@ fn push_update_notice_emit(
     if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
-    if !should_emit_update_notice(&staged.0, &last, page_ready.is_changed()) {
+    if !should_emit_update(&state, &last, page_ready.is_changed()) {
         return;
     }
-    match &staged.0 {
-        Some(version) => commands.trigger(BinHostEmitEvent::from_rkyv(
+    match &*state {
+        UpdateState::Idle => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_CLEARED_EVENT,
+            &UpdateClearedEvent,
+        )),
+        UpdateState::Downloading {
+            version,
+            downloaded,
+            total,
+        } => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_PROGRESS_EVENT,
+            &UpdateProgressEvent {
+                version: version.clone(),
+                downloaded: *downloaded,
+                total: *total,
+                installing: false,
+            },
+        )),
+        UpdateState::Installing { version } => commands.trigger(BinHostEmitEvent::from_rkyv(
+            cef_e,
+            UPDATE_PROGRESS_EVENT,
+            &UpdateProgressEvent {
+                version: version.clone(),
+                downloaded: 0,
+                total: 0,
+                installing: true,
+            },
+        )),
+        UpdateState::Ready { version } => commands.trigger(BinHostEmitEvent::from_rkyv(
             cef_e,
             UPDATE_READY_EVENT,
             &UpdateReadyEvent {
                 version: version.clone(),
             },
         )),
-        None => commands.trigger(BinHostEmitEvent::from_rkyv(
-            cef_e,
-            UPDATE_CLEARED_EVENT,
-            &UpdateClearedEvent,
-        )),
     }
-    *last = staged.0.clone();
+    *last = Some(state.clone());
 }
 
 fn on_debug_update_ready(
     trigger: On<BinReceive<DebugUpdateReady>>,
-    mut staged: ResMut<StagedUpdate>,
+    mut state: ResMut<UpdateState>,
 ) {
-    staged.0 = Some(trigger.event().payload.version.clone());
+    *state = UpdateState::Ready {
+        version: trigger.event().payload.version.clone(),
+    };
 }
 
 fn on_debug_update_clear(
     _trigger: On<BinReceive<DebugUpdateClear>>,
-    mut staged: ResMut<StagedUpdate>,
+    mut state: ResMut<UpdateState>,
 ) {
-    staged.0 = None;
+    *state = UpdateState::Idle;
 }
 
 fn on_header_command_emit(
@@ -5832,32 +5863,57 @@ mod tests {
 
 #[cfg(test)]
 mod update_notice_tests {
-    use super::should_emit_update_notice;
+    use super::should_emit_update;
+    use vmux_layout::UpdateState;
 
-    #[test]
-    fn emits_on_change() {
-        assert!(should_emit_update_notice(&Some("v2".into()), &None, false));
-        assert!(should_emit_update_notice(&None, &Some("v2".into()), false));
+    fn downloading(v: &str) -> UpdateState {
+        UpdateState::Downloading {
+            version: v.into(),
+            downloaded: 1,
+            total: 2,
+        }
     }
 
     #[test]
-    fn no_emit_when_unchanged_and_no_page_ready() {
-        assert!(!should_emit_update_notice(&None, &None, false));
-        assert!(!should_emit_update_notice(
-            &Some("v2".into()),
-            &Some("v2".into()),
+    fn emits_on_change() {
+        assert!(should_emit_update(
+            &UpdateState::Ready {
+                version: "v2".into()
+            },
+            &None,
+            false
+        ));
+        assert!(should_emit_update(
+            &UpdateState::Idle,
+            &Some(downloading("v2")),
             false
         ));
     }
 
     #[test]
-    fn re_emits_staged_on_page_ready_but_not_idle() {
-        assert!(should_emit_update_notice(
-            &Some("v2".into()),
-            &Some("v2".into()),
+    fn no_emit_when_unchanged_and_no_page_ready() {
+        assert!(!should_emit_update(
+            &UpdateState::Idle,
+            &Some(UpdateState::Idle),
+            false
+        ));
+        let r = UpdateState::Ready {
+            version: "v2".into(),
+        };
+        assert!(!should_emit_update(&r, &Some(r.clone()), false));
+    }
+
+    #[test]
+    fn re_emits_non_idle_on_page_ready() {
+        let r = UpdateState::Ready {
+            version: "v2".into(),
+        };
+        assert!(should_emit_update(&r, &Some(r.clone()), true));
+        assert!(!should_emit_update(
+            &UpdateState::Idle,
+            &Some(UpdateState::Idle),
             true
         ));
-        assert!(!should_emit_update_notice(&None, &None, true));
     }
 }
 
@@ -5867,9 +5923,9 @@ mod debug_update_observer_tests {
     use bevy_cef::prelude::BinReceive;
 
     #[test]
-    fn debug_ready_sets_staged_then_clear_resets() {
+    fn debug_ready_sets_state_then_clear_resets() {
         let mut app = App::new();
-        app.init_resource::<StagedUpdate>()
+        app.init_resource::<UpdateState>()
             .add_observer(on_debug_update_ready)
             .add_observer(on_debug_update_clear);
 
@@ -5880,15 +5936,17 @@ mod debug_update_observer_tests {
             },
         });
         assert_eq!(
-            app.world().resource::<StagedUpdate>().0.as_deref(),
-            Some("v9.0.0")
+            *app.world().resource::<UpdateState>(),
+            UpdateState::Ready {
+                version: "v9.0.0".into()
+            }
         );
 
         app.world_mut().trigger(BinReceive::<DebugUpdateClear> {
             webview: Entity::PLACEHOLDER,
             payload: DebugUpdateClear,
         });
-        assert_eq!(app.world().resource::<StagedUpdate>().0, None);
+        assert_eq!(*app.world().resource::<UpdateState>(), UpdateState::Idle);
     }
 }
 

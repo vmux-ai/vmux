@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive, JsEmitEventPlugin, Receive};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
@@ -123,7 +124,8 @@ impl Plugin for UpdatePlugin {
         ))
         .add_plugins(JsEmitEventPlugin::<PageRelaunchRequest>::default())
         .add_observer(on_restart_request)
-        .add_observer(on_page_relaunch);
+        .add_observer(on_page_relaunch)
+        .add_observer(on_debug_simulate_download);
     }
 }
 
@@ -203,7 +205,17 @@ struct UpdateChecker {
 
 enum UpdateResult {
     NoUpdate,
-    Installed { version: String },
+    Downloading {
+        version: String,
+        downloaded: u64,
+        total: u64,
+    },
+    Installing {
+        version: String,
+    },
+    Installed {
+        version: String,
+    },
     Failed(String),
 }
 
@@ -225,13 +237,9 @@ fn poll_update_result(
     config: Res<UpdateConfig>,
     settings: Res<AppSettings>,
     time: Res<Time>,
-    mut staged: ResMut<vmux_layout::StagedUpdate>,
+    mut state: ResMut<vmux_layout::UpdateState>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if checker.done {
-        return;
-    }
-
-    // Drain results from background thread
     let mut results = Vec::new();
     if let Ok(rx) = checker.rx.lock() {
         while let Ok(result) = rx.try_recv() {
@@ -239,21 +247,46 @@ fn poll_update_result(
         }
     }
     for result in results {
-        checker.in_flight = false;
         match result {
             UpdateResult::NoUpdate => {
+                checker.in_flight = false;
                 bevy::log::debug!("no update available");
             }
+            UpdateResult::Downloading {
+                version,
+                downloaded,
+                total,
+            } => {
+                *state = vmux_layout::UpdateState::Downloading {
+                    version,
+                    downloaded,
+                    total,
+                };
+            }
+            UpdateResult::Installing { version } => {
+                *state = vmux_layout::UpdateState::Installing { version };
+            }
             UpdateResult::Installed { version } => {
+                checker.in_flight = false;
                 bevy::log::info!("update v{version} installed, will take effect on next launch");
-                staged.0 = Some(version.clone());
+                *state = vmux_layout::UpdateState::Ready { version };
                 checker.done = true;
-                return;
             }
             UpdateResult::Failed(e) => {
+                checker.in_flight = false;
                 bevy::log::debug!("update check failed: {e}");
+                if !matches!(
+                    *state,
+                    vmux_layout::UpdateState::Idle | vmux_layout::UpdateState::Ready { .. }
+                ) {
+                    *state = vmux_layout::UpdateState::Idle;
+                }
             }
         }
+    }
+
+    if checker.done {
+        return;
     }
 
     if !settings.auto_update {
@@ -280,23 +313,90 @@ fn poll_update_result(
     let tx = checker.tx.clone();
     let endpoint = config.endpoint.clone();
     let pubkey = config.pubkey.clone();
+    let wake = make_wake(proxy.as_deref());
     checker.in_flight = true;
 
     std::thread::spawn(move || {
-        let result = run_update_check(&endpoint, &pubkey);
-        let _ = tx.send(result);
+        run_update_check(&endpoint, &pubkey, &tx, &*wake);
     });
 }
 
-fn run_update_check(endpoint: &str, pubkey: &str) -> UpdateResult {
+fn make_wake(proxy: Option<&EventLoopProxyWrapper>) -> Box<dyn Fn() + Send> {
+    match proxy {
+        Some(p) => {
+            let proxy = (**p).clone();
+            Box::new(move || {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            })
+        }
+        None => Box::new(|| {}),
+    }
+}
+
+fn on_debug_simulate_download(
+    _trigger: On<BinReceive<vmux_layout::event::DebugSimulateDownload>>,
+    checker: Res<UpdateChecker>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let tx = checker.tx.clone();
+    let wake = make_wake(proxy.as_deref());
+    std::thread::spawn(move || {
+        simulate_download(&tx, &*wake);
+    });
+}
+
+fn simulate_download(tx: &mpsc::Sender<UpdateResult>, wake: &(dyn Fn() + Send)) {
+    let version = "0.0.0-sim".to_string();
+    let total: u64 = 24 * 1024 * 1024;
+    let step = total / 50;
+    let mut downloaded = 0u64;
+    while downloaded < total {
+        downloaded = downloaded.saturating_add(step).min(total);
+        let _ = tx.send(UpdateResult::Downloading {
+            version: version.clone(),
+            downloaded,
+            total,
+        });
+        wake();
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    let _ = tx.send(UpdateResult::Installing {
+        version: version.clone(),
+    });
+    wake();
+    std::thread::sleep(Duration::from_millis(1200));
+    let _ = tx.send(UpdateResult::Installed { version });
+    wake();
+}
+
+fn progress_step(downloaded: u64, total: u64, last_marker: u64) -> Option<u64> {
+    let marker = match downloaded.saturating_mul(100).checked_div(total) {
+        Some(pct) => pct.min(100),
+        None => downloaded / (512 * 1024),
+    };
+    (marker > last_marker).then_some(marker)
+}
+
+fn run_update_check(
+    endpoint: &str,
+    pubkey: &str,
+    tx: &mpsc::Sender<UpdateResult>,
+    wake: &(dyn Fn() + Send),
+) {
     let current: semver::Version = match env!("CARGO_PKG_VERSION").parse() {
         Ok(v) => v,
-        Err(e) => return UpdateResult::Failed(format!("bad current version: {e}")),
+        Err(e) => {
+            let _ = tx.send(UpdateResult::Failed(format!("bad current version: {e}")));
+            return;
+        }
     };
 
     let url = match endpoint.parse() {
         Ok(u) => u,
-        Err(e) => return UpdateResult::Failed(format!("bad endpoint URL: {e}")),
+        Err(e) => {
+            let _ = tx.send(UpdateResult::Failed(format!("bad endpoint URL: {e}")));
+            return;
+        }
     };
 
     let config = cargo_packager_updater::Config {
@@ -307,21 +407,81 @@ fn run_update_check(endpoint: &str, pubkey: &str) -> UpdateResult {
 
     let update = match cargo_packager_updater::check_update(current, config) {
         Ok(Some(u)) => u,
-        Ok(None) => return UpdateResult::NoUpdate,
-        Err(e) => return UpdateResult::Failed(format!("{e}")),
+        Ok(None) => {
+            let _ = tx.send(UpdateResult::NoUpdate);
+            return;
+        }
+        Err(e) => {
+            let _ = tx.send(UpdateResult::Failed(format!("{e}")));
+            return;
+        }
     };
 
     let version = update.version.clone();
 
-    match update.download_and_install() {
-        Ok(()) => UpdateResult::Installed { version },
-        Err(e) => UpdateResult::Failed(format!("install failed: {e}")),
+    let downloaded = std::cell::Cell::new(0u64);
+    let total = std::cell::Cell::new(0u64);
+    let marker = std::cell::Cell::new(0u64);
+
+    let on_chunk = |chunk_len: usize, content_len: Option<u64>| {
+        if total.get() == 0
+            && let Some(t) = content_len
+        {
+            total.set(t);
+        }
+        downloaded.set(downloaded.get().saturating_add(chunk_len as u64));
+        if let Some(m) = progress_step(downloaded.get(), total.get(), marker.get()) {
+            marker.set(m);
+            let _ = tx.send(UpdateResult::Downloading {
+                version: version.clone(),
+                downloaded: downloaded.get(),
+                total: total.get(),
+            });
+            wake();
+        }
+    };
+    let on_finish = || {
+        let _ = tx.send(UpdateResult::Installing {
+            version: version.clone(),
+        });
+        wake();
+    };
+
+    match update.download_and_install_extended(on_chunk, on_finish) {
+        Ok(()) => {
+            let _ = tx.send(UpdateResult::Installed { version });
+            wake();
+        }
+        Err(e) => {
+            let _ = tx.send(UpdateResult::Failed(format!("install failed: {e}")));
+            wake();
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn progress_step_emits_on_percent_increase() {
+        assert_eq!(progress_step(50, 100, 0), Some(50));
+        assert_eq!(progress_step(50, 100, 50), None);
+        assert_eq!(progress_step(100, 100, 50), Some(100));
+    }
+
+    #[test]
+    fn progress_step_caps_at_100() {
+        assert_eq!(progress_step(250, 100, 0), Some(100));
+    }
+
+    #[test]
+    fn progress_step_unknown_total_buckets_by_512k() {
+        let bucket = 512 * 1024;
+        assert_eq!(progress_step(0, 0, 0), None);
+        assert_eq!(progress_step(bucket + 1, 0, 0), Some(1));
+        assert_eq!(progress_step(bucket + 1, 0, 1), None);
+    }
 
     #[test]
     fn relaunch_plan_opens_app_bundle() {
