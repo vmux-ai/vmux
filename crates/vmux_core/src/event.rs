@@ -20,6 +20,7 @@ pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
+pub const FILE_FOLD_TOGGLE_EVENT: &str = "file_fold_toggle";
 pub const FILE_DIR_EVENT: &str = "file_dir";
 pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
@@ -78,6 +79,26 @@ pub struct StyledSpan {
 #[derive(
     Debug,
     Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FoldGutter {
+    #[default]
+    None,
+    Open,
+    Collapsed,
+}
+
+#[derive(
+    Debug,
+    Clone,
     PartialEq,
     Serialize,
     Deserialize,
@@ -87,6 +108,7 @@ pub struct StyledSpan {
 )]
 pub struct FileLine {
     pub line_no: u32,
+    pub fold: FoldGutter,
     pub spans: Vec<StyledSpan>,
 }
 
@@ -118,7 +140,8 @@ pub struct FileMetaEvent {
     rkyv::Deserialize,
 )]
 pub struct FileViewportPatch {
-    pub first_line: u32,
+    pub first_row: u32,
+    pub total_rows: u32,
     pub total_lines: u32,
     pub lines: Vec<FileLine>,
 }
@@ -184,7 +207,24 @@ pub struct FileVideoRect {
     rkyv::Deserialize,
 )]
 pub struct FileScrollEvent {
-    pub top_line: u32,
+    pub top_row: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileFoldToggle {
+    pub line: u32,
 }
 
 #[derive(
@@ -638,10 +678,12 @@ mod file_event_tests {
     #[test]
     fn file_viewport_patch_rkyv_roundtrip() {
         let patch = FileViewportPatch {
-            first_line: 100,
+            first_row: 100,
+            total_rows: 4000,
             total_lines: 5000,
             lines: vec![FileLine {
                 line_no: 100,
+                fold: FoldGutter::None,
                 spans: vec![StyledSpan {
                     text: "fn main() {".into(),
                     fg: [220, 220, 170],
@@ -653,7 +695,8 @@ mod file_event_tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&patch).expect("ser");
         let decoded =
             rkyv::from_bytes::<FileViewportPatch, rkyv::rancor::Error>(&bytes).expect("de");
-        assert_eq!(decoded.first_line, 100);
+        assert_eq!(decoded.first_row, 100);
+        assert_eq!(decoded.total_rows, 4000);
         assert_eq!(decoded.total_lines, 5000);
         assert_eq!(decoded.lines[0].line_no, 100);
         assert_eq!(decoded.lines[0].spans[0].text, "fn main() {");
@@ -662,12 +705,12 @@ mod file_event_tests {
 
     #[test]
     fn file_scroll_and_resize_roundtrip() {
-        let s = FileScrollEvent { top_line: 42 };
+        let s = FileScrollEvent { top_row: 42 };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&s).unwrap();
         assert_eq!(
             rkyv::from_bytes::<FileScrollEvent, rkyv::rancor::Error>(&b)
                 .unwrap()
-                .top_line,
+                .top_row,
             42
         );
         let r = FileResizeEvent {
@@ -1501,9 +1544,14 @@ mod tests {
         let e = FileCursorEvent {
             mode: EditMode::Insert,
             mode_label: "INSERT".into(),
-            primary: CursorPos { line: 3, col: 5 },
+            primary: CursorPos {
+                line: 3,
+                row: 3,
+                col: 5,
+            },
             selections: vec![SelSpan {
                 line: 3,
+                row: 3,
                 start: 0,
                 end: 5,
             }],

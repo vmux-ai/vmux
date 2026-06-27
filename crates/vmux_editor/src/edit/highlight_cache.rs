@@ -86,6 +86,7 @@ impl HighlightCache {
                 .collect();
             out.push(FileLine {
                 line_no: i as u32,
+                fold: vmux_core::event::FoldGutter::None,
                 spans,
             });
         }

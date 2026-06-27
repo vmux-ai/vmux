@@ -258,7 +258,8 @@ pub fn Page() -> Element {
     use_theme();
     let mut path = use_signal(String::new);
     let mut total_lines = use_signal(|| 0u32);
-    let mut first_line = use_signal(|| 0u32);
+    let mut total_rows = use_signal(|| 0u32);
+    let mut first_row = use_signal(|| 0u32);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
@@ -324,7 +325,8 @@ pub fn Page() -> Element {
     });
 
     let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
-        first_line.set(p.first_line);
+        first_row.set(p.first_row);
+        total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
         lines.set(p.lines);
         lsp_hover.set(None);
@@ -337,7 +339,7 @@ pub fn Page() -> Element {
         cursor.set(c.primary);
         sel.set(c.selections);
         if moved {
-            ensure_line_visible(c.primary.line, cell_dims().1);
+            ensure_line_visible(c.primary.row, cell_dims().1);
         }
     });
 
@@ -837,8 +839,8 @@ pub fn Page() -> Element {
                             let (cw, ch) = cell_dims();
                             let gutter = gw as f64 * cw + 36.0;
                             let cx = gutter + cursor().col as f64 * cw;
-                            let cy = cursor().line as f64 * ch;
-                            let spacer = total_lines() as f64 * ch;
+                            let cy = cursor().row as f64 * ch;
+                            let spacer = total_rows() as f64 * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
@@ -858,20 +860,21 @@ pub fn Page() -> Element {
                                         };
                                         let vis_first = (el.scroll_top() as f64 / ch).floor().max(0.0) as u32;
                                         let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
-                                        let rfirst = first_line();
+                                        let rfirst = first_row();
                                         let rend = rfirst + lines.read().len() as u32;
                                         let near_top = vis_first < rfirst.saturating_add(SCROLL_EDGE);
                                         let near_bot = vis_first + vis_rows + SCROLL_EDGE > rend;
                                         if (near_top || near_bot) && last_scroll_req() != vis_first {
                                             last_scroll_req.set(vis_first);
-                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: vis_first });
+                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_row: vis_first });
                                         }
                                     },
                                     div { class: "relative", style: "height:{spacer}px;",
-                                        for line in lines().iter() {
+                                        for (i, line) in lines().iter().enumerate() {
                                             {
                                                 let ln = line.line_no;
-                                                let lt = ln as f64 * ch;
+                                                let lt = (first_row() + i as u32) as f64 * ch;
+                                                let fold = line.fold;
                                                 let diags = diagnostics();
                                                 let sev = line_severity(&diags, ln);
                                                 let line_diags: Vec<FileDiagnostic> = diags
@@ -977,6 +980,31 @@ pub fn Page() -> Element {
                                                             if let Some(s) = sev {
                                                                 span { class: "{severity_color_class(s)}", "●" }
                                                             }
+                                                            match fold {
+                                                                FoldGutter::Open => rsx! {
+                                                                    span {
+                                                                        class: "cursor-pointer opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                                                                        onmousedown: move |e: Event<MouseData>| {
+                                                                            e.stop_propagation();
+                                                                            e.prevent_default();
+                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                        },
+                                                                        "▾"
+                                                                    }
+                                                                },
+                                                                FoldGutter::Collapsed => rsx! {
+                                                                    span {
+                                                                        class: "cursor-pointer opacity-80 hover:!opacity-100",
+                                                                        onmousedown: move |e: Event<MouseData>| {
+                                                                            e.stop_propagation();
+                                                                            e.prevent_default();
+                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                        },
+                                                                        "▸"
+                                                                    }
+                                                                },
+                                                                FoldGutter::None => rsx! {},
+                                                            }
                                                             "{ln + 1}"
                                                         }
                                                         span { class: "relative whitespace-pre pr-8",
@@ -1002,6 +1030,12 @@ pub fn Page() -> Element {
                                                                     }
                                                                 }
                                                             }
+                                                            if fold == FoldGutter::Collapsed {
+                                                                span {
+                                                                    class: "ml-1 rounded bg-white/10 px-1 text-foreground/40",
+                                                                    "⋯"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -1010,7 +1044,7 @@ pub fn Page() -> Element {
 
                                         for s in sel().iter() {
                                             {
-                                                let top = s.line as f64 * ch;
+                                                let top = s.row as f64 * ch;
                                                 let left = gutter + s.start as f64 * cw;
                                                 let style = if s.end == u32::MAX {
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
@@ -1111,7 +1145,12 @@ pub fn Page() -> Element {
                                         {
                                             lsp_hover().map(|h| {
                                                 let (cw, ch) = cell_dims();
-                                                let top = h.line as f64 * ch + ch;
+                                                let hrow = lines()
+                                                    .iter()
+                                                    .position(|l| l.line_no == h.line)
+                                                    .map(|i| first_row() + i as u32)
+                                                    .unwrap_or(h.line);
+                                                let top = hrow as f64 * ch + ch;
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {

@@ -46,6 +46,12 @@ pub enum EditCommand {
     FindReferences,
     Hover,
     TriggerCompletion,
+    FoldToggle,
+    FoldOpen,
+    FoldClose,
+    FoldToggleRecursive,
+    FoldAll,
+    UnfoldAll,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

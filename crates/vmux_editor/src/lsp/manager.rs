@@ -811,6 +811,7 @@ mod tests {
     fn fline(no: u32, text: &str) -> FileLine {
         FileLine {
             line_no: no,
+            fold: vmux_core::event::FoldGutter::None,
             spans: vec![StyledSpan {
                 text: text.into(),
                 fg: [0, 0, 0],
@@ -936,8 +937,14 @@ mod tests {
             EditMode::Insert,
         );
         let hl = HighlightCache::new(&path);
-        app.world_mut()
-            .spawn((FileView { path: path.clone() }, EditState { core, hl }));
+        app.world_mut().spawn((
+            FileView { path: path.clone() },
+            EditState {
+                core,
+                hl,
+                folds: crate::fold::FoldState::default(),
+            },
+        ));
 
         let diag = lsp_types::Diagnostic {
             range: lsp_types::Range {
