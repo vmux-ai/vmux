@@ -2058,11 +2058,11 @@ fn mark_outline_dirty(q: Query<(Entity, &FileView), Changed<EditState>>, mut com
 }
 
 fn emit_outline_markdown(
-    q: Query<(Entity, &FileView, &EditState), With<OutlineDirty>>,
+    q: Query<(Entity, &EditState), With<OutlineDirty>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, fv, edit) in &q {
+    for (entity, edit) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }

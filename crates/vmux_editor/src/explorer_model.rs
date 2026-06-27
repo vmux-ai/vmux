@@ -4,14 +4,14 @@
 //! the render-ready rows pushed to the dumb Dioxus page.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vmux_core::event::{FileDirEntry, OutlineRow, TreeRow};
 
 /// Depth-first flatten of the cached directory tree into the visible rows.
 /// Only directories present in `expanded` have their (cached) children inlined.
 pub fn flatten_tree(
-    root: &PathBuf,
+    root: &Path,
     expanded: &HashSet<PathBuf>,
     children: &HashMap<PathBuf, Vec<FileDirEntry>>,
 ) -> Vec<TreeRow> {
@@ -21,7 +21,7 @@ pub fn flatten_tree(
 }
 
 fn walk(
-    dir: &PathBuf,
+    dir: &Path,
     depth: u16,
     expanded: &HashSet<PathBuf>,
     children: &HashMap<PathBuf, Vec<FileDirEntry>>,
@@ -48,15 +48,15 @@ fn walk(
 
 /// Append `path` to the session open-editors list if not already present,
 /// preserving open order (matches VS Code's behaviour).
-pub fn note_open(list: &mut Vec<PathBuf>, path: &PathBuf) {
-    if !list.contains(path) {
-        list.push(path.clone());
+pub fn note_open(list: &mut Vec<PathBuf>, path: &Path) {
+    if !list.iter().any(|p| p.as_path() == path) {
+        list.push(path.to_path_buf());
     }
 }
 
 /// Remove `path` from the open-editors list; a no-op if absent.
-pub fn close(list: &mut Vec<PathBuf>, path: &PathBuf) {
-    list.retain(|p| p != path);
+pub fn close(list: &mut Vec<PathBuf>, path: &Path) {
+    list.retain(|p| p.as_path() != path);
 }
 
 /// Whether `path` is a markdown file (outline comes from the heading scanner
