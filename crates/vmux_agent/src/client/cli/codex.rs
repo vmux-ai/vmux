@@ -46,6 +46,8 @@ impl CliAgentStrategy for CodexStrategy {
             "features.code_mode.direct_only_tool_namespaces=[{}]",
             quote_toml(DIRECT_ONLY_NAMESPACE)
         ));
+        args.push("-c".into());
+        args.push("tools.web_search=false".to_string());
         for feature in DISABLED_FEATURES {
             args.push("--disable".into());
             args.push((*feature).to_string());
@@ -261,6 +263,17 @@ mod tests {
             .collect();
         assert!(disabled.contains(&"shell_tool"));
         assert!(disabled.contains(&"unified_exec"));
+    }
+
+    #[test]
+    fn build_args_disables_native_web_search() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        assert!(args.iter().any(|a| a == "tools.web_search=false"));
     }
 
     #[test]
