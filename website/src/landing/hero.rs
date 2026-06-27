@@ -22,7 +22,7 @@ pub fn Hero() -> Element {
                 div { class: "absolute right-[16%] top-1/4 h-80 w-80 rounded-full bg-aurora-violet/20 blur-[120px] animate-aurora [animation-delay:-13s] motion-reduce:animate-none" }
             }
             div { class: "relative mx-auto max-w-2xl reveal",
-                {headline("Ask for anything", "One prompt.", "Anything, done.")}
+                {headline("The browser", "One prompt.", "Anything, done.")}
                 p { class: "mt-5 text-lg sm:text-xl text-text-muted max-w-xl mx-auto reveal",
                     "The browser that gets sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch."
                 }
