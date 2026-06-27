@@ -135,6 +135,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
+            .init_resource::<bevy::ecs::message::Messages<vmux_core::FileFollowRequest>>()
             .add_systems(
                 Update,
                 (agent_bell_to_attention, mark_agent_done, clear_agent_done)
@@ -180,6 +181,7 @@ impl Plugin for AgentPlugin {
                     handle_agent_tool_calls,
                     handle_agent_commands,
                     handle_agent_self_commands,
+                    handle_agent_file_touch,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -639,6 +641,103 @@ impl AgentBrowserResolve<'_, '_> {
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentFileResolve<'w, 's> {
+    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
+    file_follow: MessageWriter<'w, vmux_core::FileFollowRequest>,
+    agent_terms: Query<
+        'w,
+        's,
+        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
+        With<AgentSession>,
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
+}
+
+impl AgentFileResolve<'_, '_> {
+    fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The agent's existing `file://` follow-page (the page entity) and its leaf
+    /// pane: a sibling pane (same parent split) hosting a file page. `None` if
+    /// the agent has no file pane yet.
+    fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
+        use bevy::ecs::relationship::Relationship;
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        for (page, page_co, meta) in self.file_pages.iter() {
+            if !meta.url.starts_with("file:") {
+                continue;
+            }
+            let Ok(pane_co) = self.child_of.get(page_co.get()) else {
+                continue;
+            };
+            let pane = pane_co.get();
+            if pane == agent_pane {
+                continue;
+            }
+            if let Ok(parent_co) = self.child_of.get(pane)
+                && parent_co.get() == agent_parent
+            {
+                return Some((page, pane));
+            }
+        }
+        None
+    }
+}
+
+/// On an agent file read/edit, open or reuse a single `file://` follow-pane
+/// beside that agent and record it as the agent's active pane (its focus ring).
+/// Never stamps `LastActivatedAt`, so the local human's focus is untouched.
+fn handle_agent_file_touch(
+    mut reader: MessageReader<AgentCommandRequest>,
+    mut resolve: AgentFileResolve,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::FileTouched {
+            anchor, path, line, ..
+        } = &request.command
+        else {
+            continue;
+        };
+        let Some(agent_pane) = resolve.agent_pane(*anchor) else {
+            continue;
+        };
+        match resolve.file_page_for(agent_pane) {
+            Some((page, pane)) => {
+                resolve.file_follow.write(vmux_core::FileFollowRequest {
+                    target: page,
+                    path: path.clone(),
+                    line: *line,
+                });
+                resolve
+                    .activate
+                    .write(vmux_layout::active_panes::ActivatePane {
+                        profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                        active: vmux_layout::active_panes::ActiveStack {
+                            tab: None,
+                            pane: Some(pane),
+                            stack: None,
+                        },
+                    });
+            }
+            None => {
+                resolve.open_beside.write(vmux_layout::OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: format!("file://{path}"),
+                    request_id: request.request_id.0,
+                    focus: false,
+                });
+            }
+        }
+    }
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -681,6 +780,7 @@ fn handle_agent_commands(
             _ => None,
         };
         let result = match &request.command {
+            ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
                     serde_json::json!({})
