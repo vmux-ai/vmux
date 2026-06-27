@@ -67,12 +67,15 @@ fn main() -> Result<()> {
     for name in wanted {
         eprintln!("doc: {name}");
         let manifest = root.join(format!("crates/{name}/Cargo.toml"));
-        let built = rustdoc_json::Builder::default()
+        let mut builder = rustdoc_json::Builder::default()
             .toolchain(NIGHTLY)
             .manifest_path(&manifest)
             .document_private_items(false)
-            .cap_lints(Some("allow"))
-            .build();
+            .cap_lints(Some("allow"));
+        if let Some(bin) = bin_target(name) {
+            builder = builder.package_target(rustdoc_json::PackageTarget::Bin(bin.to_string()));
+        }
+        let built = builder.build();
         let json_path = match built {
             Ok(p) => p,
             Err(e) => {
@@ -119,4 +122,11 @@ fn main() -> Result<()> {
 
 fn first_paragraph(md: &str) -> String {
     md.split("\n\n").next().unwrap_or("").trim().to_string()
+}
+
+fn bin_target(crate_name: &str) -> Option<&'static str> {
+    match crate_name {
+        "vmux_cli" => Some("vmux"),
+        _ => None,
+    }
 }
