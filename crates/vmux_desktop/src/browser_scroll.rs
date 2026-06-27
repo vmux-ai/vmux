@@ -4,15 +4,16 @@ use vmux_agent::{BrowserScrollRequest, BrowserSnapshotRequest};
 use vmux_core::LastActivatedAt;
 use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::Browser;
+use vmux_layout::active_panes::ActivePanes;
 use vmux_layout::pane::{Pane, PaneSplit};
-use vmux_layout::stack::{FocusedStack, Stack, active_stack_in_pane};
+use vmux_layout::stack::{Stack, active_stack_in_pane};
 use vmux_layout::target::{active_webview_for_tab, parse_pane_target};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_scrolls(
     mut reader: MessageReader<BrowserScrollRequest>,
     cef_browsers: NonSend<Browsers>,
-    focus: Res<FocusedStack>,
+    active: Res<ActivePanes>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
@@ -23,7 +24,7 @@ pub(crate) fn run_scrolls(
     for request in reader.read() {
         let target = match request.pane.as_deref() {
             Some(s) => parse_pane_target(s, &panes),
-            None => focus.pane.filter(|p| panes.contains(*p)),
+            None => active.local().pane.filter(|p| panes.contains(*p)),
         };
         let webview = target.and_then(|pane| {
             active_webview_for_tab(

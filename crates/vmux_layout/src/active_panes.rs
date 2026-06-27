@@ -31,6 +31,12 @@ impl ActivePanes {
     pub fn get(&self, profile: &ProfileId) -> Option<ActiveStack> {
         self.0.get(profile).copied()
     }
+
+    /// The local human's active pane — the single source of truth for "the
+    /// focused pane" (replaces the former global `FocusedStack`).
+    pub fn local(&self) -> ActiveStack {
+        self.0.get(&ProfileId::Local).copied().unwrap_or_default()
+    }
 }
 
 /// A profile claims an active pane. Emitted by that profile's own actions: the
