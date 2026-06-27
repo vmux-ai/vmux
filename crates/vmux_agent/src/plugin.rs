@@ -135,7 +135,6 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
-            .init_resource::<bevy::ecs::message::Messages<vmux_core::FileFollowRequest>>()
             .add_systems(
                 Update,
                 (agent_bell_to_attention, mark_agent_done, clear_agent_done)
@@ -645,7 +644,6 @@ impl AgentBrowserResolve<'_, '_> {
 pub(crate) struct AgentFileResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
-    file_follow: MessageWriter<'w, vmux_core::FileFollowRequest>,
     agent_terms: Query<
         'w,
         's,
@@ -690,9 +688,12 @@ impl AgentFileResolve<'_, '_> {
     }
 }
 
-/// On an agent file read/edit, open or reuse a single `file://` follow-pane
-/// beside that agent and record it as the agent's active pane (its focus ring).
-/// Never stamps `LastActivatedAt`, so the local human's focus is untouched.
+/// On an agent file read/edit, open the file in a `file://` pane beside that
+/// agent and record it as the agent's active pane (its focus ring). The first
+/// file spirals a new pane; later reads stack as new tabs on top of that pane
+/// (placement `AddTab`), and re-reading the same file refocuses its tab. `focus`
+/// only brings the new tab to the front of the file pane (it does not move the
+/// human's focused pane), so it is set only once that pane already exists.
 fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
@@ -703,42 +704,31 @@ fn handle_agent_file_touch(
         return;
     }
     for request in reader.read() {
-        let ServiceAgentCommand::FileTouched {
-            anchor, path, line, ..
-        } = &request.command
-        else {
+        let ServiceAgentCommand::FileTouched { anchor, path, .. } = &request.command else {
             continue;
         };
         let Some(agent_pane) = resolve.agent_pane(*anchor) else {
             continue;
         };
-        match resolve.file_page_for(agent_pane) {
-            Some((page, pane)) => {
-                resolve.file_follow.write(vmux_core::FileFollowRequest {
-                    target: page,
-                    path: path.clone(),
-                    line: *line,
+        let existing = resolve.file_page_for(agent_pane);
+        resolve.open_beside.write(vmux_layout::OpenBesideRequest {
+            pane: agent_pane,
+            direction: None,
+            url: format!("file://{path}"),
+            request_id: request.request_id.0,
+            focus: existing.is_some(),
+        });
+        if let Some((_, pane)) = existing {
+            resolve
+                .activate
+                .write(vmux_layout::active_panes::ActivatePane {
+                    profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                    active: vmux_layout::active_panes::ActiveStack {
+                        tab: None,
+                        pane: Some(pane),
+                        stack: None,
+                    },
                 });
-                resolve
-                    .activate
-                    .write(vmux_layout::active_panes::ActivatePane {
-                        profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
-                        active: vmux_layout::active_panes::ActiveStack {
-                            tab: None,
-                            pane: Some(pane),
-                            stack: None,
-                        },
-                    });
-            }
-            None => {
-                resolve.open_beside.write(vmux_layout::OpenBesideRequest {
-                    pane: agent_pane,
-                    direction: None,
-                    url: format!("file://{path}"),
-                    request_id: request.request_id.0,
-                    focus: false,
-                });
-            }
         }
     }
 }
