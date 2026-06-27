@@ -32,11 +32,11 @@ pub use plugin::SettingsPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::runtime::{
     AgentSettings, AppProviderSettings, AppSettings, AppearanceSettings, BrowserSettings,
-    ColorScheme, EditorSettings, KeyComboDef, LastSelfWriteHash, LspServerOverride, LspSettings,
-    SettingsLoadSet, SettingsSaveRequest, SettingsWriteRequest, ShortcutDef, ShortcutEntry,
-    ShortcutSettings, SpaceOverrides, TerminalSettings, TerminalTheme, apply_settings_update,
-    load_settings, resolve_startup_dir, resolve_startup_url, serialize_settings_to_json,
-    set_at_path,
+    ColorScheme, EXPLORER_DEFAULT_WIDTH, EditorSettings, ExplorerSettings, KeyComboDef,
+    LastSelfWriteHash, LspServerOverride, LspSettings, SettingsLoadSet, SettingsSaveRequest,
+    SettingsWriteRequest, ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides,
+    TerminalSettings, TerminalTheme, apply_settings_update, load_settings, resolve_startup_dir,
+    resolve_startup_url, serialize_settings_to_json, set_at_path,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::view::Settings;

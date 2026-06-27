@@ -59,6 +59,31 @@ pub struct EditorSettings {
     pub keymap: vmux_core::KeymapKind,
     #[serde(default)]
     pub lsp: LspSettings,
+    #[serde(default)]
+    pub explorer: ExplorerSettings,
+}
+
+/// Default Explorer panel width in pixels when unset.
+pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
+
+/// Persisted Explorer (file tree) panel chrome. Absent fields fall back to
+/// [`ExplorerSettings::visible`]/[`ExplorerSettings::width`] defaults — never
+/// auto-seeded so a sparse settings file stays minimal.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ExplorerSettings {
+    #[serde(default)]
+    pub visible: Option<bool>,
+    #[serde(default)]
+    pub width: Option<u32>,
+}
+
+impl ExplorerSettings {
+    pub fn visible(&self) -> bool {
+        self.visible.unwrap_or(true)
+    }
+    pub fn width(&self) -> u32 {
+        self.width.unwrap_or(EXPLORER_DEFAULT_WIDTH)
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -1065,6 +1090,23 @@ mod tests {
             editor: Default::default(),
             appearance: Default::default(),
         }
+    }
+
+    #[test]
+    fn explorer_settings_default_when_absent() {
+        let s = base_settings();
+        assert!(s.editor.explorer.visible());
+        assert_eq!(s.editor.explorer.width(), EXPLORER_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn explorer_settings_present_overrides() {
+        let e = ExplorerSettings {
+            visible: Some(false),
+            width: Some(320),
+        };
+        assert!(!e.visible());
+        assert_eq!(e.width(), 320);
     }
 
     #[test]

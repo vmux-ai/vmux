@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::explorer::ExplorerPanel;
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, image_mime, line_severity,
     severity_color_class, span_style, squiggle_style,
@@ -305,6 +306,15 @@ pub fn Page() -> Element {
     let mut comp_sel = use_signal(|| 0usize);
     let mut comp_anchor = use_signal(|| (0u32, 0u32));
     let mut last_scroll_req = use_signal(|| 0u32);
+    let mut explorer_visible = use_signal(|| true);
+    let mut explorer_width = use_signal(|| 240u32);
+    let mut explorer_resizing = use_signal(|| false);
+
+    let _chrome =
+        use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
+            explorer_visible.set(c.visible);
+            explorer_width.set(c.width);
+        });
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(preview, thumbs);
@@ -540,9 +550,39 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
+            class: "flex h-full w-full flex-row overflow-hidden bg-background",
+            onmousemove: move |e: Event<MouseData>| {
+                if explorer_resizing() {
+                    let x = e.client_coordinates().x as i32;
+                    explorer_width.set((x.max(0) as u32).clamp(160, 600));
+                }
+            },
+            onmouseup: move |_| {
+                if explorer_resizing() {
+                    explorer_resizing.set(false);
+                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
+                }
+            },
+
+            if explorer_visible() {
+                div {
+                    class: "h-full shrink-0 overflow-hidden",
+                    style: "width:{explorer_width()}px;",
+                    ExplorerPanel {}
+                }
+                div {
+                    class: "h-full w-1 shrink-0 cursor-col-resize bg-white/[0.06] hover:bg-cyan-400/40",
+                    onmousedown: move |e: Event<MouseData>| {
+                        e.prevent_default();
+                        explorer_resizing.set(true);
+                    },
+                }
+            }
+
+        div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
+            class: "relative flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground font-mono text-sm leading-normal",
             style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
@@ -565,6 +605,11 @@ pub fn Page() -> Element {
                     return;
                 };
                 let key = raw.key();
+                if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
+                    e.prevent_default();
+                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+                    return;
+                }
                 match mode() {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
@@ -680,6 +725,24 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
+                button {
+                    class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+                    title: "Toggle Explorer",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+                    },
+                    svg {
+                        class: "h-4 w-4",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                        line { x1: "9", y1: "3", x2: "9", y2: "21" }
+                    }
+                }
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
@@ -1356,6 +1419,7 @@ pub fn Page() -> Element {
                 staged_count: git_staged,
                 message: git_message,
             }
+        }
         }
     }
 }

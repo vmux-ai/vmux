@@ -18,6 +18,8 @@ pub mod keymap;
 #[cfg(not(target_arch = "wasm32"))]
 mod dir;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod explorer_model;
+#[cfg(not(target_arch = "wasm32"))]
 mod preview;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -33,6 +35,8 @@ pub use lsp::LspPlugin;
 #[cfg(any(target_arch = "wasm32", test))]
 pub mod page_model;
 
+#[cfg(target_arch = "wasm32")]
+pub mod explorer;
 #[cfg(target_arch = "wasm32")]
 pub mod lsp_page;
 #[cfg(target_arch = "wasm32")]
