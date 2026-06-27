@@ -1,3 +1,5 @@
+//! Spaces (workspace groupings): CRUD over named spaces, per-space startup URL and
+//! directory, active-space tracking, and the spaces list webview.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,

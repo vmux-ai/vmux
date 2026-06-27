@@ -22,6 +22,8 @@ use crate::{
     TabLayoutSpawnRequest, reconcile, settings,
 };
 
+/// Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,
+/// command-bar input, and layout apply/snapshot, aggregating the per-area sub-plugins.
 pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {

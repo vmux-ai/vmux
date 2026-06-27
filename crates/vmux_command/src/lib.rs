@@ -1,3 +1,6 @@
+//! The command vocabulary and command-bar wire protocol: the `AppCommand` type, the
+//! issue/read system-set ordering, and the snapshots the command bar consumes.
+
 pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod open;

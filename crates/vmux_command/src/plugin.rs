@@ -8,6 +8,8 @@ use crate::snapshot::{
 };
 use vmux_core::team::{Profile, User};
 
+/// Wires the command protocol: the command messages, the command-bar snapshot resources,
+/// and the write -> snapshot -> read system ordering.
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {

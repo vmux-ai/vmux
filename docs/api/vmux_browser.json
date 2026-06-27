@@ -1,0 +1,83 @@
+{
+  "name": "vmux_browser",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_browser",
+    "docs_md": "Browser and page-open orchestration on top of `bevy_cef`: page resolution, CEF\nbackend management, and input forwarding between the native layout and embedded pages.",
+    "items": [
+      {
+        "kind": "struct",
+        "name": "BrowserPlugin",
+        "path": "vmux_browser::BrowserPlugin",
+        "signature": "pub struct BrowserPlugin",
+        "docs_md": "Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages\nthe CEF backend, and forwards pointer and cursor input between the layout and pages.",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "request_native_command_bar_dismiss_for_mouse_down",
+        "path": "vmux_browser::request_native_command_bar_dismiss_for_mouse_down",
+        "signature": "pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "take_native_command_bar_dismiss_requested",
+        "path": "vmux_browser::take_native_command_bar_dismiss_requested",
+        "signature": "pub fn take_native_command_bar_dismiss_requested() -> bool",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "handle_browser_go_back_requests",
+        "path": "vmux_browser::handle_browser_go_back_requests",
+        "signature": "pub fn handle_browser_go_back_requests(reader: MessageReader<'_, '_, vmux_layout::BrowserGoBackRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, panes: Query<'_, '_, Entity, (With<vmux_layout::pane::Pane>, Without<vmux_layout::pane::PaneSplit>)>, terminals: Query<'_, '_, (Entity, &ChildOf), (With<vmux_terminal::Terminal>, Without<terminal::ProcessExited>)>, browsers: Query<'_, '_, (Entity, &ChildOf), With<Browser>>, pane_children: Query<'_, '_, &Children, With<vmux_layout::pane::Pane>>, stack_ts: Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<vmux_layout::stack::Stack>>, commands: Commands<'_, '_>)",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "handle_browser_go_forward_requests",
+        "path": "vmux_browser::handle_browser_go_forward_requests",
+        "signature": "pub fn handle_browser_go_forward_requests(reader: MessageReader<'_, '_, vmux_layout::BrowserGoForwardRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, panes: Query<'_, '_, Entity, (With<vmux_layout::pane::Pane>, Without<vmux_layout::pane::PaneSplit>)>, terminals: Query<'_, '_, (Entity, &ChildOf), (With<vmux_terminal::Terminal>, Without<terminal::ProcessExited>)>, browsers: Query<'_, '_, (Entity, &ChildOf), With<Browser>>, pane_children: Query<'_, '_, &Children, With<vmux_layout::pane::Pane>>, stack_ts: Query<'_, '_, (Entity, &vmux_history::LastActivatedAt), With<vmux_layout::stack::Stack>>, commands: Commands<'_, '_>)",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "handle_browser_open_history",
+        "path": "vmux_browser::handle_browser_open_history",
+        "signature": "pub fn handle_browser_open_history(reader: MessageReader<'_, '_, vmux_command::AppCommand>, focus: Res<'_, vmux_layout::stack::FocusedStack>, writer: MessageWriter<'_, vmux_core::PageOpenRequest>)",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "handle_open_in_new_stack_requests",
+        "path": "vmux_browser::handle_open_in_new_stack_requests",
+        "signature": "pub fn handle_open_in_new_stack_requests(reader: MessageReader<'_, '_, vmux_layout::OpenInNewStackRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, panes: Query<'_, '_, Entity, (With<vmux_layout::pane::Pane>, Without<vmux_layout::pane::PaneSplit>)>, page_open_writer: MessageWriter<'_, vmux_core::PageOpenRequest>)",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "function",
+        "name": "handle_browser_navigate_requests",
+        "path": "vmux_browser::handle_browser_navigate_requests",
+        "signature": "pub fn handle_browser_navigate_requests(reader: MessageReader<'_, '_, vmux_layout::BrowserNavigateRequest>, focus: Res<'_, vmux_layout::stack::FocusedStack>, panes: Query<'_, '_, Entity, (With<vmux_layout::pane::Pane>, Without<vmux_layout::pane::PaneSplit>)>, terminals: Query<'_, '_, (Entity, &ChildOf), (With<vmux_terminal::Terminal>, Without<terminal::ProcessExited>)>, browsers: Query<'_, '_, (Entity, &ChildOf), With<Browser>>, service: Option<Res<'_, vmux_service::client::ServiceClient>>, commands: Commands<'_, '_>, page_open_writer: MessageWriter<'_, vmux_core::PageOpenRequest>)",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": []
+  }
+}

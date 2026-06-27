@@ -1,0 +1,10 @@
+{
+  "name": "vmux_macro",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_macro",
+    "docs_md": "Internal procedural-macro crate: derive macros that generate command-bar, shortcut,\nMCP-tool, and OS-menu boilerplate from enums.",
+    "items": [],
+    "submodules": []
+  }
+}

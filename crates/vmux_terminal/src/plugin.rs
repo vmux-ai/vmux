@@ -214,6 +214,8 @@ pub struct TerminalStackSpawnRequest {
     pub activate: bool,
 }
 
+/// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
+/// process-monitor requests, keyboard and mouse forwarding, and snapshot updates.
 pub struct TerminalPlugin;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]

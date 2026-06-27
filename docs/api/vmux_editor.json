@@ -1,0 +1,1787 @@
+{
+  "name": "vmux_editor",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_editor",
+    "docs_md": "File viewer and editor page: loading, editing, syntax highlighting, file watching,\nimage preview, and LSP integration in a CEF + Dioxus webview.",
+    "items": [],
+    "submodules": [
+      {
+        "path": "vmux_editor::viewport",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "clamp_top_line",
+            "path": "vmux_editor::viewport::clamp_top_line",
+            "signature": "pub fn clamp_top_line(top_line: u32, total_lines: u32, rows: u16) -> u32",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "window_range",
+            "path": "vmux_editor::viewport::window_range",
+            "signature": "pub fn window_range(total_lines: u32, top_line: u32, rows: u16) -> (u32, u32)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "rows_from_viewport",
+            "path": "vmux_editor::viewport::rows_from_viewport",
+            "signature": "pub fn rows_from_viewport(char_height: f32, viewport_height: f32) -> u16",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "visible_slice",
+            "path": "vmux_editor::viewport::visible_slice",
+            "signature": "pub fn visible_slice(total: u32, top_line: u32, rows: u16) -> std::ops::Range<usize>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_editor::highlight",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "FILE_VIEW_MAX_BYTES",
+            "path": "vmux_editor::highlight::FILE_VIEW_MAX_BYTES",
+            "signature": "pub const FILE_VIEW_MAX_BYTES",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "syntax_set",
+            "path": "vmux_editor::highlight::syntax_set",
+            "signature": "pub fn syntax_set() -> &'static syntect::parsing::SyntaxSet",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "select_syntax",
+            "path": "vmux_editor::highlight::select_syntax",
+            "signature": "pub fn select_syntax(path: &std::path::Path) -> &'static syntect::parsing::SyntaxReference",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "default_theme",
+            "path": "vmux_editor::highlight::default_theme",
+            "signature": "pub fn default_theme() -> syntect::highlighting::Theme",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "highlight_snippet",
+            "path": "vmux_editor::highlight::highlight_snippet",
+            "signature": "pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<vmux_core::event::FileLine>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "HighlightedFile",
+            "path": "vmux_editor::highlight::HighlightedFile",
+            "signature": "pub struct HighlightedFile",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "language",
+                "signature": "language: String",
+                "docs_md": ""
+              },
+              {
+                "name": "lines",
+                "signature": "lines: Vec<vmux_core::event::FileLine>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "Highlighter",
+            "path": "vmux_editor::highlight::Highlighter",
+            "signature": "pub struct Highlighter",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_editor::edit",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_editor::edit::buffer",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "TextBuffer",
+                "path": "vmux_editor::edit::buffer::TextBuffer",
+                "signature": "pub struct TextBuffer",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "rope",
+                    "signature": "rope: ropey::Rope",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "path",
+                    "signature": "path: std::path::PathBuf",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "language",
+                    "signature": "language: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::edit::command",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "enum",
+                "name": "Motion",
+                "path": "vmux_editor::edit::command::Motion",
+                "signature": "pub enum Motion",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Left",
+                    "signature": "Left",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Right",
+                    "signature": "Right",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Up",
+                    "signature": "Up",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Down",
+                    "signature": "Down",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "WordNext",
+                    "signature": "WordNext",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "WordPrev",
+                    "signature": "WordPrev",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "WordEnd",
+                    "signature": "WordEnd",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "LineStart",
+                    "signature": "LineStart",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "FirstNonBlank",
+                    "signature": "FirstNonBlank",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "LineEnd",
+                    "signature": "LineEnd",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DocStart",
+                    "signature": "DocStart",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DocEnd",
+                    "signature": "DocEnd",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "PageUp",
+                    "signature": "PageUp",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "PageDown",
+                    "signature": "PageDown",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "GotoLine",
+                    "signature": "GotoLine",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "EditCommand",
+                "path": "vmux_editor::edit::command::EditCommand",
+                "signature": "pub enum EditCommand",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Move",
+                    "signature": "Move",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Select",
+                    "signature": "Select",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "InsertText",
+                    "signature": "InsertText",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "InsertNewline",
+                    "signature": "InsertNewline",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "InsertTab",
+                    "signature": "InsertTab",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteBack",
+                    "signature": "DeleteBack",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteForward",
+                    "signature": "DeleteForward",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteWordBack",
+                    "signature": "DeleteWordBack",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteToLineEnd",
+                    "signature": "DeleteToLineEnd",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteRange",
+                    "signature": "DeleteRange",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "YankRange",
+                    "signature": "YankRange",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteSelection",
+                    "signature": "DeleteSelection",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "DeleteLine",
+                    "signature": "DeleteLine",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Yank",
+                    "signature": "Yank",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Cut",
+                    "signature": "Cut",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Paste",
+                    "signature": "Paste",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "PasteBefore",
+                    "signature": "PasteBefore",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "SetMode",
+                    "signature": "SetMode",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Undo",
+                    "signature": "Undo",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Redo",
+                    "signature": "Redo",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Save",
+                    "signature": "Save",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "GotoDefinition",
+                    "signature": "GotoDefinition",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "FindReferences",
+                    "signature": "FindReferences",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Hover",
+                    "signature": "Hover",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "TriggerCompletion",
+                    "signature": "TriggerCompletion",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "Selection",
+                "path": "vmux_editor::edit::command::Selection",
+                "signature": "pub struct Selection",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "anchor",
+                    "signature": "anchor: usize",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "head",
+                    "signature": "head: usize",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::edit::core",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "EditOutcome",
+                "path": "vmux_editor::edit::core::EditOutcome",
+                "signature": "pub struct EditOutcome",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "text_changed",
+                    "signature": "text_changed: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "sel_changed",
+                    "signature": "sel_changed: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "mode_changed",
+                    "signature": "mode_changed: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "dirty_changed",
+                    "signature": "dirty_changed: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "scroll_to",
+                    "signature": "scroll_to: Option<u32>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "yank",
+                    "signature": "yank: Option<(String, bool)>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "EditCore",
+                "path": "vmux_editor::edit::core::EditCore",
+                "signature": "pub struct EditCore",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "buffer",
+                    "signature": "buffer: crate::edit::buffer::TextBuffer",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "selections",
+                    "signature": "selections: Vec<crate::edit::command::Selection>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "mode",
+                    "signature": "mode: crate::edit::command::EditMode",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "rows",
+                    "signature": "rows: u16",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "dirty",
+                    "signature": "dirty: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "register",
+                    "signature": "register: Option<(String, bool)>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::edit::highlight_cache",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "HighlightCache",
+                "path": "vmux_editor::edit::highlight_cache::HighlightCache",
+                "signature": "pub struct HighlightCache",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "language",
+                    "signature": "language: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_editor::keymap",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "Mods",
+            "path": "vmux_editor::keymap::Mods",
+            "signature": "pub struct Mods",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "ctrl",
+                "signature": "ctrl: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "alt",
+                "signature": "alt: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "shift",
+                "signature": "shift: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "meta",
+                "signature": "meta: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "KeyInput",
+            "path": "vmux_editor::keymap::KeyInput",
+            "signature": "pub struct KeyInput",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "key",
+                "signature": "key: String",
+                "docs_md": ""
+              },
+              {
+                "name": "mods",
+                "signature": "mods: Mods",
+                "docs_md": ""
+              },
+              {
+                "name": "repeat",
+                "signature": "repeat: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "trait",
+            "name": "Keymap",
+            "path": "vmux_editor::keymap::Keymap",
+            "signature": "pub trait Keymap",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "trait",
+            "name": "KeymapKindExt",
+            "path": "vmux_editor::keymap::KeymapKindExt",
+            "signature": "pub trait KeymapKindExt",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": [
+          {
+            "path": "vmux_editor::keymap::vim",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "VimKeymap",
+                "path": "vmux_editor::keymap::vim::VimKeymap",
+                "signature": "pub struct VimKeymap",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::keymap::vscode",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "VscodeKeymap",
+                "path": "vmux_editor::keymap::vscode::VscodeKeymap",
+                "signature": "pub struct VscodeKeymap",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_editor::lsp",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "type_alias",
+            "name": "PathDiagnostics",
+            "path": "vmux_editor::lsp::PathDiagnostics",
+            "signature": "pub type PathDiagnostics",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LspOutbox",
+            "path": "vmux_editor::lsp::LspOutbox",
+            "signature": "pub struct LspOutbox",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "PathLintDiagnostics",
+            "path": "vmux_editor::lsp::PathLintDiagnostics",
+            "signature": "pub type PathLintDiagnostics",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LintOutbox",
+            "path": "vmux_editor::lsp::LintOutbox",
+            "signature": "pub struct LintOutbox",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "ServerKey",
+            "path": "vmux_editor::lsp::ServerKey",
+            "signature": "pub type ServerKey",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "OpenDoc",
+            "path": "vmux_editor::lsp::OpenDoc",
+            "signature": "pub struct OpenDoc",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "key",
+                "signature": "key: ServerKey",
+                "docs_md": ""
+              },
+              {
+                "name": "version",
+                "signature": "version: i32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "type_alias",
+            "name": "PendingMap",
+            "path": "vmux_editor::lsp::PendingMap",
+            "signature": "pub type PendingMap",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LspPlugin",
+            "path": "vmux_editor::lsp::LspPlugin",
+            "signature": "pub struct LspPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": [
+          {
+            "path": "vmux_editor::lsp::archive",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "enum",
+                "name": "ArchiveKind",
+                "path": "vmux_editor::lsp::archive::ArchiveKind",
+                "signature": "pub enum ArchiveKind",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Gz",
+                    "signature": "Gz",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "TarGz",
+                    "signature": "TarGz",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Zip",
+                    "signature": "Zip",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Raw",
+                    "signature": "Raw",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "kind_for",
+                "path": "vmux_editor::lsp::archive::kind_for",
+                "signature": "pub fn kind_for(file: &str) -> ArchiveKind",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "extract",
+                "path": "vmux_editor::lsp::archive::extract",
+                "signature": "pub fn extract(file: &std::path::Path, kind: ArchiveKind, dest_dir: &std::path::Path, single_name: &str) -> Result<(), String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::catalog",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "Package",
+                "path": "vmux_editor::lsp::catalog::Package",
+                "signature": "pub struct Package",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "description",
+                    "signature": "description: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "languages",
+                    "signature": "languages: Vec<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "categories",
+                    "signature": "categories: Vec<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "source_id",
+                    "signature": "source_id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "assets",
+                    "signature": "assets: Vec<crate::lsp::target::Asset>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "bin",
+                    "signature": "bin: std::collections::BTreeMap<String, String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_registry",
+                "path": "vmux_editor::lsp::catalog::parse_registry",
+                "signature": "pub fn parse_registry(json: &str) -> Result<Vec<Package>, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "search",
+                "path": "vmux_editor::lsp::catalog::search",
+                "signature": "pub fn search(pkgs: &'a [Package], query: &str, language: &str, category: &str) -> Vec<&'a Package>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "registry_url",
+                "path": "vmux_editor::lsp::catalog::registry_url",
+                "signature": "pub fn registry_url() -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "cached_path",
+                "path": "vmux_editor::lsp::catalog::cached_path",
+                "signature": "pub fn cached_path(store_root: &std::path::Path) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "fetch_catalog",
+                "path": "vmux_editor::lsp::catalog::fetch_catalog",
+                "signature": "pub fn fetch_catalog(url: &str, store_root: &std::path::Path) -> Result<Vec<Package>, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "ensure_catalog",
+                "path": "vmux_editor::lsp::catalog::ensure_catalog",
+                "signature": "pub fn ensure_catalog(store_root: &std::path::Path, refresh: bool) -> Result<Vec<Package>, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::client",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "path_from_uri",
+                "path": "vmux_editor::lsp::client::path_from_uri",
+                "signature": "pub fn path_from_uri(uri: &str) -> Option<std::path::PathBuf>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "dispatch_message",
+                "path": "vmux_editor::lsp::client::dispatch_message",
+                "signature": "pub fn dispatch_message(msg: serde_json::Value, pending: &crate::lsp::PendingMap, outbox: &crate::lsp::LspOutbox)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ServerClient",
+                "path": "vmux_editor::lsp::client::ServerClient",
+                "signature": "pub struct ServerClient",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "server_key",
+                "path": "vmux_editor::lsp::client::server_key",
+                "signature": "pub fn server_key(root: &std::path::Path, spec: &crate::lsp::registry::ServerSpec) -> crate::lsp::ServerKey",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::download",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "download_to",
+                "path": "vmux_editor::lsp::download::download_to",
+                "signature": "pub fn download_to(url: &str, dest: &std::path::Path, progress: impl Trait) -> Result<(), String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "sha256_file",
+                "path": "vmux_editor::lsp::download::sha256_file",
+                "signature": "pub fn sha256_file(path: &std::path::Path) -> Result<String, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::framing",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "write_message",
+                "path": "vmux_editor::lsp::framing::write_message",
+                "signature": "pub fn write_message(w: &mut W, msg: &serde_json::Value) -> io::Result<()>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "read_message",
+                "path": "vmux_editor::lsp::framing::read_message",
+                "signature": "pub fn read_message(r: &mut R) -> io::Result<Option<serde_json::Value>>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::install",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "asset_url",
+                "path": "vmux_editor::lsp::install::asset_url",
+                "signature": "pub fn asset_url(pkg: &crate::lsp::catalog::Package, asset: &crate::lsp::target::Asset) -> Result<String, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "install_from_url",
+                "path": "vmux_editor::lsp::install::install_from_url",
+                "signature": "pub fn install_from_url(pkg: &crate::lsp::catalog::Package, asset: &crate::lsp::target::Asset, url: &str, store_root: &std::path::Path, emit: impl Trait) -> Result<store::Receipt, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "install_github",
+                "path": "vmux_editor::lsp::install::install_github",
+                "signature": "pub fn install_github(pkg: &crate::lsp::catalog::Package, store_root: &std::path::Path, target_id: &str, emit: impl Trait) -> Result<store::Receipt, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "toolchain_for",
+                "path": "vmux_editor::lsp::install::toolchain_for",
+                "signature": "pub fn toolchain_for(kind: &str) -> Option<&'static str>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "npm_argv",
+                "path": "vmux_editor::lsp::install::npm_argv",
+                "signature": "pub fn npm_argv(pkgdir: &std::path::Path, p: &purl::Purl) -> (String, Vec<String>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "cargo_argv",
+                "path": "vmux_editor::lsp::install::cargo_argv",
+                "signature": "pub fn cargo_argv(pkgdir: &std::path::Path, p: &purl::Purl) -> (String, Vec<String>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "golang_module",
+                "path": "vmux_editor::lsp::install::golang_module",
+                "signature": "pub fn golang_module(p: &purl::Purl) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "golang_argv",
+                "path": "vmux_editor::lsp::install::golang_argv",
+                "signature": "pub fn golang_argv(p: &purl::Purl) -> (String, Vec<String>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "pip_spec",
+                "path": "vmux_editor::lsp::install::pip_spec",
+                "signature": "pub fn pip_spec(p: &purl::Purl) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "source_links",
+                "path": "vmux_editor::lsp::install::source_links",
+                "signature": "pub fn source_links(kind: &str, pkg: &crate::lsp::catalog::Package) -> std::collections::BTreeMap<String, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "install",
+                "path": "vmux_editor::lsp::install::install",
+                "signature": "pub fn install(pkg: &crate::lsp::catalog::Package, store_root: &std::path::Path, target_id: &str, emit: impl Trait) -> Result<store::Receipt, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::lint",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "parse_ruff",
+                "path": "vmux_editor::lsp::lint::parse_ruff",
+                "signature": "pub fn parse_ruff(stdout: &str) -> Vec<vmux_core::event::FileDiagnostic>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_eslint",
+                "path": "vmux_editor::lsp::lint::parse_eslint",
+                "signature": "pub fn parse_eslint(stdout: &str) -> Vec<vmux_core::event::FileDiagnostic>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse_shellcheck",
+                "path": "vmux_editor::lsp::lint::parse_shellcheck",
+                "signature": "pub fn parse_shellcheck(stdout: &str) -> Vec<vmux_core::event::FileDiagnostic>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "run_linter",
+                "path": "vmux_editor::lsp::lint::run_linter",
+                "signature": "pub fn run_linter(spec: &crate::lsp::registry::LinterSpec, path: &std::path::Path) -> Vec<vmux_core::event::FileDiagnostic>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::manager",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "line_text",
+                "path": "vmux_editor::lsp::manager::line_text",
+                "signature": "pub fn line_text(line: &vmux_core::event::FileLine) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "utf16_to_char_col",
+                "path": "vmux_editor::lsp::manager::utf16_to_char_col",
+                "signature": "pub fn utf16_to_char_col(text: &str, utf16_col: u32) -> u32",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "char_to_utf16_col",
+                "path": "vmux_editor::lsp::manager::char_to_utf16_col",
+                "signature": "pub fn char_to_utf16_col(text: &str, char_col: u32) -> u32",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "to_file_diagnostics",
+                "path": "vmux_editor::lsp::manager::to_file_diagnostics",
+                "signature": "pub fn to_file_diagnostics(lines: &[vmux_core::event::FileLine], diags: &[lsp_types::Diagnostic]) -> Vec<vmux_core::event::FileDiagnostic>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "ReqKind",
+                "path": "vmux_editor::lsp::manager::ReqKind",
+                "signature": "pub enum ReqKind",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Hover",
+                    "signature": "Hover",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Definition",
+                    "signature": "Definition",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "References",
+                    "signature": "References",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Completion",
+                    "signature": "Completion",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "InFlight",
+                "path": "vmux_editor::lsp::manager::InFlight",
+                "signature": "pub struct InFlight",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspGoto",
+                "path": "vmux_editor::lsp::manager::LspGoto",
+                "signature": "pub struct LspGoto",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "entity",
+                    "signature": "entity: Entity",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "path",
+                    "signature": "path: std::path::PathBuf",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "line",
+                    "signature": "line: u32",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "utf16_col",
+                    "signature": "utf16_col: u32",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspManager",
+                "path": "vmux_editor::lsp::manager::LspManager",
+                "signature": "pub struct LspManager",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "disk_line",
+                "path": "vmux_editor::lsp::manager::disk_line",
+                "signature": "pub fn disk_line(path: &std::path::Path, line: u32) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspOpened",
+                "path": "vmux_editor::lsp::manager::LspOpened",
+                "signature": "pub struct LspOpened",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "build",
+                "path": "vmux_editor::lsp::manager::build",
+                "signature": "pub fn build(app: &mut App, outbox: crate::lsp::LspOutbox)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "DiagSent",
+                "path": "vmux_editor::lsp::manager::DiagSent",
+                "signature": "pub struct DiagSent",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LintRan",
+                "path": "vmux_editor::lsp::manager::LintRan",
+                "signature": "pub struct LintRan",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspStatusSent",
+                "path": "vmux_editor::lsp::manager::LspStatusSent",
+                "signature": "pub struct LspStatusSent",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::manager_page",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "enum",
+                "name": "ManagerMsg",
+                "path": "vmux_editor::lsp::manager_page::ManagerMsg",
+                "signature": "pub enum ManagerMsg",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Catalog",
+                    "signature": "Catalog",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Progress",
+                    "signature": "Progress",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Status",
+                    "signature": "Status",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ManagerOutbox",
+                "path": "vmux_editor::lsp::manager_page::ManagerOutbox",
+                "signature": "pub struct ManagerOutbox",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ManagerPlugin",
+                "path": "vmux_editor::lsp::manager_page::ManagerPlugin",
+                "signature": "pub struct ManagerPlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "to_lsp_package",
+                "path": "vmux_editor::lsp::manager_page::to_lsp_package",
+                "signature": "pub fn to_lsp_package(root: &std::path::Path, p: &crate::lsp::catalog::Package) -> vmux_core::event::LspPackage",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::purl",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "Purl",
+                "path": "vmux_editor::lsp::purl::Purl",
+                "signature": "pub struct Purl",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "kind",
+                    "signature": "kind: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "namespace",
+                    "signature": "namespace: Option<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "version",
+                    "signature": "version: Option<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "parse",
+                "path": "vmux_editor::lsp::purl::parse",
+                "signature": "pub fn parse(s: &str) -> Option<Purl>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::registry",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "ServerSpec",
+                "path": "vmux_editor::lsp::registry::ServerSpec",
+                "signature": "pub struct ServerSpec",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "command",
+                    "signature": "command: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "args",
+                    "signature": "args: Vec<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "language_id",
+                    "signature": "language_id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "root_markers",
+                    "signature": "root_markers: Vec<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "builtin_spec",
+                "path": "vmux_editor::lsp::registry::builtin_spec",
+                "signature": "pub fn builtin_spec(ext: &str) -> Option<ServerSpec>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolve_spec",
+                "path": "vmux_editor::lsp::registry::resolve_spec",
+                "signature": "pub fn resolve_spec(ext: &str, overrides: &std::collections::BTreeMap<String, ServerSpec>) -> Option<ServerSpec>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "LintFormat",
+                "path": "vmux_editor::lsp::registry::LintFormat",
+                "signature": "pub enum LintFormat",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Ruff",
+                    "signature": "Ruff",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Eslint",
+                    "signature": "Eslint",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Shellcheck",
+                    "signature": "Shellcheck",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LinterSpec",
+                "path": "vmux_editor::lsp::registry::LinterSpec",
+                "signature": "pub struct LinterSpec",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "command",
+                    "signature": "command: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "args",
+                    "signature": "args: Vec<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "format",
+                    "signature": "format: LintFormat",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "linter_for",
+                "path": "vmux_editor::lsp::registry::linter_for",
+                "signature": "pub fn linter_for(ext: &str) -> Option<LinterSpec>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "executable_on_path",
+                "path": "vmux_editor::lsp::registry::executable_on_path",
+                "signature": "pub fn executable_on_path(command: &str) -> bool",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "workspace_root",
+                "path": "vmux_editor::lsp::registry::workspace_root",
+                "signature": "pub fn workspace_root(start: &std::path::Path, markers: &[String]) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::store",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "default_root",
+                "path": "vmux_editor::lsp::store::default_root",
+                "signature": "pub fn default_root() -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "bin_dir",
+                "path": "vmux_editor::lsp::store::bin_dir",
+                "signature": "pub fn bin_dir(root: &std::path::Path) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "packages_dir",
+                "path": "vmux_editor::lsp::store::packages_dir",
+                "signature": "pub fn packages_dir(root: &std::path::Path) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "staging_dir",
+                "path": "vmux_editor::lsp::store::staging_dir",
+                "signature": "pub fn staging_dir(root: &std::path::Path) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "registries_dir",
+                "path": "vmux_editor::lsp::store::registries_dir",
+                "signature": "pub fn registries_dir(root: &std::path::Path) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "Receipt",
+                "path": "vmux_editor::lsp::store::Receipt",
+                "signature": "pub struct Receipt",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "version",
+                    "signature": "version: Option<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "source_id",
+                    "signature": "source_id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "bin",
+                    "signature": "bin: std::collections::BTreeMap<String, String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "write_receipt",
+                "path": "vmux_editor::lsp::store::write_receipt",
+                "signature": "pub fn write_receipt(root: &std::path::Path, r: &Receipt) -> io::Result<()>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "read_receipt",
+                "path": "vmux_editor::lsp::store::read_receipt",
+                "signature": "pub fn read_receipt(root: &std::path::Path, name: &str) -> Option<Receipt>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "installed",
+                "path": "vmux_editor::lsp::store::installed",
+                "signature": "pub fn installed(root: &std::path::Path) -> std::collections::BTreeMap<String, Receipt>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "is_installed",
+                "path": "vmux_editor::lsp::store::is_installed",
+                "signature": "pub fn is_installed(root: &std::path::Path, name: &str) -> bool",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "link_bin",
+                "path": "vmux_editor::lsp::store::link_bin",
+                "signature": "pub fn link_bin(root: &std::path::Path, name: &str, file: &str, link_name: &str) -> io::Result<()>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "bin_path",
+                "path": "vmux_editor::lsp::store::bin_path",
+                "signature": "pub fn bin_path(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "remove",
+                "path": "vmux_editor::lsp::store::remove",
+                "signature": "pub fn remove(root: &std::path::Path, name: &str) -> io::Result<()>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "Resolution",
+                "path": "vmux_editor::lsp::store::Resolution",
+                "signature": "pub enum Resolution",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Managed",
+                    "signature": "Managed",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "OnPath",
+                    "signature": "OnPath",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Missing",
+                    "signature": "Missing",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "server_path_env",
+                "path": "vmux_editor::lsp::store::server_path_env",
+                "signature": "pub fn server_path_env(root: &std::path::Path) -> std::ffi::OsString",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolved_command",
+                "path": "vmux_editor::lsp::store::resolved_command",
+                "signature": "pub fn resolved_command(root: &std::path::Path, cmd: &str) -> Resolution",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_editor::lsp::target",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "Asset",
+                "path": "vmux_editor::lsp::target::Asset",
+                "signature": "pub struct Asset",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "target",
+                    "signature": "target: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "file",
+                    "signature": "file: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "bin",
+                    "signature": "bin: Option<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "host_target",
+                "path": "vmux_editor::lsp::target::host_target",
+                "signature": "pub fn host_target() -> &'static str",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "pick_asset",
+                "path": "vmux_editor::lsp::target::pick_asset",
+                "signature": "pub fn pick_asset(assets: &'a [Asset], target: &str) -> Option<&'a Asset>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      }
+    ]
+  }
+}

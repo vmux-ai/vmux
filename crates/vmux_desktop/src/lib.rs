@@ -1,3 +1,7 @@
+//! The desktop application: the top-level binary and [`VmuxPlugin`] that wire every crate
+//! together, plus macOS-native integrations (glass/blur, event tap, native focus, tray,
+//! menu, recording, persistence).
+
 // Bevy systems inherently use many parameters and complex query types.
 #![allow(
     clippy::too_many_arguments,
@@ -52,6 +56,8 @@ use {
 
 use vmux_agent::AgentPlugin;
 
+/// The top-level aggregator: adds `DefaultPlugins`, every feature plugin, and the
+/// macOS-native integrations that make up the desktop app.
 pub struct VmuxPlugin;
 
 /// First-launch window size (logical px) when no geometry is persisted in

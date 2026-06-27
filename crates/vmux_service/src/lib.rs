@@ -1,3 +1,6 @@
+//! Background daemon that hosts persistent terminal processes across app restarts, plus
+//! the processes-monitor webview page.
+
 pub mod event;
 
 #[cfg(target_arch = "wasm32")]

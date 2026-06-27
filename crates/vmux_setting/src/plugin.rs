@@ -16,6 +16,8 @@ use view::{
     on_settings_command, reset_sent_markers_on_page_ready,
 };
 
+/// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
+/// settings webview.
 pub struct SettingsPlugin;
 
 impl Plugin for SettingsPlugin {

@@ -1,0 +1,10 @@
+{
+  "name": "vmux_server",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_server",
+    "docs_md": "Serves embedded webview page bundles over `vmux://` URLs on the host, and on wasm\ndispatches the web build to the correct per-host Dioxus page.",
+    "items": [],
+    "submodules": []
+  }
+}

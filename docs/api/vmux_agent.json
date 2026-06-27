@@ -1,0 +1,1725 @@
+{
+  "name": "vmux_agent",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_agent",
+    "docs_md": "Agent integration: pluggable CLI agent strategies (vibe, claude, codex), session\nlifecycle and discovery, and the ECS messaging that lets agents drive screenshots,\nrecordings, browser snapshots, and layout commands.",
+    "items": [],
+    "submodules": [
+      {
+        "path": "vmux_agent::vibe",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_agent::vibe::setup",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "constant",
+                "name": "PAGE_MANIFEST",
+                "path": "vmux_agent::vibe::setup::PAGE_MANIFEST",
+                "signature": "pub const PAGE_MANIFEST",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AgentSetupPlugin",
+                "path": "vmux_agent::vibe::setup::AgentSetupPlugin",
+                "signature": "pub struct AgentSetupPlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": [
+              {
+                "path": "vmux_agent::vibe::setup::event",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "AgentInstallRunRequest",
+                    "path": "vmux_agent::vibe::setup::event::AgentInstallRunRequest",
+                    "signature": "pub struct AgentInstallRunRequest",
+                    "docs_md": "",
+                    "members": [
+                      {
+                        "name": "agent",
+                        "signature": "agent: String",
+                        "docs_md": ""
+                      }
+                    ],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "ArchivedAgentInstallRunRequest",
+                    "path": "vmux_agent::vibe::setup::event::ArchivedAgentInstallRunRequest",
+                    "signature": "pub struct ArchivedAgentInstallRunRequest",
+                    "docs_md": "An archived [`AgentInstallRunRequest`]",
+                    "members": [
+                      {
+                        "name": "agent",
+                        "signature": "agent: Archived",
+                        "docs_md": "The archived counterpart of [`AgentInstallRunRequest::agent`]"
+                      }
+                    ],
+                    "links": [
+                      {
+                        "text": "`AgentInstallRunRequest`",
+                        "path": "vmux_agent::vibe::setup::event::AgentInstallRunRequest"
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "AgentInstallRunRequestResolver",
+                    "path": "vmux_agent::vibe::setup::event::AgentInstallRunRequestResolver",
+                    "signature": "pub struct AgentInstallRunRequestResolver",
+                    "docs_md": "The resolver for an archived [`AgentInstallRunRequest`]",
+                    "members": [],
+                    "links": [
+                      {
+                        "text": "`AgentInstallRunRequest`",
+                        "path": "vmux_agent::vibe::setup::event::AgentInstallRunRequest"
+                      }
+                    ]
+                  }
+                ],
+                "submodules": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "vmux_agent::client",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_agent::client::cli",
+            "docs_md": "",
+            "items": [],
+            "submodules": [
+              {
+                "path": "vmux_agent::client::cli::claude",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "ClaudeStrategy",
+                    "path": "vmux_agent::client::cli::claude::ClaudeStrategy",
+                    "signature": "pub struct ClaudeStrategy",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::cli::codex",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "CodexStrategy",
+                    "path": "vmux_agent::client::cli::codex::CodexStrategy",
+                    "signature": "pub struct CodexStrategy",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::cli::strategy",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "trait",
+                    "name": "CliAgentStrategy",
+                    "path": "vmux_agent::client::cli::strategy::CliAgentStrategy",
+                    "signature": "pub trait CliAgentStrategy",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::cli::vibe",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "VibeStrategy",
+                    "path": "vmux_agent::client::cli::vibe::VibeStrategy",
+                    "signature": "pub struct VibeStrategy",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              }
+            ]
+          },
+          {
+            "path": "vmux_agent::client::page",
+            "docs_md": "",
+            "items": [],
+            "submodules": [
+              {
+                "path": "vmux_agent::client::page::plugin",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "PageAgentPlugin",
+                    "path": "vmux_agent::client::page::plugin::PageAgentPlugin",
+                    "signature": "pub struct PageAgentPlugin",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::page::strategy_components",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "Strategy",
+                    "path": "vmux_agent::client::page::strategy_components::Strategy",
+                    "signature": "pub struct Strategy",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "StrategyKey",
+                    "path": "vmux_agent::client::page::strategy_components::StrategyKey",
+                    "signature": "pub struct StrategyKey",
+                    "docs_md": "",
+                    "members": [
+                      {
+                        "name": "provider",
+                        "signature": "provider: String",
+                        "docs_md": ""
+                      },
+                      {
+                        "name": "model",
+                        "signature": "model: String",
+                        "docs_md": ""
+                      }
+                    ],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "Endpoint",
+                    "path": "vmux_agent::client::page::strategy_components::Endpoint",
+                    "signature": "pub struct Endpoint",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "EnvVarName",
+                    "path": "vmux_agent::client::page::strategy_components::EnvVarName",
+                    "signature": "pub struct EnvVarName",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "StrategyKind",
+                    "path": "vmux_agent::client::page::strategy_components::StrategyKind",
+                    "signature": "pub struct StrategyKind",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "StrategyVariant",
+                    "path": "vmux_agent::client::page::strategy_components::StrategyVariant",
+                    "signature": "pub struct StrategyVariant",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "BuildRequestFn",
+                    "path": "vmux_agent::client::page::strategy_components::BuildRequestFn",
+                    "signature": "pub struct BuildRequestFn",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "struct",
+                    "name": "ParseSseFn",
+                    "path": "vmux_agent::client::page::strategy_components::ParseSseFn",
+                    "signature": "pub struct ParseSseFn",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::page::strategy_index",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "struct",
+                    "name": "PageStrategyIndex",
+                    "path": "vmux_agent::client::page::strategy_index::PageStrategyIndex",
+                    "signature": "pub struct PageStrategyIndex",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              },
+              {
+                "path": "vmux_agent::client::page::strategy_indexer",
+                "docs_md": "",
+                "items": [
+                  {
+                    "kind": "function",
+                    "name": "on_strategy_added",
+                    "path": "vmux_agent::client::page::strategy_indexer::on_strategy_added",
+                    "signature": "pub fn on_strategy_added(trigger: On<'_, '_, Add, crate::client::page::strategy_components::StrategyKey>, keys: Query<'_, '_, &crate::client::page::strategy_components::StrategyKey>, idx: ResMut<'_, crate::client::page::strategy_index::PageStrategyIndex>)",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  },
+                  {
+                    "kind": "function",
+                    "name": "on_strategy_removed",
+                    "path": "vmux_agent::client::page::strategy_indexer::on_strategy_removed",
+                    "signature": "pub fn on_strategy_removed(trigger: On<'_, '_, Remove, crate::client::page::strategy_components::StrategyKey>, keys: Query<'_, '_, &crate::client::page::strategy_components::StrategyKey>, idx: ResMut<'_, crate::client::page::strategy_index::PageStrategyIndex>)",
+                    "docs_md": "",
+                    "members": [],
+                    "links": []
+                  }
+                ],
+                "submodules": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": "vmux_agent::components",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentSession",
+            "path": "vmux_agent::components::AgentSession",
+            "signature": "pub struct AgentSession",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "kind",
+                "signature": "kind: crate::AgentKind",
+                "docs_md": ""
+              },
+              {
+                "name": "variant",
+                "signature": "variant: crate::AgentVariant",
+                "docs_md": ""
+              },
+              {
+                "name": "sid",
+                "signature": "sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "provider",
+                "signature": "provider: String",
+                "docs_md": ""
+              },
+              {
+                "name": "model",
+                "signature": "model: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentMessages",
+            "path": "vmux_agent::components::AgentMessages",
+            "signature": "pub struct AgentMessages",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentApprovalPolicy",
+            "path": "vmux_agent::components::AgentApprovalPolicy",
+            "signature": "pub struct AgentApprovalPolicy",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "auto",
+                "signature": "auto: std::collections::HashSet<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "PendingUserInput",
+            "path": "vmux_agent::components::PendingUserInput",
+            "signature": "pub struct PendingUserInput",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::echo",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "PROVIDER",
+            "path": "vmux_agent::echo::PROVIDER",
+            "signature": "pub const PROVIDER",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "ENDPOINT",
+            "path": "vmux_agent::echo::ENDPOINT",
+            "signature": "pub const ENDPOINT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "ENV_VAR",
+            "path": "vmux_agent::echo::ENV_VAR",
+            "signature": "pub const ENV_VAR",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "DEFAULT_MODEL",
+            "path": "vmux_agent::echo::DEFAULT_MODEL",
+            "signature": "pub const DEFAULT_MODEL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "build_request",
+            "path": "vmux_agent::echo::build_request",
+            "signature": "pub fn build_request(_model: &str, _messages: &[crate::message::Message], _tools: &[crate::stream::ToolDef], _api_key: &str) -> reqwest::Request",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "parse_sse",
+            "path": "vmux_agent::echo::parse_sse",
+            "signature": "pub fn parse_sse(_payload: &str) -> Option<crate::stream::StreamEvent>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "synthetic_echo_stream",
+            "path": "vmux_agent::echo::synthetic_echo_stream",
+            "signature": "pub fn synthetic_echo_stream(text: &str) -> Vec<crate::stream::StreamEvent>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::echo_plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "EchoProvider",
+            "path": "vmux_agent::echo_plugin::EchoProvider",
+            "signature": "pub struct EchoProvider",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "EchoPlugin",
+            "path": "vmux_agent::echo_plugin::EchoPlugin",
+            "signature": "pub struct EchoPlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::events",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentInput",
+            "path": "vmux_agent::events::AgentInput",
+            "signature": "pub struct AgentInput",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session",
+                "signature": "session: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentDelta",
+            "path": "vmux_agent::events::AgentDelta",
+            "signature": "pub struct AgentDelta",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session",
+                "signature": "session: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentToolStatus",
+            "path": "vmux_agent::events::AgentToolStatus",
+            "signature": "pub struct AgentToolStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session",
+                "signature": "session: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "call_id",
+                "signature": "call_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "status",
+                "signature": "status: ToolStatus",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ToolStatus",
+            "path": "vmux_agent::events::ToolStatus",
+            "signature": "pub enum ToolStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Pending",
+                "signature": "Pending",
+                "docs_md": ""
+              },
+              {
+                "name": "Running",
+                "signature": "Running",
+                "docs_md": ""
+              },
+              {
+                "name": "Result",
+                "signature": "Result",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentApprovalRequest",
+            "path": "vmux_agent::events::AgentApprovalRequest",
+            "signature": "pub struct AgentApprovalRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session",
+                "signature": "session: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "call_id",
+                "signature": "call_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "args",
+                "signature": "args: serde_json::Value",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentApprovalReply",
+            "path": "vmux_agent::events::AgentApprovalReply",
+            "signature": "pub struct AgentApprovalReply",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session",
+                "signature": "session: Entity",
+                "docs_md": ""
+              },
+              {
+                "name": "call_id",
+                "signature": "call_id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "decision",
+                "signature": "decision: ApprovalDecision",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ApprovalDecision",
+            "path": "vmux_agent::events::ApprovalDecision",
+            "signature": "pub enum ApprovalDecision",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Allow",
+                "signature": "Allow",
+                "docs_md": ""
+              },
+              {
+                "name": "AllowAlways",
+                "signature": "AllowAlways",
+                "docs_md": ""
+              },
+              {
+                "name": "Deny",
+                "signature": "Deny",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ScreenshotRequest",
+            "path": "vmux_agent::events::ScreenshotRequest",
+            "signature": "pub struct ScreenshotRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ScreenshotImage",
+            "path": "vmux_agent::events::ScreenshotImage",
+            "signature": "pub struct ScreenshotImage",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "png",
+                "signature": "png: Vec<u8>",
+                "docs_md": ""
+              },
+              {
+                "name": "width",
+                "signature": "width: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "height",
+                "signature": "height: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ScreenshotResponse",
+            "path": "vmux_agent::events::ScreenshotResponse",
+            "signature": "pub struct ScreenshotResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: Result<ScreenshotImage, String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "BrowserSnapshotRequest",
+            "path": "vmux_agent::events::BrowserSnapshotRequest",
+            "signature": "pub struct BrowserSnapshotRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "BrowserSnapshotResponse",
+            "path": "vmux_agent::events::BrowserSnapshotResponse",
+            "signature": "pub struct BrowserSnapshotResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: Result<String, String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "snapshot_response_to_query_result",
+            "path": "vmux_agent::events::snapshot_response_to_query_result",
+            "signature": "pub fn snapshot_response_to_query_result(result: &Result<String, String>) -> vmux_service::protocol::AgentQueryResult",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RecordStartRequest",
+            "path": "vmux_agent::events::RecordStartRequest",
+            "signature": "pub struct RecordStartRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "gif",
+                "signature": "gif: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "max_secs",
+                "signature": "max_secs: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "pane",
+                "signature": "pane: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RecordStartResponse",
+            "path": "vmux_agent::events::RecordStartResponse",
+            "signature": "pub struct RecordStartResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: Result<u32, String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RecordStopRequest",
+            "path": "vmux_agent::events::RecordStopRequest",
+            "signature": "pub struct RecordStopRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "dir",
+                "signature": "dir: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "name",
+                "signature": "name: Option<String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RecordingInfo",
+            "path": "vmux_agent::events::RecordingInfo",
+            "signature": "pub struct RecordingInfo",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "mp4_path",
+                "signature": "mp4_path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "gif_path",
+                "signature": "gif_path: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "duration_ms",
+                "signature": "duration_ms: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "bytes",
+                "signature": "bytes: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "auto_stopped",
+                "signature": "auto_stopped: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "RecordStopResponse",
+            "path": "vmux_agent::events::RecordStopResponse",
+            "signature": "pub struct RecordStopResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: [u8; 16]",
+                "docs_md": ""
+              },
+              {
+                "name": "result",
+                "signature": "result: Result<RecordingInfo, String>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::exec",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "is_executable_path",
+            "path": "vmux_agent::exec::is_executable_path",
+            "signature": "pub fn is_executable_path(path: &std::path::Path) -> bool",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "find_executable",
+            "path": "vmux_agent::exec::find_executable",
+            "signature": "pub fn find_executable(command: &str) -> Option<std::path::PathBuf>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::launch",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "build_agent_launch",
+            "path": "vmux_agent::launch::build_agent_launch",
+            "signature": "pub fn build_agent_launch(kind: crate::AgentKind, cwd: &std::path::Path, session_id: Option<&str>, strategies: &crate::strategy::AgentStrategies, exe_path: &std::path::Path, anchor: vmux_core::ProcessId) -> Result<vmux_core::terminal::TerminalLaunch, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::mcp",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "resolve",
+            "path": "vmux_agent::mcp::resolve",
+            "signature": "pub fn resolve(cwd: &std::path::Path, anchor: vmux_core::ProcessId) -> Result<McpServerConfig, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentExecutableOverride",
+            "path": "vmux_agent::plugin::AgentExecutableOverride",
+            "signature": "pub struct AgentExecutableOverride",
+            "docs_md": "Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces\nmissing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow\nwithout depending on which CLIs are installed on the host.",
+            "members": [],
+            "links": [
+              {
+                "text": "`AgentKind`",
+                "path": "vmux_core::agent::AgentKind"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "AgentTerminalRegions",
+            "path": "vmux_agent::plugin::AgentTerminalRegions",
+            "signature": "pub struct AgentTerminalRegions",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "run_terminals",
+                "signature": "run_terminals: std::collections::HashMap<vmux_service::protocol::ProcessId, vmux_service::protocol::ProcessId>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentPlugin",
+            "path": "vmux_agent::plugin::AgentPlugin",
+            "signature": "pub struct AgentPlugin",
+            "docs_md": "Wires the agent domain: CLI agent strategies, session watching, discovery and exit\ndetection, and handling of agent commands, queries, tool calls, screenshots, and recordings.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "attach_page_agent_to_stack",
+            "path": "vmux_agent::plugin::attach_page_agent_to_stack",
+            "signature": "pub fn attach_page_agent_to_stack(stack: Entity, provider: &str, model: &str, sid: &str, commands: &mut Commands<'_, '_>, meshes: &mut ResMut<'_, Assets<Mesh>>, webview_mt: &mut ResMut<'_, Assets<bevy_cef::prelude::WebviewExtendStandardMaterial>>, idx: &crate::client::page::strategy_index::PageStrategyIndex, kind_q: &Query<'_, '_, &crate::client::page::strategy_components::StrategyKind>) -> Option<()>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "page_agent_placeholder_url",
+            "path": "vmux_agent::plugin::page_agent_placeholder_url",
+            "signature": "pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentLookups",
+            "path": "vmux_agent::plugin::AgentLookups",
+            "signature": "pub struct AgentLookups",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "pid_to_entity",
+                "signature": "pid_to_entity: Option<Res<'w, vmux_terminal::pid::PidToEntity>>",
+                "docs_md": ""
+              },
+              {
+                "name": "agent_to_entity",
+                "signature": "agent_to_entity: Option<Res<'w, crate::session::AgentSessionToEntity>>",
+                "docs_md": ""
+              },
+              {
+                "name": "active_space",
+                "signature": "active_space: Option<Res<'w, vmux_space::ActiveSpace>>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "detect_agent_session_process_exit",
+            "path": "vmux_agent::plugin::detect_agent_session_process_exit",
+            "signature": "pub fn detect_agent_session_process_exit(commands: Commands<'_, '_>, writer: MessageWriter<'_, crate::session::AgentSessionExited>, q: Query<'_, '_, (Entity, Option<&vmux_terminal::pid::Pid>, &mut vmux_core::PageMetadata), (With<crate::session::AgentSession>, With<vmux_terminal::ProcessExited>)>, child_of: Query<'_, '_, &ChildOf>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::providers",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_agent::providers::anthropic_plugin",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "AnthropicProvider",
+                "path": "vmux_agent::providers::anthropic_plugin::AnthropicProvider",
+                "signature": "pub struct AnthropicProvider",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AnthropicPlugin",
+                "path": "vmux_agent::providers::anthropic_plugin::AnthropicPlugin",
+                "signature": "pub struct AnthropicPlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_agent::providers::mistral_plugin",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "MistralProvider",
+                "path": "vmux_agent::providers::mistral_plugin::MistralProvider",
+                "signature": "pub struct MistralProvider",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "MistralPlugin",
+                "path": "vmux_agent::providers::mistral_plugin::MistralPlugin",
+                "signature": "pub struct MistralPlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_agent::providers::openai_plugin",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "OpenAiProvider",
+                "path": "vmux_agent::providers::openai_plugin::OpenAiProvider",
+                "signature": "pub struct OpenAiProvider",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "OpenAiPlugin",
+                "path": "vmux_agent::providers::openai_plugin::OpenAiPlugin",
+                "signature": "pub struct OpenAiPlugin",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_agent::run_state",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "AgentRunState",
+            "path": "vmux_agent::run_state::AgentRunState",
+            "signature": "pub enum AgentRunState",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Idle",
+                "signature": "Idle",
+                "docs_md": ""
+              },
+              {
+                "name": "Streaming",
+                "signature": "Streaming",
+                "docs_md": ""
+              },
+              {
+                "name": "AwaitingApproval",
+                "signature": "AwaitingApproval",
+                "docs_md": ""
+              },
+              {
+                "name": "Errored",
+                "signature": "Errored",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::run_state_kind",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "AgentRunStateKind",
+            "path": "vmux_agent::run_state_kind::AgentRunStateKind",
+            "signature": "pub enum AgentRunStateKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Idle",
+                "signature": "Idle",
+                "docs_md": ""
+              },
+              {
+                "name": "Streaming",
+                "signature": "Streaming",
+                "docs_md": ""
+              },
+              {
+                "name": "RunningTool",
+                "signature": "RunningTool",
+                "docs_md": ""
+              },
+              {
+                "name": "AwaitingApproval",
+                "signature": "AwaitingApproval",
+                "docs_md": ""
+              },
+              {
+                "name": "Errored",
+                "signature": "Errored",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "LastRunStateKind",
+            "path": "vmux_agent::run_state_kind::LastRunStateKind",
+            "signature": "pub struct LastRunStateKind",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::session",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentSessionExited",
+            "path": "vmux_agent::session::AgentSessionExited",
+            "signature": "pub struct AgentSessionExited",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "entity",
+                "signature": "entity: Entity",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentSessionToEntity",
+            "path": "vmux_agent::session::AgentSessionToEntity",
+            "signature": "pub struct AgentSessionToEntity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentSessionDirty",
+            "path": "vmux_agent::session::AgentSessionDirty",
+            "signature": "pub struct AgentSessionDirty",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "format_agent_url",
+            "path": "vmux_agent::session::format_agent_url",
+            "signature": "pub fn format_agent_url(strategies: Res<'_, crate::strategy::AgentStrategies>, q: Query<'_, '_, (Option<&SessionId>, &AgentSession, &mut vmux_core::PageMetadata), Or<(Changed<SessionId>, Added<AgentSession>, Added<vmux_core::PageMetadata>)>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "mark_dirty_on_pending_added",
+            "path": "vmux_agent::session::mark_dirty_on_pending_added",
+            "signature": "pub fn mark_dirty_on_pending_added(added_pending: Query<'_, '_, (), Added<PendingAgentSession>>, added_session: Query<'_, '_, (), Added<SessionId>>, dirty: ResMut<'_, AgentSessionDirty>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "agent_session_dirty_run_condition",
+            "path": "vmux_agent::session::agent_session_dirty_run_condition",
+            "signature": "pub fn agent_session_dirty_run_condition(dirty: Res<'_, AgentSessionDirty>) -> bool",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "clear_agent_session_dirty",
+            "path": "vmux_agent::session::clear_agent_session_dirty",
+            "signature": "pub fn clear_agent_session_dirty(dirty: ResMut<'_, AgentSessionDirty>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "discover_pending_agent_sessions",
+            "path": "vmux_agent::session::discover_pending_agent_sessions",
+            "signature": "pub fn discover_pending_agent_sessions(commands: Commands<'_, '_>, strategies: Res<'_, crate::strategy::AgentStrategies>, map: Res<'_, AgentSessionToEntity>, q: Query<'_, '_, (Entity, &PendingAgentSession)>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "track_session_id_inserts",
+            "path": "vmux_agent::session::track_session_id_inserts",
+            "signature": "pub fn track_session_id_inserts(map: ResMut<'_, AgentSessionToEntity>, inserted: Query<'_, '_, (Entity, &SessionId, &AgentSession), Added<SessionId>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "track_session_id_removals",
+            "path": "vmux_agent::session::track_session_id_removals",
+            "signature": "pub fn track_session_id_removals(map: ResMut<'_, AgentSessionToEntity>, removed: RemovedComponents<'_, '_, SessionId>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentSessionWatchers",
+            "path": "vmux_agent::session::AgentSessionWatchers",
+            "signature": "pub struct AgentSessionWatchers",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "start_agent_session_watchers",
+            "path": "vmux_agent::session::start_agent_session_watchers",
+            "signature": "pub fn start_agent_session_watchers(commands: Commands<'_, '_>, strategies: Res<'_, crate::strategy::AgentStrategies>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "mark_dirty_on_fs_change",
+            "path": "vmux_agent::session::mark_dirty_on_fs_change",
+            "signature": "pub fn mark_dirty_on_fs_change(watchers: Option<Res<'_, AgentSessionWatchers>>, dirty: ResMut<'_, AgentSessionDirty>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "detect_file_end_time_exit",
+            "path": "vmux_agent::session::detect_file_end_time_exit",
+            "signature": "pub fn detect_file_end_time_exit(commands: Commands<'_, '_>, exited_writer: MessageWriter<'_, AgentSessionExited>, strategies: Res<'_, crate::strategy::AgentStrategies>, sessioned: Query<'_, '_, (Entity, &AgentSession, &SessionId)>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::snapshot_updater",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "update_agents_snapshot",
+            "path": "vmux_agent::snapshot_updater::update_agents_snapshot",
+            "signature": "pub fn update_agents_snapshot(providers_q: Query<'_, '_, (&vmux_core::agent::AgentProviderTargetKind, &Name), With<vmux_core::Ready>>, changed_q: Query<'_, '_, Entity, (With<vmux_core::agent::AgentProviderTargetKind>, Or<(Added<vmux_core::Ready>, Added<vmux_core::agent::AgentProviderTargetKind>)>)>, page_idx: Option<Res<'_, crate::client::page::strategy_index::PageStrategyIndex>>, snapshot: ResMut<'_, vmux_command::snapshot::CommandBarAgentsSnapshot>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "update_agent_sessions_snapshot",
+            "path": "vmux_agent::snapshot_updater::update_agent_sessions_snapshot",
+            "signature": "pub fn update_agent_sessions_snapshot(sessions: Option<Res<'_, crate::session::AgentSessionToEntity>>, snapshot: ResMut<'_, vmux_command::snapshot::CommandBarTerminalsSnapshot>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::strategy",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "trait",
+            "name": "AgentStrategy",
+            "path": "vmux_agent::strategy::AgentStrategy",
+            "signature": "pub trait AgentStrategy",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "AgentStrategies",
+            "path": "vmux_agent::strategy::AgentStrategies",
+            "signature": "pub struct AgentStrategies",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::systems",
+        "docs_md": "",
+        "items": [],
+        "submodules": [
+          {
+            "path": "vmux_agent::systems::approval",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "handle_approval_reply",
+                "path": "vmux_agent::systems::approval::handle_approval_reply",
+                "signature": "pub fn handle_approval_reply(trigger: On<'_, '_, crate::events::AgentApprovalReply>, q: Query<'_, '_, (&crate::components::AgentSession, &mut crate::run_state::AgentRunState, &mut crate::components::AgentApprovalPolicy)>, service: Option<Res<'_, vmux_service::client::ServiceClient>>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_agent::systems::surface_errors",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "function",
+                "name": "surface_errors",
+                "path": "vmux_agent::systems::surface_errors::surface_errors",
+                "signature": "pub fn surface_errors(writer: MessageWriter<'_, crate::toast::AgentToast>, q: Query<'_, '_, (&crate::run_state::AgentRunState, &mut crate::run_state_kind::LastRunStateKind, &mut crate::components::AgentMessages, &crate::components::AgentSession)>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_agent::toast",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "ToastLevel",
+            "path": "vmux_agent::toast::ToastLevel",
+            "signature": "pub enum ToastLevel",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Info",
+                "signature": "Info",
+                "docs_md": ""
+              },
+              {
+                "name": "Warning",
+                "signature": "Warning",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedToastLevel",
+            "path": "vmux_agent::toast::ArchivedToastLevel",
+            "signature": "pub enum ArchivedToastLevel",
+            "docs_md": "An archived [`ToastLevel`]",
+            "members": [
+              {
+                "name": "Info",
+                "signature": "Info",
+                "docs_md": "The archived counterpart of [`ToastLevel::Info`]"
+              },
+              {
+                "name": "Warning",
+                "signature": "Warning",
+                "docs_md": "The archived counterpart of [`ToastLevel::Warning`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The archived counterpart of [`ToastLevel::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ToastLevel`",
+                "path": "vmux_agent::toast::ToastLevel"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "ToastLevelResolver",
+            "path": "vmux_agent::toast::ToastLevelResolver",
+            "signature": "pub enum ToastLevelResolver",
+            "docs_md": "The resolver for an archived [`ToastLevel`]",
+            "members": [
+              {
+                "name": "Info",
+                "signature": "Info",
+                "docs_md": "The resolver for [`ToastLevel::Info`]"
+              },
+              {
+                "name": "Warning",
+                "signature": "Warning",
+                "docs_md": "The resolver for [`ToastLevel::Warning`]"
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": "The resolver for [`ToastLevel::Error`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ToastLevel`",
+                "path": "vmux_agent::toast::ToastLevel"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "AgentToast",
+            "path": "vmux_agent::toast::AgentToast",
+            "signature": "pub struct AgentToast",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "session_sid",
+                "signature": "session_sid: String",
+                "docs_md": ""
+              },
+              {
+                "name": "level",
+                "signature": "level: ToastLevel",
+                "docs_md": ""
+              },
+              {
+                "name": "message",
+                "signature": "message: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedAgentToast",
+            "path": "vmux_agent::toast::ArchivedAgentToast",
+            "signature": "pub struct ArchivedAgentToast",
+            "docs_md": "An archived [`AgentToast`]",
+            "members": [
+              {
+                "name": "session_sid",
+                "signature": "session_sid: Archived",
+                "docs_md": "The archived counterpart of [`AgentToast::session_sid`]"
+              },
+              {
+                "name": "level",
+                "signature": "level: Archived",
+                "docs_md": "The archived counterpart of [`AgentToast::level`]"
+              },
+              {
+                "name": "message",
+                "signature": "message: Archived",
+                "docs_md": "The archived counterpart of [`AgentToast::message`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`AgentToast`",
+                "path": "vmux_agent::toast::AgentToast"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "AgentToastResolver",
+            "path": "vmux_agent::toast::AgentToastResolver",
+            "signature": "pub struct AgentToastResolver",
+            "docs_md": "The resolver for an archived [`AgentToast`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`AgentToast`",
+                "path": "vmux_agent::toast::AgentToast"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::tools",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "mcp_tool_defs",
+            "path": "vmux_agent::tools::mcp_tool_defs",
+            "signature": "pub fn mcp_tool_defs() -> Vec<crate::stream::ToolDef>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::url",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "page_url_prefix",
+            "path": "vmux_agent::url::page_url_prefix",
+            "signature": "pub fn page_url_prefix(provider: &str, model: &str) -> String",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "AgentUrl",
+            "path": "vmux_agent::url::AgentUrl",
+            "signature": "pub enum AgentUrl",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Cli",
+                "signature": "Cli",
+                "docs_md": ""
+              },
+              {
+                "name": "Page",
+                "signature": "Page",
+                "docs_md": ""
+              },
+              {
+                "name": "PageDefault",
+                "signature": "PageDefault",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_agent::variant",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "AgentVariant",
+            "path": "vmux_agent::variant::AgentVariant",
+            "signature": "pub enum AgentVariant",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Page",
+                "signature": "Page",
+                "docs_md": ""
+              },
+              {
+                "name": "Cli",
+                "signature": "Cli",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

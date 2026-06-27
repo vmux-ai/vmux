@@ -30,6 +30,8 @@ pub struct SpaceCommandRequest {
     pub name: Option<String>,
 }
 
+/// Wires the spaces domain: space commands, active-space syncing, orphan pruning,
+/// startup-URL resolution, and the spaces list webview.
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
