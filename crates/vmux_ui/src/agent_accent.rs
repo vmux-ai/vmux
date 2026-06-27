@@ -5,6 +5,7 @@ pub struct AgentAccent {
     pub accent_text: &'static str,
     pub accent_bg: &'static str,
     pub cta_shadow: &'static str,
+    pub rain_rgb: &'static str,
 }
 
 pub fn agent_accent(segment: &str) -> AgentAccent {
@@ -16,6 +17,7 @@ pub fn agent_accent(segment: &str) -> AgentAccent {
             accent_text: "text-rose-400",
             accent_bg: "bg-rose-400",
             cta_shadow: "shadow-lg shadow-rose-500/25 hover:shadow-rose-500/40",
+            rain_rgb: "251 113 133",
         },
         "codex" => AgentAccent {
             glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-emerald-500/20 blur-[120px]",
@@ -24,6 +26,7 @@ pub fn agent_accent(segment: &str) -> AgentAccent {
             accent_text: "text-emerald-400",
             accent_bg: "bg-emerald-400",
             cta_shadow: "shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40",
+            rain_rgb: "52 211 153",
         },
         _ => AgentAccent {
             glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-orange-500/20 blur-[120px]",
@@ -32,6 +35,7 @@ pub fn agent_accent(segment: &str) -> AgentAccent {
             accent_text: "text-orange-400",
             accent_bg: "bg-orange-400",
             cta_shadow: "shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40",
+            rain_rgb: "251 146 60",
         },
     }
 }
@@ -46,6 +50,7 @@ mod tests {
         assert_eq!(a.grad, "from-orange-400 to-rose-500");
         assert_eq!(a.accent_text, "text-rose-400");
         assert_eq!(a.accent_bg, "bg-rose-400");
+        assert_eq!(a.rain_rgb, "251 113 133");
     }
 
     #[test]
@@ -53,6 +58,7 @@ mod tests {
         let a = agent_accent("codex");
         assert_eq!(a.grad, "from-emerald-500 to-teal-600");
         assert_eq!(a.accent_text, "text-emerald-400");
+        assert_eq!(a.rain_rgb, "52 211 153");
     }
 
     #[test]
@@ -60,5 +66,6 @@ mod tests {
         let a = agent_accent("nope");
         assert_eq!(a.grad, "from-orange-500 to-amber-600");
         assert_eq!(a.grad, agent_accent("vibe").grad);
+        assert_eq!(a.rain_rgb, "251 146 60");
     }
 }
