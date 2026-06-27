@@ -15,11 +15,9 @@ const GLYPHS: &str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃ�
 /// columns so the agent name stays legible in the rain.
 #[component]
 pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
-    let canvas_id =
-        use_hook(|| format!("matrix-rain-{}", (js_sys::Math::random() * 1.0e9) as u64));
+    let canvas_id = use_hook(|| format!("matrix-rain-{}", (js_sys::Math::random() * 1.0e9) as u64));
     let running: Rc<RefCell<bool>> = use_hook(|| Rc::new(RefCell::new(true)));
-    let raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>> =
-        use_hook(|| Rc::new(RefCell::new(None)));
+    let raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
 
     use_effect({
         let canvas_id = canvas_id.clone();
@@ -134,7 +132,9 @@ fn start_rain(
     let mut cols = (canvas.client_width().max(1) as f64 / FONT_PX)
         .floor()
         .max(1.0) as usize;
-    let mut drops: Vec<f64> = (0..cols).map(|_| -(js_sys::Math::random() * 40.0)).collect();
+    let mut drops: Vec<f64> = (0..cols)
+        .map(|_| -(js_sys::Math::random() * 40.0))
+        .collect();
 
     let win = window.clone();
     let raf_inner = raf.clone();
