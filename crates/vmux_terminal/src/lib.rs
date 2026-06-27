@@ -8,6 +8,8 @@
 
 pub mod event;
 #[cfg(target_arch = "wasm32")]
+pub mod matrix_rain;
+#[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod render_model;
 
