@@ -179,7 +179,7 @@ so doc comments get the exact vmux styling (headings, code fences, tables, links
 New module `website/src/api.rs` (+ `website/src/api/` directory if it grows; no
 `mod.rs`). Components and routes:
 
-Extend the `Route` enum in `website/src/main.rs`:
+Extend the `Route` enum in `website/src/app.rs` (the `vmux_website` lib; `main.rs` is a thin launcher):
 
 ```rust
 #[layout(DocsLayout)]
@@ -220,7 +220,7 @@ Data loading (Dioxus fullstack SSG):
 - Model JSON is served as **static assets**, copied to
   `website/public/api/*.json`. It is **not** `include_str!`'d into the WASM — embedding
   the full API of 19 crates would bloat the binary.
-- `static_routes()` in `main.rs` is extended to enumerate prerendered routes:
+- `static_routes()` in `app.rs` is extended to enumerate prerendered routes:
   - Always: `/docs/api` and `/docs/api/<crate>` for every crate.
   - **Item pages:** for M0, render item detail **client-side** (do not enumerate
     every item in `static_routes`) to bound the prerendered page count. Full per-item
@@ -275,7 +275,7 @@ its own commit/PR, regenerate, and visual review.
   fields/variants/methods) gets a `///`.
 - First line = one-sentence summary (rustdoc convention; also used in lists).
 - Bodies are Markdown (they render through `markdown::Markdown`): use fenced
-  ```rust examples, tables, and intra-doc links (`[OtherType]`).
+  `rust` code blocks, tables, and intra-doc links (`[OtherType]`).
 - Crate roots get a `//!` overview; non-trivial modules get a `//!`.
 - No plain `//` code comments are added (project rule: code has no comments; doc
   comments are the exception and are the whole point here).
