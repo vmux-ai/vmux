@@ -376,6 +376,7 @@ struct AgentSpaceWriters<'w, 's> {
     >,
     user: Query<'w, 's, Entity, With<vmux_core::team::User>>,
     browse: AgentBrowserResolve<'w, 's>,
+    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
 }
 
 fn handle_agent_tool_calls(
@@ -583,14 +584,18 @@ impl AgentBrowserResolve<'_, '_> {
         None
     }
 
+    /// The agent's own terminal pane (its stack's parent pane), from its anchor.
+    fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
     /// Resolve the agent's browser pane from its anchor, and record it as that
     /// agent's active pane (for its focus ring). Returns the pane entity, or
     /// `None` if the agent has no browser pane yet (caller keeps the default).
     fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
-        use bevy::ecs::relationship::Relationship;
-        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
-        let agent_pane = self.child_of.get(term_co.get()).ok()?.get();
-        let pane = self.browser_pane_for(agent_pane)?;
+        let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         self.activate
             .write(vmux_layout::active_panes::ActivatePane {
                 profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
@@ -753,9 +758,23 @@ fn handle_agent_commands(
                         anchor: Some(anchor),
                         ..
                     } = &request.origin
-                    && let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor)
                 {
-                    pane = Some(browser_pane.to_bits().to_string());
+                    if let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor) {
+                        // Reuse the agent's existing browser pane in-place.
+                        pane = Some(browser_pane.to_bits().to_string());
+                    } else if let Some(agent_pane) = writers.browse.agent_pane(*anchor) {
+                        // No browser pane yet: open one dedicated pane beside the
+                        // agent (same as open_page) instead of stacking a tab onto
+                        // its terminal pane. Subsequent navigations reuse it.
+                        writers.open_beside.write(vmux_layout::OpenBesideRequest {
+                            pane: agent_pane,
+                            direction: None,
+                            url: url.clone(),
+                            request_id: request.request_id.0,
+                            focus: false,
+                        });
+                        continue;
+                    }
                 }
                 browser_nav_writer.write(vmux_layout::BrowserNavigateRequest {
                     url: url.clone(),
