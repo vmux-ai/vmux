@@ -4,6 +4,8 @@
 **Status:** Design — pending spec review
 **Depends on:** `feat/per-profile-active-pane` (`docs/specs/2026-06-27-per-profile-active-pane-design.md`) — `ActivePanes`, `ActivatePane`, `ProfileId::Agent`, per-agent focus rings. Ships as a **separate PR stacked on** that branch.
 
+> **Note:** that branch's "Migration from `FocusedStack`" is being changed — `FocusedStack` is **removed**, not kept as a mirror. `ActivePanes[ProfileId::Local]` is the single source of truth for the local human's active pane (`compute_focused_stack` writes it directly from `LastActivatedAt`; consumers `host_focus`/command bar/clipboard migrate to it). This spec references `ActivePanes[Local]` accordingly.
+
 ## Problem
 
 When an agent reads or edits a file, the user can't see which file. The agent's **native** Read/Edit tools emit nothing to vmux — they don't call `mcp__vmux__open_file`. (Observed: agent runs native Grep/Read, no MCP traffic, no preview.) The user wants the file the agent is working on to appear **instantly** in a live `file://` preview beside the agent.
@@ -94,7 +96,7 @@ Reuse `vmux_editor`'s existing jump-to-line (`apply_goto` / `LspGoto`, `plugin.r
 
 ### 5. Ring + focus — inherited from per-profile model
 
-No new ring/focus code. The follow-pane becomes `ActivePanes[Agent(anchor)]`, so the per-agent windowed/OSR ring (`feat/per-profile-active-pane`, commit `eac17cfc`) renders it in the agent's color. `focus: false` + no `LastActivatedAt` stamp ⇒ the local human's `FocusedStack` / OS keyboard focus / ring are untouched.
+No new ring/focus code. The follow-pane becomes `ActivePanes[Agent(anchor)]`, so the per-agent windowed/OSR ring (`feat/per-profile-active-pane`, commit `eac17cfc`) renders it in the agent's color. `focus: false` + no `LastActivatedAt` stamp ⇒ `ActivePanes[Local]` / OS keyboard focus / the human's ring are untouched.
 
 ### 6. Toggle
 
@@ -119,7 +121,7 @@ No new ring/focus code. The follow-pane becomes `ActivePanes[Agent(anchor)]`, so
 ## Testing
 
 - **Unit (`vmux_cli`):** `notify-file-touch` parses Claude PostToolUse (Read w/ `offset`, Edit w/ `old_string`), Vibe `after_tool`, and Codex `apply_patch` JSON into the correct `{ path, line, kind }`; no-ops on missing path/anchor.
-- **Integration (Bevy, `vmux_agent`):** `AgentFileTouch` opens a `file://` pane beside the agent with `focus: false`; `FocusedStack` / `ActivePanes[Local]` unchanged; `ActivePanes[Agent(anchor)] == file_pane`; a second touch swaps the **same** pane (no new pane); a despawned agent ⇒ no-op.
+- **Integration (Bevy, `vmux_agent`):** `AgentFileTouch` opens a `file://` pane beside the agent with `focus: false`; `ActivePanes[Local]` unchanged; `ActivePanes[Agent(anchor)] == file_pane`; a second touch swaps the **same** pane (no new pane); a despawned agent ⇒ no-op.
 - **Placement:** the file follow-pane never splits the agent pane (extends existing placement guarantees).
 - **Multi-agent:** two agents ⇒ two follow-panes, two disjoint `ActivePanes[Agent]` entries.
 
