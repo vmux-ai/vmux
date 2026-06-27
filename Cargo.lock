@@ -9763,6 +9763,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tokio",
+ "toml",
  "url",
  "uuid",
  "vmux_command",
