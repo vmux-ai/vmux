@@ -29,13 +29,13 @@ pub fn agent_accent(segment: &str) -> AgentAccent {
             rain_rgb: "52 211 153",
         },
         "terminal" => AgentAccent {
-            glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-green-500/20 blur-[120px]",
-            glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-green-400/10 blur-[120px]",
-            grad: "from-green-400 to-emerald-500",
-            accent_text: "text-green-400",
-            accent_bg: "bg-green-400",
-            cta_shadow: "shadow-lg shadow-green-500/25 hover:shadow-green-500/40",
-            rain_rgb: "74 222 128",
+            glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-[#00ff41]/20 blur-[120px]",
+            glow_bottom: "pointer-events-none absolute -bottom-1/4 right-1/4 h-[44vh] w-[44vh] rounded-full bg-[#00ff41]/10 blur-[120px]",
+            grad: "from-[#00ff41] to-[#008f11]",
+            accent_text: "text-[#00ff41]",
+            accent_bg: "bg-[#00ff41]",
+            cta_shadow: "shadow-lg shadow-[#00ff41]/25 hover:shadow-[#00ff41]/40",
+            rain_rgb: "0 255 65",
         },
         _ => AgentAccent {
             glow_top: "pointer-events-none absolute -top-1/3 left-1/2 h-[60vh] w-[60vh] -translate-x-1/2 rounded-full bg-orange-500/20 blur-[120px]",
@@ -73,8 +73,8 @@ mod tests {
     #[test]
     fn terminal_uses_green() {
         let a = agent_accent("terminal");
-        assert_eq!(a.accent_text, "text-green-400");
-        assert_eq!(a.rain_rgb, "74 222 128");
+        assert_eq!(a.accent_text, "text-[#00ff41]");
+        assert_eq!(a.rain_rgb, "0 255 65");
     }
 
     #[test]
