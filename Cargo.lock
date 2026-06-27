@@ -9810,6 +9810,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "predicates",
+ "serde_json",
  "tokio",
  "vmux_mcp",
  "vmux_service",

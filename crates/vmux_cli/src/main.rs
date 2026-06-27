@@ -17,6 +17,7 @@ async fn main() -> std::io::Result<()> {
             body,
             anchor,
         }) => commands::notify::run(title, body, anchor).await,
+        Some(Command::NotifyFileTouch { anchor }) => commands::notify_file_touch::run(anchor).await,
         Some(Command::Service(args)) => {
             let code = commands::service::run(args)?;
             std::process::exit(code);
