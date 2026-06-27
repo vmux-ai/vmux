@@ -26,7 +26,7 @@ const SNAPSHOT_ATTRS: &[&str] = &[
 ];
 
 const NAME_CAP: usize = 200;
-const RAW_NODE_CAP: usize = 3000;
+const RAW_NODE_CAP: usize = 6000;
 const MAX_WALK_DEPTH: usize = 2048;
 const EMPTY_SNAPSHOT: &str = "{\"url\":\"\",\"title\":\"\",\"nodes\":[]}";
 

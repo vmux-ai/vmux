@@ -18,7 +18,7 @@ pub const SNAPSHOT_ATTRS: &[&str] = &[
     "checked",
 ];
 
-pub const SNAPSHOT_NODE_CAP: usize = 300;
+pub const SNAPSHOT_NODE_CAP: usize = 600;
 pub const SNAPSHOT_NAME_CAP: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
