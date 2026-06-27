@@ -51,9 +51,6 @@ pub fn format_agent_url(
         if meta.title != title {
             meta.title = title;
         }
-        if !meta.icon.is_none() {
-            meta.icon = vmux_core::PageIcon::None;
-        }
     }
 }
 
@@ -214,35 +211,6 @@ mod url_tests {
         app.update();
         let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
         assert_eq!(title, "Vibe");
-    }
-
-    #[test]
-    fn format_agent_url_clears_stale_builtin_icon_so_provider_favicon_resolves() {
-        let mut app = App::new();
-        let mut strategies = AgentStrategies::default();
-        strategies.register_cli(Box::new(VibeStrategy));
-        app.insert_resource(strategies)
-            .add_systems(Update, format_agent_url);
-
-        let entity = app
-            .world_mut()
-            .spawn((
-                AgentSession {
-                    kind: AgentKind::Vibe,
-                },
-                PageMetadata {
-                    title: "Terminal".into(),
-                    url: vmux_core::event::TERMINAL_PAGE_URL.to_string(),
-                    icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Terminal),
-                    bg_color: None,
-                },
-            ))
-            .id();
-        app.update();
-        assert_eq!(
-            app.world().get::<PageMetadata>(entity).unwrap().icon,
-            vmux_core::PageIcon::None
-        );
     }
 
     #[test]
