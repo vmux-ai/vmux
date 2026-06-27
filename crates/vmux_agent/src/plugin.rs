@@ -374,6 +374,7 @@ struct AgentSpaceWriters<'w, 's> {
         ),
     >,
     user: Query<'w, 's, Entity, With<vmux_core::team::User>>,
+    browse: AgentBrowserResolve<'w, 's>,
 }
 
 fn handle_agent_tool_calls(
@@ -544,6 +545,80 @@ fn clear_agent_done(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentBrowserResolve<'w, 's> {
+    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    agent_terms: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static vmux_service::protocol::ProcessId,
+            &'static ChildOf,
+        ),
+        With<AgentSession>,
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
+}
+
+impl AgentBrowserResolve<'_, '_> {
+    /// The agent's own terminal pane (its stack's parent pane).
+    fn agent_term_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, _, term_co) = self
+            .agent_terms
+            .iter()
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The browser pane the agent opened beside itself: a sibling leaf pane
+    /// (same parent split) that hosts a browser. Resolved from the layout tree,
+    /// never from the user's `FocusedStack`.
+    fn browser_pane_for(&self, agent_pane: Entity) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        for stack_co in self.browser_stacks.iter() {
+            let Ok(pane_co) = self.child_of.get(stack_co.get()) else {
+                continue;
+            };
+            let pane = pane_co.get();
+            if pane == agent_pane {
+                continue;
+            }
+            if let Ok(parent_co) = self.child_of.get(pane)
+                && parent_co.get() == agent_parent
+            {
+                return Some(pane);
+            }
+        }
+        None
+    }
+
+    /// Resolve the agent's browser pane from its anchor, and record it as that
+    /// agent's active pane (for its focus ring). Returns the pane entity.
+    fn claim_browser_pane(
+        &mut self,
+        anchor: vmux_service::protocol::ProcessId,
+        sid: Option<&String>,
+    ) -> Option<Entity> {
+        let pane = self.browser_pane_for(self.agent_term_pane(anchor)?)?;
+        if let Some(sid) = sid {
+            self.activate
+                .write(vmux_layout::active_panes::ActivatePane {
+                    profile: vmux_layout::active_panes::ProfileId::Agent(sid.clone()),
+                    active: vmux_layout::active_panes::ActiveStack {
+                        tab: None,
+                        pane: Some(pane),
+                        stack: None,
+                    },
+                });
+        }
+        Some(pane)
+    }
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -671,9 +746,20 @@ fn handle_agent_commands(
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
+                let mut pane = pane.clone();
+                if pane.is_none()
+                    && let CommandOrigin::Agent {
+                        anchor: Some(anchor),
+                        sid,
+                    } = &request.origin
+                    && let Some(browser_pane) =
+                        writers.browse.claim_browser_pane(*anchor, sid.as_ref())
+                {
+                    pane = Some(browser_pane.to_bits().to_string());
+                }
                 browser_nav_writer.write(vmux_layout::BrowserNavigateRequest {
                     url: url.clone(),
-                    pane: pane.clone(),
+                    pane,
                     request_id: Some(request.request_id.0),
                 });
                 continue;
