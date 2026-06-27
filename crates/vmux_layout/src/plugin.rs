@@ -29,7 +29,7 @@ impl Plugin for LayoutPlugin {
         app.register_type::<Open>()
             .init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
-            .init_resource::<crate::StagedUpdate>()
+            .init_resource::<crate::UpdateState>()
             .add_message::<LayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
             .add_message::<vmux_core::PageOpenRequest>()

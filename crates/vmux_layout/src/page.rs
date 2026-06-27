@@ -81,14 +81,34 @@ pub fn Page() -> Element {
         let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });
 
-    let mut update_version = use_signal(|| None::<String>);
+    let mut update_phase = use_signal(|| None::<UpdatePhase>);
+    let _update_progress_listener = use_bin_event_listener::<crate::event::UpdateProgressEvent, _>(
+        crate::event::UPDATE_PROGRESS_EVENT,
+        move |evt| {
+            update_phase.set(Some(if evt.installing {
+                UpdatePhase::Installing {
+                    version: evt.version,
+                }
+            } else {
+                UpdatePhase::Downloading {
+                    version: evt.version,
+                    downloaded: evt.downloaded,
+                    total: evt.total,
+                }
+            }));
+        },
+    );
     let _update_ready_listener = use_bin_event_listener::<crate::event::UpdateReadyEvent, _>(
         crate::event::UPDATE_READY_EVENT,
-        move |evt| update_version.set(Some(evt.version)),
+        move |evt| {
+            update_phase.set(Some(UpdatePhase::Ready {
+                version: evt.version,
+            }))
+        },
     );
     let _update_cleared_listener = use_bin_event_listener::<crate::event::UpdateClearedEvent, _>(
         crate::event::UPDATE_CLEARED_EVENT,
-        move |_| update_version.set(None),
+        move |_| update_phase.set(None),
     );
 
     let state = layout_state();
@@ -149,8 +169,8 @@ pub fn Page() -> Element {
                             active_space,
                             pane_tree_error: pane_tree_error.clone(),
                         }
-                        if let Some(v) = update_version() {
-                            UpdateNoticeFooter { version: v }
+                        if let Some(phase) = update_phase() {
+                            UpdateNoticeFooter { phase }
                         }
                     }
                 }
@@ -794,23 +814,78 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     }
 }
 
+fn download_pct(downloaded: u64, total: u64) -> u64 {
+    if total == 0 {
+        return 0;
+    }
+    (downloaded.saturating_mul(100) / total).min(100)
+}
+
+#[derive(Clone, PartialEq)]
+enum UpdatePhase {
+    Downloading {
+        version: String,
+        downloaded: u64,
+        total: u64,
+    },
+    Installing {
+        version: String,
+    },
+    Ready {
+        version: String,
+    },
+}
+
 #[component]
-fn UpdateNoticeFooter(version: String) -> Element {
+fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
+    let (label, version) = match &phase {
+        UpdatePhase::Downloading { version, .. } => ("Downloading update", version.clone()),
+        UpdatePhase::Installing { version } => ("Installing update…", version.clone()),
+        UpdatePhase::Ready { version } => ("New version available", version.clone()),
+    };
     rsx! {
         div {
             class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2 rounded-md glass px-3 py-2 text-foreground",
             div { class: "flex items-center gap-2",
                 span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" }
-                span { class: "min-w-0 flex-1 text-ui font-medium", "New version available" }
+                span { class: "min-w-0 flex-1 text-ui font-medium", "{label}" }
                 span { class: "shrink-0 text-xs text-muted-foreground", "{version}" }
             }
-            button {
-                r#type: "button",
-                class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
-                onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
+            {match phase {
+                UpdatePhase::Downloading { downloaded, total, .. } => rsx! {
+                    UpdateProgressBar { downloaded, total }
                 },
-                "Restart to update"
+                UpdatePhase::Installing { .. } => rsx! {
+                    UpdateProgressBar { downloaded: 0, total: 0 }
+                },
+                UpdatePhase::Ready { .. } => rsx! {
+                    button {
+                        r#type: "button",
+                        class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
+                        },
+                        "Restart to update"
+                    }
+                },
+            }}
+        }
+    }
+}
+
+#[component]
+fn UpdateProgressBar(downloaded: u64, total: u64) -> Element {
+    let determinate = total > 0;
+    let pct = download_pct(downloaded, total);
+    rsx! {
+        div { class: "h-1.5 w-full overflow-hidden rounded-full bg-foreground/10",
+            if determinate {
+                div {
+                    class: "h-full rounded-full bg-primary transition-[width] duration-200",
+                    style: "width:{pct}%",
+                }
+            } else {
+                div { class: "h-full w-1/3 rounded-full bg-primary update-progress-indeterminate" }
             }
         }
     }
@@ -819,6 +894,13 @@ fn UpdateNoticeFooter(version: String) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_pct_clamps_and_handles_zero_total() {
+        assert_eq!(download_pct(0, 0), 0);
+        assert_eq!(download_pct(50, 100), 50);
+        assert_eq!(download_pct(250, 100), 100);
+    }
 
     fn state(header_open: bool, side_sheet_open: bool) -> LayoutStateEvent {
         LayoutStateEvent {

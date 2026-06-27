@@ -490,6 +490,7 @@ pub enum LayoutNode {
 
 pub const UPDATE_READY_EVENT: &str = "update-ready";
 pub const UPDATE_CLEARED_EVENT: &str = "update-cleared";
+pub const UPDATE_PROGRESS_EVENT: &str = "update-progress";
 
 #[derive(
     Clone,
@@ -503,6 +504,24 @@ pub const UPDATE_CLEARED_EVENT: &str = "update-cleared";
 )]
 pub struct UpdateReadyEvent {
     pub version: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct UpdateProgressEvent {
+    pub version: String,
+    pub downloaded: u64,
+    pub total: u64,
+    pub installing: bool,
 }
 
 #[derive(
@@ -564,6 +583,21 @@ pub struct DebugUpdateReady {
 )]
 pub struct DebugUpdateClear;
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct DebugSimulateDownload;
+
 #[cfg(test)]
 mod update_event_tests {
     use super::*;
@@ -579,8 +613,25 @@ mod update_event_tests {
     }
 
     #[test]
+    fn update_progress_event_rkyv_round_trips() {
+        let evt = UpdateProgressEvent {
+            version: "0.0.20".to_string(),
+            downloaded: 42,
+            total: 100,
+            installing: false,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&evt).unwrap();
+        let back = rkyv::from_bytes::<UpdateProgressEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.version, "0.0.20");
+        assert_eq!(back.downloaded, 42);
+        assert_eq!(back.total, 100);
+        assert!(!back.installing);
+    }
+
+    #[test]
     fn event_ids_are_stable() {
         assert_eq!(UPDATE_READY_EVENT, "update-ready");
         assert_eq!(UPDATE_CLEARED_EVENT, "update-cleared");
+        assert_eq!(UPDATE_PROGRESS_EVENT, "update-progress");
     }
 }

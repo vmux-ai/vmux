@@ -152,8 +152,22 @@ pub struct CloseRequiresConfirmation;
 pub struct SpaceFilePresent(pub bool);
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Resource, Default)]
-pub struct StagedUpdate(pub Option<String>);
+#[derive(Resource, Default, Clone, PartialEq, Debug)]
+pub enum UpdateState {
+    #[default]
+    Idle,
+    Downloading {
+        version: String,
+        downloaded: u64,
+        total: u64,
+    },
+    Installing {
+        version: String,
+    },
+    Ready {
+        version: String,
+    },
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone, Debug)]

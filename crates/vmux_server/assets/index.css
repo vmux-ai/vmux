@@ -135,3 +135,16 @@
   background-size: 200% 100%;
   animation: loading-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
+
+@keyframes update-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.update-progress-indeterminate {
+  animation: update-indeterminate 1.2s ease-in-out infinite;
+}
