@@ -465,7 +465,7 @@ specific page; defaults to the focused page."
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "Optional pane:<id> or stack:<id>; focused page if omitted."
+                    "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."
                 }
             }
         }),
@@ -485,10 +485,19 @@ the focused page. Prefer scrolling to read long pages instead of assuming off-sc
         input_schema: serde_json::json!({
             "type": "object",
             "additionalProperties": false,
+            "oneOf": [
+                { "required": ["to"] },
+                { "required": ["delta"] }
+            ],
             "properties": {
                 "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom."},
-                "delta": {"type": "integer", "description": "Scroll by pixels; positive = down."},
-                "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; focused page if omitted."}
+                "delta": {
+                    "type": "integer",
+                    "minimum": i32::MIN,
+                    "maximum": i32::MAX,
+                    "description": "Scroll by pixels; positive = down."
+                },
+                "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."}
             }
         }),
     }

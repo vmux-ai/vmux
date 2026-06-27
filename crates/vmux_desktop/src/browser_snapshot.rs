@@ -93,7 +93,7 @@ pub(crate) fn drive_pending_nav_snapshots(
             nav_awaiting.0.insert(nav.request_id);
             snapshot_writer.write(BrowserSnapshotRequest {
                 request_id: nav.request_id,
-                pane: None,
+                pane: nav.pane.clone(),
             });
             done.push(*webview);
         }

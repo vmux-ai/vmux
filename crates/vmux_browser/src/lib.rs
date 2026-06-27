@@ -3596,6 +3596,7 @@ pub struct NavPending {
     pub request_id: [u8; 16],
     pub started: std::time::Duration,
     pub saw_loading: bool,
+    pub pane: Option<String>,
 }
 
 #[derive(Resource, Default)]
@@ -3624,10 +3625,6 @@ pub fn handle_browser_navigate_requests(
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                // If the target pane already hosts a browser, navigate it
-                // in-place (no new tab, no focus stamp) so an agent driving its
-                // own pane doesn't disturb the user's focus ring. Otherwise open
-                // a new stack there.
                 let in_place = if url.starts_with("vmux://") || url.starts_with("file:") {
                     None
                 } else {
@@ -3642,21 +3639,23 @@ pub fn handle_browser_navigate_requests(
                         webview,
                         url: url.clone(),
                     });
-                    match request_id {
-                        Some(rid) => {
-                            let displaced = pending_nav.0.insert(
-                                webview,
-                                NavPending {
-                                    request_id: rid,
-                                    started: time.elapsed(),
-                                    saw_loading: false,
-                                },
-                            );
-                            if let Some(old) = displaced {
-                                send_page_open_response(&service, Some(old.request_id), Ok(()));
-                            }
-                        }
-                        None => send_page_open_response(&service, request_id, Ok(())),
+                    let displaced = match request_id {
+                        Some(rid) => pending_nav.0.insert(
+                            webview,
+                            NavPending {
+                                request_id: rid,
+                                started: time.elapsed(),
+                                saw_loading: false,
+                                pane: Some(target.to_bits().to_string()),
+                            },
+                        ),
+                        None => pending_nav.0.remove(&webview),
+                    };
+                    if let Some(old) = displaced {
+                        send_page_open_response(&service, Some(old.request_id), Ok(()));
+                    }
+                    if request_id.is_none() {
+                        send_page_open_response(&service, None, Ok(()));
                     }
                 } else {
                     page_open_writer.write(PageOpenRequest {
@@ -3694,21 +3693,23 @@ pub fn handle_browser_navigate_requests(
                     webview,
                     url: url.clone(),
                 });
-                match request_id {
-                    Some(rid) => {
-                        let displaced = pending_nav.0.insert(
-                            webview,
-                            NavPending {
-                                request_id: rid,
-                                started: time.elapsed(),
-                                saw_loading: false,
-                            },
-                        );
-                        if let Some(old) = displaced {
-                            send_page_open_response(&service, Some(old.request_id), Ok(()));
-                        }
-                    }
-                    None => send_page_open_response(&service, request_id, Ok(())),
+                let displaced = match request_id {
+                    Some(rid) => pending_nav.0.insert(
+                        webview,
+                        NavPending {
+                            request_id: rid,
+                            started: time.elapsed(),
+                            saw_loading: false,
+                            pane: focus.pane.map(|p| p.to_bits().to_string()),
+                        },
+                    ),
+                    None => pending_nav.0.remove(&webview),
+                };
+                if let Some(old) = displaced {
+                    send_page_open_response(&service, Some(old.request_id), Ok(()));
+                }
+                if request_id.is_none() {
+                    send_page_open_response(&service, None, Ok(()));
                 }
             }
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {

@@ -609,8 +609,9 @@ impl AgentBrowserResolve<'_, '_> {
     }
 
     /// Returns the explicit pane if given, else the agent's resolved browser
-    /// pane (formatted as a `pane:` target string). Never falls back to the
-    /// user's focus.
+    /// pane as a bare entity-bits string (the form `parse_pane_target` expects,
+    /// matching explicit MCP targets after they reach this layer). Returns
+    /// `None` if neither is available.
     fn resolve_pane(
         &mut self,
         pane: &Option<String>,
@@ -771,12 +772,8 @@ fn handle_agent_commands(
                     } = &request.origin
                 {
                     if let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor) {
-                        // Reuse the agent's existing browser pane in-place.
                         pane = Some(browser_pane.to_bits().to_string());
                     } else if let Some(agent_pane) = writers.browse.agent_pane(*anchor) {
-                        // No browser pane yet: open one dedicated pane beside the
-                        // agent (same as open_page) instead of stacking a tab onto
-                        // its terminal pane. Subsequent navigations reuse it.
                         writers.open_beside.write(vmux_layout::OpenBesideRequest {
                             pane: agent_pane,
                             direction: None,
@@ -784,6 +781,16 @@ fn handle_agent_commands(
                             request_id: request.request_id.0,
                             focus: false,
                         });
+                        continue;
+                    } else {
+                        if let Some(service) = service.as_ref() {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "browser_navigate: agent has no resolvable pane".to_string(),
+                                ),
+                            });
+                        }
                         continue;
                     }
                 }
