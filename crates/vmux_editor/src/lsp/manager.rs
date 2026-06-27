@@ -99,6 +99,7 @@ pub enum ReqKind {
     References,
     Completion { line: u32, replace_from_col: u32 },
     Folding { path: PathBuf },
+    DocumentSymbol,
 }
 
 pub struct InFlight {
@@ -371,6 +372,25 @@ impl LspManager {
             rx,
         });
     }
+
+    pub fn document_symbol(&mut self, entity: Entity, path: &Path) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let (_, rx) = client.send_request("textDocument/documentSymbol", params);
+        self.inflight.push(InFlight {
+            entity,
+            kind: ReqKind::DocumentSymbol,
+            rx,
+        });
+    }
 }
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
@@ -568,6 +588,9 @@ fn lsp_open_documents(
     for (entity, fv, _edit) in &q {
         manager.open(&fv.path, &overrides);
         manager.folding_range(entity, &fv.path);
+        if !crate::explorer_model::is_markdown(&fv.path) {
+            manager.document_symbol(entity, &fv.path);
+        }
         commands.entity(entity).insert(LspOpened);
     }
 }
@@ -580,8 +603,8 @@ fn drain_lsp_requests(
     mut commands: Commands,
 ) {
     use vmux_core::event::{
-        FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT, FileCompletionEvent,
-        FileHoverEvent, FileReferencesEvent, RefItem,
+        EXPLORER_OUTLINE_EVENT, FILE_COMPLETION_EVENT, FILE_HOVER_EVENT, FILE_REFERENCES_EVENT,
+        FileCompletionEvent, FileHoverEvent, FileReferencesEvent, OutlineEvent, RefItem,
     };
     let drained = std::mem::take(&mut manager.inflight);
     let mut still = Vec::new();
@@ -662,6 +685,16 @@ fn drain_lsp_requests(
                     path,
                     regions: parse_folding_ranges(&value),
                 });
+            }
+            ReqKind::DocumentSymbol => {
+                let items = crate::explorer_model::flatten_symbols(&value);
+                if ready {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(
+                        f.entity,
+                        EXPLORER_OUTLINE_EVENT,
+                        &OutlineEvent { items },
+                    ));
+                }
             }
         }
     }
