@@ -1,0 +1,227 @@
+{
+  "name": "vmux_mcp",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_mcp",
+    "docs_md": "MCP (Model Context Protocol) stdio server exposing Vmux workspace controls as tools\nfor external agents.",
+    "items": [],
+    "submodules": [
+      {
+        "path": "vmux_mcp::protocol",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "read_json_line",
+            "path": "vmux_mcp::protocol::read_json_line",
+            "signature": "pub fn read_json_line(reader: &mut impl Trait) -> io::Result<Option<serde_json::Value>>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "run_stdio",
+            "path": "vmux_mcp::protocol::run_stdio",
+            "signature": "pub fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io::Result<()>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "command_result_to_mcp_response",
+            "path": "vmux_mcp::protocol::command_result_to_mcp_response",
+            "signature": "pub fn command_result_to_mcp_response(result: vmux_service::protocol::AgentCommandResult) -> Result<serde_json::Value, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "query_result_to_mcp_response",
+            "path": "vmux_mcp::protocol::query_result_to_mcp_response",
+            "signature": "pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> serde_json::Value",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "tool_error",
+            "path": "vmux_mcp::protocol::tool_error",
+            "signature": "pub fn tool_error(message: &str) -> serde_json::Value",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_mcp::tools",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ToolDefinition",
+            "path": "vmux_mcp::tools::ToolDefinition",
+            "signature": "pub struct ToolDefinition",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "description",
+                "signature": "description: String",
+                "docs_md": ""
+              },
+              {
+                "name": "input_schema",
+                "signature": "input_schema: serde_json::Value",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "McpParamTool",
+            "path": "vmux_mcp::tools::McpParamTool",
+            "signature": "pub enum McpParamTool",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "OpenCommandBar",
+                "signature": "OpenCommandBar",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserNavigate",
+                "signature": "BrowserNavigate",
+                "docs_md": ""
+              },
+              {
+                "name": "TerminalSend",
+                "signature": "TerminalSend",
+                "docs_md": ""
+              },
+              {
+                "name": "FocusPane",
+                "signature": "FocusPane",
+                "docs_md": ""
+              },
+              {
+                "name": "RenameProfile",
+                "signature": "RenameProfile",
+                "docs_md": ""
+              },
+              {
+                "name": "SelectTab",
+                "signature": "SelectTab",
+                "docs_md": ""
+              },
+              {
+                "name": "UpdateSettings",
+                "signature": "UpdateSettings",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserGoBack",
+                "signature": "BrowserGoBack",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserGoForward",
+                "signature": "BrowserGoForward",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserHistorySearch",
+                "signature": "BrowserHistorySearch",
+                "docs_md": ""
+              },
+              {
+                "name": "BrowserInstallExtension",
+                "signature": "BrowserInstallExtension",
+                "docs_md": ""
+              },
+              {
+                "name": "CreateSpace",
+                "signature": "CreateSpace",
+                "docs_md": ""
+              },
+              {
+                "name": "RenameSpace",
+                "signature": "RenameSpace",
+                "docs_md": ""
+              },
+              {
+                "name": "DeleteSpace",
+                "signature": "DeleteSpace",
+                "docs_md": ""
+              },
+              {
+                "name": "Notify",
+                "signature": "Notify",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "DispatchTarget",
+            "path": "vmux_mcp::tools::DispatchTarget",
+            "signature": "pub enum DispatchTarget",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Command",
+                "signature": "Command",
+                "docs_md": ""
+              },
+              {
+                "name": "Query",
+                "signature": "Query",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "tool_definitions",
+            "path": "vmux_mcp::tools::tool_definitions",
+            "signature": "pub fn tool_definitions() -> Vec<ToolDefinition>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "dispatch_from_tool_call",
+            "path": "vmux_mcp::tools::dispatch_from_tool_call",
+            "signature": "pub fn dispatch_from_tool_call(name: &str, arguments: serde_json::Value) -> Result<DispatchTarget, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "dispatch_with_anchor",
+            "path": "vmux_mcp::tools::dispatch_with_anchor",
+            "signature": "pub fn dispatch_with_anchor(name: &str, arguments: serde_json::Value, anchor: Option<vmux_service::protocol::ProcessId>) -> Result<DispatchTarget, String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

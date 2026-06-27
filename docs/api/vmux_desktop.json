@@ -1,0 +1,71 @@
+{
+  "name": "vmux_desktop",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_desktop",
+    "docs_md": "The desktop application: the top-level binary and [`VmuxPlugin`] that wire every crate\ntogether, plus macOS-native integrations (glass/blur, event tap, native focus, tray,\nmenu, recording, persistence).",
+    "items": [
+      {
+        "kind": "struct",
+        "name": "VmuxPlugin",
+        "path": "vmux_desktop::VmuxPlugin",
+        "signature": "pub struct VmuxPlugin",
+        "docs_md": "The top-level aggregator: adds `DefaultPlugins`, every feature plugin, and the\nmacOS-native integrations that make up the desktop app.",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_desktop::panic_hook",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "install",
+            "path": "vmux_desktop::panic_hook::install",
+            "signature": "pub fn install()",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_desktop::updater",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "VmuxUpdater",
+            "path": "vmux_desktop::updater::VmuxUpdater",
+            "signature": "pub struct VmuxUpdater",
+            "docs_md": "Auto-updater for Vmux. Checks a remote endpoint for new versions,\ndownloads the signed `.app` bundle, and replaces the current one in-place.\nThe update takes effect on the next launch.\n\n```rust,ignore\nlet updater = VmuxUpdater::builder()\n    .endpoint(\"https://example.com/updates.json\")\n    .pubkey(\"<minisign-public-key>\")\n    .initial_delay(Duration::from_secs(5))\n    .poll_interval(Duration::from_secs(3600))\n    .build();\n```",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "VmuxUpdaterBuilder",
+            "path": "vmux_desktop::updater::VmuxUpdaterBuilder",
+            "signature": "pub struct VmuxUpdaterBuilder",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "UpdatePlugin",
+            "path": "vmux_desktop::updater::UpdatePlugin",
+            "signature": "pub struct UpdatePlugin",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

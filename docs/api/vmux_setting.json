@@ -1,0 +1,1030 @@
+{
+  "name": "vmux_setting",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_setting",
+    "docs_md": "Application settings: a typed schema (appearance, editor, browser, agent, lsp,\nshortcuts, spaces), RON load/save with debounce, theme definitions, and the settings webview.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_setting::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_setting::event",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "SETTINGS_PAGE_URL",
+            "path": "vmux_setting::event::SETTINGS_PAGE_URL",
+            "signature": "pub const SETTINGS_PAGE_URL",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SETTINGS_LIST_EVENT",
+            "path": "vmux_setting::event::SETTINGS_LIST_EVENT",
+            "signature": "pub const SETTINGS_LIST_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "SETTINGS_SCHEMA_EVENT",
+            "path": "vmux_setting::event::SETTINGS_SCHEMA_EVENT",
+            "signature": "pub const SETTINGS_SCHEMA_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsListEvent",
+            "path": "vmux_setting::event::SettingsListEvent",
+            "signature": "pub struct SettingsListEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "json",
+                "signature": "json: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedSettingsListEvent",
+            "path": "vmux_setting::event::ArchivedSettingsListEvent",
+            "signature": "pub struct ArchivedSettingsListEvent",
+            "docs_md": "An archived [`SettingsListEvent`]",
+            "members": [
+              {
+                "name": "json",
+                "signature": "json: Archived",
+                "docs_md": "The archived counterpart of [`SettingsListEvent::json`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SettingsListEvent`",
+                "path": "vmux_setting::event::SettingsListEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsListEventResolver",
+            "path": "vmux_setting::event::SettingsListEventResolver",
+            "signature": "pub struct SettingsListEventResolver",
+            "docs_md": "The resolver for an archived [`SettingsListEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`SettingsListEvent`",
+                "path": "vmux_setting::event::SettingsListEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsCommandEvent",
+            "path": "vmux_setting::event::SettingsCommandEvent",
+            "signature": "pub struct SettingsCommandEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "value",
+                "signature": "value: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedSettingsCommandEvent",
+            "path": "vmux_setting::event::ArchivedSettingsCommandEvent",
+            "signature": "pub struct ArchivedSettingsCommandEvent",
+            "docs_md": "An archived [`SettingsCommandEvent`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`SettingsCommandEvent::path`]"
+              },
+              {
+                "name": "value",
+                "signature": "value: Archived",
+                "docs_md": "The archived counterpart of [`SettingsCommandEvent::value`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SettingsCommandEvent`",
+                "path": "vmux_setting::event::SettingsCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsCommandEventResolver",
+            "path": "vmux_setting::event::SettingsCommandEventResolver",
+            "signature": "pub struct SettingsCommandEventResolver",
+            "docs_md": "The resolver for an archived [`SettingsCommandEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`SettingsCommandEvent`",
+                "path": "vmux_setting::event::SettingsCommandEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsSchemaEvent",
+            "path": "vmux_setting::event::SettingsSchemaEvent",
+            "signature": "pub struct SettingsSchemaEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "json",
+                "signature": "json: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedSettingsSchemaEvent",
+            "path": "vmux_setting::event::ArchivedSettingsSchemaEvent",
+            "signature": "pub struct ArchivedSettingsSchemaEvent",
+            "docs_md": "An archived [`SettingsSchemaEvent`]",
+            "members": [
+              {
+                "name": "json",
+                "signature": "json: Archived",
+                "docs_md": "The archived counterpart of [`SettingsSchemaEvent::json`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`SettingsSchemaEvent`",
+                "path": "vmux_setting::event::SettingsSchemaEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "SettingsSchemaEventResolver",
+            "path": "vmux_setting::event::SettingsSchemaEventResolver",
+            "signature": "pub struct SettingsSchemaEventResolver",
+            "docs_md": "The resolver for an archived [`SettingsSchemaEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`SettingsSchemaEvent`",
+                "path": "vmux_setting::event::SettingsSchemaEvent"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_setting::plugin",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SettingsPlugin",
+            "path": "vmux_setting::plugin::SettingsPlugin",
+            "signature": "pub struct SettingsPlugin",
+            "docs_md": "Wires settings: RON load/save with debounce, schema and settings broadcasts, and the\nsettings webview.",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": [
+          {
+            "path": "vmux_setting::plugin::runtime",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "SettingsLoadSet",
+                "path": "vmux_setting::plugin::runtime::SettingsLoadSet",
+                "signature": "pub struct SettingsLoadSet",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AppSettings",
+                "path": "vmux_setting::plugin::runtime::AppSettings",
+                "signature": "pub struct AppSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "browser",
+                    "signature": "browser: BrowserSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "layout",
+                    "signature": "layout: LayoutSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "shortcuts",
+                    "signature": "shortcuts: ShortcutSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "terminal",
+                    "signature": "terminal: Option<TerminalSettings>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "auto_update",
+                    "signature": "auto_update: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "agent",
+                    "signature": "agent: AgentSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "spaces",
+                    "signature": "spaces: std::collections::BTreeMap<String, SpaceOverrides>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "recording",
+                    "signature": "recording: RecordingSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "editor",
+                    "signature": "editor: EditorSettings",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "appearance",
+                    "signature": "appearance: AppearanceSettings",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "ColorScheme",
+                "path": "vmux_setting::plugin::runtime::ColorScheme",
+                "signature": "pub enum ColorScheme",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Light",
+                    "signature": "Light",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Dark",
+                    "signature": "Dark",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Device",
+                    "signature": "Device",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AppearanceSettings",
+                "path": "vmux_setting::plugin::runtime::AppearanceSettings",
+                "signature": "pub struct AppearanceSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "mode",
+                    "signature": "mode: ColorScheme",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "EditorSettings",
+                "path": "vmux_setting::plugin::runtime::EditorSettings",
+                "signature": "pub struct EditorSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "keymap",
+                    "signature": "keymap: vmux_core::KeymapKind",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "lsp",
+                    "signature": "lsp: LspSettings",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspSettings",
+                "path": "vmux_setting::plugin::runtime::LspSettings",
+                "signature": "pub struct LspSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "servers",
+                    "signature": "servers: std::collections::BTreeMap<String, LspServerOverride>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LspServerOverride",
+                "path": "vmux_setting::plugin::runtime::LspServerOverride",
+                "signature": "pub struct LspServerOverride",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "command",
+                    "signature": "command: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "args",
+                    "signature": "args: Vec<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "language_id",
+                    "signature": "language_id: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "root_markers",
+                    "signature": "root_markers: Vec<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "RecordingSettings",
+                "path": "vmux_setting::plugin::runtime::RecordingSettings",
+                "signature": "pub struct RecordingSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "output_dir",
+                    "signature": "output_dir: Option<String>",
+                    "docs_md": "Output directory for screenshots and screen recordings. Absent falls back\nto the default `~/.vmux/recording` (see [`vmux_core::profile::recording_dir`])."
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "SpaceOverrides",
+                "path": "vmux_setting::plugin::runtime::SpaceOverrides",
+                "signature": "pub struct SpaceOverrides",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "startup_url",
+                    "signature": "startup_url: Option<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "startup_dir",
+                    "signature": "startup_dir: Option<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AgentSettings",
+                "path": "vmux_setting::plugin::runtime::AgentSettings",
+                "signature": "pub struct AgentSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "app_providers",
+                    "signature": "app_providers: Vec<AppProviderSettings>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "AppProviderSettings",
+                "path": "vmux_setting::plugin::runtime::AppProviderSettings",
+                "signature": "pub struct AppProviderSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "provider",
+                    "signature": "provider: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "kind",
+                    "signature": "kind: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "models",
+                    "signature": "models: Vec<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolve_startup_url",
+                "path": "vmux_setting::plugin::runtime::resolve_startup_url",
+                "signature": "pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "resolve_startup_dir",
+                "path": "vmux_setting::plugin::runtime::resolve_startup_dir",
+                "signature": "pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ShortcutSettings",
+                "path": "vmux_setting::plugin::runtime::ShortcutSettings",
+                "signature": "pub struct ShortcutSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "leader",
+                    "signature": "leader: KeyComboDef",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "chord_timeout_ms",
+                    "signature": "chord_timeout_ms: u64",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "bindings",
+                    "signature": "bindings: Vec<ShortcutEntry>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "ShortcutEntry",
+                "path": "vmux_setting::plugin::runtime::ShortcutEntry",
+                "signature": "pub struct ShortcutEntry",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "command",
+                    "signature": "command: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "binding",
+                    "signature": "binding: ShortcutDef",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "enum",
+                "name": "ShortcutDef",
+                "path": "vmux_setting::plugin::runtime::ShortcutDef",
+                "signature": "pub enum ShortcutDef",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "Direct",
+                    "signature": "Direct",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Chord",
+                    "signature": "Chord",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "Leader",
+                    "signature": "Leader",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "KeyComboDef",
+                "path": "vmux_setting::plugin::runtime::KeyComboDef",
+                "signature": "pub struct KeyComboDef",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "key",
+                    "signature": "key: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "ctrl",
+                    "signature": "ctrl: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "shift",
+                    "signature": "shift: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "alt",
+                    "signature": "alt: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "super_key",
+                    "signature": "super_key: bool",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "BrowserSettings",
+                "path": "vmux_setting::plugin::runtime::BrowserSettings",
+                "signature": "pub struct BrowserSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "startup_url",
+                    "signature": "startup_url: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "TerminalSettings",
+                "path": "vmux_setting::plugin::runtime::TerminalSettings",
+                "signature": "pub struct TerminalSettings",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "shell",
+                    "signature": "shell: Option<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "font_family",
+                    "signature": "font_family: Option<String>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "default_theme",
+                    "signature": "default_theme: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "themes",
+                    "signature": "themes: Vec<TerminalTheme>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "custom_themes",
+                    "signature": "custom_themes: Vec<crate::themes::TerminalColorScheme>",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "confirm_close",
+                    "signature": "confirm_close: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "startup_dir",
+                    "signature": "startup_dir: Option<String>",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "TerminalTheme",
+                "path": "vmux_setting::plugin::runtime::TerminalTheme",
+                "signature": "pub struct TerminalTheme",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "name",
+                    "signature": "name: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "color_scheme",
+                    "signature": "color_scheme: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "font_family",
+                    "signature": "font_family: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "font_size",
+                    "signature": "font_size: f32",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "line_height",
+                    "signature": "line_height: f32",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "padding",
+                    "signature": "padding: f32",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "cursor_style",
+                    "signature": "cursor_style: String",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "cursor_blink",
+                    "signature": "cursor_blink: bool",
+                    "docs_md": ""
+                  },
+                  {
+                    "name": "shell",
+                    "signature": "shell: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "load_settings",
+                "path": "vmux_setting::plugin::runtime::load_settings",
+                "signature": "pub fn load_settings(commands: Commands<'_, '_>)",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "apply_settings_update",
+                "path": "vmux_setting::plugin::runtime::apply_settings_update",
+                "signature": "pub fn apply_settings_update(settings: &mut AppSettings, path: &str, value: serde_json::Value) -> Result<String, String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "serialize_settings_to_json",
+                "path": "vmux_setting::plugin::runtime::serialize_settings_to_json",
+                "signature": "pub fn serialize_settings_to_json(settings: &AppSettings) -> String",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "function",
+                "name": "set_at_path",
+                "path": "vmux_setting::plugin::runtime::set_at_path",
+                "signature": "pub fn set_at_path(root: &mut serde_json::Value, path: &str, value: serde_json::Value) -> Result<(), String>",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "LastSelfWriteHash",
+                "path": "vmux_setting::plugin::runtime::LastSelfWriteHash",
+                "signature": "pub struct LastSelfWriteHash",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "SettingsWriteRequest",
+                "path": "vmux_setting::plugin::runtime::SettingsWriteRequest",
+                "signature": "pub struct SettingsWriteRequest",
+                "docs_md": "",
+                "members": [
+                  {
+                    "name": "ron_bytes",
+                    "signature": "ron_bytes: String",
+                    "docs_md": ""
+                  }
+                ],
+                "links": []
+              },
+              {
+                "kind": "struct",
+                "name": "SettingsSaveRequest",
+                "path": "vmux_setting::plugin::runtime::SettingsSaveRequest",
+                "signature": "pub struct SettingsSaveRequest",
+                "docs_md": "Request that the current in-memory settings be persisted to disk after a short\nquiet period. Coalesces bursts of rapid edits (e.g. holding `cmd+`) into a single\nwrite, keeping the main loop free of synchronous disk I/O per keystroke.",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          },
+          {
+            "path": "vmux_setting::plugin::view",
+            "docs_md": "",
+            "items": [
+              {
+                "kind": "struct",
+                "name": "Settings",
+                "path": "vmux_setting::plugin::view::Settings",
+                "signature": "pub struct Settings",
+                "docs_md": "",
+                "members": [],
+                "links": []
+              }
+            ],
+            "submodules": []
+          }
+        ]
+      },
+      {
+        "path": "vmux_setting::schema",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "SettingsSchema",
+            "path": "vmux_setting::schema::SettingsSchema",
+            "signature": "pub struct SettingsSchema",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "sections",
+                "signature": "sections: Vec<SectionSpec>",
+                "docs_md": ""
+              },
+              {
+                "name": "fields",
+                "signature": "fields: Vec<(String, FieldSpec)>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SectionSpec",
+            "path": "vmux_setting::schema::SectionSpec",
+            "signature": "pub struct SectionSpec",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "id",
+                "signature": "id: String",
+                "docs_md": ""
+              },
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "description",
+                "signature": "description: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "synthetic_keys",
+                "signature": "synthetic_keys: Vec<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "root_path",
+                "signature": "root_path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "FieldSpec",
+            "path": "vmux_setting::schema::FieldSpec",
+            "signature": "pub struct FieldSpec",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "label",
+                "signature": "label: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "description",
+                "signature": "description: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "hint",
+                "signature": "hint: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "placeholder",
+                "signature": "placeholder: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "widget",
+                "signature": "widget: Option<WidgetKind>",
+                "docs_md": ""
+              },
+              {
+                "name": "order",
+                "signature": "order: Vec<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "omit",
+                "signature": "omit: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "step",
+                "signature": "step: Option<f64>",
+                "docs_md": ""
+              },
+              {
+                "name": "options",
+                "signature": "options: Vec<SelectOption>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "WidgetKind",
+            "path": "vmux_setting::schema::WidgetKind",
+            "signature": "pub enum WidgetKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "LeaderKbd",
+                "signature": "LeaderKbd",
+                "docs_md": ""
+              },
+              {
+                "name": "BindingsList",
+                "signature": "BindingsList",
+                "docs_md": ""
+              },
+              {
+                "name": "Select",
+                "signature": "Select",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "SelectOption",
+            "path": "vmux_setting::schema::SelectOption",
+            "signature": "pub struct SelectOption",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "value",
+                "signature": "value: String",
+                "docs_md": ""
+              },
+              {
+                "name": "label",
+                "signature": "label: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_setting::themes",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "TerminalColorScheme",
+            "path": "vmux_setting::themes::TerminalColorScheme",
+            "signature": "pub struct TerminalColorScheme",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "name",
+                "signature": "name: String",
+                "docs_md": ""
+              },
+              {
+                "name": "foreground",
+                "signature": "foreground: [u8; 3]",
+                "docs_md": ""
+              },
+              {
+                "name": "background",
+                "signature": "background: [u8; 3]",
+                "docs_md": ""
+              },
+              {
+                "name": "cursor",
+                "signature": "cursor: [u8; 3]",
+                "docs_md": ""
+              },
+              {
+                "name": "ansi",
+                "signature": "ansi: [[u8; 3]; 16]",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "get_builtin_themes",
+            "path": "vmux_setting::themes::get_builtin_themes",
+            "signature": "pub fn get_builtin_themes() -> Vec<TerminalColorScheme>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "resolve_theme",
+            "path": "vmux_setting::themes::resolve_theme",
+            "signature": "pub fn resolve_theme(name: &str, custom_themes: &[TerminalColorScheme]) -> TerminalColorScheme",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

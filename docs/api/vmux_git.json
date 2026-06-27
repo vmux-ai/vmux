@@ -1,0 +1,1669 @@
+{
+  "name": "vmux_git",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_git",
+    "docs_md": "Host-side git engine: runs git operations on background threads and bridges results\nto the `files://` editor page.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "FILES_HOST",
+        "path": "vmux_git::FILES_HOST",
+        "signature": "pub const FILES_HOST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "type_alias",
+        "name": "OutboxQueue",
+        "path": "vmux_git::OutboxQueue",
+        "signature": "pub type OutboxQueue",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "GitOutbox",
+        "path": "vmux_git::GitOutbox",
+        "signature": "pub struct GitOutbox",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "GitPlugin",
+        "path": "vmux_git::GitPlugin",
+        "signature": "pub struct GitPlugin",
+        "docs_md": "Wires the git bridge: runs each git request on a background thread and drains completed\nresults back to the originating webview.",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_git::event",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "GIT_STATUS_EVENT",
+            "path": "vmux_git::event::GIT_STATUS_EVENT",
+            "signature": "pub const GIT_STATUS_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "GIT_DIFF_META_EVENT",
+            "path": "vmux_git::event::GIT_DIFF_META_EVENT",
+            "signature": "pub const GIT_DIFF_META_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "GIT_DIFF_VIEWPORT_EVENT",
+            "path": "vmux_git::event::GIT_DIFF_VIEWPORT_EVENT",
+            "signature": "pub const GIT_DIFF_VIEWPORT_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "GIT_RESULT_EVENT",
+            "path": "vmux_git::event::GIT_RESULT_EVENT",
+            "signature": "pub const GIT_RESULT_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "GIT_ERROR_EVENT",
+            "path": "vmux_git::event::GIT_ERROR_EVENT",
+            "signature": "pub const GIT_ERROR_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "GitStatusRequest",
+            "path": "vmux_git::event::GitStatusRequest",
+            "signature": "pub struct GitStatusRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitStatusRequest",
+            "path": "vmux_git::event::ArchivedGitStatusRequest",
+            "signature": "pub struct ArchivedGitStatusRequest",
+            "docs_md": "An archived [`GitStatusRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusRequest::path`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitStatusRequest`",
+                "path": "vmux_git::event::GitStatusRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitStatusRequestResolver",
+            "path": "vmux_git::event::GitStatusRequestResolver",
+            "signature": "pub struct GitStatusRequestResolver",
+            "docs_md": "The resolver for an archived [`GitStatusRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitStatusRequest`",
+                "path": "vmux_git::event::GitStatusRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffRequest",
+            "path": "vmux_git::event::GitDiffRequest",
+            "signature": "pub struct GitDiffRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "top_line",
+                "signature": "top_line: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "rows",
+                "signature": "rows: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitDiffRequest",
+            "path": "vmux_git::event::ArchivedGitDiffRequest",
+            "signature": "pub struct ArchivedGitDiffRequest",
+            "docs_md": "An archived [`GitDiffRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffRequest::path`]"
+              },
+              {
+                "name": "top_line",
+                "signature": "top_line: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffRequest::top_line`]"
+              },
+              {
+                "name": "rows",
+                "signature": "rows: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffRequest::rows`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitDiffRequest`",
+                "path": "vmux_git::event::GitDiffRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffRequestResolver",
+            "path": "vmux_git::event::GitDiffRequestResolver",
+            "signature": "pub struct GitDiffRequestResolver",
+            "docs_md": "The resolver for an archived [`GitDiffRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitDiffRequest`",
+                "path": "vmux_git::event::GitDiffRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitStageRequest",
+            "path": "vmux_git::event::GitStageRequest",
+            "signature": "pub struct GitStageRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitStageRequest",
+            "path": "vmux_git::event::ArchivedGitStageRequest",
+            "signature": "pub struct ArchivedGitStageRequest",
+            "docs_md": "An archived [`GitStageRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitStageRequest::path`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitStageRequest`",
+                "path": "vmux_git::event::GitStageRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitStageRequestResolver",
+            "path": "vmux_git::event::GitStageRequestResolver",
+            "signature": "pub struct GitStageRequestResolver",
+            "docs_md": "The resolver for an archived [`GitStageRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitStageRequest`",
+                "path": "vmux_git::event::GitStageRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitUnstageRequest",
+            "path": "vmux_git::event::GitUnstageRequest",
+            "signature": "pub struct GitUnstageRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitUnstageRequest",
+            "path": "vmux_git::event::ArchivedGitUnstageRequest",
+            "signature": "pub struct ArchivedGitUnstageRequest",
+            "docs_md": "An archived [`GitUnstageRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitUnstageRequest::path`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitUnstageRequest`",
+                "path": "vmux_git::event::GitUnstageRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitUnstageRequestResolver",
+            "path": "vmux_git::event::GitUnstageRequestResolver",
+            "signature": "pub struct GitUnstageRequestResolver",
+            "docs_md": "The resolver for an archived [`GitUnstageRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitUnstageRequest`",
+                "path": "vmux_git::event::GitUnstageRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiscardRequest",
+            "path": "vmux_git::event::GitDiscardRequest",
+            "signature": "pub struct GitDiscardRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitDiscardRequest",
+            "path": "vmux_git::event::ArchivedGitDiscardRequest",
+            "signature": "pub struct ArchivedGitDiscardRequest",
+            "docs_md": "An archived [`GitDiscardRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitDiscardRequest::path`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitDiscardRequest`",
+                "path": "vmux_git::event::GitDiscardRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiscardRequestResolver",
+            "path": "vmux_git::event::GitDiscardRequestResolver",
+            "signature": "pub struct GitDiscardRequestResolver",
+            "docs_md": "The resolver for an archived [`GitDiscardRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitDiscardRequest`",
+                "path": "vmux_git::event::GitDiscardRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitCommitRequest",
+            "path": "vmux_git::event::GitCommitRequest",
+            "signature": "pub struct GitCommitRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "message",
+                "signature": "message: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitCommitRequest",
+            "path": "vmux_git::event::ArchivedGitCommitRequest",
+            "signature": "pub struct ArchivedGitCommitRequest",
+            "docs_md": "An archived [`GitCommitRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitCommitRequest::path`]"
+              },
+              {
+                "name": "message",
+                "signature": "message: Archived",
+                "docs_md": "The archived counterpart of [`GitCommitRequest::message`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitCommitRequest`",
+                "path": "vmux_git::event::GitCommitRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitCommitRequestResolver",
+            "path": "vmux_git::event::GitCommitRequestResolver",
+            "signature": "pub struct GitCommitRequestResolver",
+            "docs_md": "The resolver for an archived [`GitCommitRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitCommitRequest`",
+                "path": "vmux_git::event::GitCommitRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitPushRequest",
+            "path": "vmux_git::event::GitPushRequest",
+            "signature": "pub struct GitPushRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitPushRequest",
+            "path": "vmux_git::event::ArchivedGitPushRequest",
+            "signature": "pub struct ArchivedGitPushRequest",
+            "docs_md": "An archived [`GitPushRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitPushRequest::path`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitPushRequest`",
+                "path": "vmux_git::event::GitPushRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitPushRequestResolver",
+            "path": "vmux_git::event::GitPushRequestResolver",
+            "signature": "pub struct GitPushRequestResolver",
+            "docs_md": "The resolver for an archived [`GitPushRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitPushRequest`",
+                "path": "vmux_git::event::GitPushRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitHunkRequest",
+            "path": "vmux_git::event::GitHunkRequest",
+            "signature": "pub struct GitHunkRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: String",
+                "docs_md": ""
+              },
+              {
+                "name": "hunk",
+                "signature": "hunk: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "accept",
+                "signature": "accept: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitHunkRequest",
+            "path": "vmux_git::event::ArchivedGitHunkRequest",
+            "signature": "pub struct ArchivedGitHunkRequest",
+            "docs_md": "An archived [`GitHunkRequest`]",
+            "members": [
+              {
+                "name": "path",
+                "signature": "path: Archived",
+                "docs_md": "The archived counterpart of [`GitHunkRequest::path`]"
+              },
+              {
+                "name": "hunk",
+                "signature": "hunk: Archived",
+                "docs_md": "The archived counterpart of [`GitHunkRequest::hunk`]"
+              },
+              {
+                "name": "accept",
+                "signature": "accept: Archived",
+                "docs_md": "The archived counterpart of [`GitHunkRequest::accept`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitHunkRequest`",
+                "path": "vmux_git::event::GitHunkRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitHunkRequestResolver",
+            "path": "vmux_git::event::GitHunkRequestResolver",
+            "signature": "pub struct GitHunkRequestResolver",
+            "docs_md": "The resolver for an archived [`GitHunkRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitHunkRequest`",
+                "path": "vmux_git::event::GitHunkRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StyledSpan",
+            "path": "vmux_git::event::StyledSpan",
+            "signature": "pub struct StyledSpan",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "text",
+                "signature": "text: String",
+                "docs_md": ""
+              },
+              {
+                "name": "fg",
+                "signature": "fg: [u8; 3]",
+                "docs_md": ""
+              },
+              {
+                "name": "bold",
+                "signature": "bold: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "italic",
+                "signature": "italic: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedStyledSpan",
+            "path": "vmux_git::event::ArchivedStyledSpan",
+            "signature": "pub struct ArchivedStyledSpan",
+            "docs_md": "An archived [`StyledSpan`]",
+            "members": [
+              {
+                "name": "text",
+                "signature": "text: Archived",
+                "docs_md": "The archived counterpart of [`StyledSpan::text`]"
+              },
+              {
+                "name": "fg",
+                "signature": "fg: Archived",
+                "docs_md": "The archived counterpart of [`StyledSpan::fg`]"
+              },
+              {
+                "name": "bold",
+                "signature": "bold: Archived",
+                "docs_md": "The archived counterpart of [`StyledSpan::bold`]"
+              },
+              {
+                "name": "italic",
+                "signature": "italic: Archived",
+                "docs_md": "The archived counterpart of [`StyledSpan::italic`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`StyledSpan`",
+                "path": "vmux_git::event::StyledSpan"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "StyledSpanResolver",
+            "path": "vmux_git::event::StyledSpanResolver",
+            "signature": "pub struct StyledSpanResolver",
+            "docs_md": "The resolver for an archived [`StyledSpan`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`StyledSpan`",
+                "path": "vmux_git::event::StyledSpan"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DiffLine",
+            "path": "vmux_git::event::DiffLine",
+            "signature": "pub struct DiffLine",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "kind",
+                "signature": "kind: DiffKind",
+                "docs_md": ""
+              },
+              {
+                "name": "old_no",
+                "signature": "old_no: Option<u32>",
+                "docs_md": ""
+              },
+              {
+                "name": "new_no",
+                "signature": "new_no: Option<u32>",
+                "docs_md": ""
+              },
+              {
+                "name": "hunk",
+                "signature": "hunk: Option<u32>",
+                "docs_md": ""
+              },
+              {
+                "name": "spans",
+                "signature": "spans: Vec<StyledSpan>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedDiffLine",
+            "path": "vmux_git::event::ArchivedDiffLine",
+            "signature": "pub struct ArchivedDiffLine",
+            "docs_md": "An archived [`DiffLine`]",
+            "members": [
+              {
+                "name": "kind",
+                "signature": "kind: Archived",
+                "docs_md": "The archived counterpart of [`DiffLine::kind`]"
+              },
+              {
+                "name": "old_no",
+                "signature": "old_no: Archived",
+                "docs_md": "The archived counterpart of [`DiffLine::old_no`]"
+              },
+              {
+                "name": "new_no",
+                "signature": "new_no: Archived",
+                "docs_md": "The archived counterpart of [`DiffLine::new_no`]"
+              },
+              {
+                "name": "hunk",
+                "signature": "hunk: Archived",
+                "docs_md": "The archived counterpart of [`DiffLine::hunk`]"
+              },
+              {
+                "name": "spans",
+                "signature": "spans: Archived",
+                "docs_md": "The archived counterpart of [`DiffLine::spans`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`DiffLine`",
+                "path": "vmux_git::event::DiffLine"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "DiffLineResolver",
+            "path": "vmux_git::event::DiffLineResolver",
+            "signature": "pub struct DiffLineResolver",
+            "docs_md": "The resolver for an archived [`DiffLine`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`DiffLine`",
+                "path": "vmux_git::event::DiffLine"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitStatusEvent",
+            "path": "vmux_git::event::GitStatusEvent",
+            "signature": "pub struct GitStatusEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "branch",
+                "signature": "branch: String",
+                "docs_md": ""
+              },
+              {
+                "name": "ahead",
+                "signature": "ahead: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "behind",
+                "signature": "behind: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "has_upstream",
+                "signature": "has_upstream: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "file_status",
+                "signature": "file_status: FileStatus",
+                "docs_md": ""
+              },
+              {
+                "name": "staged_count",
+                "signature": "staged_count: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "repo_root",
+                "signature": "repo_root: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitStatusEvent",
+            "path": "vmux_git::event::ArchivedGitStatusEvent",
+            "signature": "pub struct ArchivedGitStatusEvent",
+            "docs_md": "An archived [`GitStatusEvent`]",
+            "members": [
+              {
+                "name": "branch",
+                "signature": "branch: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::branch`]"
+              },
+              {
+                "name": "ahead",
+                "signature": "ahead: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::ahead`]"
+              },
+              {
+                "name": "behind",
+                "signature": "behind: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::behind`]"
+              },
+              {
+                "name": "has_upstream",
+                "signature": "has_upstream: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::has_upstream`]"
+              },
+              {
+                "name": "file_status",
+                "signature": "file_status: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::file_status`]"
+              },
+              {
+                "name": "staged_count",
+                "signature": "staged_count: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::staged_count`]"
+              },
+              {
+                "name": "repo_root",
+                "signature": "repo_root: Archived",
+                "docs_md": "The archived counterpart of [`GitStatusEvent::repo_root`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitStatusEvent`",
+                "path": "vmux_git::event::GitStatusEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitStatusEventResolver",
+            "path": "vmux_git::event::GitStatusEventResolver",
+            "signature": "pub struct GitStatusEventResolver",
+            "docs_md": "The resolver for an archived [`GitStatusEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitStatusEvent`",
+                "path": "vmux_git::event::GitStatusEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffMetaEvent",
+            "path": "vmux_git::event::GitDiffMetaEvent",
+            "signature": "pub struct GitDiffMetaEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "total_lines",
+                "signature": "total_lines: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitDiffMetaEvent",
+            "path": "vmux_git::event::ArchivedGitDiffMetaEvent",
+            "signature": "pub struct ArchivedGitDiffMetaEvent",
+            "docs_md": "An archived [`GitDiffMetaEvent`]",
+            "members": [
+              {
+                "name": "total_lines",
+                "signature": "total_lines: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffMetaEvent::total_lines`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitDiffMetaEvent`",
+                "path": "vmux_git::event::GitDiffMetaEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffMetaEventResolver",
+            "path": "vmux_git::event::GitDiffMetaEventResolver",
+            "signature": "pub struct GitDiffMetaEventResolver",
+            "docs_md": "The resolver for an archived [`GitDiffMetaEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitDiffMetaEvent`",
+                "path": "vmux_git::event::GitDiffMetaEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffViewportEvent",
+            "path": "vmux_git::event::GitDiffViewportEvent",
+            "signature": "pub struct GitDiffViewportEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "first_line",
+                "signature": "first_line: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "total_lines",
+                "signature": "total_lines: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "lines",
+                "signature": "lines: Vec<DiffLine>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitDiffViewportEvent",
+            "path": "vmux_git::event::ArchivedGitDiffViewportEvent",
+            "signature": "pub struct ArchivedGitDiffViewportEvent",
+            "docs_md": "An archived [`GitDiffViewportEvent`]",
+            "members": [
+              {
+                "name": "first_line",
+                "signature": "first_line: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffViewportEvent::first_line`]"
+              },
+              {
+                "name": "total_lines",
+                "signature": "total_lines: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffViewportEvent::total_lines`]"
+              },
+              {
+                "name": "lines",
+                "signature": "lines: Archived",
+                "docs_md": "The archived counterpart of [`GitDiffViewportEvent::lines`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitDiffViewportEvent`",
+                "path": "vmux_git::event::GitDiffViewportEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitDiffViewportEventResolver",
+            "path": "vmux_git::event::GitDiffViewportEventResolver",
+            "signature": "pub struct GitDiffViewportEventResolver",
+            "docs_md": "The resolver for an archived [`GitDiffViewportEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitDiffViewportEvent`",
+                "path": "vmux_git::event::GitDiffViewportEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitResultEvent",
+            "path": "vmux_git::event::GitResultEvent",
+            "signature": "pub struct GitResultEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "action",
+                "signature": "action: String",
+                "docs_md": ""
+              },
+              {
+                "name": "ok",
+                "signature": "ok: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "message",
+                "signature": "message: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitResultEvent",
+            "path": "vmux_git::event::ArchivedGitResultEvent",
+            "signature": "pub struct ArchivedGitResultEvent",
+            "docs_md": "An archived [`GitResultEvent`]",
+            "members": [
+              {
+                "name": "action",
+                "signature": "action: Archived",
+                "docs_md": "The archived counterpart of [`GitResultEvent::action`]"
+              },
+              {
+                "name": "ok",
+                "signature": "ok: Archived",
+                "docs_md": "The archived counterpart of [`GitResultEvent::ok`]"
+              },
+              {
+                "name": "message",
+                "signature": "message: Archived",
+                "docs_md": "The archived counterpart of [`GitResultEvent::message`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitResultEvent`",
+                "path": "vmux_git::event::GitResultEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitResultEventResolver",
+            "path": "vmux_git::event::GitResultEventResolver",
+            "signature": "pub struct GitResultEventResolver",
+            "docs_md": "The resolver for an archived [`GitResultEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitResultEvent`",
+                "path": "vmux_git::event::GitResultEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitErrorEvent",
+            "path": "vmux_git::event::GitErrorEvent",
+            "signature": "pub struct GitErrorEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "message",
+                "signature": "message: String",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedGitErrorEvent",
+            "path": "vmux_git::event::ArchivedGitErrorEvent",
+            "signature": "pub struct ArchivedGitErrorEvent",
+            "docs_md": "An archived [`GitErrorEvent`]",
+            "members": [
+              {
+                "name": "message",
+                "signature": "message: Archived",
+                "docs_md": "The archived counterpart of [`GitErrorEvent::message`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`GitErrorEvent`",
+                "path": "vmux_git::event::GitErrorEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "GitErrorEventResolver",
+            "path": "vmux_git::event::GitErrorEventResolver",
+            "signature": "pub struct GitErrorEventResolver",
+            "docs_md": "The resolver for an archived [`GitErrorEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`GitErrorEvent`",
+                "path": "vmux_git::event::GitErrorEvent"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "FileStatus",
+            "path": "vmux_git::event::FileStatus",
+            "signature": "pub enum FileStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Clean",
+                "signature": "Clean",
+                "docs_md": ""
+              },
+              {
+                "name": "Modified",
+                "signature": "Modified",
+                "docs_md": ""
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": ""
+              },
+              {
+                "name": "StagedModified",
+                "signature": "StagedModified",
+                "docs_md": ""
+              },
+              {
+                "name": "Untracked",
+                "signature": "Untracked",
+                "docs_md": ""
+              },
+              {
+                "name": "Deleted",
+                "signature": "Deleted",
+                "docs_md": ""
+              },
+              {
+                "name": "Conflicted",
+                "signature": "Conflicted",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedFileStatus",
+            "path": "vmux_git::event::ArchivedFileStatus",
+            "signature": "pub enum ArchivedFileStatus",
+            "docs_md": "An archived [`FileStatus`]",
+            "members": [
+              {
+                "name": "Clean",
+                "signature": "Clean",
+                "docs_md": "The archived counterpart of [`FileStatus::Clean`]"
+              },
+              {
+                "name": "Modified",
+                "signature": "Modified",
+                "docs_md": "The archived counterpart of [`FileStatus::Modified`]"
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": "The archived counterpart of [`FileStatus::Staged`]"
+              },
+              {
+                "name": "StagedModified",
+                "signature": "StagedModified",
+                "docs_md": "The archived counterpart of [`FileStatus::StagedModified`]"
+              },
+              {
+                "name": "Untracked",
+                "signature": "Untracked",
+                "docs_md": "The archived counterpart of [`FileStatus::Untracked`]"
+              },
+              {
+                "name": "Deleted",
+                "signature": "Deleted",
+                "docs_md": "The archived counterpart of [`FileStatus::Deleted`]"
+              },
+              {
+                "name": "Conflicted",
+                "signature": "Conflicted",
+                "docs_md": "The archived counterpart of [`FileStatus::Conflicted`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`FileStatus`",
+                "path": "vmux_git::event::FileStatus"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "FileStatusResolver",
+            "path": "vmux_git::event::FileStatusResolver",
+            "signature": "pub enum FileStatusResolver",
+            "docs_md": "The resolver for an archived [`FileStatus`]",
+            "members": [
+              {
+                "name": "Clean",
+                "signature": "Clean",
+                "docs_md": "The resolver for [`FileStatus::Clean`]"
+              },
+              {
+                "name": "Modified",
+                "signature": "Modified",
+                "docs_md": "The resolver for [`FileStatus::Modified`]"
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": "The resolver for [`FileStatus::Staged`]"
+              },
+              {
+                "name": "StagedModified",
+                "signature": "StagedModified",
+                "docs_md": "The resolver for [`FileStatus::StagedModified`]"
+              },
+              {
+                "name": "Untracked",
+                "signature": "Untracked",
+                "docs_md": "The resolver for [`FileStatus::Untracked`]"
+              },
+              {
+                "name": "Deleted",
+                "signature": "Deleted",
+                "docs_md": "The resolver for [`FileStatus::Deleted`]"
+              },
+              {
+                "name": "Conflicted",
+                "signature": "Conflicted",
+                "docs_md": "The resolver for [`FileStatus::Conflicted`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`FileStatus`",
+                "path": "vmux_git::event::FileStatus"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "DiffKind",
+            "path": "vmux_git::event::DiffKind",
+            "signature": "pub enum DiffKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Context",
+                "signature": "Context",
+                "docs_md": ""
+              },
+              {
+                "name": "Add",
+                "signature": "Add",
+                "docs_md": ""
+              },
+              {
+                "name": "Remove",
+                "signature": "Remove",
+                "docs_md": ""
+              },
+              {
+                "name": "Hunk",
+                "signature": "Hunk",
+                "docs_md": ""
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "ArchivedDiffKind",
+            "path": "vmux_git::event::ArchivedDiffKind",
+            "signature": "pub enum ArchivedDiffKind",
+            "docs_md": "An archived [`DiffKind`]",
+            "members": [
+              {
+                "name": "Context",
+                "signature": "Context",
+                "docs_md": "The archived counterpart of [`DiffKind::Context`]"
+              },
+              {
+                "name": "Add",
+                "signature": "Add",
+                "docs_md": "The archived counterpart of [`DiffKind::Add`]"
+              },
+              {
+                "name": "Remove",
+                "signature": "Remove",
+                "docs_md": "The archived counterpart of [`DiffKind::Remove`]"
+              },
+              {
+                "name": "Hunk",
+                "signature": "Hunk",
+                "docs_md": "The archived counterpart of [`DiffKind::Hunk`]"
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": "The archived counterpart of [`DiffKind::Staged`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`DiffKind`",
+                "path": "vmux_git::event::DiffKind"
+              }
+            ]
+          },
+          {
+            "kind": "enum",
+            "name": "DiffKindResolver",
+            "path": "vmux_git::event::DiffKindResolver",
+            "signature": "pub enum DiffKindResolver",
+            "docs_md": "The resolver for an archived [`DiffKind`]",
+            "members": [
+              {
+                "name": "Context",
+                "signature": "Context",
+                "docs_md": "The resolver for [`DiffKind::Context`]"
+              },
+              {
+                "name": "Add",
+                "signature": "Add",
+                "docs_md": "The resolver for [`DiffKind::Add`]"
+              },
+              {
+                "name": "Remove",
+                "signature": "Remove",
+                "docs_md": "The resolver for [`DiffKind::Remove`]"
+              },
+              {
+                "name": "Hunk",
+                "signature": "Hunk",
+                "docs_md": "The resolver for [`DiffKind::Hunk`]"
+              },
+              {
+                "name": "Staged",
+                "signature": "Staged",
+                "docs_md": "The resolver for [`DiffKind::Staged`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`DiffKind`",
+                "path": "vmux_git::event::DiffKind"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_git::highlight",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "highlight_file",
+            "path": "vmux_git::highlight::highlight_file",
+            "signature": "pub fn highlight_file(content: &str, path: &std::path::Path) -> Vec<Vec<crate::event::StyledSpan>>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "highlight_line",
+            "path": "vmux_git::highlight::highlight_line",
+            "signature": "pub fn highlight_line(text: &str, path: &std::path::Path) -> Vec<crate::event::StyledSpan>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_git::job",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "enum",
+            "name": "JobKind",
+            "path": "vmux_git::job::JobKind",
+            "signature": "pub enum JobKind",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Status",
+                "signature": "Status",
+                "docs_md": ""
+              },
+              {
+                "name": "Diff",
+                "signature": "Diff",
+                "docs_md": ""
+              },
+              {
+                "name": "Stage",
+                "signature": "Stage",
+                "docs_md": ""
+              },
+              {
+                "name": "Unstage",
+                "signature": "Unstage",
+                "docs_md": ""
+              },
+              {
+                "name": "Discard",
+                "signature": "Discard",
+                "docs_md": ""
+              },
+              {
+                "name": "Commit",
+                "signature": "Commit",
+                "docs_md": ""
+              },
+              {
+                "name": "Push",
+                "signature": "Push",
+                "docs_md": ""
+              },
+              {
+                "name": "Hunk",
+                "signature": "Hunk",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "enum",
+            "name": "Emit",
+            "path": "vmux_git::job::Emit",
+            "signature": "pub enum Emit",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "Status",
+                "signature": "Status",
+                "docs_md": ""
+              },
+              {
+                "name": "DiffMeta",
+                "signature": "DiffMeta",
+                "docs_md": ""
+              },
+              {
+                "name": "DiffViewport",
+                "signature": "DiffViewport",
+                "docs_md": ""
+              },
+              {
+                "name": "Result",
+                "signature": "Result",
+                "docs_md": ""
+              },
+              {
+                "name": "Error",
+                "signature": "Error",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "emit_event_name",
+            "path": "vmux_git::job::emit_event_name",
+            "signature": "pub fn emit_event_name(e: &Emit) -> &'static str",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "run_job",
+            "path": "vmux_git::job::run_job",
+            "signature": "pub fn run_job(job: JobKind) -> Vec<Emit>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_git::parse",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "ParsedStatus",
+            "path": "vmux_git::parse::ParsedStatus",
+            "signature": "pub struct ParsedStatus",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "branch",
+                "signature": "branch: String",
+                "docs_md": ""
+              },
+              {
+                "name": "ahead",
+                "signature": "ahead: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "behind",
+                "signature": "behind: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "has_upstream",
+                "signature": "has_upstream: bool",
+                "docs_md": ""
+              },
+              {
+                "name": "file_status",
+                "signature": "file_status: crate::event::FileStatus",
+                "docs_md": ""
+              },
+              {
+                "name": "staged_count",
+                "signature": "staged_count: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "parse_porcelain_v2",
+            "path": "vmux_git::parse::parse_porcelain_v2",
+            "signature": "pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "parse_unified_diff",
+            "path": "vmux_git::parse::parse_unified_diff",
+            "signature": "pub fn parse_unified_diff(diff: &str) -> Vec<crate::event::DiffLine>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "window",
+            "path": "vmux_git::parse::window",
+            "signature": "pub fn window(lines: &[crate::event::DiffLine], top_line: u32, rows: u32) -> (u32, Vec<crate::event::DiffLine>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "HunkRange",
+            "path": "vmux_git::parse::HunkRange",
+            "signature": "pub struct HunkRange",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "old_start",
+                "signature": "old_start: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "old_count",
+                "signature": "old_count: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "new_start",
+                "signature": "new_start: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "new_count",
+                "signature": "new_count: u32",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "hunk_ranges",
+            "path": "vmux_git::parse::hunk_ranges",
+            "signature": "pub fn hunk_ranges(diff: &str) -> Vec<HunkRange>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "hunk_patches",
+            "path": "vmux_git::parse::hunk_patches",
+            "signature": "pub fn hunk_patches(diff: &str) -> (String, Vec<String>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_git::runner",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "GitError",
+            "path": "vmux_git::runner::GitError",
+            "signature": "pub struct GitError",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "repo_root",
+            "path": "vmux_git::runner::repo_root",
+            "signature": "pub fn repo_root(file: &std::path::Path) -> Result<std::path::PathBuf, GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "status",
+            "path": "vmux_git::runner::status",
+            "signature": "pub fn status(file: &std::path::Path) -> Result<GitStatusEvent, GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "diff_lines",
+            "path": "vmux_git::runner::diff_lines",
+            "signature": "pub fn diff_lines(file: &std::path::Path) -> Result<Vec<DiffLine>, GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "apply_hunk",
+            "path": "vmux_git::runner::apply_hunk",
+            "signature": "pub fn apply_hunk(file: &std::path::Path, index: u32, accept: bool) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "stage",
+            "path": "vmux_git::runner::stage",
+            "signature": "pub fn stage(file: &std::path::Path) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "unstage",
+            "path": "vmux_git::runner::unstage",
+            "signature": "pub fn unstage(file: &std::path::Path) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "discard",
+            "path": "vmux_git::runner::discard",
+            "signature": "pub fn discard(file: &std::path::Path) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "commit",
+            "path": "vmux_git::runner::commit",
+            "signature": "pub fn commit(file: &std::path::Path, message: &str) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "push",
+            "path": "vmux_git::runner::push",
+            "signature": "pub fn push(file: &std::path::Path) -> Result<(), GitError>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

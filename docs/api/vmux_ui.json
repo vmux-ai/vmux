@@ -1,0 +1,172 @@
+{
+  "name": "vmux_ui",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_ui",
+    "docs_md": "Dioxus WASM UI library: [`components`] and [`hooks`] for CEF IPC.\n\nBevy-side hosting, embedded `dist/` serving, and GPU/UI tokens live in **`vmux_ui_native`**.",
+    "items": [],
+    "submodules": [
+      {
+        "path": "vmux_ui::agent_accent",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "struct",
+            "name": "AgentAccent",
+            "path": "vmux_ui::agent_accent::AgentAccent",
+            "signature": "pub struct AgentAccent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "glow_top",
+                "signature": "glow_top: &'static str",
+                "docs_md": ""
+              },
+              {
+                "name": "glow_bottom",
+                "signature": "glow_bottom: &'static str",
+                "docs_md": ""
+              },
+              {
+                "name": "grad",
+                "signature": "grad: &'static str",
+                "docs_md": ""
+              },
+              {
+                "name": "accent_text",
+                "signature": "accent_text: &'static str",
+                "docs_md": ""
+              },
+              {
+                "name": "accent_bg",
+                "signature": "accent_bg: &'static str",
+                "docs_md": ""
+              },
+              {
+                "name": "cta_shadow",
+                "signature": "cta_shadow: &'static str",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "agent_accent",
+            "path": "vmux_ui::agent_accent::agent_accent",
+            "signature": "pub fn agent_accent(segment: &str) -> AgentAccent",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_ui::favicon",
+        "docs_md": "Favicon URL resolution with multi-tier fallback.\n\nPure helpers ([`favicon_src_for_url`] and friends) work on any target. The\n[`Favicon`] and [`GlobeIcon`] components are wasm-only.",
+        "items": [
+          {
+            "kind": "function",
+            "name": "host_for_favicon_fallback",
+            "path": "vmux_ui::favicon::host_for_favicon_fallback",
+            "signature": "pub fn host_for_favicon_fallback(page_url: &str) -> Option<&str>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "agent_host",
+            "path": "vmux_ui::favicon::agent_host",
+            "signature": "pub fn agent_host(url: &str) -> Option<&'static str>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "favicon_src_for_url",
+            "path": "vmux_ui::favicon::favicon_src_for_url",
+            "signature": "pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_ui::icon",
+        "docs_md": "",
+        "items": [],
+        "submodules": []
+      },
+      {
+        "path": "vmux_ui::theme",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "THEME_EVENT",
+            "path": "vmux_ui::theme::THEME_EVENT",
+            "signature": "pub const THEME_EVENT",
+            "docs_md": "Theme settings shared between Bevy host and Dioxus webview apps.",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ThemeEvent",
+            "path": "vmux_ui::theme::ThemeEvent",
+            "signature": "pub struct ThemeEvent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "radius",
+                "signature": "radius: f32",
+                "docs_md": "Border radius in CSS pixels."
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedThemeEvent",
+            "path": "vmux_ui::theme::ArchivedThemeEvent",
+            "signature": "pub struct ArchivedThemeEvent",
+            "docs_md": "An archived [`ThemeEvent`]",
+            "members": [
+              {
+                "name": "radius",
+                "signature": "radius: Archived",
+                "docs_md": "The archived counterpart of [`ThemeEvent::radius`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`ThemeEvent`",
+                "path": "vmux_ui::theme::ThemeEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "ThemeEventResolver",
+            "path": "vmux_ui::theme::ThemeEventResolver",
+            "signature": "pub struct ThemeEventResolver",
+            "docs_md": "The resolver for an archived [`ThemeEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`ThemeEvent`",
+                "path": "vmux_ui::theme::ThemeEvent"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}

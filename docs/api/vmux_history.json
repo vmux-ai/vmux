@@ -1,0 +1,814 @@
+{
+  "name": "vmux_history",
+  "version": "0.0.19",
+  "root": {
+    "path": "vmux_history",
+    "docs_md": "Browsing history: records visits, prunes old entries, serves history queries and\ncommand-bar suggestions, and renders the history webview.",
+    "items": [
+      {
+        "kind": "constant",
+        "name": "PAGE_MANIFEST",
+        "path": "vmux_history::PAGE_MANIFEST",
+        "signature": "pub const PAGE_MANIFEST",
+        "docs_md": "",
+        "members": [],
+        "links": []
+      },
+      {
+        "kind": "struct",
+        "name": "HistoryPlugin",
+        "path": "vmux_history::HistoryPlugin",
+        "signature": "pub struct HistoryPlugin",
+        "docs_md": "Wires the history domain: visit spawning, change broadcasts, timed pruning, and\nhistory query, open, and suggestion bridges.",
+        "members": [],
+        "links": []
+      }
+    ],
+    "submodules": [
+      {
+        "path": "vmux_history::event",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "HISTORY_QUERY_RESPONSE_EVENT",
+            "path": "vmux_history::event::HISTORY_QUERY_RESPONSE_EVENT",
+            "signature": "pub const HISTORY_QUERY_RESPONSE_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "HISTORY_SUGGESTIONS_RESPONSE_EVENT",
+            "path": "vmux_history::event::HISTORY_SUGGESTIONS_RESPONSE_EVENT",
+            "signature": "pub const HISTORY_SUGGESTIONS_RESPONSE_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "constant",
+            "name": "HISTORY_CHANGED_EVENT",
+            "path": "vmux_history::event::HISTORY_CHANGED_EVENT",
+            "signature": "pub const HISTORY_CHANGED_EVENT",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryChangedEvent",
+            "path": "vmux_history::event::HistoryChangedEvent",
+            "signature": "pub struct HistoryChangedEvent",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryChangedEvent",
+            "path": "vmux_history::event::ArchivedHistoryChangedEvent",
+            "signature": "pub struct ArchivedHistoryChangedEvent",
+            "docs_md": "An archived [`HistoryChangedEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryChangedEvent`",
+                "path": "vmux_history::event::HistoryChangedEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryChangedEventResolver",
+            "path": "vmux_history::event::HistoryChangedEventResolver",
+            "signature": "pub struct HistoryChangedEventResolver",
+            "docs_md": "The resolver for an archived [`HistoryChangedEvent`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryChangedEvent`",
+                "path": "vmux_history::event::HistoryChangedEvent"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryEntry",
+            "path": "vmux_history::event::HistoryEntry",
+            "signature": "pub struct HistoryEntry",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "url_entity_bits",
+                "signature": "url_entity_bits: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "title",
+                "signature": "title: String",
+                "docs_md": ""
+              },
+              {
+                "name": "favicon_url",
+                "signature": "favicon_url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "visit_created_at",
+                "signature": "visit_created_at: i64",
+                "docs_md": ""
+              },
+              {
+                "name": "visit_count",
+                "signature": "visit_count: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "last_visited_at",
+                "signature": "last_visited_at: i64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryEntry",
+            "path": "vmux_history::event::ArchivedHistoryEntry",
+            "signature": "pub struct ArchivedHistoryEntry",
+            "docs_md": "An archived [`HistoryEntry`]",
+            "members": [
+              {
+                "name": "url_entity_bits",
+                "signature": "url_entity_bits: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::url_entity_bits`]"
+              },
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::url`]"
+              },
+              {
+                "name": "title",
+                "signature": "title: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::title`]"
+              },
+              {
+                "name": "favicon_url",
+                "signature": "favicon_url: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::favicon_url`]"
+              },
+              {
+                "name": "visit_created_at",
+                "signature": "visit_created_at: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::visit_created_at`]"
+              },
+              {
+                "name": "visit_count",
+                "signature": "visit_count: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::visit_count`]"
+              },
+              {
+                "name": "last_visited_at",
+                "signature": "last_visited_at: Archived",
+                "docs_md": "The archived counterpart of [`HistoryEntry::last_visited_at`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistoryEntry`",
+                "path": "vmux_history::event::HistoryEntry"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryEntryResolver",
+            "path": "vmux_history::event::HistoryEntryResolver",
+            "signature": "pub struct HistoryEntryResolver",
+            "docs_md": "The resolver for an archived [`HistoryEntry`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryEntry`",
+                "path": "vmux_history::event::HistoryEntry"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryQueryRequest",
+            "path": "vmux_history::event::HistoryQueryRequest",
+            "signature": "pub struct HistoryQueryRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "query",
+                "signature": "query: Option<String>",
+                "docs_md": ""
+              },
+              {
+                "name": "offset",
+                "signature": "offset: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "limit",
+                "signature": "limit: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "request_id",
+                "signature": "request_id: u64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryQueryRequest",
+            "path": "vmux_history::event::ArchivedHistoryQueryRequest",
+            "signature": "pub struct ArchivedHistoryQueryRequest",
+            "docs_md": "An archived [`HistoryQueryRequest`]",
+            "members": [
+              {
+                "name": "query",
+                "signature": "query: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryRequest::query`]"
+              },
+              {
+                "name": "offset",
+                "signature": "offset: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryRequest::offset`]"
+              },
+              {
+                "name": "limit",
+                "signature": "limit: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryRequest::limit`]"
+              },
+              {
+                "name": "request_id",
+                "signature": "request_id: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryRequest::request_id`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistoryQueryRequest`",
+                "path": "vmux_history::event::HistoryQueryRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryQueryRequestResolver",
+            "path": "vmux_history::event::HistoryQueryRequestResolver",
+            "signature": "pub struct HistoryQueryRequestResolver",
+            "docs_md": "The resolver for an archived [`HistoryQueryRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryQueryRequest`",
+                "path": "vmux_history::event::HistoryQueryRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryQueryResponse",
+            "path": "vmux_history::event::HistoryQueryResponse",
+            "signature": "pub struct HistoryQueryResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "entries",
+                "signature": "entries: Vec<HistoryEntry>",
+                "docs_md": ""
+              },
+              {
+                "name": "has_more",
+                "signature": "has_more: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryQueryResponse",
+            "path": "vmux_history::event::ArchivedHistoryQueryResponse",
+            "signature": "pub struct ArchivedHistoryQueryResponse",
+            "docs_md": "An archived [`HistoryQueryResponse`]",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryResponse::request_id`]"
+              },
+              {
+                "name": "entries",
+                "signature": "entries: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryResponse::entries`]"
+              },
+              {
+                "name": "has_more",
+                "signature": "has_more: Archived",
+                "docs_md": "The archived counterpart of [`HistoryQueryResponse::has_more`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistoryQueryResponse`",
+                "path": "vmux_history::event::HistoryQueryResponse"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryQueryResponseResolver",
+            "path": "vmux_history::event::HistoryQueryResponseResolver",
+            "signature": "pub struct HistoryQueryResponseResolver",
+            "docs_md": "The resolver for an archived [`HistoryQueryResponse`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryQueryResponse`",
+                "path": "vmux_history::event::HistoryQueryResponse"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryDeleteRequest",
+            "path": "vmux_history::event::HistoryDeleteRequest",
+            "signature": "pub struct HistoryDeleteRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "url_entity_bits",
+                "signature": "url_entity_bits: u64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryDeleteRequest",
+            "path": "vmux_history::event::ArchivedHistoryDeleteRequest",
+            "signature": "pub struct ArchivedHistoryDeleteRequest",
+            "docs_md": "An archived [`HistoryDeleteRequest`]",
+            "members": [
+              {
+                "name": "url_entity_bits",
+                "signature": "url_entity_bits: Archived",
+                "docs_md": "The archived counterpart of [`HistoryDeleteRequest::url_entity_bits`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistoryDeleteRequest`",
+                "path": "vmux_history::event::HistoryDeleteRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryDeleteRequestResolver",
+            "path": "vmux_history::event::HistoryDeleteRequestResolver",
+            "signature": "pub struct HistoryDeleteRequestResolver",
+            "docs_md": "The resolver for an archived [`HistoryDeleteRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryDeleteRequest`",
+                "path": "vmux_history::event::HistoryDeleteRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryClearAllRequest",
+            "path": "vmux_history::event::HistoryClearAllRequest",
+            "signature": "pub struct HistoryClearAllRequest",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryClearAllRequest",
+            "path": "vmux_history::event::ArchivedHistoryClearAllRequest",
+            "signature": "pub struct ArchivedHistoryClearAllRequest",
+            "docs_md": "An archived [`HistoryClearAllRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryClearAllRequest`",
+                "path": "vmux_history::event::HistoryClearAllRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryClearAllRequestResolver",
+            "path": "vmux_history::event::HistoryClearAllRequestResolver",
+            "signature": "pub struct HistoryClearAllRequestResolver",
+            "docs_md": "The resolver for an archived [`HistoryClearAllRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryClearAllRequest`",
+                "path": "vmux_history::event::HistoryClearAllRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryOpenRequest",
+            "path": "vmux_history::event::HistoryOpenRequest",
+            "signature": "pub struct HistoryOpenRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "in_new_stack",
+                "signature": "in_new_stack: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistoryOpenRequest",
+            "path": "vmux_history::event::ArchivedHistoryOpenRequest",
+            "signature": "pub struct ArchivedHistoryOpenRequest",
+            "docs_md": "An archived [`HistoryOpenRequest`]",
+            "members": [
+              {
+                "name": "url",
+                "signature": "url: Archived",
+                "docs_md": "The archived counterpart of [`HistoryOpenRequest::url`]"
+              },
+              {
+                "name": "in_new_stack",
+                "signature": "in_new_stack: Archived",
+                "docs_md": "The archived counterpart of [`HistoryOpenRequest::in_new_stack`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistoryOpenRequest`",
+                "path": "vmux_history::event::HistoryOpenRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryOpenRequestResolver",
+            "path": "vmux_history::event::HistoryOpenRequestResolver",
+            "signature": "pub struct HistoryOpenRequestResolver",
+            "docs_md": "The resolver for an archived [`HistoryOpenRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistoryOpenRequest`",
+                "path": "vmux_history::event::HistoryOpenRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistorySuggestionsRequest",
+            "path": "vmux_history::event::HistorySuggestionsRequest",
+            "signature": "pub struct HistorySuggestionsRequest",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "query",
+                "signature": "query: String",
+                "docs_md": ""
+              },
+              {
+                "name": "limit",
+                "signature": "limit: u32",
+                "docs_md": ""
+              },
+              {
+                "name": "request_id",
+                "signature": "request_id: u64",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistorySuggestionsRequest",
+            "path": "vmux_history::event::ArchivedHistorySuggestionsRequest",
+            "signature": "pub struct ArchivedHistorySuggestionsRequest",
+            "docs_md": "An archived [`HistorySuggestionsRequest`]",
+            "members": [
+              {
+                "name": "query",
+                "signature": "query: Archived",
+                "docs_md": "The archived counterpart of [`HistorySuggestionsRequest::query`]"
+              },
+              {
+                "name": "limit",
+                "signature": "limit: Archived",
+                "docs_md": "The archived counterpart of [`HistorySuggestionsRequest::limit`]"
+              },
+              {
+                "name": "request_id",
+                "signature": "request_id: Archived",
+                "docs_md": "The archived counterpart of [`HistorySuggestionsRequest::request_id`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistorySuggestionsRequest`",
+                "path": "vmux_history::event::HistorySuggestionsRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistorySuggestionsRequestResolver",
+            "path": "vmux_history::event::HistorySuggestionsRequestResolver",
+            "signature": "pub struct HistorySuggestionsRequestResolver",
+            "docs_md": "The resolver for an archived [`HistorySuggestionsRequest`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistorySuggestionsRequest`",
+                "path": "vmux_history::event::HistorySuggestionsRequest"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistorySuggestionsResponse",
+            "path": "vmux_history::event::HistorySuggestionsResponse",
+            "signature": "pub struct HistorySuggestionsResponse",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: u64",
+                "docs_md": ""
+              },
+              {
+                "name": "entries",
+                "signature": "entries: Vec<HistoryEntry>",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "ArchivedHistorySuggestionsResponse",
+            "path": "vmux_history::event::ArchivedHistorySuggestionsResponse",
+            "signature": "pub struct ArchivedHistorySuggestionsResponse",
+            "docs_md": "An archived [`HistorySuggestionsResponse`]",
+            "members": [
+              {
+                "name": "request_id",
+                "signature": "request_id: Archived",
+                "docs_md": "The archived counterpart of [`HistorySuggestionsResponse::request_id`]"
+              },
+              {
+                "name": "entries",
+                "signature": "entries: Archived",
+                "docs_md": "The archived counterpart of [`HistorySuggestionsResponse::entries`]"
+              }
+            ],
+            "links": [
+              {
+                "text": "`HistorySuggestionsResponse`",
+                "path": "vmux_history::event::HistorySuggestionsResponse"
+              }
+            ]
+          },
+          {
+            "kind": "struct",
+            "name": "HistorySuggestionsResponseResolver",
+            "path": "vmux_history::event::HistorySuggestionsResponseResolver",
+            "signature": "pub struct HistorySuggestionsResponseResolver",
+            "docs_md": "The resolver for an archived [`HistorySuggestionsResponse`]",
+            "members": [],
+            "links": [
+              {
+                "text": "`HistorySuggestionsResponse`",
+                "path": "vmux_history::event::HistorySuggestionsResponse"
+              }
+            ]
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_history::prune",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "constant",
+            "name": "RETENTION_MS",
+            "path": "vmux_history::prune::RETENTION_MS",
+            "signature": "pub const RETENTION_MS",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "prune_history",
+            "path": "vmux_history::prune::prune_history",
+            "signature": "pub fn prune_history(commands: Commands<'_, '_>, visits: Query<'_, '_, (Entity, &vmux_core::CreatedAt, &vmux_core::VisitedUrl), With<vmux_core::Visit>>, urls: Query<'_, '_, (Entity, &vmux_core::LastVisitedAt), With<vmux_core::Url>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_history::query",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "frecency",
+            "path": "vmux_history::query::frecency",
+            "signature": "pub fn frecency(visit_count: u32, last_visited_at: i64, now: i64) -> f32",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "match_strength",
+            "path": "vmux_history::query::match_strength",
+            "signature": "pub fn match_strength(query: &str, url: &str, title: &str) -> f32",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "score",
+            "path": "vmux_history::query::score",
+            "signature": "pub fn score(visit_count: u32, last_visited_at: i64, now: i64, query: &str, url: &str, title: &str) -> f32",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "on_history_query_request",
+            "path": "vmux_history::query::on_history_query_request",
+            "signature": "pub fn on_history_query_request(trigger: On<'_, '_, bevy_cef::prelude::BinReceive<crate::event::HistoryQueryRequest>>, urls: Query<'_, '_, (Entity, &vmux_core::PageMetadata, &vmux_core::VisitCount, &vmux_core::LastVisitedAt), With<vmux_core::Url>>, visits: Query<'_, '_, (&vmux_core::CreatedAt, &vmux_core::VisitedUrl), With<vmux_core::Visit>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "build_entries",
+            "path": "vmux_history::query::build_entries",
+            "signature": "pub fn build_entries(query: &Option<String>, urls: &[(Entity, vmux_core::PageMetadata, vmux_core::VisitCount, vmux_core::LastVisitedAt)], visits: &[(vmux_core::CreatedAt, vmux_core::VisitedUrl)], now: i64) -> Vec<crate::event::HistoryEntry>",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "on_history_delete_request",
+            "path": "vmux_history::query::on_history_delete_request",
+            "signature": "pub fn on_history_delete_request(trigger: On<'_, '_, bevy_cef::prelude::BinReceive<crate::event::HistoryDeleteRequest>>, commands: Commands<'_, '_>, visits: Query<'_, '_, (Entity, &vmux_core::VisitedUrl), With<vmux_core::Visit>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "on_history_clear_all_request",
+            "path": "vmux_history::query::on_history_clear_all_request",
+            "signature": "pub fn on_history_clear_all_request(_trigger: On<'_, '_, bevy_cef::prelude::BinReceive<crate::event::HistoryClearAllRequest>>, commands: Commands<'_, '_>, urls: Query<'_, '_, Entity, With<vmux_core::Url>>, visits: Query<'_, '_, Entity, With<vmux_core::Visit>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "struct",
+            "name": "HistoryOpenIntent",
+            "path": "vmux_history::query::HistoryOpenIntent",
+            "signature": "pub struct HistoryOpenIntent",
+            "docs_md": "",
+            "members": [
+              {
+                "name": "url",
+                "signature": "url: String",
+                "docs_md": ""
+              },
+              {
+                "name": "in_new_stack",
+                "signature": "in_new_stack: bool",
+                "docs_md": ""
+              }
+            ],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "on_history_open_request",
+            "path": "vmux_history::query::on_history_open_request",
+            "signature": "pub fn on_history_open_request(trigger: On<'_, '_, bevy_cef::prelude::BinReceive<crate::event::HistoryOpenRequest>>, messages: ResMut<'_, bevy::ecs::message::Messages<HistoryOpenIntent>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "broadcast_history_changed",
+            "path": "vmux_history::query::broadcast_history_changed",
+            "signature": "pub fn broadcast_history_changed(changed: Query<'_, '_, (), (Changed<vmux_core::LastVisitedAt>, With<vmux_core::Url>)>, webviews: Query<'_, '_, (Entity, &bevy_cef::prelude::WebviewSource)>, browsers: NonSend<'_, bevy_cef_core::prelude::Browsers>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "on_history_suggestions_request",
+            "path": "vmux_history::query::on_history_suggestions_request",
+            "signature": "pub fn on_history_suggestions_request(trigger: On<'_, '_, bevy_cef::prelude::BinReceive<crate::event::HistorySuggestionsRequest>>, urls: Query<'_, '_, (Entity, &vmux_core::PageMetadata, &vmux_core::VisitCount, &vmux_core::LastVisitedAt), With<vmux_core::Url>>, commands: Commands<'_, '_>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_history::spawn",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "find_or_create_url",
+            "path": "vmux_history::spawn::find_or_create_url",
+            "signature": "pub fn find_or_create_url(world: &mut World, url: &str) -> Entity",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          },
+          {
+            "kind": "function",
+            "name": "spawn_visits",
+            "path": "vmux_history::spawn::spawn_visits",
+            "signature": "pub fn spawn_visits(events: bevy::ecs::message::MessageReader<'_, '_, bevy_cef_core::prelude::WebviewCommittedNavigationEvent>, commands: Commands<'_, '_>, urls: Query<'_, '_, (Entity, &vmux_core::PageMetadata, &mut vmux_core::VisitCount, &mut vmux_core::LastVisitedAt), With<vmux_core::Url>>)",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      },
+      {
+        "path": "vmux_history::transition",
+        "docs_md": "",
+        "items": [
+          {
+            "kind": "function",
+            "name": "map",
+            "path": "vmux_history::transition::map",
+            "signature": "pub fn map(core: bevy_cef_core::prelude::CefTransitionCore, qual: bevy_cef_core::prelude::CefTransitionQualifiers) -> vmux_core::TransitionType",
+            "docs_md": "",
+            "members": [],
+            "links": []
+          }
+        ],
+        "submodules": []
+      }
+    ]
+  }
+}
