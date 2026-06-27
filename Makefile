@@ -121,7 +121,7 @@ cleanup:
 # Website
 build-website-css:
 	cd website && tailwindcss -i tailwind.input.css -o public/style.css --minify
-	mkdir -p website/public/api && cp -f docs/api/*.json website/public/api/ 2>/dev/null || true
+	rm -rf website/public/api && mkdir -p website/public/api && cp docs/api/*.json website/public/api/
 
 # Regenerate the committed API model from in-code rustdoc (nightly).
 api-docs:

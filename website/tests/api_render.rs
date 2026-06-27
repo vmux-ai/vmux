@@ -26,4 +26,6 @@ fn item_renders_signature_and_docs() {
     let html = dioxus_ssr::render(&dom);
     assert!(html.contains("make"), "missing name: {html}");
     assert!(html.contains("documented function"), "missing docs: {html}");
+    assert!(html.contains("width"), "missing signature param: {html}");
+    assert!(html.contains("Widget"), "missing signature return: {html}");
 }
