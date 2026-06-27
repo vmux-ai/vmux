@@ -7,7 +7,6 @@ mod parts;
 mod platform;
 #[cfg(target_arch = "wasm32")]
 mod scroll;
-mod showcase;
 mod visit;
 
 use browser::Browser;
