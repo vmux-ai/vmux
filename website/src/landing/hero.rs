@@ -24,7 +24,7 @@ pub fn Hero() -> Element {
             div { class: "relative mx-auto max-w-2xl reveal",
                 {headline("The browser", "One prompt.", "Anything, done.")}
                 p { class: "mt-5 text-lg sm:text-xl text-text-muted max-w-xl mx-auto reveal",
-                    "The browser that gets sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch."
+                    "The browser + IDE that get sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch."
                 }
             }
             div { class: "relative mt-12 w-full", {vmux_demo()} }
