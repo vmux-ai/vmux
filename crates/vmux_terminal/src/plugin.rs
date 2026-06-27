@@ -2708,7 +2708,7 @@ fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> 
             s.kind.display_name().to_string(),
             s.kind.as_url_segment().to_string(),
         ),
-        None => ("Terminal".to_string(), String::new()),
+        None => ("Terminal".to_string(), "terminal".to_string()),
     }
 }
 
