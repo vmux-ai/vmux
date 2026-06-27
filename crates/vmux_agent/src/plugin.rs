@@ -34,10 +34,10 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserSnapshotRequest,
-    BrowserSnapshotResponse, CommandOrigin, RecordStartRequest, RecordStartResponse,
-    RecordStopRequest, RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest,
-    ScreenshotResponse, snapshot_response_to_query_result,
+    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
+    BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, NavAwaitingSnapshot,
+    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -106,6 +106,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
+            .init_resource::<NavAwaitingSnapshot>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
@@ -114,6 +115,8 @@ impl Plugin for AgentPlugin {
             .add_message::<ScreenshotResponse>()
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
+            .add_message::<BrowserScrollRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
@@ -374,6 +377,8 @@ struct AgentSpaceWriters<'w, 's> {
         ),
     >,
     user: Query<'w, 's, Entity, With<vmux_core::team::User>>,
+    browse: AgentBrowserResolve<'w, 's>,
+    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
 }
 
 fn handle_agent_tool_calls(
@@ -544,6 +549,96 @@ fn clear_agent_done(
     }
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentBrowserResolve<'w, 's> {
+    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    agent_terms: Query<
+        'w,
+        's,
+        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
+        With<AgentSession>,
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
+}
+
+impl AgentBrowserResolve<'_, '_> {
+    /// The browser pane the agent opened beside itself: a sibling leaf pane
+    /// (same parent split) that hosts a browser. Resolved from the layout tree,
+    /// never from the user's `FocusedStack`.
+    fn browser_pane_for(&self, agent_pane: Entity) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        for stack_co in self.browser_stacks.iter() {
+            let Ok(pane_co) = self.child_of.get(stack_co.get()) else {
+                continue;
+            };
+            let pane = pane_co.get();
+            if pane == agent_pane {
+                continue;
+            }
+            if let Ok(parent_co) = self.child_of.get(pane)
+                && parent_co.get() == agent_parent
+            {
+                return Some(pane);
+            }
+        }
+        None
+    }
+
+    /// The agent's own terminal pane (its stack's parent pane), from its anchor.
+    fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// Resolve the agent's browser pane from its anchor, and record it as that
+    /// agent's active pane (for its focus ring). Returns the pane entity, or
+    /// `None` if the agent has no browser pane yet (caller keeps the default).
+    fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
+        self.activate
+            .write(vmux_layout::active_panes::ActivatePane {
+                profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                active: vmux_layout::active_panes::ActiveStack {
+                    tab: None,
+                    pane: Some(pane),
+                    stack: None,
+                },
+            });
+        Some(pane)
+    }
+
+    /// Returns the explicit pane if given, else the agent's resolved browser
+    /// pane as a bare entity-bits string (the form `parse_pane_target` expects,
+    /// matching explicit MCP targets after they reach this layer). Returns
+    /// `None` if neither is available.
+    fn resolve_pane(
+        &mut self,
+        pane: &Option<String>,
+        anchor: &Option<vmux_service::protocol::ProcessId>,
+    ) -> Option<String> {
+        if pane.is_some() {
+            return pane.clone();
+        }
+        let anchor = (*anchor)?;
+        self.claim_browser_pane(anchor)
+            .map(|p| p.to_bits().to_string())
+    }
+
+    /// Same as `resolve_pane` but reads the anchor from a command's origin, for
+    /// agent browser commands (back/forward) that carry origin rather than a
+    /// query anchor.
+    fn command_pane(&mut self, pane: &Option<String>, origin: &CommandOrigin) -> Option<String> {
+        let anchor = match origin {
+            CommandOrigin::Agent { anchor, .. } => *anchor,
+            _ => None,
+        };
+        self.resolve_pane(pane, &anchor)
+    }
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -671,9 +766,39 @@ fn handle_agent_commands(
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
+                let mut pane = pane.clone();
+                if pane.is_none()
+                    && let CommandOrigin::Agent {
+                        anchor: Some(anchor),
+                        ..
+                    } = &request.origin
+                {
+                    if let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor) {
+                        pane = Some(browser_pane.to_bits().to_string());
+                    } else if let Some(agent_pane) = writers.browse.agent_pane(*anchor) {
+                        writers.open_beside.write(vmux_layout::OpenBesideRequest {
+                            pane: agent_pane,
+                            direction: None,
+                            url: url.clone(),
+                            request_id: request.request_id.0,
+                            focus: false,
+                        });
+                        continue;
+                    } else {
+                        if let Some(service) = service.as_ref() {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "browser_navigate: agent has no resolvable pane".to_string(),
+                                ),
+                            });
+                        }
+                        continue;
+                    }
+                }
                 browser_nav_writer.write(vmux_layout::BrowserNavigateRequest {
                     url: url.clone(),
-                    pane: pane.clone(),
+                    pane,
                     request_id: Some(request.request_id.0),
                 });
                 continue;
@@ -742,13 +867,13 @@ fn handle_agent_commands(
                 continue;
             }
             ServiceAgentCommand::BrowserGoBack { pane } => {
-                browser_go_back_writer
-                    .write(vmux_layout::BrowserGoBackRequest { pane: pane.clone() });
+                let pane = writers.browse.command_pane(pane, &request.origin);
+                browser_go_back_writer.write(vmux_layout::BrowserGoBackRequest { pane });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserGoForward { pane } => {
-                browser_go_forward_writer
-                    .write(vmux_layout::BrowserGoForwardRequest { pane: pane.clone() });
+                let pane = writers.browse.command_pane(pane, &request.origin);
+                browser_go_forward_writer.write(vmux_layout::BrowserGoForwardRequest { pane });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserHistorySearch { query, limit } => {
@@ -1186,8 +1311,10 @@ fn handle_agent_queries(
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
+    mut browser_scroll_writer: MessageWriter<BrowserScrollRequest>,
     mut record_start_writer: MessageWriter<RecordStartRequest>,
     mut record_stop_writer: MessageWriter<RecordStopRequest>,
+    mut browse: AgentBrowserResolve,
 ) {
     let Some(service) = service else { return };
 
@@ -1236,10 +1363,26 @@ fn handle_agent_queries(
                     pane: pane.clone(),
                 });
             }
-            AgentQuery::BrowserSnapshot { ref pane } => {
+            AgentQuery::BrowserSnapshot {
+                ref pane,
+                ref anchor,
+            } => {
                 browser_snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
-                    pane: pane.clone(),
+                    pane: browse.resolve_pane(pane, anchor),
+                });
+            }
+            AgentQuery::BrowserScroll {
+                ref pane,
+                ref to,
+                delta,
+                ref anchor,
+            } => {
+                browser_scroll_writer.write(BrowserScrollRequest {
+                    request_id: request.request_id.0,
+                    pane: browse.resolve_pane(pane, anchor),
+                    to: to.clone(),
+                    delta,
                 });
             }
             AgentQuery::RecordStart {
@@ -1330,13 +1473,25 @@ fn forward_screenshot_responses(
 fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
+    mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
 ) {
     let Some(service) = service else { return };
     for response in reader.read() {
-        service.0.send(ClientMessage::AgentQueryResponse {
-            request_id: AgentRequestId(response.request_id),
-            result: snapshot_response_to_query_result(&response.result),
-        });
+        if nav_awaiting.0.remove(&response.request_id) {
+            let result = match &response.result {
+                Ok(json) => AgentCommandResult::Text(json.clone()),
+                Err(message) => AgentCommandResult::Error(message.clone()),
+            };
+            service.0.send(ClientMessage::AgentCommandResponse {
+                request_id: AgentRequestId(response.request_id),
+                result,
+            });
+        } else {
+            service.0.send(ClientMessage::AgentQueryResponse {
+                request_id: AgentRequestId(response.request_id),
+                result: snapshot_response_to_query_result(&response.result),
+            });
+        }
     }
 }
 

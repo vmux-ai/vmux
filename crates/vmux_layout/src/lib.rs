@@ -22,6 +22,8 @@ pub mod reconcile;
 pub mod snapshot;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod active_panes;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug;

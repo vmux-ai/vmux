@@ -8,6 +8,11 @@ use crate::{AgentKind, AgentVariant, McpServerConfig};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
+const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
+commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Do ALL \
+web access via the vmux browser tools in the user's visible browser: mcp__vmux__browser_navigate (it \
+returns the page snapshot on load), then mcp__vmux__browser_scroll to read more. Omit the pane \
+argument - it targets your own browser pane. Do not look for a built-in web search.";
 
 pub struct CodexStrategy;
 
@@ -45,6 +50,13 @@ impl CliAgentStrategy for CodexStrategy {
         args.push(format!(
             "features.code_mode.direct_only_tool_namespaces=[{}]",
             quote_toml(DIRECT_ONLY_NAMESPACE)
+        ));
+        args.push("-c".into());
+        args.push("tools.web_search=false".to_string());
+        args.push("-c".into());
+        args.push(format!(
+            "developer_instructions={}",
+            quote_toml(RUN_STEER_PROMPT)
         ));
         for feature in DISABLED_FEATURES {
             args.push("--disable".into());
@@ -261,6 +273,33 @@ mod tests {
             .collect();
         assert!(disabled.contains(&"shell_tool"));
         assert!(disabled.contains(&"unified_exec"));
+    }
+
+    #[test]
+    fn build_args_disables_native_web_search() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        assert!(args.iter().any(|a| a == "tools.web_search=false"));
+    }
+
+    #[test]
+    fn build_args_steers_web_access_to_vmux_browser() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        let steer = args
+            .iter()
+            .find(|a| a.starts_with("developer_instructions="))
+            .expect("developer_instructions override present");
+        assert!(steer.contains("mcp__vmux__run"));
+        assert!(steer.contains("browser_navigate"));
     }
 
     #[test]

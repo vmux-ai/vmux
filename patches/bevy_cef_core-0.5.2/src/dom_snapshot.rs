@@ -1,9 +1,9 @@
 use crate::prelude::{IntoString, PROCESS_MESSAGE_SNAPSHOT_RESULT};
 use cef::rc::Rc;
 use cef::{
-    Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode, ImplDomvisitor, ImplFrame,
-    ImplListValue, ImplProcessMessage, ProcessId, WrapDomvisitor, process_message_create,
-    wrap_domvisitor,
+    Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode, ImplDomvisitor,
+    ImplFrame, ImplListValue, ImplProcessMessage, ProcessId, WrapDomvisitor,
+    process_message_create, wrap_domvisitor,
 };
 use cef_dll_sys::cef_process_id_t;
 
@@ -26,7 +26,7 @@ const SNAPSHOT_ATTRS: &[&str] = &[
 ];
 
 const NAME_CAP: usize = 200;
-const RAW_NODE_CAP: usize = 3000;
+const RAW_NODE_CAP: usize = 6000;
 const MAX_WALK_DEPTH: usize = 2048;
 const EMPTY_SNAPSHOT: &str = "{\"url\":\"\",\"title\":\"\",\"nodes\":[]}";
 

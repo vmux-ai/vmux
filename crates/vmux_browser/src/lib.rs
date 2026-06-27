@@ -207,6 +207,7 @@ impl Plugin for BrowserPlugin {
             )
             .add_systems(Last, refresh_active_windowed_hover)
             .init_resource::<HostFocusIntent>()
+            .init_resource::<PendingNavSnapshots>()
             .add_systems(
                 PostUpdate,
                 (
@@ -997,6 +998,61 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     }
 }
 
+/// Pick the focus-ring width + color for a windowed browser pane. The local
+/// user's ring (their accent) draws on their focused stack; each agent's ring
+/// (a distinct per-agent hue) draws on the agent's own active pane. User takes
+/// precedence when a pane is active for both.
+fn windowed_ring_for(
+    stack: Entity,
+    pane: Entity,
+    focus: &vmux_layout::stack::FocusedStack,
+    visible_pane_count: usize,
+    active_panes: &vmux_layout::active_panes::ActivePanes,
+    settings: &AppSettings,
+    scale: f32,
+) -> (f32, [f32; 3]) {
+    use vmux_layout::active_panes::ProfileId;
+    let width = settings.layout.focus_ring.width * scale;
+    let user = &settings.layout.focus_ring.color;
+    if focus.stack == Some(stack) && visible_pane_count > 1 {
+        return (width, [user.r, user.g, user.b]);
+    }
+    for (profile, active) in active_panes.0.iter() {
+        if let ProfileId::Agent(key) = profile
+            && active.pane == Some(pane)
+        {
+            return (width, agent_ring_rgb(key));
+        }
+    }
+    (0.0, [user.r, user.g, user.b])
+}
+
+/// Deterministic, distinct ring color per agent (so multiple agents read apart).
+fn agent_ring_rgb(key: &str) -> [f32; 3] {
+    let mut h: u64 = 1469598103934665603;
+    for b in key.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    hsl_to_rgb((h % 360) as f32, 0.85, 0.62)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r, g, b) = match hp as i32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    [r + m, g + m, b + m]
+}
+
 /// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
 /// by `sync_children_to_ui` (visible active pane has a real scale; inactive panes ~1e-6) to pick
 /// which native view to show. No-op for OSR webviews / non-macOS (`set_windowed_*` are no-ops).
@@ -1005,6 +1061,7 @@ fn sync_windowed_frames(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
+    active_panes: Res<vmux_layout::active_panes::ActivePanes>,
     clear_color: Res<ClearColor>,
     browser_q: Query<
         (
@@ -1078,18 +1135,16 @@ fn sync_windowed_frames(
             scale,
             all_corners,
         );
-        let focus_ring_width = if focus.stack == Some(parent) && visible_pane_count > 1 {
-            settings.layout.focus_ring.width * scale
-        } else {
-            0.0
-        };
-        let focus_ring_color = &settings.layout.focus_ring.color;
-        browsers.set_windowed_focus_ring(
-            &entity,
-            focus_ring_width,
+        let (focus_ring_width, focus_ring_rgb) = windowed_ring_for(
+            parent,
+            pane_entity,
+            &focus,
+            visible_pane_count,
+            &active_panes,
+            &settings,
             scale,
-            [focus_ring_color.r, focus_ring_color.g, focus_ring_color.b],
         );
+        browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
         let cover_rgb = clear_color.0.to_srgba();
         browsers.set_windowed_corner_cover(
             &entity,
@@ -3537,6 +3592,20 @@ pub fn handle_open_in_new_stack_requests(
     }
 }
 
+/// A pending agent-initiated in-place navigation, keyed by the target webview.
+/// Populated by `handle_browser_navigate_requests`; drained in `vmux_desktop`
+/// (`drive_pending_nav_snapshots`) once the page settles, so the navigation's
+/// agent command returns the post-load snapshot inline.
+pub struct NavPending {
+    pub request_id: [u8; 16],
+    pub started: std::time::Duration,
+    pub saw_loading: bool,
+    pub pane: Option<String>,
+}
+
+#[derive(Resource, Default)]
+pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>);
+
 pub fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -3546,6 +3615,10 @@ pub fn handle_browser_navigate_requests(
     service: Option<Res<vmux_service::client::ServiceClient>>,
     mut commands: Commands,
     mut page_open_writer: MessageWriter<PageOpenRequest>,
+    mut pending_nav: ResMut<PendingNavSnapshots>,
+    time: Res<Time>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -3556,11 +3629,45 @@ pub fn handle_browser_navigate_requests(
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                page_open_writer.write(PageOpenRequest {
-                    target: PageOpenTarget::NewStackInPane(target),
-                    url,
-                    request_id,
-                });
+                let in_place = if url.starts_with("vmux://") || url.starts_with("file:") {
+                    None
+                } else {
+                    vmux_layout::target::active_webview_for_tab(
+                        vmux_layout::stack::active_stack_in_pane(target, &pane_children, &stack_ts),
+                        &browsers,
+                        &terminals,
+                    )
+                };
+                if let Some(webview) = in_place {
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: url.clone(),
+                    });
+                    let displaced = match request_id {
+                        Some(rid) => pending_nav.0.insert(
+                            webview,
+                            NavPending {
+                                request_id: rid,
+                                started: time.elapsed(),
+                                saw_loading: false,
+                                pane: Some(target.to_bits().to_string()),
+                            },
+                        ),
+                        None => pending_nav.0.remove(&webview),
+                    };
+                    if let Some(old) = displaced {
+                        send_page_open_response(&service, Some(old.request_id), Ok(()));
+                    }
+                    if request_id.is_none() {
+                        send_page_open_response(&service, None, Ok(()));
+                    }
+                } else {
+                    page_open_writer.write(PageOpenRequest {
+                        target: PageOpenTarget::NewStackInPane(target),
+                        url,
+                        request_id,
+                    });
+                }
             } else {
                 send_page_open_response(
                     &service,
@@ -3590,7 +3697,24 @@ pub fn handle_browser_navigate_requests(
                     webview,
                     url: url.clone(),
                 });
-                send_page_open_response(&service, request_id, Ok(()));
+                let displaced = match request_id {
+                    Some(rid) => pending_nav.0.insert(
+                        webview,
+                        NavPending {
+                            request_id: rid,
+                            started: time.elapsed(),
+                            saw_loading: false,
+                            pane: focus.pane.map(|p| p.to_bits().to_string()),
+                        },
+                    ),
+                    None => pending_nav.0.remove(&webview),
+                };
+                if let Some(old) = displaced {
+                    send_page_open_response(&service, Some(old.request_id), Ok(()));
+                }
+                if request_id.is_none() {
+                    send_page_open_response(&service, None, Ok(()));
+                }
             }
         } else if let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) {
             page_open_writer.write(PageOpenRequest {
@@ -4397,10 +4521,16 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
+        let ring_fn = source
+            .split("fn windowed_ring_for")
+            .nth(1)
+            .and_then(|tail| tail.split("fn agent_ring_rgb").next())
+            .unwrap_or_default();
+
         assert!(sync_fn.contains("focus: Res<vmux_layout::stack::FocusedStack>"));
         assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
-        assert!(sync_fn.contains("focus.stack == Some(parent)"));
-        assert!(sync_fn.contains("pane_count > 1"));
+        assert!(ring_fn.contains("focus.stack == Some(stack)"));
+        assert!(ring_fn.contains("visible_pane_count > 1"));
     }
 
     #[test]
@@ -4438,8 +4568,14 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
+        let ring_fn = source
+            .split("fn windowed_ring_for")
+            .nth(1)
+            .and_then(|tail| tail.split("fn agent_ring_rgb").next())
+            .unwrap_or_default();
+
         assert!(sync_fn.contains("settings.layout.radius * scale"));
-        assert!(sync_fn.contains("settings.layout.focus_ring.width * scale"));
+        assert!(ring_fn.contains("settings.layout.focus_ring.width * scale"));
     }
 
     #[test]
@@ -5038,6 +5174,7 @@ mod tests {
                 .add_message::<vmux_setting::SettingsWriteRequest>()
                 .add_message::<vmux_space::SpaceCommandRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
+                .init_resource::<crate::PendingNavSnapshots>()
                 .configure_sets(
                     Update,
                     (

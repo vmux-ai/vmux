@@ -18,7 +18,7 @@ pub const SNAPSHOT_ATTRS: &[&str] = &[
     "checked",
 ];
 
-pub const SNAPSHOT_NODE_CAP: usize = 300;
+pub const SNAPSHOT_NODE_CAP: usize = 600;
 pub const SNAPSHOT_NAME_CAP: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,10 +31,40 @@ pub struct RawDomNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RawViewport {
+    #[serde(rename = "scrollX")]
+    pub scroll_x: i32,
+    #[serde(rename = "scrollY")]
+    pub scroll_y: i32,
+    pub width: i32,
+    pub height: i32,
+    #[serde(rename = "pageWidth")]
+    pub page_width: i32,
+    #[serde(rename = "pageHeight")]
+    pub page_height: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RawSnapshot {
     pub url: String,
     pub title: String,
     pub nodes: Vec<RawDomNode>,
+    #[serde(default)]
+    pub viewport: Option<RawViewport>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Viewport {
+    #[serde(rename = "scrollX")]
+    pub scroll_x: i32,
+    #[serde(rename = "scrollY")]
+    pub scroll_y: i32,
+    pub width: i32,
+    pub height: i32,
+    #[serde(rename = "pageWidth")]
+    pub page_width: i32,
+    #[serde(rename = "pageHeight")]
+    pub page_height: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -46,6 +76,8 @@ pub struct SnapNode {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     pub bbox: [i32; 4],
+    #[serde(rename = "inViewport", skip_serializing_if = "is_false")]
+    pub in_viewport: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub state: Vec<String>,
 }
@@ -54,6 +86,8 @@ pub struct SnapNode {
 pub struct Snapshot {
     pub url: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<Viewport>,
     pub nodes: Vec<SnapNode>,
     #[serde(skip_serializing_if = "is_false")]
     pub truncated: bool,
@@ -81,15 +115,35 @@ pub fn shape_snapshot(raw: RawSnapshot) -> Snapshot {
             name: derive_name(raw_node),
             value: derive_value(raw_node),
             bbox: raw_node.bounds,
+            in_viewport: raw
+                .viewport
+                .as_ref()
+                .map(|vp| in_viewport_of(raw_node.bounds, vp))
+                .unwrap_or(false),
             state: derive_state(raw_node),
         });
     }
     Snapshot {
         url: raw.url,
         title: raw.title,
+        viewport: raw.viewport.map(|v| Viewport {
+            scroll_x: v.scroll_x,
+            scroll_y: v.scroll_y,
+            width: v.width,
+            height: v.height,
+            page_width: v.page_width,
+            page_height: v.page_height,
+        }),
         nodes,
         truncated,
     }
+}
+
+fn in_viewport_of(bbox: [i32; 4], vp: &RawViewport) -> bool {
+    let (x, y, w, h) = (bbox[0], bbox[1], bbox[2], bbox[3]);
+    let intersects_x = x < vp.width && (x + w) > 0;
+    let intersects_y = y < vp.height && (y + h) > 0;
+    intersects_x && intersects_y
 }
 
 fn attr<'a>(node: &'a RawDomNode, key: &str) -> Option<&'a str> {
@@ -217,12 +271,46 @@ mod tests {
         }
     }
 
-    fn raw(nodes: Vec<RawDomNode>) -> RawSnapshot {
+    fn raw_vp(nodes: Vec<RawDomNode>, viewport: Option<RawViewport>) -> RawSnapshot {
         RawSnapshot {
             url: "https://example.com".to_string(),
             title: "Example".to_string(),
             nodes,
+            viewport,
         }
+    }
+
+    fn raw(nodes: Vec<RawDomNode>) -> RawSnapshot {
+        raw_vp(nodes, None)
+    }
+
+    #[test]
+    fn viewport_passes_through_and_marks_in_viewport_by_bbox() {
+        let vp = RawViewport {
+            scroll_x: 0,
+            scroll_y: 0,
+            width: 800,
+            height: 600,
+            page_width: 800,
+            page_height: 4000,
+        };
+        let on = node("button", "On", &[], [0, 10, 100, 30]);
+        let off = node("button", "Off", &[], [0, 2000, 100, 30]);
+        let snap = shape_snapshot(raw_vp(vec![on, off], Some(vp)));
+        let on_n = snap.nodes.iter().find(|n| n.name == "On").unwrap();
+        let off_n = snap.nodes.iter().find(|n| n.name == "Off").unwrap();
+        assert!(on_n.in_viewport);
+        assert!(!off_n.in_viewport);
+        let v = snap.viewport.unwrap();
+        assert_eq!(v.height, 600);
+        assert_eq!(v.page_height, 4000);
+    }
+
+    #[test]
+    fn no_viewport_means_nodes_default_in_viewport_false_and_field_absent() {
+        let snap = shape_snapshot(raw_vp(vec![node("button", "X", &[], [0, 0, 10, 10])], None));
+        assert!(snap.viewport.is_none());
+        assert!(!snap.nodes[0].in_viewport);
     }
 
     #[test]

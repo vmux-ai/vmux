@@ -8,10 +8,15 @@ use crate::client::cli::strategy::CliAgentStrategy;
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
-const DISALLOWED_TOOLS: &str = "Bash,Monitor";
-const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal";
-const RUN_STEER_PROMPT: &str = "The native Bash tool is disabled. Run ALL shell commands via the \
-mcp__vmux__run tool, which executes in a visible terminal the user can watch and take over.";
+const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
+const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
+mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll";
+const RUN_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. Run \
+ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
+over). Do ALL web access via the vmux browser tools in the user's visible browser: \
+mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
+to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
+built-in web search.";
 
 pub struct ClaudeStrategy;
 
@@ -35,6 +40,8 @@ impl CliAgentStrategy for ClaudeStrategy {
         let mut args = vec![
             "--mcp-config".to_string(),
             build_mcp_config_json(mcp),
+            "--settings".to_string(),
+            build_notify_settings_json(),
             "--disallowedTools".to_string(),
             DISALLOWED_TOOLS.to_string(),
             "--allowedTools".to_string(),
@@ -79,6 +86,21 @@ pub(crate) fn project_dir_name(cwd: &Path) -> String {
             }
         })
         .collect()
+}
+
+fn build_notify_settings_json() -> String {
+    let value = serde_json::json!({
+        "hooks": {
+            "Notification": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": "printf '\\a' > /dev/tty" }
+                    ]
+                }
+            ]
+        }
+    });
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".into())
 }
 
 fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
@@ -234,7 +256,7 @@ mod tests {
         let args = ClaudeStrategy.build_args(&mcp, None);
 
         let disallowed = args.iter().position(|a| a == "--disallowedTools").unwrap();
-        assert_eq!(args[disallowed + 1], "Bash,Monitor");
+        assert_eq!(args[disallowed + 1], "Bash,Monitor,WebSearch,WebFetch");
 
         let allowed = args.iter().position(|a| a == "--allowedTools").unwrap();
         assert!(args[allowed + 1].contains("mcp__vmux__run"));
@@ -245,6 +267,26 @@ mod tests {
             .position(|a| a == "--append-system-prompt")
             .unwrap();
         assert!(args[steer + 1].contains("mcp__vmux__run"));
+        assert!(args[steer + 1].contains("browser_navigate"));
+    }
+
+    #[test]
+    fn build_args_injects_notification_bell_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+        let settings = args.iter().position(|a| a == "--settings").unwrap();
+        let json = &args[settings + 1];
+        assert!(json.contains("Notification"));
+        assert!(json.contains("/dev/tty"));
+        let parsed: Value = serde_json::from_str(json).unwrap();
+        let cmd = parsed["hooks"]["Notification"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(cmd, "printf '\\a' > /dev/tty");
     }
 
     #[test]

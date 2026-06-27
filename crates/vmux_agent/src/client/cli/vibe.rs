@@ -49,8 +49,13 @@ impl CliAgentStrategy for VibeStrategy {
     }
 
     fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)> {
-        let json = serialize_vibe_mcp_env(mcp);
-        vec![("VIBE_MCP_SERVERS".to_string(), json)]
+        let mcp_json = serialize_vibe_mcp_env(mcp);
+        let disabled = vibe_disabled_tools(read_user_disabled_tools());
+        let disabled_json = serde_json::to_string(&disabled).unwrap_or_else(|_| "[]".to_string());
+        vec![
+            ("VIBE_MCP_SERVERS".to_string(), mcp_json),
+            ("VIBE_DISABLED_TOOLS".to_string(), disabled_json),
+        ]
     }
 
     fn discover_session(
@@ -107,6 +112,42 @@ fn serialize_vibe_mcp_env(mcp: &McpServerConfig) -> String {
         cwd: mcp.cwd.as_ref().map(|c| c.to_string_lossy().to_string()),
     };
     serde_json::to_string(&[server]).unwrap_or_else(|_| "[]".to_string())
+}
+
+const VIBE_WEB_TOOLS: [&str; 2] = ["web_search", "web_fetch"];
+
+fn vibe_config_path() -> PathBuf {
+    std::env::var("VIBE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            PathBuf::from(home).join(".vibe")
+        })
+        .join("config.toml")
+}
+
+fn parse_disabled_tools_toml(text: &str) -> Vec<String> {
+    text.parse::<toml::Table>()
+        .ok()
+        .and_then(|t| t.get("disabled_tools").cloned())
+        .and_then(|v| v.try_into::<Vec<String>>().ok())
+        .unwrap_or_default()
+}
+
+fn read_user_disabled_tools() -> Vec<String> {
+    std::fs::read_to_string(vibe_config_path())
+        .map(|t| parse_disabled_tools_toml(&t))
+        .unwrap_or_default()
+}
+
+fn vibe_disabled_tools(existing: Vec<String>) -> Vec<String> {
+    let mut out = existing;
+    for tool in VIBE_WEB_TOOLS {
+        if !out.iter().any(|t| t == tool) {
+            out.push(tool.to_string());
+        }
+    }
+    out
 }
 
 #[derive(serde::Deserialize)]
@@ -211,6 +252,53 @@ mod tests {
         if let Some(p) = prev {
             unsafe { std::env::set_var("VMUX_TEST", p) };
         }
+    }
+
+    #[test]
+    fn disabled_tools_unions_web_tools_with_existing() {
+        let out = vibe_disabled_tools(vec!["bash".to_string()]);
+        assert!(out.contains(&"bash".to_string()));
+        assert!(out.contains(&"web_search".to_string()));
+        assert!(out.contains(&"web_fetch".to_string()));
+    }
+
+    #[test]
+    fn disabled_tools_dedups_when_web_tool_already_present() {
+        let out = vibe_disabled_tools(vec!["web_search".to_string()]);
+        assert_eq!(out.iter().filter(|t| *t == "web_search").count(), 1);
+    }
+
+    #[test]
+    fn parse_disabled_from_toml_reads_array() {
+        let toml = "disabled_tools = [\"bash\", \"foo\"]\nother = 1\n";
+        assert_eq!(
+            parse_disabled_tools_toml(toml),
+            vec!["bash".to_string(), "foo".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_disabled_from_toml_defaults_empty_when_absent_or_bad() {
+        assert!(parse_disabled_tools_toml("x = 1").is_empty());
+        assert!(parse_disabled_tools_toml("not = [valid").is_empty());
+    }
+
+    #[test]
+    fn build_env_sets_disabled_tools_json_array() {
+        let mcp = McpServerConfig {
+            command: "vmux".to_string(),
+            args: vec![],
+            cwd: None,
+        };
+        let env = VibeStrategy.build_env(&mcp);
+        let val = env
+            .iter()
+            .find(|(k, _)| k == "VIBE_DISABLED_TOOLS")
+            .map(|(_, v)| v.clone())
+            .expect("VIBE_DISABLED_TOOLS present");
+        let parsed: Vec<String> = serde_json::from_str(&val).unwrap();
+        assert!(parsed.contains(&"web_search".to_string()));
+        assert!(parsed.contains(&"web_fetch".to_string()));
     }
 
     fn write_meta(

@@ -11,6 +11,7 @@
 
 mod background_lifecycle;
 mod boot_status;
+mod browser_scroll;
 mod browser_snapshot;
 mod display;
 #[cfg(target_os = "macos")]
@@ -164,6 +165,8 @@ impl Plugin for VmuxPlugin {
                 (
                     screenshot::start_screenshots,
                     screenshot::drain_screenshots,
+                    browser_snapshot::drive_pending_nav_snapshots,
+                    browser_scroll::run_scrolls,
                     browser_snapshot::start_snapshots,
                     browser_snapshot::shape_snapshot_results,
                     recording::start_recording,

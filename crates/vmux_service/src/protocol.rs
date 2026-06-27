@@ -187,6 +187,13 @@ pub enum AgentQuery {
     },
     BrowserSnapshot {
         pane: Option<String>,
+        anchor: Option<ProcessId>,
+    },
+    BrowserScroll {
+        pane: Option<String>,
+        to: Option<String>,
+        delta: Option<i32>,
+        anchor: Option<ProcessId>,
     },
     RecordStart {
         gif: bool,

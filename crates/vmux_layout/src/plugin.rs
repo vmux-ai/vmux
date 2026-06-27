@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 use vmux_core::page::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_ready};
 
+use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::focus_ring::FocusRingPlugin;
@@ -80,6 +81,7 @@ impl Plugin for LayoutPlugin {
                 TabPlugin,
                 PanePlugin,
                 StackPlugin,
+                ActivePanesPlugin,
                 FocusRingPlugin,
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
