@@ -59,12 +59,17 @@ pub struct ActivatePane { pub profile: ProfileId, pub stack: Entity }
 
 One system (`apply_active_panes`) consumes `ActivatePane` and updates `ActivePanes[profile]` (resolving tab/pane from the stack). Profiles whose target stack/pane despawns are pruned.
 
-## Migration from `FocusedStack`
+## Removal of `FocusedStack`
 
-`FocusedStack` stays as a **derived mirror of `ActivePanes[ProfileId::Local]`** so the many existing local-only consumers (OS keyboard focus, command bar, clipboard target) keep working unchanged.
+`FocusedStack` is **removed**. `ActivePanes[ProfileId::Local]` is the single source of truth for the local human's active pane — no derived mirror, no dual state (consistent with "the local human is one profile among many, not a privileged singleton").
 
-- Today `compute_focused_stack` derives focus from the global `LastActivatedAt` timeline. Change: `LastActivatedAt::now()` is stamped **only by local-human actions**. Agent open/spawn stops stamping it (they instead set their own `ActivePanes[Agent]`). So `FocusedStack` (computed from `LastActivatedAt`) becomes purely the local human's active pane, and `ActivePanes[Local]` mirrors it.
-- Consumer audit (each `FocusedStack` reader): OS keyboard focus (`host_focus`), command bar, clipboard → stay on `FocusedStack` (= local human). Focus-ring rendering → becomes per-profile (reads `ActivePanes`). Agent target resolution → reads `ActivePanes[acting agent]` via anchor.
+- `compute_focused_stack` (in `ComputeFocusSet`) writes `ActivePanes[Local]` **directly** from the `LastActivatedAt` timeline instead of populating a separate `FocusedStack` resource. `LastActivatedAt::now()` is stamped **only by local-human actions**; agent open/spawn/navigate stops stamping it and instead sets its own `ActivePanes[Agent]`. `mirror_local_active_pane` is deleted.
+- Add accessor `ActivePanes::local(&self) -> ActiveStack` (the `ProfileId::Local` entry, defaulting empty) for the common read.
+- **Consumer migration** — 41 `Res<FocusedStack>` reader sites across 9 files repoint to `ActivePanes::local()`; the `ComputeFocusSet` ordering stays (optionally rename it to reflect it now computes the local active pane). No test churn (0 references in tests).
+  - OS keyboard first-responder (`vmux_browser/host_focus.rs` — the load-bearing site), command bar, clipboard, and `vmux_layout/{archive,snapshot,stack}.rs` + `vmux_setting/plugin/view.rs` → `ActivePanes::local()`.
+  - Focus-ring rendering → per-profile (iterates `ActivePanes`).
+  - Agent target resolution (`vmux_agent/plugin.rs`, `vmux_desktop/browser_{scroll,snapshot}.rs`) → `ActivePanes[acting agent]` via anchor, never local.
+- Net: delete the `FocusedStack` resource + struct; keep `ComputeFocusSet`.
 
 ## Agent targeting (fixes the hijack)
 
