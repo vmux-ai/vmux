@@ -22,6 +22,8 @@ struct Team;
 #[derive(Component)]
 struct TeamListSent;
 
+/// Wires the team domain: spawns the user profile, emits the team-member list (user and
+/// agents) to ready views, and handles team commands.
 pub struct TeamPlugin;
 
 impl Plugin for TeamPlugin {

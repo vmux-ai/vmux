@@ -13,6 +13,8 @@ pub type OutboxQueue = Vec<(Entity, Vec<Emit>)>;
 #[derive(Resource, Clone, Default)]
 pub struct GitOutbox(pub Arc<Mutex<OutboxQueue>>);
 
+/// Wires the git bridge: runs each git request on a background thread and drains completed
+/// results back to the originating webview.
 pub struct GitPlugin;
 
 impl Plugin for GitPlugin {

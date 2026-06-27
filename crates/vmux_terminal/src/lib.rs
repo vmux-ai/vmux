@@ -1,3 +1,5 @@
+//! Terminal page: spawns and drives shell processes through the background service and
+//! renders them in a CEF + Dioxus terminal webview.
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
