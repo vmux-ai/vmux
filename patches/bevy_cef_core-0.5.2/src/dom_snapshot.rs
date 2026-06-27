@@ -1,9 +1,9 @@
 use crate::prelude::{IntoString, PROCESS_MESSAGE_SNAPSHOT_RESULT};
 use cef::rc::Rc;
 use cef::{
-    CefString, Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode,
-    ImplDomvisitor, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Context, ImplV8Value,
-    ProcessId, V8Value, WrapDomvisitor, process_message_create, wrap_domvisitor,
+    Domdocument, Domnode, Domvisitor, Frame, ImplDomdocument, ImplDomnode, ImplDomvisitor, ImplFrame,
+    ImplListValue, ImplProcessMessage, ProcessId, WrapDomvisitor, process_message_create,
+    wrap_domvisitor,
 };
 use cef_dll_sys::cef_process_id_t;
 
@@ -35,44 +35,7 @@ pub fn request_dom_snapshot(frame: &Frame, request_id: &str) {
     frame.visit_dom(Some(&mut visitor));
 }
 
-const VIEWPORT_SCRIPT: &str = "(function(){try{var d=document.documentElement||{},b=document.body||{};return [(window.scrollX||0)|0,(window.scrollY||0)|0,(window.innerWidth||0)|0,(window.innerHeight||0)|0,Math.max(d.scrollWidth||0,b.scrollWidth||0)|0,Math.max(d.scrollHeight||0,b.scrollHeight||0)|0].join(',');}catch(e){return '';}})()";
-
-fn viewport_json(frame: &Frame) -> serde_json::Value {
-    parse_viewport_from_frame(frame).unwrap_or(serde_json::Value::Null)
-}
-
-fn parse_viewport_from_frame(frame: &Frame) -> Option<serde_json::Value> {
-    let context = frame.v8_context()?;
-    let script: CefString = VIEWPORT_SCRIPT.into();
-    context.enter();
-    let mut retval: Option<V8Value> = None;
-    let ok = context.eval(Some(&script), None, 0, Some(&mut retval), None);
-    let csv = if ok != 0 {
-        retval
-            .filter(|v| v.is_string() != 0)
-            .map(|v| v.string_value().into_string())
-    } else {
-        None
-    };
-    context.exit();
-    let nums: Vec<i32> = csv?
-        .split(',')
-        .filter_map(|part| part.trim().parse::<i32>().ok())
-        .collect();
-    if nums.len() != 6 {
-        return None;
-    }
-    Some(serde_json::json!({
-        "scrollX": nums[0],
-        "scrollY": nums[1],
-        "width": nums[2],
-        "height": nums[3],
-        "pageWidth": nums[4],
-        "pageHeight": nums[5],
-    }))
-}
-
-fn build_json(frame: &Frame, document: Option<&mut Domdocument>) -> String {
+fn build_json(document: Option<&mut Domdocument>) -> String {
     let Some(document) = document else {
         return EMPTY_SNAPSHOT.to_string();
     };
@@ -86,7 +49,6 @@ fn build_json(frame: &Frame, document: Option<&mut Domdocument>) -> String {
         "url": url,
         "title": title,
         "nodes": nodes,
-        "viewport": viewport_json(frame),
     });
     serde_json::to_string(&value).unwrap_or_else(|_| EMPTY_SNAPSHOT.to_string())
 }
@@ -161,7 +123,7 @@ wrap_domvisitor! {
     }
     impl Domvisitor {
         fn visit(&self, document: Option<&mut Domdocument>) {
-            let json = build_json(&self.frame, document);
+            let json = build_json(document);
             send_result(&self.frame, &self.request_id, &json);
         }
     }
