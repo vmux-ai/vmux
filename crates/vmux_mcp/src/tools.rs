@@ -387,6 +387,26 @@ to start at; limit is the number of lines (default: the whole file)."
     }
 }
 
+fn grep_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "grep".into(),
+        description: "Search files with ripgrep and open each matching file in the vmux editor \
+beside YOUR pane, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
+run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
+regex; path is an absolute directory or file to search (default: the current working directory)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "additionalProperties": false,
+            "properties": {
+                "query": {"type": "string"},
+                "path": {"type": "string"}
+            }
+        }),
+    }
+}
+
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
@@ -583,6 +603,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(open_page_definition());
     defs.push(open_file_definition());
     defs.push(read_file_definition());
+    defs.push(grep_definition());
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
@@ -1500,6 +1521,7 @@ mod tests {
         assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
         assert!(tool_definitions().iter().any(|d| d.name == "run"));
         assert!(tool_definitions().iter().any(|d| d.name == "read_file"));
+        assert!(tool_definitions().iter().any(|d| d.name == "grep"));
     }
 
     #[test]

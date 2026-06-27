@@ -114,6 +114,10 @@ async fn tool_call_result(
         return read_file_result(&arguments, anchor).await;
     }
 
+    if name == "grep" {
+        return grep_result(&arguments, anchor).await;
+    }
+
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
         crate::tools::DispatchTarget::Command(AgentCommand::Run {
             anchor,
@@ -175,6 +179,94 @@ async fn read_file_result(
         .await;
     }
     let text = slice_lines(&content, offset, limit);
+    Ok(json!({ "content": [{"type": "text", "text": text}] }))
+}
+
+const GREP_MAX_FILES: usize = 10;
+const GREP_MAX_LINES: usize = 200;
+
+async fn grep_result(
+    arguments: &Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
+    let query = arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or("grep.query is required")?;
+    let search_path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+
+    let output = std::process::Command::new("rg")
+        .args(["--json", "--", query, search_path])
+        .output()
+        .map_err(|e| format!("grep: cannot run rg (is ripgrep installed?): {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let mut order: Vec<String> = Vec::new();
+    let mut first_line: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut lines_out: Vec<String> = Vec::new();
+    for line in stdout.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("match") {
+            continue;
+        }
+        let Some(data) = v.get("data") else { continue };
+        let path = data
+            .get("path")
+            .and_then(|p| p.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if path.is_empty() {
+            continue;
+        }
+        let lineno = data.get("line_number").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let text = data
+            .get("lines")
+            .and_then(|l| l.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim_end();
+        if !first_line.contains_key(path) {
+            first_line.insert(path.to_string(), lineno);
+            order.push(path.to_string());
+        }
+        if lines_out.len() < GREP_MAX_LINES {
+            lines_out.push(format!("{path}:{lineno}: {text}"));
+        }
+    }
+
+    if order.is_empty() {
+        return Ok(
+            json!({ "content": [{"type": "text", "text": format!("no matches for {query:?}")}] }),
+        );
+    }
+
+    if let Some(anchor) = anchor {
+        for file in order.iter().take(GREP_MAX_FILES) {
+            let Ok(abs) = std::fs::canonicalize(file) else {
+                continue;
+            };
+            let _ = run_agent_command(
+                AgentCommand::FileTouched {
+                    anchor,
+                    path: abs.to_string_lossy().to_string(),
+                    line: first_line.get(file).copied(),
+                    kind: FileTouchKind::Read,
+                },
+                Some(anchor),
+            )
+            .await;
+        }
+    }
+
+    let mut text = lines_out.join("\n");
+    if order.len() > GREP_MAX_FILES {
+        text.push_str(&format!(
+            "\n\u{2026} opened first {GREP_MAX_FILES} of {} matching files",
+            order.len()
+        ));
+    }
     Ok(json!({ "content": [{"type": "text", "text": text}] }))
 }
 

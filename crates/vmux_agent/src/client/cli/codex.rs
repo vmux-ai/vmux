@@ -11,7 +11,8 @@ const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
 const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
 commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
-text) - do NOT cat/sed/head/tail a file via run. Do ALL web access via the vmux browser tools in the \
+text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
+opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Do ALL web access via the vmux browser tools in the \
 user's visible browser: mcp__vmux__browser_navigate (it returns the page snapshot on load), then \
 mcp__vmux__browser_scroll to read more. Omit the pane argument - it targets your own browser pane. \
 Do not look for a built-in web search.";
