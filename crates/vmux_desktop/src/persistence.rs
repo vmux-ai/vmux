@@ -147,8 +147,17 @@ fn mark_dirty_on_change(
     }
 }
 
-fn auto_save_system(time: Res<Time>, mut auto_save: ResMut<AutoSave>, mut commands: Commands) {
+fn auto_save_system(
+    time: Res<Time>,
+    mut auto_save: ResMut<AutoSave>,
+    spaces: Query<(), With<Space>>,
+    mut commands: Commands,
+) {
     auto_save.periodic.tick(time.delta());
+
+    if spaces.is_empty() {
+        return;
+    }
 
     if auto_save.dirty {
         auto_save.debounce.tick(time.delta());
@@ -210,6 +219,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
 /// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(
     active: Res<ActiveSpace>,
+    registry: Res<AppTypeRegistry>,
     mut restore: ResMut<crate::boot_status::RestoreComplete>,
     mut commands: Commands,
 ) {
@@ -221,6 +231,10 @@ pub(crate) fn load_space_on_startup(
     }
     let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
+    let removed_incompatible = {
+        let registry = registry.read();
+        remove_incompatible_store_if_needed(&path, &registry)
+    };
     let schema_outdated = path.exists() && !store_schema_is_current();
     if schema_outdated {
         warn!("Store schema outdated; resetting {:?}", path);
@@ -231,7 +245,7 @@ pub(crate) fn load_space_on_startup(
     }
     // Never load a schema-incompatible store, even if deletion failed above —
     // loading it would hit deserialization errors / unknown component types.
-    let exists = path.exists() && !removed_stale && !schema_outdated;
+    let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading space from {:?}", path);
@@ -252,6 +266,43 @@ fn remove_stale_space_if_needed(path: &Path) -> bool {
     warn!("Removing stale store from {:?}", path);
     let _ = std::fs::remove_file(path);
     true
+}
+
+fn remove_incompatible_store_if_needed(
+    path: &Path,
+    registry: &bevy::reflect::TypeRegistry,
+) -> bool {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if !space_has_unregistered_types(&body, registry) {
+        return false;
+    }
+    warn!(
+        "Removing incompatible store (unregistered component types) from {:?}",
+        path
+    );
+    let _ = std::fs::remove_file(path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::remove_file(parent.join("store.version"));
+    }
+    true
+}
+
+fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
+    component_type_path_keys(body).any(|path| registry.get_with_type_path(path).is_none())
+}
+
+fn component_type_path_keys(body: &str) -> impl Iterator<Item = &str> {
+    body.lines().filter_map(|line| {
+        let rest = line.trim_start().strip_prefix('"')?;
+        let (key, after) = rest.split_once('"')?;
+        if key.contains("::") && after.trim_start().starts_with(':') {
+            Some(key)
+        } else {
+            None
+        }
+    })
 }
 
 fn space_is_stale(body: &str) -> bool {
@@ -654,22 +705,26 @@ mod tests {
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
         old_home: Option<std::ffi::OsString>,
+        old_tmpdir: Option<std::ffi::OsString>,
     }
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = ENV_LOCK.lock().expect("env lock");
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let old_home = std::env::var_os("HOME");
+            let old_tmpdir = std::env::var_os("TMPDIR");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&home);
             std::fs::create_dir_all(&home).expect("create temp home");
             unsafe {
                 std::env::set_var("HOME", &home);
+                std::env::set_var("TMPDIR", &home);
             }
             Self {
                 _guard: guard,
                 old_home,
+                old_tmpdir,
             }
         }
     }
@@ -677,10 +732,13 @@ mod tests {
     impl Drop for HomeEnvGuard {
         fn drop(&mut self) {
             unsafe {
-                if let Some(home) = &self.old_home {
-                    std::env::set_var("HOME", home);
-                } else {
-                    std::env::remove_var("HOME");
+                match &self.old_home {
+                    Some(home) => std::env::set_var("HOME", home),
+                    None => std::env::remove_var("HOME"),
+                }
+                match &self.old_tmpdir {
+                    Some(tmpdir) => std::env::set_var("TMPDIR", tmpdir),
+                    None => std::env::remove_var("TMPDIR"),
                 }
             }
         }
@@ -1096,5 +1154,173 @@ mod tests {
         assert!(remove_stale_space_if_needed(&path));
         assert!(!path.exists());
         assert!(space_dir.exists());
+    }
+
+    fn registry_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin);
+        app
+    }
+
+    fn store_body_with_key(key: &str) -> String {
+        format!(
+            "(\n  resources: {{}},\n  entities: {{\n    1: (\n      components: {{\n        \"{key}\": (),\n      }},\n    ),\n  }},\n)\n"
+        )
+    }
+
+    #[test]
+    fn store_with_unregistered_component_type_is_incompatible() {
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let body = store_body_with_key("vmux_desktop::ghost::DoesNotExist");
+        assert!(space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn store_with_registered_component_types_is_compatible() {
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let body = store_body_with_key(key);
+        assert!(!space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn incompatible_store_is_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+        std::fs::write(dir.path().join("store.version"), "2").expect("write version");
+        std::fs::write(
+            &path,
+            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
+        )
+        .expect("write store");
+
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(remove_incompatible_store_if_needed(&path, &registry));
+        assert!(!path.exists());
+        assert!(!dir.path().join("store.version").exists());
+    }
+
+    #[test]
+    fn compatible_store_is_kept_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        std::fs::write(&path, store_body_with_key(key)).expect("write store");
+
+        assert!(!remove_incompatible_store_if_needed(&path, &registry));
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn incompatible_store_resets_layout_on_startup() {
+        let _home = HomeEnvGuard::use_temp_home("incompatible-store-resets-layout-on-startup");
+        let path = store_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("store dir");
+        }
+        std::fs::write(
+            &path,
+            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
+        )
+        .expect("write store");
+        std::fs::write(store_version_path(), STORE_SCHEMA_VERSION.to_string())
+            .expect("write version");
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .insert_resource(ActiveSpace {
+                record: vmux_space::model::bootstrap_space_record(),
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_plugins(PersistencePlugin);
+        app.world_mut().spawn(Main);
+        app.world_mut().spawn(PrimaryWindow);
+        app.update();
+
+        assert!(
+            !path.exists(),
+            "incompatible store should be removed on startup"
+        );
+        assert!(
+            !store_version_path().exists(),
+            "store.version should be removed with the incompatible store"
+        );
+        let spaces = app.world_mut().query::<&Space>().iter(app.world()).count();
+        assert_eq!(spaces, 1, "a fresh space should be spawned after reset");
+    }
+
+    #[test]
+    fn auto_save_system_skips_save_without_space() {
+        let _home = HomeEnvGuard::use_temp_home("auto-save-system-skips-without-space");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .insert_resource(AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+            })
+            .add_observer(save_on_default_event)
+            .add_systems(Update, auto_save_system);
+        app.world_mut().spawn((
+            Save,
+            WindowGeometry {
+                fullscreen: false,
+                position: None,
+                size: None,
+            },
+        ));
+        app.update();
+        app.update();
+        assert!(
+            !store_path().exists(),
+            "auto_save must skip when no Space exists"
+        );
+    }
+
+    #[test]
+    fn auto_save_system_saves_with_space() {
+        let _home = HomeEnvGuard::use_temp_home("auto-save-system-saves-with-space");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .insert_resource(AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+            })
+            .add_observer(save_on_default_event)
+            .add_systems(Update, auto_save_system);
+        app.world_mut().spawn((
+            Save,
+            Space,
+            SpaceId("space-1".to_string()),
+            WindowGeometry {
+                fullscreen: false,
+                position: None,
+                size: None,
+            },
+        ));
+        app.update();
+        app.update();
+        assert!(
+            store_path().exists(),
+            "auto_save must save when a Space exists"
+        );
     }
 }
