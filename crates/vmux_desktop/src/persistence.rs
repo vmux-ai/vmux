@@ -705,22 +705,26 @@ mod tests {
     struct HomeEnvGuard {
         _guard: std::sync::MutexGuard<'static, ()>,
         old_home: Option<std::ffi::OsString>,
+        old_tmpdir: Option<std::ffi::OsString>,
     }
 
     impl HomeEnvGuard {
         fn use_temp_home(name: &str) -> Self {
-            let guard = ENV_LOCK.lock().expect("env lock");
+            let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let old_home = std::env::var_os("HOME");
+            let old_tmpdir = std::env::var_os("TMPDIR");
             let home =
                 std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&home);
             std::fs::create_dir_all(&home).expect("create temp home");
             unsafe {
                 std::env::set_var("HOME", &home);
+                std::env::set_var("TMPDIR", &home);
             }
             Self {
                 _guard: guard,
                 old_home,
+                old_tmpdir,
             }
         }
     }
@@ -728,10 +732,13 @@ mod tests {
     impl Drop for HomeEnvGuard {
         fn drop(&mut self) {
             unsafe {
-                if let Some(home) = &self.old_home {
-                    std::env::set_var("HOME", home);
-                } else {
-                    std::env::remove_var("HOME");
+                match &self.old_home {
+                    Some(home) => std::env::set_var("HOME", home),
+                    None => std::env::remove_var("HOME"),
+                }
+                match &self.old_tmpdir {
+                    Some(tmpdir) => std::env::set_var("TMPDIR", tmpdir),
+                    None => std::env::remove_var("TMPDIR"),
                 }
             }
         }
