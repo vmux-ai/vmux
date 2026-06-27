@@ -623,6 +623,17 @@ impl AgentBrowserResolve<'_, '_> {
         self.claim_browser_pane(anchor)
             .map(|p| p.to_bits().to_string())
     }
+
+    /// Same as `resolve_pane` but reads the anchor from a command's origin, for
+    /// agent browser commands (back/forward) that carry origin rather than a
+    /// query anchor.
+    fn command_pane(&mut self, pane: &Option<String>, origin: &CommandOrigin) -> Option<String> {
+        let anchor = match origin {
+            CommandOrigin::Agent { anchor, .. } => *anchor,
+            _ => None,
+        };
+        self.resolve_pane(pane, &anchor)
+    }
 }
 
 fn handle_agent_commands(
@@ -847,13 +858,13 @@ fn handle_agent_commands(
                 continue;
             }
             ServiceAgentCommand::BrowserGoBack { pane } => {
-                browser_go_back_writer
-                    .write(vmux_layout::BrowserGoBackRequest { pane: pane.clone() });
+                let pane = writers.browse.command_pane(pane, &request.origin);
+                browser_go_back_writer.write(vmux_layout::BrowserGoBackRequest { pane });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserGoForward { pane } => {
-                browser_go_forward_writer
-                    .write(vmux_layout::BrowserGoForwardRequest { pane: pane.clone() });
+                let pane = writers.browse.command_pane(pane, &request.origin);
+                browser_go_forward_writer.write(vmux_layout::BrowserGoForwardRequest { pane });
                 AgentCommandResult::Ok
             }
             ServiceAgentCommand::BrowserHistorySearch { query, limit } => {

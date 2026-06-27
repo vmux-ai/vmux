@@ -40,6 +40,8 @@ impl CliAgentStrategy for ClaudeStrategy {
         let mut args = vec![
             "--mcp-config".to_string(),
             build_mcp_config_json(mcp),
+            "--settings".to_string(),
+            build_notify_settings_json(),
             "--disallowedTools".to_string(),
             DISALLOWED_TOOLS.to_string(),
             "--allowedTools".to_string(),
@@ -84,6 +86,21 @@ pub(crate) fn project_dir_name(cwd: &Path) -> String {
             }
         })
         .collect()
+}
+
+fn build_notify_settings_json() -> String {
+    let value = serde_json::json!({
+        "hooks": {
+            "Notification": [
+                {
+                    "hooks": [
+                        { "type": "command", "command": "printf '\\a' > /dev/tty" }
+                    ]
+                }
+            ]
+        }
+    });
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".into())
 }
 
 fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
@@ -251,6 +268,25 @@ mod tests {
             .unwrap();
         assert!(args[steer + 1].contains("mcp__vmux__run"));
         assert!(args[steer + 1].contains("browser_navigate"));
+    }
+
+    #[test]
+    fn build_args_injects_notification_bell_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+        let settings = args.iter().position(|a| a == "--settings").unwrap();
+        let json = &args[settings + 1];
+        assert!(json.contains("Notification"));
+        assert!(json.contains("/dev/tty"));
+        let parsed: Value = serde_json::from_str(json).unwrap();
+        let cmd = parsed["hooks"]["Notification"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(cmd, "printf '\\a' > /dev/tty");
     }
 
     #[test]
