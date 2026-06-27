@@ -172,6 +172,8 @@ async fn read_file_result(
                 anchor,
                 path: path.to_string(),
                 line: offset,
+                col: None,
+                end_col: None,
                 kind: FileTouchKind::Read,
             },
             Some(anchor),
@@ -203,6 +205,8 @@ async fn grep_result(
 
     let mut order: Vec<String> = Vec::new();
     let mut first_line: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut first_cols: std::collections::HashMap<String, (u32, u32)> =
+        std::collections::HashMap::new();
     let mut lines_out: Vec<String> = Vec::new();
     for line in stdout.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
@@ -229,6 +233,15 @@ async fn grep_result(
             .trim_end();
         if !first_line.contains_key(path) {
             first_line.insert(path.to_string(), lineno);
+            if let Some(sm) = data
+                .get("submatches")
+                .and_then(|s| s.as_array())
+                .and_then(|a| a.first())
+            {
+                let s = sm.get("start").and_then(Value::as_u64).unwrap_or(0) as u32;
+                let e = sm.get("end").and_then(Value::as_u64).unwrap_or(0) as u32;
+                first_cols.insert(path.to_string(), (s, e));
+            }
             order.push(path.to_string());
         }
         if lines_out.len() < GREP_MAX_LINES {
@@ -252,6 +265,8 @@ async fn grep_result(
                     anchor,
                     path: abs.to_string_lossy().to_string(),
                     line: first_line.get(file).copied(),
+                    col: first_cols.get(file).map(|c| c.0),
+                    end_col: first_cols.get(file).map(|c| c.1),
                     kind: FileTouchKind::Read,
                 },
                 Some(anchor),

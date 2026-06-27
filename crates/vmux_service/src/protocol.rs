@@ -152,6 +152,10 @@ pub enum AgentCommand {
         anchor: ProcessId,
         path: String,
         line: Option<u32>,
+        /// 0-based start/end columns of the match on `line`, for highlighting
+        /// (e.g. a grep hit). `None` = no column highlight (plain open/scroll).
+        col: Option<u32>,
+        end_col: Option<u32>,
         kind: FileTouchKind,
     },
 }
@@ -829,6 +833,8 @@ mod tests {
             anchor: ProcessId::new(),
             path: "/abs/x.rs".into(),
             line: Some(42),
+            col: Some(4),
+            end_col: Some(12),
             kind: FileTouchKind::Edit,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
@@ -841,6 +847,8 @@ mod tests {
             anchor: ProcessId::new(),
             path: "  ".into(),
             line: None,
+            col: None,
+            end_col: None,
             kind: FileTouchKind::Read,
         };
         assert!(validate_agent_command(&empty).is_err());

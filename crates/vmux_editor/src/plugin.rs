@@ -202,11 +202,18 @@ pub fn handle_file_page_open(
             });
             continue;
         };
+        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
+        let pending = parse_goto_fragment(&task.url);
         clear_stack_children(task.stack, &children_q, &mut commands);
-        commands.spawn((
-            new_file_view_bundle(&task.url, path, &mut meshes, &mut webview_mt),
-            ChildOf(task.stack),
-        ));
+        let view = commands
+            .spawn((
+                new_file_view_bundle(&clean_url, path, &mut meshes, &mut webview_mt),
+                ChildOf(task.stack),
+            ))
+            .id();
+        if let Some(pg) = pending {
+            commands.entity(view).insert(pg);
+        }
         commands.entity(entity).insert(PageOpenHandled);
     }
 }
@@ -1220,6 +1227,29 @@ fn on_file_hover_request(
 struct PendingGoto {
     line: u32,
     utf16_col: u32,
+    /// When set, select from `utf16_col` to this column on `line` (highlights a
+    /// match); otherwise just place the caret.
+    select_end_col: Option<u32>,
+}
+
+/// Parse an editor goto fragment from a `file://` URL: `#L<line>` (1-based) or
+/// `#L<line>:<col>-<end>` (0-based cols, to highlight a match).
+fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
+    let body = url.split_once('#')?.1.strip_prefix('L')?;
+    let (line_s, sel) = match body.split_once(':') {
+        Some((l, r)) => (l, Some(r)),
+        None => (body, None),
+    };
+    let line = line_s.parse::<u32>().ok()?.saturating_sub(1);
+    let (utf16_col, select_end_col) = match sel.and_then(|r| r.split_once('-')) {
+        Some((s, e)) => (s.parse().unwrap_or(0), e.parse::<u32>().ok()),
+        None => (0, None),
+    };
+    Some(PendingGoto {
+        line,
+        utf16_col,
+        select_end_col,
+    })
 }
 
 fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
@@ -1410,6 +1440,7 @@ fn apply_goto(
                 .insert(PendingGoto {
                     line: g.line,
                     utf16_col: g.utf16_col,
+                    select_end_col: None,
                 });
         }
     }
@@ -1428,6 +1459,22 @@ fn apply_pending_goto(
 ) {
     for (entity, mut edit, mut vp, keymap, pg) in &mut q {
         goto_caret(&mut edit, pg.line, pg.utf16_col, &mut vp);
+        if let Some(end) = pg.select_end_col {
+            let line = (pg.line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
+            let lt: String = edit
+                .core
+                .buffer
+                .rope
+                .line(line)
+                .chars()
+                .filter(|c| *c != '\n' && *c != '\r')
+                .collect();
+            let s = crate::lsp::manager::utf16_to_char_col(&lt, pg.utf16_col) as usize;
+            let e = crate::lsp::manager::utf16_to_char_col(&lt, end) as usize;
+            let a = edit.core.buffer.coords_to_char(line, s);
+            let b = edit.core.buffer.coords_to_char(line, e);
+            edit.core.selections = vec![Selection { anchor: a, head: b }];
+        }
         let vpc = *vp;
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
         emit_cursor(
@@ -1587,6 +1634,16 @@ impl Plugin for EditorPlugin {
 mod edit_flow_tests {
     use super::*;
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn parse_goto_fragment_line_and_select() {
+        let g = parse_goto_fragment("file:///a/b.rs#L10").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 0, None));
+        let g = parse_goto_fragment("file:///a/b.rs#L10:5-12").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 5, Some(12)));
+        assert!(parse_goto_fragment("file:///a/b.rs").is_none());
+        assert!(parse_goto_fragment("file:///a/b.rs#x").is_none());
+    }
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {

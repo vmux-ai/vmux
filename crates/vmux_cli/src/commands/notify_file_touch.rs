@@ -60,6 +60,8 @@ pub async fn run(anchor: Option<String>) -> io::Result<()> {
                 anchor,
                 path,
                 line,
+                col: None,
+                end_col: None,
                 kind,
             },
         })

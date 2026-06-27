@@ -688,6 +688,21 @@ impl AgentFileResolve<'_, '_> {
     }
 }
 
+/// Build the `file://` URL for a touched file, encoding an optional goto/select
+/// as a fragment the editor understands: `#L<line>` (scroll) or
+/// `#L<line>:<col>-<end>` (scroll + highlight the match). `line` is 1-based;
+/// `col`/`end_col` are 0-based.
+fn file_touch_url(path: &str, line: Option<u32>, col: Option<u32>, end_col: Option<u32>) -> String {
+    let mut url = format!("file://{path}");
+    if let Some(l) = line {
+        url.push_str(&format!("#L{l}"));
+        if let (Some(c), Some(e)) = (col, end_col) {
+            url.push_str(&format!(":{c}-{e}"));
+        }
+    }
+    url
+}
+
 /// On an agent file read/edit, open the file in a `file://` pane beside that
 /// agent and record it as the agent's active pane (its focus ring). The first
 /// file spirals a new pane; later reads stack as new tabs on top of that pane
@@ -704,7 +719,15 @@ fn handle_agent_file_touch(
         return;
     }
     for request in reader.read() {
-        let ServiceAgentCommand::FileTouched { anchor, path, .. } = &request.command else {
+        let ServiceAgentCommand::FileTouched {
+            anchor,
+            path,
+            line,
+            col,
+            end_col,
+            ..
+        } = &request.command
+        else {
             continue;
         };
         let Some(agent_pane) = resolve.agent_pane(*anchor) else {
@@ -714,7 +737,7 @@ fn handle_agent_file_touch(
         resolve.open_beside.write(vmux_layout::OpenBesideRequest {
             pane: agent_pane,
             direction: None,
-            url: format!("file://{path}"),
+            url: file_touch_url(path, *line, *col, *end_col),
             request_id: request.request_id.0,
             focus: existing.is_some(),
         });
@@ -2254,6 +2277,22 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
+
+    #[test]
+    fn file_touch_url_builds_goto_fragment() {
+        assert_eq!(
+            file_touch_url("/a/b.rs", None, None, None),
+            "file:///a/b.rs"
+        );
+        assert_eq!(
+            file_touch_url("/a/b.rs", Some(10), None, None),
+            "file:///a/b.rs#L10"
+        );
+        assert_eq!(
+            file_touch_url("/a/b.rs", Some(10), Some(5), Some(12)),
+            "file:///a/b.rs#L10:5-12"
+        );
+    }
 
     fn bell_test_app() -> App {
         let mut app = App::new();
