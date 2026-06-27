@@ -46,7 +46,7 @@ pub fn Visit() -> Element {
                                     div { class: "flex items-end gap-2",
                                         {avatar_bot()}
                                         div { class: "rounded-xl rounded-bl-sm bg-surface/80 px-3 py-2 text-[12px] text-text",
-                                            "Tests pass — ship it?"
+                                            "All done — ship it?"
                                         }
                                     }
                                     div { class: "flex items-end justify-end gap-2",
