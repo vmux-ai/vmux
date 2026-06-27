@@ -98,7 +98,7 @@ impl Plugin for CommandBarInputPlugin {
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
-            )>::for_hosts(&["command-bar"]))
+            )>::for_hosts(&["command-bar", "home"]))
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
@@ -567,23 +567,8 @@ fn handle_open_command_bar(
     let spaces_snapshot = snapshot_params.p1().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
     let agents_snap = snapshot_params.p0().clone();
-    let app_agent_entries: Vec<AppAgentEntry> = agents_snap
-        .strategies
-        .iter()
-        .map(|s| AppAgentEntry {
-            id: app_agent_id(&s.provider, &s.model),
-            name: format!("New {}/{} chat (App)", s.provider, s.model),
-        })
-        .collect();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
-    let mut pages = snapshot_params.p5().pages.clone();
-    pages.extend(agent_pages());
-    let history_shortcut = command_shortcut("browser_open_history");
-    if !history_shortcut.is_empty()
-        && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
-    {
-        page.shortcut = history_shortcut;
-    }
+    let pages_snap = snapshot_params.p5().clone();
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -800,58 +785,17 @@ fn handle_open_command_bar(
             .unwrap_or_default()
     };
 
-    // Gather all tabs
-    let active_tab = active_tab_param.get();
-    let mut bar_tabs = Vec::new();
-    if let Some(active_tab_e) = active_tab {
-        let (_, _, active_stack) = focused_stack(
-            active_tab_param.get(),
-            &all_children,
-            &leaf_panes,
-            &pane_ts,
-            &pane_children,
-            &stack_ts,
-        );
-        let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
-        let mut tab_panes = Vec::new();
-        collect_leaf_panes(active_tab_e, &all_children, &leaf_panes, &mut tab_panes);
-        for &pane_e in &tab_panes {
-            let is_active_pane = active_pane == Some(pane_e);
-            if let Ok(children) = pane_children.get(pane_e) {
-                let mut tab_index = 0usize;
-                for child in children.iter() {
-                    if !stack_q.contains(child) {
-                        continue;
-                    }
-                    let stack_is_active = active_stack == Some(child) && is_active_pane;
-                    if let Ok(tab_kids) = all_children.get(child) {
-                        for browser_e in tab_kids.iter() {
-                            if let Ok(meta) = browser_meta.get(browser_e) {
-                                bar_tabs.push(CommandBarTab {
-                                    title: meta.title.clone(),
-                                    url: meta.url.clone(),
-                                    pane_id: pane_e.to_bits(),
-                                    tab_index: tab_index as u32,
-                                    is_active: stack_is_active,
-                                });
-                            }
-                        }
-                    }
-                    tab_index += 1;
-                }
-            }
-        }
-    }
-
-    // Build command list
-    let bar_commands: Vec<CommandBarCommandEntry> = command_list(app_agent_entries)
-        .into_iter()
-        .map(|e| CommandBarCommandEntry {
-            id: e.id,
-            name: e.name,
-            shortcut: e.shortcut,
-        })
-        .collect();
+    let bar_tabs = gather_command_bar_tabs(
+        active_tab_param.get(),
+        &all_children,
+        &leaf_panes,
+        &pane_ts,
+        &pane_children,
+        &stack_ts,
+        &stack_q,
+        &browser_meta,
+        &child_of_q,
+    );
 
     let has_browser = browsers.has_browser(modal_e);
     let host_emit_ready = browsers.host_emit_ready(&modal_e);
@@ -875,25 +819,6 @@ fn handle_open_command_bar(
         return;
     }
 
-    let bar_spaces = spaces_snapshot
-        .spaces
-        .iter()
-        .map(|s| {
-            let is_active = s.id == spaces_snapshot.active_space_id;
-            CommandBarSpace {
-                id: s.id.clone(),
-                name: s.name.clone(),
-                profile: s.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    active_stack_count as u32
-                } else {
-                    0
-                },
-            }
-        })
-        .collect();
-
     let open_id = now_millis() as u64;
     let reveal_start_frames = command_bar_reveal_start_frames(
         modal_pending_reveal.is_some_and(|pending| pending.open_id == 0),
@@ -905,16 +830,17 @@ fn handle_open_command_bar(
     } else {
         None
     };
-    let payload = command_bar_open_payload(
+    let payload = build_command_bar_open_payload(
         open_id,
         native_windowed,
         space_name,
         current_url,
-        bar_spaces,
+        &spaces_snapshot,
+        &agents_snap,
+        &pages_snap,
+        active_stack_count,
         bar_tabs,
-        bar_commands,
         target,
-        pages,
     );
     let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
     let payload_bytes = event.payload.clone();
@@ -980,6 +906,142 @@ fn command_bar_open_payload(
         pages,
         target,
     }
+}
+
+#[derive(SystemParam)]
+pub(crate) struct TabGatherParams<'w, 's> {
+    pub active_tab: ActiveTabParam<'w, 's>,
+    pub all_children: Query<'w, 's, &'static Children>,
+    pub leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
+    pub pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
+    pub pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    pub stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
+    pub stack_q: Query<'w, 's, Entity, With<Stack>>,
+    pub browser_meta: Query<'w, 's, &'static PageMetadata, With<Browser>>,
+    pub child_of_q: Query<'w, 's, &'static ChildOf>,
+}
+
+pub(crate) fn gather_command_bar_tabs(
+    active_tab: Option<Entity>,
+    all_children: &Query<&Children>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+    stack_q: &Query<Entity, With<Stack>>,
+    browser_meta: &Query<&PageMetadata, With<Browser>>,
+    child_of_q: &Query<&ChildOf>,
+) -> Vec<CommandBarTab> {
+    let mut bar_tabs = Vec::new();
+    let Some(active_tab_e) = active_tab else {
+        return bar_tabs;
+    };
+    let (_, _, active_stack) = focused_stack(
+        active_tab,
+        all_children,
+        leaf_panes,
+        pane_ts,
+        pane_children,
+        stack_ts,
+    );
+    let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
+    let mut tab_panes = Vec::new();
+    collect_leaf_panes(active_tab_e, all_children, leaf_panes, &mut tab_panes);
+    for &pane_e in &tab_panes {
+        let is_active_pane = active_pane == Some(pane_e);
+        let Ok(children) = pane_children.get(pane_e) else {
+            continue;
+        };
+        let mut tab_index = 0usize;
+        for child in children.iter() {
+            if !stack_q.contains(child) {
+                continue;
+            }
+            let stack_is_active = active_stack == Some(child) && is_active_pane;
+            if let Ok(tab_kids) = all_children.get(child) {
+                for browser_e in tab_kids.iter() {
+                    if let Ok(meta) = browser_meta.get(browser_e) {
+                        bar_tabs.push(CommandBarTab {
+                            title: meta.title.clone(),
+                            url: meta.url.clone(),
+                            pane_id: pane_e.to_bits(),
+                            tab_index: tab_index as u32,
+                            is_active: stack_is_active,
+                        });
+                    }
+                }
+            }
+            tab_index += 1;
+        }
+    }
+    bar_tabs
+}
+
+pub(crate) fn build_command_bar_open_payload(
+    open_id: u64,
+    native_windowed: bool,
+    space_name: String,
+    url: String,
+    spaces_snapshot: &CommandBarSpacesSnapshot,
+    agents_snapshot: &CommandBarAgentsSnapshot,
+    pages_snapshot: &CommandBarPagesSnapshot,
+    active_stack_count: usize,
+    tabs: Vec<CommandBarTab>,
+    target: Option<OpenTarget>,
+) -> CommandBarOpenEvent {
+    let app_agent_entries: Vec<AppAgentEntry> = agents_snapshot
+        .strategies
+        .iter()
+        .map(|s| AppAgentEntry {
+            id: app_agent_id(&s.provider, &s.model),
+            name: format!("New {}/{} chat (App)", s.provider, s.model),
+        })
+        .collect();
+    let mut pages = pages_snapshot.pages.clone();
+    pages.extend(agent_pages());
+    let history_shortcut = command_shortcut("browser_open_history");
+    if !history_shortcut.is_empty()
+        && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
+    {
+        page.shortcut = history_shortcut;
+    }
+    let commands: Vec<CommandBarCommandEntry> = command_list(app_agent_entries)
+        .into_iter()
+        .map(|e| CommandBarCommandEntry {
+            id: e.id,
+            name: e.name,
+            shortcut: e.shortcut,
+        })
+        .collect();
+    let spaces = spaces_snapshot
+        .spaces
+        .iter()
+        .map(|s| {
+            let is_active = s.id == spaces_snapshot.active_space_id;
+            CommandBarSpace {
+                id: s.id.clone(),
+                name: s.name.clone(),
+                profile: s.profile.clone(),
+                is_active,
+                tab_count: if is_active {
+                    active_stack_count as u32
+                } else {
+                    0
+                },
+            }
+        })
+        .collect();
+    command_bar_open_payload(
+        open_id,
+        native_windowed,
+        space_name,
+        url,
+        spaces,
+        tabs,
+        commands,
+        target,
+        pages,
+    )
 }
 
 #[derive(SystemParam)]
@@ -1723,6 +1785,28 @@ mod tests {
     fn command_bar_open_does_not_block_on_command_bar_listener() {
         assert!(command_bar_open_delivery_ready(true, true, false));
         assert!(command_bar_open_delivery_ready(true, true, true));
+    }
+
+    #[test]
+    fn build_payload_includes_commands_and_target() {
+        let pages = CommandBarPagesSnapshot::default();
+        let spaces = CommandBarSpacesSnapshot::default();
+        let agents = CommandBarAgentsSnapshot::default();
+        let payload = build_command_bar_open_payload(
+            7,
+            false,
+            String::new(),
+            String::new(),
+            &spaces,
+            &agents,
+            &pages,
+            0,
+            Vec::new(),
+            Some(OpenTarget::InPlace),
+        );
+        assert_eq!(payload.open_id, 7);
+        assert_eq!(payload.target, Some(OpenTarget::InPlace));
+        assert!(!payload.commands.is_empty());
     }
 
     #[test]

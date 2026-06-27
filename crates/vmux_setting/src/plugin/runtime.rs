@@ -304,7 +304,7 @@ fn default_browser_settings() -> BrowserSettings {
 }
 
 fn default_browser_startup_url() -> String {
-    "https://www.google.com".to_string()
+    "vmux://home/".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1070,23 +1070,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_url_defaults_to_google() {
+    fn resolve_startup_url_defaults_to_home() {
         let s = base_settings();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://home/");
     }
 
     #[test]
-    fn resolve_startup_url_uses_google_for_empty_browser_url() {
+    fn resolve_startup_url_uses_home_for_empty_browser_url() {
         let mut s = base_settings();
         s.browser.startup_url.clear();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://home/");
     }
 
     #[test]
-    fn resolve_startup_url_treats_legacy_agent_default_as_google() {
+    fn resolve_startup_url_treats_legacy_agent_default_as_home() {
         let mut s = base_settings();
         s.browser.startup_url = "vmux://agent/".into();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://home/");
     }
 
     #[test]
@@ -1104,9 +1104,9 @@ mod tests {
     }
 
     #[test]
-    fn embedded_settings_default_to_google() {
+    fn embedded_settings_default_to_home() {
         let s = load_embedded_settings();
-        assert_eq!(resolve_startup_url(&s, "space-1"), "https://www.google.com");
+        assert_eq!(resolve_startup_url(&s, "space-1"), "vmux://home/");
     }
 
     #[test]
@@ -1378,7 +1378,7 @@ mod tests {
     fn parse_settings_empty_uses_embedded_defaults() {
         let s = parse_settings("()").unwrap();
         assert_eq!(s.shortcuts.leader.key, "b");
-        assert_eq!(s.browser.startup_url, "https://www.google.com");
+        assert_eq!(s.browser.startup_url, "vmux://home/");
     }
 
     #[test]

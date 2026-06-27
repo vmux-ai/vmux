@@ -208,13 +208,14 @@ mod tests {
     #[test]
     fn command_bar_size_event_uses_results_list_natural_height() {
         let source = include_str!("page.rs");
+        let palette = include_str!("palette.rs");
         let size_fn = source
             .split("fn emit_command_bar_size")
             .nth(1)
             .and_then(|tail| tail.split("fn schedule_command_bar_size_emit").next())
             .unwrap_or_default();
 
-        assert!(source.contains("id: \"command-bar-results\""));
+        assert!(palette.contains("id: \"command-bar-results\""));
         assert!(size_fn.contains("command_bar_results_extra_height"));
         assert!(size_fn.contains("shell.scroll_height() + result_list_extra_height"));
         assert!(source.contains("max-height"));
@@ -253,7 +254,7 @@ mod tests {
 
     #[test]
     fn command_bar_input_handles_plain_meta_a() {
-        let source = include_str!("page.rs");
+        let source = include_str!("palette.rs");
 
         assert!(source.contains("fn handle_plain_meta_a"));
         assert!(source.contains("e.meta_key()"));
@@ -262,7 +263,7 @@ mod tests {
 
     #[test]
     fn command_bar_in_place_enter_opens_typed_query_before_suggestions() {
-        let source = include_str!("page.rs");
+        let source = include_str!("palette.rs");
 
         assert!(source.contains("should_open_typed_query_on_enter("));
         assert!(source.contains("emit_action_with_target(\"open\", &q, open_target)"));
@@ -316,7 +317,7 @@ mod tests {
 
     #[test]
     fn result_rows_reserve_aligned_trailing_slot() {
-        let source = include_str!("page.rs");
+        let source = include_str!("palette.rs");
 
         assert!(source.contains("result_trailing_slot_class()"));
         assert!(source.contains("result_shortcut_badge_class()"));

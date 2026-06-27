@@ -14,6 +14,7 @@ pub mod error_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod extensions_page;
+pub mod home;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod protocol;
