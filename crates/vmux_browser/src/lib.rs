@@ -3558,6 +3558,8 @@ pub fn handle_browser_navigate_requests(
     mut page_open_writer: MessageWriter<PageOpenRequest>,
     mut pending_nav: ResMut<PendingNavSnapshots>,
     time: Res<Time>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
@@ -3568,11 +3570,47 @@ pub fn handle_browser_navigate_requests(
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
-                page_open_writer.write(PageOpenRequest {
-                    target: PageOpenTarget::NewStackInPane(target),
-                    url,
-                    request_id,
-                });
+                // If the target pane already hosts a browser, navigate it
+                // in-place (no new tab, no focus stamp) so an agent driving its
+                // own pane doesn't disturb the user's focus ring. Otherwise open
+                // a new stack there.
+                let in_place = if url.starts_with("vmux://") || url.starts_with("file:") {
+                    None
+                } else {
+                    vmux_layout::target::active_webview_for_tab(
+                        vmux_layout::stack::active_stack_in_pane(target, &pane_children, &stack_ts),
+                        &browsers,
+                        &terminals,
+                    )
+                };
+                if let Some(webview) = in_place {
+                    commands.trigger(RequestNavigate {
+                        webview,
+                        url: url.clone(),
+                    });
+                    match request_id {
+                        Some(rid) => {
+                            let displaced = pending_nav.0.insert(
+                                webview,
+                                NavPending {
+                                    request_id: rid,
+                                    started: time.elapsed(),
+                                    saw_loading: false,
+                                },
+                            );
+                            if let Some(old) = displaced {
+                                send_page_open_response(&service, Some(old.request_id), Ok(()));
+                            }
+                        }
+                        None => send_page_open_response(&service, request_id, Ok(())),
+                    }
+                } else {
+                    page_open_writer.write(PageOpenRequest {
+                        target: PageOpenTarget::NewStackInPane(target),
+                        url,
+                        request_id,
+                    });
+                }
             } else {
                 send_page_open_response(
                     &service,
