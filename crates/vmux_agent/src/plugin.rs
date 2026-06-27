@@ -114,6 +114,7 @@ impl Plugin for AgentPlugin {
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
             .add_message::<BrowserScrollRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
             .add_message::<RecordStopRequest>()
