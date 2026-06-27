@@ -366,6 +366,27 @@ new pane."
     }
 }
 
+fn read_file_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_file".into(),
+        description: "Read a local file and show it in the vmux editor in a pane beside YOUR pane \
+(the agent calling this). Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
+via run (that dumps into a terminal). path is an absolute filesystem path. offset is the 1-based line \
+to start at; limit is the number of lines (default: the whole file)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "offset": {"type": "integer"},
+                "limit": {"type": "integer"}
+            }
+        }),
+    }
+}
+
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
@@ -561,6 +582,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(list_spaces_definition());
     defs.push(open_page_definition());
     defs.push(open_file_definition());
+    defs.push(read_file_definition());
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
@@ -1477,6 +1499,7 @@ mod tests {
         assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
         assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
         assert!(tool_definitions().iter().any(|d| d.name == "run"));
+        assert!(tool_definitions().iter().any(|d| d.name == "read_file"));
     }
 
     #[test]

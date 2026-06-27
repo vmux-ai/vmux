@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use std::time::{Duration, Instant};
 use vmux_service::protocol::{
-    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, ServiceMessage,
+    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
+    ServiceMessage,
 };
 
 /// How long `run` waits for a command to finish before returning a partial
@@ -109,6 +110,10 @@ async fn tool_call_result(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    if name == "read_file" {
+        return read_file_result(&arguments, anchor).await;
+    }
+
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
         crate::tools::DispatchTarget::Command(AgentCommand::Run {
             anchor,
@@ -135,6 +140,55 @@ async fn tool_call_result(
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
+}
+
+async fn read_file_result(
+    arguments: &Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
+    let path = arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("read_file.path is required")?;
+    if !std::path::Path::new(path).is_absolute() {
+        return Err("read_file.path must be an absolute path".to_string());
+    }
+    let offset = arguments
+        .get("offset")
+        .and_then(Value::as_u64)
+        .map(|n| n as u32);
+    let limit = arguments
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize);
+    let content = std::fs::read_to_string(path).map_err(|e| format!("read_file: {e}"))?;
+    if let Some(anchor) = anchor {
+        let _ = run_agent_command(
+            AgentCommand::FileTouched {
+                anchor,
+                path: path.to_string(),
+                line: offset,
+                kind: FileTouchKind::Read,
+            },
+            Some(anchor),
+        )
+        .await;
+    }
+    let text = slice_lines(&content, offset, limit);
+    Ok(json!({ "content": [{"type": "text", "text": text}] }))
+}
+
+fn slice_lines(content: &str, offset: Option<u32>, limit: Option<usize>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset
+        .map(|o| o.saturating_sub(1) as usize)
+        .unwrap_or(0)
+        .min(lines.len());
+    let end = match limit {
+        Some(l) => start.saturating_add(l).min(lines.len()),
+        None => lines.len(),
+    };
+    lines[start..end].join("\n")
 }
 
 fn output_since(baseline: &str, final_text: &str) -> String {
@@ -459,6 +513,16 @@ pub fn tool_error(message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slice_lines_offset_and_limit() {
+        let content = "a\nb\nc\nd\ne";
+        assert_eq!(slice_lines(content, None, None), "a\nb\nc\nd\ne");
+        assert_eq!(slice_lines(content, Some(2), Some(2)), "b\nc");
+        assert_eq!(slice_lines(content, Some(4), None), "d\ne");
+        assert_eq!(slice_lines(content, Some(99), None), "");
+        assert_eq!(slice_lines(content, Some(1), Some(100)), "a\nb\nc\nd\ne");
+    }
 
     #[test]
     fn newline_framing_reads_single_json_message() {
