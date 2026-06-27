@@ -162,9 +162,9 @@ fn start_rain(
         ctx.set_fill_style_str("rgba(30, 30, 46, 0.08)");
         ctx.fill_rect(0.0, 0.0, w, h);
 
-        for i in 0..cols {
+        for (i, drop) in drops.iter_mut().enumerate().take(cols) {
             let x = i as f64 * FONT_PX;
-            let head_row = drops[i];
+            let head_row = *drop;
             let y = head_row * FONT_PX;
             if y >= 0.0 {
                 let ch = pick_glyph(&glyphs, &word_chars, i, head_row).to_string();
@@ -174,9 +174,9 @@ fn start_rain(
                 let _ = ctx.fill_text(&ch, x, y);
             }
             if y > h && js_sys::Math::random() > 0.975 {
-                drops[i] = 0.0;
+                *drop = 0.0;
             } else {
-                drops[i] += 1.0;
+                *drop += 1.0;
             }
         }
 
