@@ -27,8 +27,6 @@ pub use lsp::LspPlugin;
 pub mod page_model;
 
 #[cfg(target_arch = "wasm32")]
-mod lang_icon;
-#[cfg(target_arch = "wasm32")]
 pub mod lsp_page;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
