@@ -9,7 +9,7 @@ use crate::page_model::{
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
-use vmux_ui::components::icon::Icon;
+use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -172,110 +172,6 @@ fn apply_dir(
         }
     }
     dir_entries.set(entries);
-}
-
-fn folder_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-        }
-    }
-}
-
-fn file_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-        }
-    }
-}
-
-fn text_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-            path { d: "M16 13H8" }
-            path { d: "M16 17H8" }
-            path { d: "M10 9H8" }
-        }
-    }
-}
-
-fn code_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "m16 18 6-6-6-6" }
-            path { d: "m8 6-6 6 6 6" }
-        }
-    }
-}
-
-fn config_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
-            path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
-        }
-    }
-}
-
-fn image_glyph(class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}",
-            path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
-            path { d: "m21 15-5-5L5 21" }
-        }
-    }
-}
-
-fn logo_icon(d: &str, class: &str) -> Element {
-    rsx! {
-        Icon { class: "{class}", fill: "currentColor", stroke: "none",
-            path { d: "{d}" }
-        }
-    }
-}
-
-fn ext_of(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .unwrap_or("")
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_ascii_lowercase())
-        .unwrap_or_default()
-}
-
-fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
-    if is_dir {
-        return folder_glyph(class);
-    }
-    let name = path.rsplit('/').next().unwrap_or("");
-    let ext = ext_of(path);
-    if matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
-    ) {
-        return image_glyph(class);
-    }
-    let key = match name {
-        "Dockerfile" => "dockerfile",
-        "CMakeLists.txt" => "cmake",
-        _ => ext.as_str(),
-    };
-    if let Some(d) = crate::lang_icon::lang_logo(key) {
-        return logo_icon(d, class);
-    }
-    match ext.as_str() {
-        "ini" | "cfg" | "conf" | "lock" | "env" | "properties" | "editorconfig" => {
-            config_glyph(class)
-        }
-        "txt" | "log" | "csv" | "text" => text_glyph(class),
-        "java" | "vala" | "d" | "ron" => code_glyph(class),
-        _ if matches!(name, "Makefile" | "makefile" | "GNUmakefile") => config_glyph(class),
-        _ => file_glyph(class),
-    }
 }
 
 fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {

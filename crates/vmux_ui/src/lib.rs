@@ -9,6 +9,8 @@ pub mod agent_accent;
 
 pub mod favicon;
 
+pub mod file_icon;
+
 pub mod icon;
 
 pub mod theme;
