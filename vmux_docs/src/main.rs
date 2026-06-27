@@ -55,6 +55,11 @@ fn main() -> Result<()> {
     let wanted: Vec<&str> = if args.only.is_empty() {
         CRATES.to_vec()
     } else {
+        for requested in &args.only {
+            if !CRATES.contains(&requested.as_str()) {
+                anyhow::bail!("unknown crate in --only: {requested}");
+            }
+        }
         CRATES
             .iter()
             .copied()
@@ -109,6 +114,7 @@ fn main() -> Result<()> {
 
     if failed.is_empty() {
         eprintln!("done: {} crates", index.crates.len());
+        Ok(())
     } else {
         eprintln!(
             "done: {} ok, {} FAILED: {}",
@@ -116,8 +122,8 @@ fn main() -> Result<()> {
             failed.len(),
             failed.join(", ")
         );
+        anyhow::bail!("{} crate(s) failed to document", failed.len())
     }
-    Ok(())
 }
 
 fn first_paragraph(md: &str) -> String {

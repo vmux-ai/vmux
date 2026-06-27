@@ -49,7 +49,7 @@ This is two efforts in one spec:
 | Doc depth | Full API reference (items, signatures, module trees) |
 | Crate scope | All 19 workspace crates under `crates/*` |
 | Authoring scope | Full public-API authoring across all crates (Part B) |
-| Generation mechanics | Commit generated model; `make docs`; website stays light; CI freshness check |
+| Generation mechanics | Commit generated model; `make api-docs`; website stays light; CI freshness check |
 | Generator placement | `vmux_docs` — standalone crate **excluded** from the workspace (mirrors `website`) |
 | Model representation | Our own stable serde schema (decoupled from `rustdoc-types` `FORMAT_VERSION`) |
 
@@ -69,13 +69,13 @@ Hard constraints discovered:
   repo toolchain stays pinned at stable `1.95.0` for all normal builds; doc-gen alone
   uses a separately pinned nightly.
 - **Doc-gen compiles the crates** (bevy/CEF → very large builds). Therefore doc-gen
-  runs on demand (`make docs`) and in main CI only — never in the website-deploy job.
+  runs on demand (`make api-docs`) and in main CI only — never in the website-deploy job.
 - The `website/` crate is **excluded from the main workspace** and has its own
   `Cargo.lock`; its deploy job builds only the website WASM.
 
 ## Architecture overview
 
-```
+```text
 crates/*  (rustdoc //! /// in source)
    │  cargo +nightly rustdoc --output-format json   (per crate)
    ▼
@@ -232,7 +232,7 @@ Data loading (Dioxus fullstack SSG):
 
 Add to `Makefile`:
 
-```
+```make
 api-docs:        ## regenerate committed API model from rustdoc
 	cd vmux_docs && cargo run --release -- --out ../docs/api
 ```
