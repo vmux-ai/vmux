@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub use vmux_service::agent_events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
@@ -92,6 +93,13 @@ pub struct BrowserScrollRequest {
     pub to: Option<String>,
     pub delta: Option<i32>,
 }
+
+/// Request ids whose `BrowserSnapshotResponse` must be returned as an agent
+/// *command* result (a navigation that returns its page snapshot inline)
+/// rather than the default *query* result. Populated when a deferred
+/// navigation settles; drained by `forward_snapshot_responses`.
+#[derive(Resource, Default)]
+pub struct NavAwaitingSnapshot(pub HashSet<[u8; 16]>);
 
 pub fn snapshot_response_to_query_result(
     result: &Result<String, String>,
