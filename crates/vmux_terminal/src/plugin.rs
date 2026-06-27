@@ -153,6 +153,10 @@ pub struct TerminalModeFlags {
 pub struct AgentFocusBlurred;
 
 const AGENT_LOADING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Minimum time the loading splash stays up for a plain (non-agent) terminal,
+/// whose shell prints its prompt almost instantly. Agents instead clear when the
+/// TUI takes over (alt-screen).
+const TERMINAL_LOADING_MIN_DISPLAY: std::time::Duration = std::time::Duration::from_millis(700);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AgentLoading {
@@ -2696,14 +2700,27 @@ fn on_term_key(
     }
 }
 
+/// Loading splash label + url segment for a terminal. Agents use their brand
+/// (color + name); plain terminals use a generic "Terminal" / default accent.
+fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> (String, String) {
+    match session {
+        Some(s) => (
+            s.kind.display_name().to_string(),
+            s.kind.as_url_segment().to_string(),
+        ),
+        None => ("Terminal".to_string(), String::new()),
+    }
+}
+
 fn arm_agent_loading(
     newly_ready: Query<
-        (Entity, &vmux_core::agent::AgentSession),
+        (Entity, Option<&vmux_core::agent::AgentSession>),
         (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
     >,
     mut commands: Commands,
 ) {
     for (entity, session) in &newly_ready {
+        let (label, segment) = terminal_loading_labels(session);
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
@@ -2712,8 +2729,8 @@ fn arm_agent_loading(
             TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: true,
-                label: session.kind.display_name().to_string(),
-                segment: session.kind.as_url_segment().to_string(),
+                label,
+                segment,
             },
         ));
     }
@@ -2721,7 +2738,7 @@ fn arm_agent_loading(
 
 fn arm_agent_loading_on_restart(
     restarted: Query<
-        (Entity, &vmux_core::agent::AgentSession),
+        (Entity, Option<&vmux_core::agent::AgentSession>),
         (
             With<Terminal>,
             With<PageReady>,
@@ -2732,6 +2749,7 @@ fn arm_agent_loading_on_restart(
     mut commands: Commands,
 ) {
     for (entity, session) in &restarted {
+        let (label, segment) = terminal_loading_labels(session);
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
@@ -2740,8 +2758,8 @@ fn arm_agent_loading_on_restart(
             TERM_LOADING_EVENT,
             &crate::event::TermLoadingEvent {
                 loading: true,
-                label: session.kind.display_name().to_string(),
-                segment: session.kind.as_url_segment().to_string(),
+                label,
+                segment,
             },
         ));
     }
@@ -2752,7 +2770,7 @@ fn clear_agent_loading(
         (
             Entity,
             &ProcessId,
-            &vmux_core::agent::AgentSession,
+            Option<&vmux_core::agent::AgentSession>,
             &AgentLoading,
         ),
         With<Terminal>,
@@ -2761,20 +2779,26 @@ fn clear_agent_loading(
     mut commands: Commands,
 ) {
     for (entity, pid, session, loading) in &loading_q {
-        let alt_screen = mode_map
-            .modes
-            .get(pid)
-            .map(|m| m.alt_screen)
-            .unwrap_or(false);
-        if alt_screen || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
+        // Agents clear when the TUI takes over (alt-screen); plain terminals,
+        // whose shell prints instantly, show a brief minimum splash instead.
+        let ready = match session {
+            Some(_) => mode_map
+                .modes
+                .get(pid)
+                .map(|m| m.alt_screen)
+                .unwrap_or(false),
+            None => loading.since.elapsed() >= TERMINAL_LOADING_MIN_DISPLAY,
+        };
+        if ready || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
+            let (label, segment) = terminal_loading_labels(session);
             commands.entity(entity).remove::<AgentLoading>();
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 TERM_LOADING_EVENT,
                 &crate::event::TermLoadingEvent {
                     loading: false,
-                    label: session.kind.display_name().to_string(),
-                    segment: session.kind.as_url_segment().to_string(),
+                    label,
+                    segment,
                 },
             ));
         }
@@ -4259,11 +4283,51 @@ mod tests {
     }
 
     #[test]
-    fn arm_agent_loading_ignores_non_agent_terminal() {
+    fn arm_loading_arms_plain_terminal() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, arm_agent_loading);
         let e = app.world_mut().spawn((Terminal, PageReady {})).id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn plain_terminal_loading_retained_before_min_display() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                ProcessId::new(),
+                AgentLoading {
+                    since: Instant::now(),
+                },
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn plain_terminal_loading_cleared_after_min_display() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                ProcessId::new(),
+                AgentLoading {
+                    since: Instant::now() - TERMINAL_LOADING_MIN_DISPLAY - Duration::from_millis(1),
+                },
+            ))
+            .id();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
     }
