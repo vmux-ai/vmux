@@ -52,7 +52,7 @@ accumulator uses interior mutability (`Cell`).
 
 ## Data flow
 
-```
+```text
 updater bg thread: download_and_install_extended(on_chunk, on_download_finish)
    on_chunk(len, content_len) ──┐ throttled to integer-% steps (or ~512KB if
    on_download_finish          ─┤   total unknown), sent over mpsc
