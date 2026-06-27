@@ -336,8 +336,28 @@ impl Plugin for TerminalPlugin {
                     arm_agent_loading_on_restart,
                     clear_agent_loading.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
+                    set_terminal_shell_icon,
                 ),
             );
+    }
+}
+
+/// Give a plain terminal a shell-specific tab icon (nushell/bash/zsh) derived
+/// from its launch command. Agents keep their own icons; unrecognized shells
+/// keep the generic terminal icon.
+fn set_terminal_shell_icon(
+    mut q: Query<(&crate::launch::TerminalLaunch, &mut vmux_core::PageMetadata), With<Terminal>>,
+) {
+    for (launch, mut meta) in &mut q {
+        if !matches!(launch.kind, crate::launch::TerminalKind::Plain) {
+            continue;
+        }
+        if !meta.icon.is_none() {
+            continue;
+        }
+        if let Some(icon) = vmux_core::BuiltinIcon::for_shell(&launch.command) {
+            meta.icon = vmux_core::PageIcon::Builtin(icon);
+        }
     }
 }
 
