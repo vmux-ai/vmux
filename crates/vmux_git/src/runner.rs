@@ -315,6 +315,8 @@ pub(crate) mod test_repo {
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
             .status()
             .unwrap();
         assert!(status.success(), "git {args:?} failed");
