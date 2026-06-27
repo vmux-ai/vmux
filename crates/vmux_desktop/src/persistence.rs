@@ -147,19 +147,44 @@ fn mark_dirty_on_change(
     }
 }
 
-fn auto_save_system(time: Res<Time>, mut auto_save: ResMut<AutoSave>, mut commands: Commands) {
-    auto_save.periodic.tick(time.delta());
+fn auto_save_system(
+    time: Res<Time>,
+    mut auto_save: ResMut<AutoSave>,
+    spaces: Query<(), With<Space>>,
+    mut commands: Commands,
+) {
+    auto_save_tick(
+        &mut auto_save,
+        time.delta(),
+        !spaces.is_empty(),
+        &mut commands,
+        store_path(),
+    );
+}
+
+fn auto_save_tick(
+    auto_save: &mut AutoSave,
+    delta: std::time::Duration,
+    has_space: bool,
+    commands: &mut Commands,
+    path: PathBuf,
+) {
+    auto_save.periodic.tick(delta);
+
+    if !has_space {
+        return;
+    }
 
     if auto_save.dirty {
-        auto_save.debounce.tick(time.delta());
+        auto_save.debounce.tick(delta);
         if auto_save.debounce.is_finished() {
-            save_space_to_path(&mut commands, store_path());
+            save_space_to_path(commands, path.clone());
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        save_space_to_path(&mut commands, store_path());
+        save_space_to_path(commands, path);
     }
 }
 
@@ -210,6 +235,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
 /// Check if a space file exists and trigger load on startup.
 pub(crate) fn load_space_on_startup(
     active: Res<ActiveSpace>,
+    registry: Res<AppTypeRegistry>,
     mut restore: ResMut<crate::boot_status::RestoreComplete>,
     mut commands: Commands,
 ) {
@@ -221,6 +247,10 @@ pub(crate) fn load_space_on_startup(
     }
     let path = store_path();
     let removed_stale = remove_stale_space_if_needed(&path);
+    let removed_incompatible = {
+        let registry = registry.read();
+        remove_incompatible_store_if_needed(&path, &registry)
+    };
     let schema_outdated = path.exists() && !store_schema_is_current();
     if schema_outdated {
         warn!("Store schema outdated; resetting {:?}", path);
@@ -231,7 +261,7 @@ pub(crate) fn load_space_on_startup(
     }
     // Never load a schema-incompatible store, even if deletion failed above —
     // loading it would hit deserialization errors / unknown component types.
-    let exists = path.exists() && !removed_stale && !schema_outdated;
+    let exists = path.exists() && !removed_stale && !removed_incompatible && !schema_outdated;
     commands.insert_resource(SpaceFilePresent(exists));
     if exists {
         info!("Loading space from {:?}", path);
@@ -252,6 +282,43 @@ fn remove_stale_space_if_needed(path: &Path) -> bool {
     warn!("Removing stale store from {:?}", path);
     let _ = std::fs::remove_file(path);
     true
+}
+
+fn remove_incompatible_store_if_needed(
+    path: &Path,
+    registry: &bevy::reflect::TypeRegistry,
+) -> bool {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    if !space_has_unregistered_types(&body, registry) {
+        return false;
+    }
+    warn!(
+        "Removing incompatible store (unregistered component types) from {:?}",
+        path
+    );
+    let _ = std::fs::remove_file(path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::remove_file(parent.join("store.version"));
+    }
+    true
+}
+
+fn space_has_unregistered_types(body: &str, registry: &bevy::reflect::TypeRegistry) -> bool {
+    component_type_path_keys(body).any(|path| registry.get_with_type_path(path).is_none())
+}
+
+fn component_type_path_keys(body: &str) -> impl Iterator<Item = &str> {
+    body.lines().filter_map(|line| {
+        let rest = line.trim_start().strip_prefix('"')?;
+        let (key, after) = rest.split_once('"')?;
+        if key.contains("::") && after.trim_start().starts_with(':') {
+            Some(key)
+        } else {
+            None
+        }
+    })
 }
 
 fn space_is_stale(body: &str) -> bool {
@@ -1096,5 +1163,126 @@ mod tests {
         assert!(remove_stale_space_if_needed(&path));
         assert!(!path.exists());
         assert!(space_dir.exists());
+    }
+
+    fn registry_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin);
+        app
+    }
+
+    fn store_body_with_key(key: &str) -> String {
+        format!(
+            "(\n  resources: {{}},\n  entities: {{\n    1: (\n      components: {{\n        \"{key}\": (),\n      }},\n    ),\n  }},\n)\n"
+        )
+    }
+
+    #[test]
+    fn store_with_unregistered_component_type_is_incompatible() {
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let body = store_body_with_key("vmux_desktop::ghost::DoesNotExist");
+        assert!(space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn store_with_registered_component_types_is_compatible() {
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        let body = store_body_with_key(key);
+        assert!(!space_has_unregistered_types(&body, &registry));
+    }
+
+    #[test]
+    fn incompatible_store_is_removed_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+        std::fs::write(dir.path().join("store.version"), "2").expect("write version");
+        std::fs::write(
+            &path,
+            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
+        )
+        .expect("write store");
+
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(remove_incompatible_store_if_needed(&path, &registry));
+        assert!(!path.exists());
+        assert!(!dir.path().join("store.version").exists());
+    }
+
+    #[test]
+    fn compatible_store_is_kept_before_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+        let app = registry_app();
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let key = <vmux_core::PageMetadata as bevy::reflect::TypePath>::type_path();
+        std::fs::write(&path, store_body_with_key(key)).expect("write store");
+
+        assert!(!remove_incompatible_store_if_needed(&path, &registry));
+        assert!(path.exists());
+    }
+
+    fn savable_geometry_app() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .add_observer(save_on_default_event);
+        app.world_mut().spawn((
+            Save,
+            WindowGeometry {
+                fullscreen: true,
+                position: Some(IVec2::new(1, 2)),
+                size: Some(Vec2::new(3.0, 4.0)),
+            },
+        ));
+        (dir, app)
+    }
+
+    fn dirty_auto_save() -> AutoSave {
+        AutoSave {
+            debounce: Timer::from_seconds(0.0, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: true,
+        }
+    }
+
+    #[test]
+    fn auto_save_writes_when_space_present() {
+        let (dir, mut app) = savable_geometry_app();
+        let path = dir.path().join("store.ron");
+        let mut auto_save = dirty_auto_save();
+        auto_save_tick(
+            &mut auto_save,
+            std::time::Duration::from_millis(1),
+            true,
+            &mut app.world_mut().commands(),
+            path.clone(),
+        );
+        app.update();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn auto_save_skips_when_no_space() {
+        let (dir, mut app) = savable_geometry_app();
+        let path = dir.path().join("store.ron");
+        let mut auto_save = dirty_auto_save();
+        auto_save_tick(
+            &mut auto_save,
+            std::time::Duration::from_millis(1),
+            false,
+            &mut app.world_mut().commands(),
+            path.clone(),
+        );
+        app.update();
+        assert!(!path.exists());
     }
 }
