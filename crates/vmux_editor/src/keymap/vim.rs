@@ -159,6 +159,27 @@ impl VimKeymap {
                 let n = self.take_count();
                 rep(DeleteForward, n)
             }
+            "X" => {
+                let n = self.take_count();
+                rep(DeleteBack, n)
+            }
+            "D" => vec![DeleteToLineEnd],
+            "C" => {
+                self.mode = EditMode::Insert;
+                vec![DeleteToLineEnd, SetMode(EditMode::Insert)]
+            }
+            "s" => {
+                self.mode = EditMode::Insert;
+                vec![DeleteForward, SetMode(EditMode::Insert)]
+            }
+            "S" => {
+                self.mode = EditMode::Insert;
+                vec![
+                    Move(Motion::LineStart),
+                    DeleteToLineEnd,
+                    SetMode(EditMode::Insert),
+                ]
+            }
             "p" => vec![Paste],
             "P" => vec![PasteBefore],
             "K" => vec![Hover],
@@ -271,6 +292,28 @@ impl Keymap for VimKeymap {
         self.mode
     }
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+        if k.mods.ctrl && k.key.eq_ignore_ascii_case("c") {
+            if self.ex.take().is_some() {
+                return vec![];
+            }
+            return match self.mode {
+                EditMode::Insert => {
+                    self.mode = EditMode::Normal;
+                    vec![
+                        EditCommand::Move(Motion::Left),
+                        EditCommand::SetMode(EditMode::Normal),
+                    ]
+                }
+                EditMode::Visual | EditMode::VisualLine => {
+                    self.mode = EditMode::Normal;
+                    vec![EditCommand::SetMode(EditMode::Normal)]
+                }
+                EditMode::Normal => {
+                    self.reset();
+                    vec![]
+                }
+            };
+        }
         if self.ex.is_some() {
             return self.ex_key(k);
         }
@@ -421,5 +464,53 @@ mod tests {
         km.handle(&k(":"));
         km.handle(&k("w"));
         assert_eq!(km.handle(&k("Enter")), vec![EditCommand::Save]);
+    }
+
+    #[test]
+    fn ctrl_c_acts_as_escape_from_insert() {
+        let mut km = VimKeymap::default();
+        km.handle(&k("i"));
+        assert_eq!(km.mode(), EditMode::Insert);
+        assert_eq!(
+            km.handle(&ctrl("c")),
+            vec![
+                EditCommand::Move(Motion::Left),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn ctrl_c_escapes_visual() {
+        let mut km = VimKeymap::default();
+        km.handle(&k("v"));
+        assert_eq!(
+            km.handle(&ctrl("c")),
+            vec![EditCommand::SetMode(EditMode::Normal)]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn shift_d_c_and_s_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&k("D")), vec![EditCommand::DeleteToLineEnd]);
+        assert_eq!(
+            km.handle(&k("C")),
+            vec![
+                EditCommand::DeleteToLineEnd,
+                EditCommand::SetMode(EditMode::Insert)
+            ]
+        );
+        km.handle(&k("Escape"));
+        km.mode = EditMode::Normal;
+        assert_eq!(
+            km.handle(&k("s")),
+            vec![
+                EditCommand::DeleteForward,
+                EditCommand::SetMode(EditMode::Insert)
+            ]
+        );
     }
 }
