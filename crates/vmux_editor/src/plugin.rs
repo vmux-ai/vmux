@@ -672,17 +672,17 @@ fn drain_thumb_tasks(
     }
 }
 
-fn on_file_open(
-    trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
+#[allow(clippy::too_many_arguments)]
+fn navigate_file_view(
+    entity: Entity,
+    path: PathBuf,
+    top_line: u32,
+    fv: &mut FileView,
+    vp: &mut FileViewport,
+    meta: &mut PageMetadata,
+    manager: &mut crate::lsp::manager::LspManager,
+    commands: &mut Commands,
 ) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
-        return;
-    };
     manager.close(&fv.path);
     let url = url::Url::from_file_path(&path)
         .map(|u| u.to_string())
@@ -693,7 +693,7 @@ fn on_file_open(
         .unwrap_or_else(|| path.to_string_lossy().to_string());
     meta.url = url;
     fv.path = path;
-    vp.top_line = 0;
+    vp.top_line = top_line;
     commands
         .entity(entity)
         .remove::<FileDir>()
@@ -705,6 +705,60 @@ fn on_file_open(
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LspOpened>()
         .remove::<crate::lsp::manager::LintRan>();
+}
+
+fn on_file_open(
+    trigger: On<BinReceive<FileOpenEvent>>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
+        return;
+    };
+    navigate_file_view(
+        entity,
+        path,
+        0,
+        &mut fv,
+        &mut vp,
+        &mut meta,
+        &mut manager,
+        &mut commands,
+    );
+}
+
+/// Host-driven follow: an agent's follow-pane swaps to a new file in place.
+fn handle_file_follow(
+    mut reader: MessageReader<vmux_core::FileFollowRequest>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    for req in reader.read() {
+        let Ok((mut fv, mut vp, mut meta)) = views.get_mut(req.target) else {
+            continue;
+        };
+        let path = PathBuf::from(&req.path);
+        if fv.path == path {
+            if let Some(line) = req.line {
+                vp.top_line = line;
+            }
+            continue;
+        }
+        navigate_file_view(
+            req.target,
+            path,
+            req.line.unwrap_or(0),
+            &mut fv,
+            &mut vp,
+            &mut meta,
+            &mut manager,
+            &mut commands,
+        );
+    }
 }
 
 #[derive(Component)]
@@ -1447,6 +1501,7 @@ impl Plugin for EditorPlugin {
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .insert_non_send(SelfWrites::default())
             .add_plugins(crate::lsp::LspPlugin)
+            .add_message::<vmux_core::FileFollowRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
@@ -1482,6 +1537,7 @@ impl Plugin for EditorPlugin {
                     flush_lsp_changes,
                     apply_goto,
                     apply_pending_goto,
+                    handle_file_follow,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )

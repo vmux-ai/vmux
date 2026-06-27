@@ -35,8 +35,8 @@ pub use archive::{ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PaneSt
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 #[cfg(not(target_arch = "wasm32"))]
 pub use page_open::{
-    CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
-    PageOpenTarget, PageOpenTask,
+    CefPageAttachRequest, FileFollowRequest, PageOpenError, PageOpenHandled, PageOpenId,
+    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
