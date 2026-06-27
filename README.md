@@ -1,5 +1,5 @@
 <h1 align="center">Vmux</h1>
-<p align="center"><b>The browser that ships code with agents.</b> Browse, prompt, and build — in one space.</p>
+<p align="center"><b>One prompt. Anything, done.</b> The browser + IDE that get sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch.</p>
 
 <p align="center">
   <img src="icon.png" alt="Vmux icon" width="256" />

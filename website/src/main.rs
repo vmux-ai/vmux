@@ -6,12 +6,11 @@ mod markdown;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::ToastProvider;
 
-const SEO_TITLE: &str = "Vmux — The browser that ships code with agents";
-const SEO_DESCRIPTION: &str =
-    "The browser that ships code with agents. Browse, prompt, and build — in one space.";
+const SEO_TITLE: &str = "Vmux — One prompt. Anything, done.";
+const SEO_DESCRIPTION: &str = "The browser + IDE that get sh*t done — booking a flight, building a website, opening a PR, all handled by your agents while you watch.";
 const SITE_URL: &str = "https://vmux.ai/";
 const OG_IMAGE: &str = "https://vmux.ai/og.png";
-const OG_IMAGE_ALT: &str = "Vmux — the browser that ships code with agents";
+const OG_IMAGE_ALT: &str = "Vmux — One prompt. Anything, done.";
 
 #[derive(Routable, Clone, PartialEq)]
 #[rustfmt::skip]
