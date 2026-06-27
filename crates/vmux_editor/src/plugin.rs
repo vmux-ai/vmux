@@ -303,6 +303,30 @@ fn load_file_buffers(
     }
 }
 
+/// Re-apply the editor keymap to already-open files when `editor.keymap`
+/// changes at runtime (the keymap is otherwise only set at file open). Swaps
+/// the keymap and resets each editor to the new keymap's initial mode (Vim ->
+/// Normal, VSCode -> Insert) so switching to Vim engages without reopening.
+fn reapply_keymap_on_change(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut last: Local<Option<vmux_core::KeymapKind>>,
+    mut q: Query<(&mut EditState, &mut EditorKeymap)>,
+) {
+    let kind = settings_keymap(&settings);
+    if *last == Some(kind) {
+        return;
+    }
+    let first = last.is_none();
+    *last = Some(kind);
+    if first {
+        return;
+    }
+    for (mut edit, mut keymap) in &mut q {
+        keymap.0 = kind.make();
+        edit.core.mode = kind.initial_mode();
+    }
+}
+
 fn display_path(path: &std::path::Path) -> String {
     if let Ok(cwd) = std::env::current_dir()
         && let Ok(rel) = path.strip_prefix(&cwd)
@@ -1538,6 +1562,7 @@ impl Plugin for EditorPlugin {
                     apply_goto,
                     apply_pending_goto,
                     handle_file_follow,
+                    reapply_keymap_on_change,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
