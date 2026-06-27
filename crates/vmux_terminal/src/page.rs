@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use crate::event::*;
+use crate::matrix_rain::MatrixRain;
 use crate::render_model::{
     cursor_cell_style, span_background_overlay, span_classes, span_inline_style,
     span_looks_like_suggestion,
@@ -302,15 +303,15 @@ pub fn Page() -> Element {
                 state.map(|(label, segment)| {
                     let accent = agent_accent(&segment);
                     let favicon_url = format!("vmux://agent/{segment}/cli/");
+                    let words = vec![label.to_uppercase()];
                     rsx! {
                         div {
                             class: "pointer-events-none absolute inset-0 z-40 overflow-hidden bg-term-bg",
-                            div { class: "{accent.glow_top}" }
-                            div { class: "{accent.glow_bottom}" }
+                            MatrixRain { accent_rgb: accent.rain_rgb.to_string(), words }
                             div {
-                                class: "relative flex h-full w-full flex-col",
+                                class: "relative z-10 flex h-full w-full items-center justify-center",
                                 div {
-                                    class: "flex items-center gap-3 px-5 py-4",
+                                    class: "flex items-center gap-3 rounded-2xl bg-black/40 px-5 py-4 ring-1 ring-inset ring-white/10 backdrop-blur-md",
                                     div {
                                         class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] ring-1 ring-inset ring-white/10",
                                         Favicon {
@@ -321,39 +322,13 @@ pub fn Page() -> Element {
                                         }
                                     }
                                     div {
-                                        div { class: "text-sm font-semibold text-foreground", "{label}" }
+                                        div { class: "text-sm font-semibold {accent.accent_text}", "{label}" }
                                         div {
                                             class: "flex items-center gap-1.5 text-xs text-muted-foreground",
-                                            span { class: "h-1.5 w-1.5 rounded-full animate-pulse {accent.accent_bg}" }
-                                            "starting…"
+                                            span { class: "font-mono", "> booting" }
+                                            span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
                                         }
                                     }
-                                }
-                                div {
-                                    class: "flex flex-1 flex-col gap-4 px-5 py-3",
-                                    div {
-                                        class: "flex justify-end gap-2.5",
-                                        div {
-                                            class: "flex max-w-[60%] flex-col items-end gap-2",
-                                            div { class: "h-2.5 w-40 rounded-md bg-white/10 animate-pulse" }
-                                        }
-                                        div { class: "h-6 w-6 shrink-0 rounded-lg bg-white/10" }
-                                    }
-                                    div {
-                                        class: "flex gap-2.5",
-                                        div { class: "h-6 w-6 shrink-0 rounded-lg bg-gradient-to-br {accent.grad}" }
-                                        div {
-                                            class: "flex flex-1 flex-col gap-2",
-                                            div { class: "h-2.5 w-[92%] rounded-md bg-white/10 animate-pulse" }
-                                            div { class: "h-2.5 w-[80%] rounded-md bg-white/10 animate-pulse [animation-delay:120ms]" }
-                                            div { class: "h-2.5 w-[45%] rounded-md bg-white/10 animate-pulse [animation-delay:240ms]" }
-                                        }
-                                    }
-                                }
-                                div {
-                                    class: "mx-4 mb-4 flex items-center gap-2 rounded-xl bg-white/[0.03] px-3 py-3 ring-1 ring-inset ring-white/10",
-                                    span { class: "h-4 w-0.5 animate-pulse {accent.accent_bg}" }
-                                    div { class: "h-2 w-32 rounded bg-white/10 animate-pulse" }
                                 }
                             }
                         }
