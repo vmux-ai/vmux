@@ -696,7 +696,12 @@ impl AgentFileResolve<'_, '_> {
 fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
+    settings: Res<AppSettings>,
 ) {
+    if !settings.agent.follow_files {
+        for _ in reader.read() {}
+        return;
+    }
     for request in reader.read() {
         let ServiceAgentCommand::FileTouched {
             anchor, path, line, ..

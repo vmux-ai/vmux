@@ -56,5 +56,6 @@
         app_providers: [
             (provider: "stub", kind: "vibe", models: ["echo"]),
         ],
+        follow_files: true,
     ),
 )

@@ -97,6 +97,10 @@ pub struct SpaceOverrides {
 pub struct AgentSettings {
     #[serde(default)]
     pub app_providers: Vec<AppProviderSettings>,
+    /// When true (default), an agent reading/editing a file opens it in a
+    /// `file://` follow-pane beside that agent.
+    #[serde(default = "default_true")]
+    pub follow_files: bool,
 }
 
 impl Default for AgentSettings {
@@ -112,6 +116,7 @@ fn default_agent_settings() -> AgentSettings {
             kind: "vibe".to_string(),
             models: vec!["echo".to_string()],
         }],
+        follow_files: true,
     }
 }
 
