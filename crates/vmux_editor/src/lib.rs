@@ -1,3 +1,6 @@
+//! File viewer and editor page: loading, editing, syntax highlighting, file watching,
+//! image preview, and LSP integration in a CEF + Dioxus webview.
+
 pub mod viewport;
 
 #[cfg(not(target_arch = "wasm32"))]

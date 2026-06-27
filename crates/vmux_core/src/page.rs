@@ -57,6 +57,8 @@ pub struct ServerEmbedSet;
 )]
 pub struct PageReady {}
 
+/// Embeds each page manifest's static webview bundle into Bevy's asset registry so pages
+/// can be served over `vmux://` URLs.
 pub struct ServerPlugin;
 
 impl Plugin for ServerPlugin {

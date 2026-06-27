@@ -1,3 +1,5 @@
+//! Shared component types and reflection registration used across all vmux crates.
+
 pub mod agent_setup;
 pub mod dom_snapshot;
 pub mod editor;
@@ -43,6 +45,7 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Registers reflection for the shared component types so they can be saved and loaded.
 pub struct CorePlugin;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -18,6 +18,8 @@ use crate::query::{
 };
 use crate::spawn::spawn_visits;
 
+/// Wires the history domain: visit spawning, change broadcasts, timed pruning, and
+/// history query, open, and suggestion bridges.
 pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {

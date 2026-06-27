@@ -1424,6 +1424,8 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: false,
 };
 
+/// Wires the file editor: buffer loading, filesystem watching, image and theme sends, LSP
+/// change flushing, and the file webview event bridge (adds [`LspPlugin`]).
 pub struct EditorPlugin;
 
 impl Plugin for EditorPlugin {
