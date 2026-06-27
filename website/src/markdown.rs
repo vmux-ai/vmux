@@ -17,7 +17,7 @@ fn escape_html(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn highlight_html(lang: &str, code: &str) -> String {
+pub fn highlight_code(lang: &str, code: &str) -> String {
     let token = lang.split([' ', '\t', ',']).next().unwrap_or(lang);
     let syntax = SYNTAXES
         .find_syntax_by_token(token)
@@ -263,7 +263,7 @@ fn render_node(n: &Node) -> Element {
             }
         },
         Node::CodeBlock(lang, code) => {
-            let html = highlight_html(lang, code);
+            let html = highlight_code(lang, code);
             rsx! {
                 pre { class: "bg-code-bg border border-border rounded-lg p-4 my-5 overflow-x-auto",
                     code { class: "font-mono text-sm leading-relaxed", dangerous_inner_html: "{html}" }
@@ -395,5 +395,17 @@ pub fn Markdown(content: String) -> Element {
     let nodes = parse(&content);
     rsx! {
         div { class: "text-text text-[15px]", {render_nodes(&nodes)} }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_rust_returns_markup() {
+        let html = highlight_code("rust", "pub fn x() {}");
+        assert!(html.contains("span"));
+        assert!(!html.is_empty());
     }
 }
