@@ -303,10 +303,9 @@ fn load_file_buffers(
             }
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
-        commands.entity(entity).insert((
-            EditState { core, hl, folds },
-            EditorKeymap(kind.make()),
-        ));
+        commands
+            .entity(entity)
+            .insert((EditState { core, hl, folds }, EditorKeymap(kind.make())));
     }
 }
 
@@ -653,7 +652,14 @@ fn on_file_fold_toggle(
     sync_fold_view(&mut edit);
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
-    emit_cursor(entity, &edit, keymap.0.as_ref(), &vpc, &browsers, &mut commands);
+    emit_cursor(
+        entity,
+        &edit,
+        keymap.0.as_ref(),
+        &vpc,
+        &browsers,
+        &mut commands,
+    );
     commands.entity(entity).insert(FoldsDirty);
 }
 
@@ -672,6 +678,34 @@ fn persist_folds(
     }
     if changed {
         store.save();
+    }
+}
+
+fn apply_lsp_folds(
+    mut msgs: MessageReader<crate::lsp::manager::LspFolds>,
+    mut q: Query<(&mut EditState, &FileView, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for f in msgs.read() {
+        let Ok((mut edit, fv, keymap, vp)) = q.get_mut(f.entity) else {
+            continue;
+        };
+        if canon(&fv.path) != canon(&f.path) {
+            continue;
+        }
+        edit.folds.set_regions(f.regions.clone());
+        sync_fold_view(&mut edit);
+        let vpc = *vp;
+        emit_window(f.entity, &mut edit, &vpc, &browsers, &mut commands);
+        emit_cursor(
+            f.entity,
+            &edit,
+            keymap.0.as_ref(),
+            &vpc,
+            &browsers,
+            &mut commands,
+        );
     }
 }
 
@@ -1727,6 +1761,7 @@ fn flush_lsp_changes(
     *acc = 0.0;
     for (entity, fv, edit) in &q {
         manager.change_with_text(&fv.path, &edit.core.buffer.text());
+        manager.folding_range(entity, &fv.path);
         commands.entity(entity).remove::<LspEditDirty>();
     }
 }
@@ -1805,6 +1840,7 @@ impl Plugin for EditorPlugin {
                     apply_goto,
                     apply_pending_goto,
                     reapply_keymap_on_change,
+                    apply_lsp_folds,
                     persist_folds,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),

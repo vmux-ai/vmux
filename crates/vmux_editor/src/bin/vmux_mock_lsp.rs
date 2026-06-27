@@ -14,7 +14,19 @@ fn main() {
         let id = msg.get("id").cloned();
         match method {
             "initialize" => {
-                let resp = json!({"jsonrpc": "2.0", "id": id, "result": {"capabilities": {}}});
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"capabilities": {"foldingRangeProvider": true}}
+                });
+                let _ = write_message(&mut stdout, &resp);
+            }
+            "textDocument/foldingRange" => {
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": [{"startLine": 0, "endLine": 2}]
+                });
                 let _ = write_message(&mut stdout, &resp);
             }
             "textDocument/didOpen" => {

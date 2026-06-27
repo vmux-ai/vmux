@@ -591,7 +591,14 @@ mod tests {
     fn cursor_pos_visual_col_for_wide_chars() {
         let mut c = core("あb");
         c.set_caret(1);
-        assert_eq!(c.cursor_pos(), CursorPos { line: 0, row: 0, col: 2 });
+        assert_eq!(
+            c.cursor_pos(),
+            CursorPos {
+                line: 0,
+                row: 0,
+                col: 2
+            }
+        );
     }
 
     #[test]
