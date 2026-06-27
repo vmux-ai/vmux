@@ -17,6 +17,7 @@ over). Do ALL web access via the vmux browser tools in the user's visible browse
 mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
 to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
 built-in web search.";
+const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
 
 pub struct ClaudeStrategy;
 
@@ -41,7 +42,7 @@ impl CliAgentStrategy for ClaudeStrategy {
             "--mcp-config".to_string(),
             build_mcp_config_json(mcp),
             "--settings".to_string(),
-            build_notify_settings_json(),
+            build_settings_json(mcp),
             "--disallowedTools".to_string(),
             DISALLOWED_TOOLS.to_string(),
             "--allowedTools".to_string(),
@@ -88,13 +89,26 @@ pub(crate) fn project_dir_name(cwd: &Path) -> String {
         .collect()
 }
 
-fn build_notify_settings_json() -> String {
+/// Inline `--settings` JSON merging two vmux hooks (merges with the user's
+/// `~/.claude/settings.json`, does not modify it): a Notification bell, and a
+/// PostToolUse hook that pings vmux on every file read/edit (`async` so it
+/// never blocks the agent).
+fn build_settings_json(mcp: &McpServerConfig) -> String {
+    let mut hook_args = vec![Value::String("notify-file-touch".into())];
+    if let Some(anchor) = anchor_from_mcp(mcp) {
+        hook_args.push(Value::String("--anchor".into()));
+        hook_args.push(Value::String(anchor.into()));
+    }
     let value = serde_json::json!({
         "hooks": {
             "Notification": [
+                { "hooks": [ { "type": "command", "command": "printf '\\a' > /dev/tty" } ] }
+            ],
+            "PostToolUse": [
                 {
+                    "matcher": FILE_TOUCH_MATCHER,
                     "hooks": [
-                        { "type": "command", "command": "printf '\\a' > /dev/tty" }
+                        { "type": "command", "command": mcp.command, "args": hook_args, "async": true }
                     ]
                 }
             ]
@@ -118,6 +132,11 @@ fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
     let mut root = Map::new();
     root.insert("mcpServers".into(), Value::Object(servers));
     serde_json::to_string(&Value::Object(root)).unwrap_or_else(|_| "{}".into())
+}
+
+fn anchor_from_mcp(mcp: &McpServerConfig) -> Option<&str> {
+    let i = mcp.args.iter().position(|a| a == "--anchor")?;
+    mcp.args.get(i + 1).map(|s| s.as_str())
 }
 
 pub(crate) fn discover_claude_session_id(
@@ -287,6 +306,23 @@ mod tests {
             .as_str()
             .unwrap();
         assert_eq!(cmd, "printf '\\a' > /dev/tty");
+    }
+
+    #[test]
+    fn build_args_injects_file_touch_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into(), "--anchor".into(), "42".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+        let settings = args.iter().position(|a| a == "--settings").unwrap();
+        let json = &args[settings + 1];
+        assert!(json.contains("PostToolUse"), "json: {json}");
+        assert!(json.contains("Read|Edit|Write|MultiEdit"));
+        assert!(json.contains("notify-file-touch"));
+        assert!(json.contains("\"--anchor\""));
+        assert!(json.contains("\"42\""));
     }
 
     #[test]
