@@ -55,7 +55,15 @@ impl CliAgentStrategy for VibeStrategy {
         vec![
             ("VIBE_MCP_SERVERS".to_string(), mcp_json),
             ("VIBE_DISABLED_TOOLS".to_string(), disabled_json),
+            (
+                "VIBE_ENABLE_EXPERIMENTAL_HOOKS".to_string(),
+                "true".to_string(),
+            ),
         ]
+    }
+
+    fn prepare_launch(&self, mcp: &McpServerConfig) {
+        ensure_vibe_file_touch_hook(&mcp.command);
     }
 
     fn discover_session(
@@ -124,6 +132,61 @@ fn vibe_config_path() -> PathBuf {
             PathBuf::from(home).join(".vibe")
         })
         .join("config.toml")
+}
+
+const VMUX_HOOK_NAME: &str = "vmux-file-follow";
+
+fn vibe_hooks_path() -> PathBuf {
+    std::env::var("VIBE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            PathBuf::from(home).join(".vibe")
+        })
+        .join("hooks.toml")
+}
+
+/// Idempotently register a vmux-managed `after_tool` hook in `~/.vibe/hooks.toml`
+/// that pings vmux on file read/edit. The hook command no-ops without
+/// `VMUX_ANCHOR`, so manual vibe use is unaffected. Appends only if our named
+/// hook is absent — never clobbers user-authored hooks.
+fn ensure_vibe_file_touch_hook(vmux_command: &str) {
+    write_vmux_hook(&vibe_hooks_path(), vmux_command);
+}
+
+fn write_vmux_hook(path: &Path, vmux_command: &str) {
+    let mut doc: toml::Table = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or_default();
+    let entry = doc
+        .entry("hooks".to_string())
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    let toml::Value::Array(hooks) = entry else {
+        return;
+    };
+    if hooks
+        .iter()
+        .any(|h| h.get("name").and_then(|n| n.as_str()) == Some(VMUX_HOOK_NAME))
+    {
+        return;
+    }
+    let mut hook = toml::Table::new();
+    hook.insert("name".into(), VMUX_HOOK_NAME.into());
+    hook.insert("type".into(), "after_tool".into());
+    hook.insert("match".into(), "re:^(read|edit|write)$".into());
+    hook.insert(
+        "command".into(),
+        format!("{vmux_command} notify-file-touch").into(),
+    );
+    hook.insert("strict".into(), false.into());
+    hooks.push(toml::Value::Table(hook));
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(text) = toml::to_string(&doc) {
+        let _ = std::fs::write(path, text);
+    }
 }
 
 fn parse_disabled_tools_toml(text: &str) -> Vec<String> {
@@ -299,6 +362,59 @@ mod tests {
         let parsed: Vec<String> = serde_json::from_str(&val).unwrap();
         assert!(parsed.contains(&"web_search".to_string()));
         assert!(parsed.contains(&"web_fetch".to_string()));
+    }
+
+    #[test]
+    fn build_env_enables_experimental_hooks() {
+        let mcp = McpServerConfig {
+            command: "vmux".to_string(),
+            args: vec![],
+            cwd: None,
+        };
+        let env = VibeStrategy.build_env(&mcp);
+        assert!(
+            env.iter()
+                .any(|(k, v)| k == "VIBE_ENABLE_EXPERIMENTAL_HOOKS" && v == "true")
+        );
+    }
+
+    #[test]
+    fn vmux_hook_written_idempotently() {
+        let tmp = unique_tmp("vibe-hooks");
+        let path = tmp.join("hooks.toml");
+        write_vmux_hook(&path, "/bin/vmux");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("vmux-file-follow"), "text: {text}");
+        assert!(text.contains("after_tool"));
+        assert!(text.contains("notify-file-touch"));
+
+        write_vmux_hook(&path, "/bin/vmux");
+        let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let count = doc
+            .get("hooks")
+            .and_then(|h| h.as_array())
+            .unwrap()
+            .iter()
+            .filter(|h| h.get("name").and_then(|n| n.as_str()) == Some("vmux-file-follow"))
+            .count();
+        assert_eq!(count, 1, "idempotent: no duplicate");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn vmux_hook_preserves_user_hooks() {
+        let tmp = unique_tmp("vibe-hooks-user");
+        let path = tmp.join("hooks.toml");
+        std::fs::write(
+            &path,
+            "[[hooks]]\nname = \"mine\"\ntype = \"before_tool\"\nmatch = \"bash\"\ncommand = \"echo hi\"\n",
+        )
+        .unwrap();
+        write_vmux_hook(&path, "/bin/vmux");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("mine"), "user hook preserved: {text}");
+        assert!(text.contains("vmux-file-follow"));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     fn write_meta(
