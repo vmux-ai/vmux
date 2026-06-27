@@ -153,38 +153,22 @@ fn auto_save_system(
     spaces: Query<(), With<Space>>,
     mut commands: Commands,
 ) {
-    auto_save_tick(
-        &mut auto_save,
-        time.delta(),
-        !spaces.is_empty(),
-        &mut commands,
-        store_path(),
-    );
-}
+    auto_save.periodic.tick(time.delta());
 
-fn auto_save_tick(
-    auto_save: &mut AutoSave,
-    delta: std::time::Duration,
-    has_space: bool,
-    commands: &mut Commands,
-    path: PathBuf,
-) {
-    auto_save.periodic.tick(delta);
-
-    if !has_space {
+    if spaces.is_empty() {
         return;
     }
 
     if auto_save.dirty {
-        auto_save.debounce.tick(delta);
+        auto_save.debounce.tick(time.delta());
         if auto_save.debounce.is_finished() {
-            save_space_to_path(commands, path.clone());
+            save_space_to_path(&mut commands, store_path());
             auto_save.dirty = false;
         }
     }
 
     if auto_save.periodic.just_finished() {
-        save_space_to_path(commands, path);
+        save_space_to_path(&mut commands, store_path());
     }
 }
 
@@ -1226,63 +1210,110 @@ mod tests {
         assert!(path.exists());
     }
 
-    fn savable_geometry_app() -> (tempfile::TempDir, App) {
-        let dir = tempfile::tempdir().expect("tempdir");
+    #[test]
+    fn incompatible_store_resets_layout_on_startup() {
+        let _home = HomeEnvGuard::use_temp_home("incompatible-store-resets-layout-on-startup");
+        let path = store_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("store dir");
+        }
+        std::fs::write(
+            &path,
+            store_body_with_key("vmux_desktop::ghost::DoesNotExist"),
+        )
+        .expect("write store");
+        std::fs::write(store_version_path(), STORE_SCHEMA_VERSION.to_string())
+            .expect("write version");
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .insert_resource(ActiveSpace {
+                record: vmux_space::model::bootstrap_space_record(),
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<vmux_agent::strategy::AgentStrategies>()
+            .add_plugins(PersistencePlugin);
+        app.world_mut().spawn(Main);
+        app.world_mut().spawn(PrimaryWindow);
+        app.update();
+
+        assert!(
+            !path.exists(),
+            "incompatible store should be removed on startup"
+        );
+        assert!(
+            !store_version_path().exists(),
+            "store.version should be removed with the incompatible store"
+        );
+        let spaces = app.world_mut().query::<&Space>().iter(app.world()).count();
+        assert_eq!(spaces, 1, "a fresh space should be spawned after reset");
+    }
+
+    #[test]
+    fn auto_save_system_skips_save_without_space() {
+        let _home = HomeEnvGuard::use_temp_home("auto-save-system-skips-without-space");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(vmux_core::CorePlugin)
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
-            .add_observer(save_on_default_event);
+            .insert_resource(AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+            })
+            .add_observer(save_on_default_event)
+            .add_systems(Update, auto_save_system);
         app.world_mut().spawn((
             Save,
             WindowGeometry {
-                fullscreen: true,
-                position: Some(IVec2::new(1, 2)),
-                size: Some(Vec2::new(3.0, 4.0)),
+                fullscreen: false,
+                position: None,
+                size: None,
             },
         ));
-        (dir, app)
-    }
-
-    fn dirty_auto_save() -> AutoSave {
-        AutoSave {
-            debounce: Timer::from_seconds(0.0, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: true,
-        }
+        app.update();
+        app.update();
+        assert!(
+            !store_path().exists(),
+            "auto_save must skip when no Space exists"
+        );
     }
 
     #[test]
-    fn auto_save_writes_when_space_present() {
-        let (dir, mut app) = savable_geometry_app();
-        let path = dir.path().join("store.ron");
-        let mut auto_save = dirty_auto_save();
-        auto_save_tick(
-            &mut auto_save,
-            std::time::Duration::from_millis(1),
-            true,
-            &mut app.world_mut().commands(),
-            path.clone(),
-        );
+    fn auto_save_system_saves_with_space() {
+        let _home = HomeEnvGuard::use_temp_home("auto-save-system-saves-with-space");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .insert_resource(AutoSave {
+                debounce: Timer::from_seconds(0.0, TimerMode::Once),
+                periodic: Timer::from_seconds(0.0, TimerMode::Repeating),
+                dirty: true,
+            })
+            .add_observer(save_on_default_event)
+            .add_systems(Update, auto_save_system);
+        app.world_mut().spawn((
+            Save,
+            Space,
+            SpaceId("space-1".to_string()),
+            WindowGeometry {
+                fullscreen: false,
+                position: None,
+                size: None,
+            },
+        ));
         app.update();
-        assert!(path.exists());
-    }
-
-    #[test]
-    fn auto_save_skips_when_no_space() {
-        let (dir, mut app) = savable_geometry_app();
-        let path = dir.path().join("store.ron");
-        let mut auto_save = dirty_auto_save();
-        auto_save_tick(
-            &mut auto_save,
-            std::time::Duration::from_millis(1),
-            false,
-            &mut app.world_mut().commands(),
-            path.clone(),
-        );
         app.update();
-        assert!(!path.exists());
+        assert!(
+            store_path().exists(),
+            "auto_save must save when a Space exists"
+        );
     }
 }
