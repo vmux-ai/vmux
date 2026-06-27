@@ -82,7 +82,7 @@ Replace the skeleton body. Keep the outer
 `div.pointer-events-none.absolute.inset-0.z-40.overflow-hidden.bg-term-bg` and the
 `state.map(|(label, segment)| ...)` plumbing + `Favicon`.
 
-```
+```text
 div (absolute inset-0 z-40 overflow-hidden bg-term-bg)
   MatrixRain { accent_rgb, words }                      // z-0, fills box
   div (relative z-10 flex h-full items-center justify-center)

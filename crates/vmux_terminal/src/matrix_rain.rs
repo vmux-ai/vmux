@@ -18,6 +18,7 @@ pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
     let canvas_id = use_hook(|| format!("matrix-rain-{}", (js_sys::Math::random() * 1.0e9) as u64));
     let running: Rc<RefCell<bool>> = use_hook(|| Rc::new(RefCell::new(true)));
     let raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let handle: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
 
     use_effect({
         let canvas_id = canvas_id.clone();
@@ -25,6 +26,7 @@ pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
         let words = words.clone();
         let running = running.clone();
         let raf = raf.clone();
+        let handle = handle.clone();
         move || {
             start_rain(
                 canvas_id.clone(),
@@ -32,6 +34,7 @@ pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
                 words.clone(),
                 running.clone(),
                 raf.clone(),
+                handle.clone(),
             );
         }
     });
@@ -39,8 +42,14 @@ pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
     use_drop({
         let running = running.clone();
         let raf = raf.clone();
+        let handle = handle.clone();
         move || {
             *running.borrow_mut() = false;
+            if let Some(id) = handle.borrow_mut().take()
+                && let Some(win) = web_sys::window()
+            {
+                let _ = win.cancel_animation_frame(id);
+            }
             *raf.borrow_mut() = None;
         }
     });
@@ -80,6 +89,7 @@ fn start_rain(
     words: Vec<String>,
     running: Rc<RefCell<bool>>,
     raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
+    handle: Rc<RefCell<Option<i32>>>,
 ) {
     let Some(window) = web_sys::window() else {
         return;
@@ -139,6 +149,7 @@ fn start_rain(
     let win = window.clone();
     let raf_inner = raf.clone();
     let running_inner = running.clone();
+    let handle_inner = handle.clone();
     let closure = Closure::wrap(Box::new(move || {
         let w = canvas.client_width().max(1) as f64;
         let h = canvas.client_height().max(1) as f64;
@@ -182,13 +193,16 @@ fn start_rain(
 
         if *running_inner.borrow()
             && let Some(cb) = raf_inner.borrow().as_ref()
+            && let Ok(id) = win.request_animation_frame(cb.as_ref().unchecked_ref())
         {
-            let _ = win.request_animation_frame(cb.as_ref().unchecked_ref());
+            *handle_inner.borrow_mut() = Some(id);
         }
     }) as Box<dyn FnMut()>);
 
     *raf.borrow_mut() = Some(closure);
-    if let Some(cb) = raf.borrow().as_ref() {
-        let _ = window.request_animation_frame(cb.as_ref().unchecked_ref());
+    if let Some(cb) = raf.borrow().as_ref()
+        && let Ok(id) = window.request_animation_frame(cb.as_ref().unchecked_ref())
+    {
+        *handle.borrow_mut() = Some(id);
     }
 }
