@@ -1,7 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
+    BOOKMARKS_EVENT, BookmarkNode, BookmarkRow, BookmarksCommandEvent, BookmarksHostEvent,
+    FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
     PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
     TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
@@ -12,8 +13,11 @@ use vmux_core::event::extension::{
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_ui::components::context_menu::{
+    ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
+};
 use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
+use vmux_ui::favicon::{Favicon, favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
@@ -43,6 +47,12 @@ pub fn Page() -> Element {
         tabs_state_received.set(true);
         tabs_state.set(data);
     });
+
+    let mut bookmarks_state = use_signal(BookmarksHostEvent::default);
+    let _bookmarks_listener =
+        use_bin_event_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
+            bookmarks_state.set(data);
+        });
 
     let mut reload_key = use_signal(|| 0u32);
     let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
@@ -147,6 +157,7 @@ pub fn Page() -> Element {
                         SideSheetView {
                             panes,
                             active_space,
+                            bookmarks: bookmarks_state(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(v) = update_version() {
@@ -162,6 +173,7 @@ pub fn Page() -> Element {
                     HeaderView {
                         stacks_state: stacks,
                         tabs_state: tabs,
+                        bookmarks: bookmarks_state(),
                         team: team_state().members,
                         extensions: extensions_state().extensions,
                         reload_key: reload_key(),
@@ -209,6 +221,7 @@ fn format_address(stack: &StackRow) -> String {
 fn HeaderView(
     stacks_state: StacksHostEvent,
     tabs_state: TabsHostEvent,
+    bookmarks: BookmarksHostEvent,
     team: Vec<TeamMemberRow>,
     extensions: Vec<ExtRow>,
     reload_key: u32,
@@ -224,6 +237,16 @@ fn HeaderView(
     let TabsHostEvent { tabs } = tabs_state;
     let active_row = stacks.iter().find(|t| t.is_active).cloned();
     let active_bg_color = active_row.as_ref().and_then(|r| r.bg_color.clone());
+    let active_url = active_row
+        .as_ref()
+        .map(|r| r.url.clone())
+        .unwrap_or_default();
+    let show_bookmark = !active_url.is_empty();
+    let is_bookmarked = show_bookmark
+        && bookmarks.roots.iter().any(|n| match n {
+            BookmarkNode::Entry(b) => b.url == active_url,
+            BookmarkNode::Folder(f) => f.children.iter().any(|b| b.url == active_url),
+        });
 
     let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
@@ -279,6 +302,34 @@ fn HeaderView(
                     HeaderAddressBar {
                         active_row: active_row.clone(),
                         bg_color: active_bg_color.clone(),
+                    }
+                    if show_bookmark {
+                        button {
+                            r#type: "button",
+                            aria_label: "Bookmark this page",
+                            title: "Bookmark this page (\u{2318}D)",
+                            class: if is_bookmarked {
+                                "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground transition-colors hover:bg-glass-hover"
+                            } else {
+                                "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            },
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+                                    command: "toggle_active".into(),
+                                    uuid: None,
+                                    name: None,
+                                    url: None,
+                                    title: None,
+                                    favicon_url: None,
+                                });
+                            },
+                            Icon { class: "h-4 w-4",
+                                path {
+                                    d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
+                                    fill: if is_bookmarked { "currentColor" } else { "none" },
+                                }
+                            }
+                        }
                     }
                     TeamFacepile { members: team }
                     ExtensionBar { extensions }
@@ -455,7 +506,17 @@ fn Tab(tab: TabRow) -> Element {
         )
     };
 
+    let bm_url = tab.url.clone();
+    let bm_title = display_title.clone();
+    let bm_favicon = tab.icon.favicon_url().to_string();
+    let pin_url = tab.url.clone();
+    let pin_title = display_title.clone();
+    let pin_favicon = tab.icon.favicon_url().to_string();
+    let menu_val = use_signal(|| tab.id.clone());
+
     rsx! {
+        ContextMenu { attributes: vec![],
+            ContextMenuTrigger { attributes: vec![],
         div {
             class: "{tab_class}",
             style: "{tab_style}",
@@ -498,6 +559,24 @@ fn Tab(tab: TabRow) -> Element {
                 Icon { class: "h-2.5 w-2.5",
                     path { d: "M18 6 6 18" }
                     path { d: "m6 6 12 12" }
+                }
+            }
+        }
+            }
+            ContextMenuContent { attributes: vec![],
+                ContextMenuItem {
+                    index: 0usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: move |_: String| add_to_bookmarks("add", bm_url.clone(), bm_title.clone(), bm_favicon.clone()),
+                    attributes: vec![],
+                    "Bookmark"
+                }
+                ContextMenuItem {
+                    index: 1usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_url.clone(), pin_title.clone(), pin_favicon.clone()),
+                    attributes: vec![],
+                    "Pin"
                 }
             }
         }
@@ -615,6 +694,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
 fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
+    bookmarks: BookmarksHostEvent,
     pane_tree_error: Option<String>,
 ) -> Element {
     rsx! {
@@ -637,6 +717,7 @@ fn SideSheetView(
                     }
                 }
             }
+            BookmarksSection { bookmarks }
             if let Some(err) = pane_tree_error {
                 div { class: "flex items-center px-2 py-1",
                     span { class: "text-ui text-destructive", "{err}" }
@@ -648,6 +729,330 @@ fn SideSheetView(
             } else {
                 for (i, pane) in panes.iter().enumerate() {
                     PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                }
+            }
+        }
+    }
+}
+
+fn open_bookmark(url: String) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "open".into(),
+        url: Some(url),
+        uuid: None,
+        name: None,
+        title: None,
+        favicon_url: None,
+    });
+}
+
+fn bookmark_cmd(command: &str, uuid: Option<String>) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: command.into(),
+        uuid,
+        name: None,
+        url: None,
+        title: None,
+        favicon_url: None,
+    });
+}
+
+fn add_to_bookmarks(command: &str, url: String, title: String, favicon_url: String) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: command.into(),
+        uuid: None,
+        name: None,
+        url: Some(url),
+        title: Some(title),
+        favicon_url: Some(favicon_url),
+    });
+}
+
+fn request_bookmark_menu() {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "menu_new_folder".into(),
+        uuid: None,
+        name: None,
+        url: None,
+        title: None,
+        favicon_url: None,
+    });
+}
+
+fn commit_folder_rename(uuid: String, name: String) {
+    let name = name.trim().to_string();
+    let command = if name.is_empty() {
+        "remove_folder"
+    } else {
+        "rename_folder"
+    };
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: command.into(),
+        uuid: Some(uuid),
+        name: if name.is_empty() { None } else { Some(name) },
+        url: None,
+        title: None,
+        favicon_url: None,
+    });
+}
+
+#[component]
+fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
+    let BookmarksHostEvent { pins, roots } = bookmarks;
+
+    if pins.is_empty() && roots.is_empty() {
+        return rsx! {
+            div {
+                class: "glass relative z-30 mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
+                oncontextmenu: move |e| {
+                    e.prevent_default();
+                    request_bookmark_menu();
+                },
+                "No pins or bookmarks"
+            }
+        };
+    }
+
+    rsx! {
+        div {
+            class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
+            oncontextmenu: move |e: Event<MouseData>| {
+                let data = e.data();
+                let on_card = data
+                    .downcast::<web_sys::MouseEvent>()
+                    .map(|m| m.target() == m.current_target())
+                    .unwrap_or(false);
+                if on_card {
+                    e.prevent_default();
+                    request_bookmark_menu();
+                }
+            },
+            if !pins.is_empty() {
+                div { class: "mb-1 grid grid-cols-3 gap-2 p-1",
+                    for p in pins.iter() {
+                        PinTile { key: "{p.uuid}", row: p.clone() }
+                    }
+                }
+            }
+            div { class: "flex flex-col gap-1",
+                for node in roots.iter() {
+                    match node {
+                        BookmarkNode::Folder(f) => rsx! { BookmarkFolder { key: "{f.uuid}", folder: f.clone() } },
+                        BookmarkNode::Entry(b) => rsx! { BookmarkEntry { key: "{b.uuid}", row: b.clone() } },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PinTile(row: BookmarkRow) -> Element {
+    let url_open = row.url.clone();
+    let uuid = row.uuid.clone();
+    let menu_val = use_signal(|| row.uuid.clone());
+    rsx! {
+        ContextMenu { attributes: vec![],
+            ContextMenuTrigger { attributes: vec![],
+                div {
+                    class: "flex aspect-square cursor-pointer items-center justify-center rounded-lg bg-white/5 hover:bg-white/10",
+                    onclick: {
+                        let u = url_open.clone();
+                        move |_| open_bookmark(u.clone())
+                    },
+                    title: "{row.title}",
+                    Favicon {
+                        favicon_url: row.favicon_url.clone(),
+                        url: row.url.clone(),
+                        class: "h-6 w-6 shrink-0 rounded-sm object-contain".to_string(),
+                        globe_class: "h-6 w-6 shrink-0 text-muted-foreground".to_string(),
+                    }
+                }
+            }
+            ContextMenuContent { attributes: vec![],
+                ContextMenuItem {
+                    index: 0usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
+                    attributes: vec![],
+                    "Open"
+                }
+                ContextMenuItem {
+                    index: 1usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("unpin", Some(id.clone())) },
+                    attributes: vec![],
+                    "Unpin"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BookmarkEntry(row: BookmarkRow) -> Element {
+    let url_open = row.url.clone();
+    let uuid_pin = row.uuid.clone();
+    let uuid_remove = row.uuid.clone();
+    let menu_val = use_signal(|| row.uuid.clone());
+    let title = if row.title.is_empty() {
+        row.url.clone()
+    } else {
+        row.title.clone()
+    };
+    let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
+    rsx! {
+        ContextMenu { attributes: vec![],
+            ContextMenuTrigger { attributes: vec![],
+                SheetEntryRow {
+                    active: false,
+                    onclick: {
+                        let u = url_open.clone();
+                        move |_| open_bookmark(u.clone())
+                    },
+                    Favicon {
+                        favicon_url: row.favicon_url.clone(),
+                        url: row.url.clone(),
+                        class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                        globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                    }
+                    span { class: "{title_class}", "{title}" }
+                }
+            }
+            ContextMenuContent { attributes: vec![],
+                ContextMenuItem {
+                    index: 0usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
+                    attributes: vec![],
+                    "Open"
+                }
+                ContextMenuItem {
+                    index: 1usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: { let id = uuid_pin.clone(); move |_: String| bookmark_cmd("pin", Some(id.clone())) },
+                    attributes: vec![],
+                    "Pin"
+                }
+                ContextMenuItem {
+                    index: 2usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
+                    attributes: vec![],
+                    "Remove"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BookmarkFolder(folder: FolderRow) -> Element {
+    let uuid = folder.uuid.clone();
+    let collapsed = folder.collapsed;
+    let mut editing = use_signal(|| false);
+    let mut draft = use_signal(|| folder.name.clone());
+    let menu_val = use_signal(|| folder.uuid.clone());
+
+    rsx! {
+        div { class: "flex flex-col gap-1",
+            if editing() {
+                div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                    input {
+                        r#type: "text",
+                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none",
+                        placeholder: "Folder name",
+                        value: "{draft}",
+                        autofocus: true,
+                        oncontextmenu: move |e| e.prevent_default(),
+                        onmounted: move |e: Event<MountedData>| {
+                            if let Some(el) = e.downcast::<web_sys::Element>()
+                                && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
+                            {
+                                let _ = input.focus();
+                            }
+                        },
+                        oninput: move |e| draft.set(e.value()),
+                        onkeydown: {
+                            let id = uuid.clone();
+                            move |e: Event<KeyboardData>| match e.key() {
+                                Key::Enter => {
+                                    e.prevent_default();
+                                    editing.set(false);
+                                    commit_folder_rename(id.clone(), draft());
+                                }
+                                Key::Escape => {
+                                    e.prevent_default();
+                                    editing.set(false);
+                                }
+                                _ => {}
+                            }
+                        },
+                        onblur: {
+                            let id = uuid.clone();
+                            move |_| {
+                                if editing() {
+                                    editing.set(false);
+                                    commit_folder_rename(id.clone(), draft());
+                                }
+                            }
+                        },
+                    }
+                }
+            } else {
+                ContextMenu { attributes: vec![],
+                    ContextMenuTrigger { attributes: vec![],
+                        SheetEntryRow {
+                            active: false,
+                            onclick: {
+                                let id = uuid.clone();
+                                move |_| bookmark_cmd("toggle_folder", Some(id.clone()))
+                            },
+                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                            }
+                            span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
+                        }
+                    }
+                    ContextMenuContent { attributes: vec![],
+                        ContextMenuItem {
+                            index: 0usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("toggle_folder", Some(id.clone())) },
+                            attributes: vec![],
+                            if collapsed { "Expand" } else { "Collapse" }
+                        }
+                        ContextMenuItem {
+                            index: 1usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: {
+                                let name = folder.name.clone();
+                                move |_: String| {
+                                    draft.set(name.clone());
+                                    editing.set(true);
+                                }
+                            },
+                            attributes: vec![],
+                            "Rename Folder"
+                        }
+                        ContextMenuItem {
+                            index: 2usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
+                            attributes: vec![],
+                            "Remove Folder"
+                        }
+                    }
+                }
+            }
+            if !collapsed {
+                div { class: "ml-3 flex flex-col gap-1",
+                    for b in folder.children.iter() {
+                        BookmarkEntry { key: "{b.uuid}", row: b.clone() }
+                    }
                 }
             }
         }
@@ -677,6 +1082,34 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
                 class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left",
                 "{space.name}"
             }
+        }
+    }
+}
+
+#[component]
+fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Element) -> Element {
+    rsx! {
+        div {
+            class: if active {
+                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+            } else {
+                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+            },
+            onclick: move |e| onclick.call(e),
+            {children}
+        }
+    }
+}
+
+#[component]
+fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            onclick: move |e| onclick.call(e),
+            {icon}
+            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{label}" }
         }
     }
 }
@@ -720,9 +1153,14 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 #[component]
 fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
-        button {
-            r#type: "button",
-            class: "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+        SheetNewButton {
+            label: "New Stack".to_string(),
+            icon: rsx! {
+                Icon { class: "h-4 w-4 shrink-0",
+                    path { d: "M12 5v14" }
+                    path { d: "M5 12h14" }
+                }
+            },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
@@ -730,11 +1168,6 @@ fn NewStackRow(pane_id: u64) -> Element {
                     stack_index: 0,
                 });
             },
-            Icon { class: "h-4 w-4 shrink-0",
-                path { d: "M12 5v14" }
-                path { d: "M5 12h14" }
-            }
-            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "New Stack" }
         }
     }
 }
@@ -744,13 +1177,21 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
 
+    let title_class = if is_active {
+        format!(
+            "min-w-0 flex-1 {} text-ui font-medium text-foreground",
+            dir_truncate_class(&stack.title)
+        )
+    } else {
+        format!(
+            "min-w-0 flex-1 {} text-ui",
+            dir_truncate_class(&stack.title)
+        )
+    };
+
     rsx! {
-        div {
-            class: if is_active {
-                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
-            } else {
-                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
-            },
+        SheetEntryRow {
+            active: is_active,
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "activate_stack".to_string(),
@@ -759,14 +1200,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 });
             },
             StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-            span {
-                class: if is_active {
-                    format!("min-w-0 flex-1 {} text-ui font-medium text-foreground", dir_truncate_class(&stack.title))
-                } else {
-                    format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&stack.title))
-                },
-                "{stack.title}"
-            }
+            span { class: "{title_class}", "{stack.title}" }
             button {
                 r#type: "button",
                 aria_label: "Close stack",

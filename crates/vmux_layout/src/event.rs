@@ -23,6 +23,7 @@ pub const RELOAD_EVENT: &str = "reload";
 )]
 pub struct ReloadEvent;
 pub const TABS_EVENT: &str = "tabs";
+pub const BOOKMARKS_EVENT: &str = "bookmarks";
 pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
@@ -563,6 +564,99 @@ pub struct DebugUpdateReady {
     rkyv::Deserialize,
 )]
 pub struct DebugUpdateClear;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct BookmarkRow {
+    pub uuid: String,
+    pub url: String,
+    pub title: String,
+    pub favicon_url: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FolderRow {
+    pub uuid: String,
+    pub name: String,
+    pub collapsed: bool,
+    pub children: Vec<BookmarkRow>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum BookmarkNode {
+    Entry(BookmarkRow),
+    Folder(FolderRow),
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct BookmarksHostEvent {
+    pub pins: Vec<BookmarkRow>,
+    pub roots: Vec<BookmarkNode>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct BookmarksCommandEvent {
+    pub command: String,
+    #[serde(default)]
+    pub uuid: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub favicon_url: Option<String>,
+}
 
 #[cfg(test)]
 mod update_event_tests {

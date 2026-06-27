@@ -66,6 +66,11 @@ impl Plugin for CorePlugin {
             .register_type::<TransitionType>()
             .register_type::<Order>()
             .register_type::<Active>()
+            .register_type::<Pin>()
+            .register_type::<Bookmark>()
+            .register_type::<Folder>()
+            .register_type::<Collapsed>()
+            .register_type::<Uuid>()
             .register_type::<Children>()
             .register_type::<ChildOf>();
     }
@@ -184,6 +189,36 @@ pub struct Order(pub u32);
 pub struct Active;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Pin;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Bookmark;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Folder;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Collapsed;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
+pub struct Uuid(pub String);
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
@@ -235,6 +270,18 @@ mod tests {
                 .get(std::any::TypeId::of::<TransitionType>())
                 .is_some()
         );
+    }
+
+    #[test]
+    fn registers_bookmark_components() {
+        let mut app = App::new();
+        app.add_plugins(CorePlugin);
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(registry.get(std::any::TypeId::of::<Pin>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<Bookmark>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<Folder>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<Collapsed>()).is_some());
+        assert!(registry.get(std::any::TypeId::of::<Uuid>()).is_some());
     }
 
     #[test]
