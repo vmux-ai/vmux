@@ -5,7 +5,6 @@ pub use wasm::{PageIconView, builtin_icon};
 mod wasm {
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
-    use crate::file_icon::type_icon;
     use dioxus::prelude::*;
     use vmux_core::icon::{BuiltinIcon, PageIcon};
 
@@ -63,9 +62,6 @@ mod wasm {
         img_class: String,
         icon_class: String,
     ) -> Element {
-        if url.starts_with("file:") {
-            return type_icon(&url, url.ends_with('/'), &icon_class);
-        }
         if let PageIcon::Builtin(builtin) = &icon {
             return builtin_icon(*builtin, &icon_class);
         }
