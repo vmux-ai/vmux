@@ -87,7 +87,7 @@
       "blurb_md": "The desktop application: the top-level binary and [`VmuxPlugin`] that wire every crate\ntogether, plus macOS-native integrations (glass/blur, event tap, native focus, tray,\nmenu, recording, persistence)."
     },
     {
-      "name": "vmux",
+      "name": "vmux_cli",
       "version": "0.0.19",
       "blurb_md": "The `vmux` command-line entry point: launches and controls the app and dispatches the\nMCP server, OS notifications, and the background service."
     },

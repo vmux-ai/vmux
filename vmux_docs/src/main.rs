@@ -88,7 +88,7 @@ fn main() -> Result<()> {
         let krate: rustdoc_types::Crate = serde_json::from_str(&raw)?;
         let doc = translate(&krate);
         metas.push(CrateMeta {
-            name: doc.name.clone(),
+            name: name.to_string(),
             version: doc.version.clone(),
             blurb_md: first_paragraph(&doc.root.docs_md),
         });
