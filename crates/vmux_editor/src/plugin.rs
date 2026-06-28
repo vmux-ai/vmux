@@ -47,6 +47,8 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
+/// A media file (image/video/audio/pdf) opened in a `file://` view. Holds only
+/// the kind and MIME; the bytes are served on demand over the CEF resource pipe.
 #[derive(Component, Clone, Debug)]
 pub struct FileMedia {
     pub kind: vmux_core::media::MediaKind,
@@ -557,12 +559,16 @@ fn on_file_scroll(
     );
 }
 
+/// Mirror the set of currently-open media paths into the CEF raw-media allowlist
+/// each frame, so the resource handler only serves files the user is viewing.
 fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>) {
     let paths: std::collections::HashSet<std::path::PathBuf> =
         media.iter().map(|fv| fv.path.clone()).collect();
     set_media_allowlist(paths);
 }
 
+/// Build the raw-media URL (`file://<abs>?vmux-raw=1`) that the page points media
+/// elements at; the CEF resource handler range-serves the file behind it.
 fn raw_media_url(path: &std::path::Path) -> String {
     let mut url = url::Url::from_file_path(path)
         .map(|u| u.to_string())
@@ -571,6 +577,8 @@ fn raw_media_url(path: &std::path::Path) -> String {
     url
 }
 
+/// Emit [`FileMediaEvent`] once the page is ready, so it can render the media
+/// element pointed at the raw-media URL.
 fn send_initial_media(
     q: Query<(Entity, &FileView, &FileMedia), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
@@ -672,6 +680,8 @@ fn drain_thumb_tasks(
     }
 }
 
+/// Open a media file in the system default app (the PDF view's "Open externally"
+/// action). Restricted to the requesting view's own path.
 fn on_file_open_external(
     trigger: On<BinReceive<FileOpenExternalRequest>>,
     views: Query<&FileView, With<FileMedia>>,
@@ -1495,8 +1505,8 @@ impl Plugin for EditorPlugin {
                     send_initial_meta,
                     send_initial_text_meta,
                     send_initial_dir,
-                    send_initial_media,
                     sync_media_allowlist,
+                    send_initial_media.after(sync_media_allowlist),
                     send_file_theme,
                     drain_thumb_tasks,
                     reconcile_file_watches,

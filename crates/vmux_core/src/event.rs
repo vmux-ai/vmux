@@ -23,7 +23,9 @@ pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
+/// Backend → page: a media file (image/video/audio/pdf) is ready to render.
 pub const FILE_MEDIA_EVENT: &str = "file_media";
+/// Page → backend: open a media file in the system default application.
 pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
@@ -298,8 +300,11 @@ pub struct FileOpenEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+/// Tells the page how to render an opened media file and where to fetch its bytes.
 pub struct FileMediaEvent {
+    /// Which media element to render.
     pub kind: crate::media::MediaKind,
+    /// MIME type of the file.
     pub mime: String,
     /// Raw-media URL (`file://…?vmux-raw=1`) for the media element `src`.
     pub url: String,
@@ -307,6 +312,7 @@ pub struct FileMediaEvent {
     pub abs_path: String,
 }
 
+/// Page → backend request to open a media file in the system default app.
 #[derive(
     Debug,
     Clone,
@@ -319,6 +325,7 @@ pub struct FileMediaEvent {
     rkyv::Deserialize,
 )]
 pub struct FileOpenExternalRequest {
+    /// Absolute path of the file to open.
     pub path: String,
 }
 
