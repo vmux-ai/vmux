@@ -23,9 +23,10 @@ fn read_system_appearance() -> Option<ResolvedScheme> {
 /// Seed [`SystemAppearance`] once at startup so Device mode resolves correctly on
 /// the first frame; winit only reports theme *changes* afterward.
 pub(crate) fn seed_system_appearance(mut system: ResMut<SystemAppearance>) {
-    if system.0.is_none() {
-        if let Some(scheme) = read_system_appearance() {
-            system.0 = Some(scheme);
-        }
+    if system.0.is_some() {
+        return;
+    }
+    if let Some(scheme) = read_system_appearance() {
+        system.0 = Some(scheme);
     }
 }
