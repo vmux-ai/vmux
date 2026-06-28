@@ -25,8 +25,8 @@ use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
-    ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
-    new_terminal_bundle_with_cwd,
+    AwaitingProcessCreated, ProcessExited, ServiceMessageSet, Terminal, TerminalGridSize,
+    TerminalStackSpawnRequest, new_terminal_bundle_with_cwd,
 };
 
 use crate::AgentVariant;
@@ -2095,16 +2095,18 @@ fn handle_restart_agent_pty(
         Option<&mut TerminalLaunch>,
         &AgentSession,
         Option<&SessionId>,
+        Option<&TerminalGridSize>,
     )>,
     service: Option<Res<ServiceClient>>,
     strategies: Option<Res<AgentStrategies>>,
+    mut commands: Commands,
 ) {
     let Some(service) = service else {
         for _ in reader.read() {}
         return;
     };
     for msg in reader.read() {
-        let Ok((mut pid, mut launch, session, session_id)) = q.get_mut(msg.entity) else {
+        let Ok((mut pid, mut launch, session, session_id, grid)) = q.get_mut(msg.entity) else {
             continue;
         };
         service
@@ -2129,20 +2131,19 @@ fn handle_restart_agent_pty(
             None => (String::new(), vec![], String::new(), Vec::new()),
         };
 
+        let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
         service.0.send(ClientMessage::CreateProcess {
             process_id: new_id,
             command: command.clone(),
             args: args.clone(),
             cwd: cwd.clone(),
             env: env.clone(),
-            cols: 80,
-            rows: 24,
+            cols,
+            rows,
         });
-        service
-            .0
-            .send(ClientMessage::AttachProcess { process_id: new_id });
 
         *pid = new_id;
+        commands.entity(msg.entity).insert(AwaitingProcessCreated);
         if let Some(l) = launch.as_mut() {
             l.args = args;
             l.env = env;

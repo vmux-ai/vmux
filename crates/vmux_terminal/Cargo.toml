@@ -50,4 +50,5 @@ web-sys = { version = "0.3", features = [
     "DomRect", "CssStyleDeclaration",
     "ResizeObserver", "ResizeObserverEntry",
     "MouseEvent", "WheelEvent",
+    "HtmlCanvasElement", "CanvasRenderingContext2d", "MediaQueryList",
 ] }
