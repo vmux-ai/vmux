@@ -46,16 +46,6 @@ pub struct PageOpenError {
     pub message: String,
 }
 
-/// Host-driven request to navigate an already-open `file://` page (the
-/// `target` entity) to a different file and scroll to `line`. Consumed by the
-/// editor; lets an agent's follow-pane swap content in place without a new tab.
-#[derive(Message, Clone, Debug)]
-pub struct FileFollowRequest {
-    pub target: Entity,
-    pub path: String,
-    pub line: Option<u32>,
-}
-
 #[derive(Message, Clone, Debug)]
 pub struct CefPageAttachRequest {
     pub stack: Entity,

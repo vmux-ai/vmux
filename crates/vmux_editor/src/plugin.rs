@@ -761,37 +761,6 @@ fn on_file_open(
     );
 }
 
-/// Host-driven follow: an agent's follow-pane swaps to a new file in place.
-fn handle_file_follow(
-    mut reader: MessageReader<vmux_core::FileFollowRequest>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Ok((mut fv, mut vp, mut meta)) = views.get_mut(req.target) else {
-            continue;
-        };
-        let path = PathBuf::from(&req.path);
-        if fv.path == path {
-            if let Some(line) = req.line {
-                vp.top_line = line;
-            }
-            continue;
-        }
-        navigate_file_view(
-            req.target,
-            path,
-            req.line.unwrap_or(0),
-            &mut fv,
-            &mut vp,
-            &mut meta,
-            &mut manager,
-            &mut commands,
-        );
-    }
-}
-
 #[derive(Component)]
 struct FileReloadRequested;
 
@@ -1572,7 +1541,6 @@ impl Plugin for EditorPlugin {
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .insert_non_send(SelfWrites::default())
             .add_plugins(crate::lsp::LspPlugin)
-            .add_message::<vmux_core::FileFollowRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
@@ -1608,7 +1576,6 @@ impl Plugin for EditorPlugin {
                     flush_lsp_changes,
                     apply_goto,
                     apply_pending_goto,
-                    handle_file_follow,
                     reapply_keymap_on_change,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
