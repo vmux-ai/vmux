@@ -723,7 +723,9 @@ impl AgentFileResolve<'_, '_> {
 /// `#L<line>:<col>-<end>` (scroll + highlight the match). `line` is 1-based;
 /// `col`/`end_col` are 0-based.
 fn file_touch_url(path: &str, line: Option<u32>, col: Option<u32>, end_col: Option<u32>) -> String {
-    let mut url = format!("file://{path}");
+    let mut url = url::Url::from_file_path(path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{path}"));
     if let Some(l) = line {
         url.push_str(&format!("#L{l}"));
         if let (Some(c), Some(e)) = (col, end_col) {

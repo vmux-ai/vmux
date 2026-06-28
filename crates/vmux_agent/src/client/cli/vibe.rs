@@ -148,8 +148,9 @@ fn vibe_hooks_path() -> PathBuf {
 
 /// Idempotently register a vmux-managed `after_tool` hook in `~/.vibe/hooks.toml`
 /// that pings vmux on file read/edit. The hook command no-ops without
-/// `VMUX_ANCHOR`, so manual vibe use is unaffected. Appends only if our named
-/// hook is absent — never clobbers user-authored hooks.
+/// `VMUX_ANCHOR`, so manual vibe use is unaffected. Adds our named hook if
+/// absent and reconciles its command in place when stale (e.g. after the vmux
+/// binary moves) — never clobbers user-authored hooks.
 fn ensure_vibe_file_touch_hook(vmux_command: &str) {
     write_vmux_hook(&vibe_hooks_path(), vmux_command);
 }
@@ -165,22 +166,30 @@ fn write_vmux_hook(path: &Path, vmux_command: &str) {
     let toml::Value::Array(hooks) = entry else {
         return;
     };
-    if hooks
-        .iter()
-        .any(|h| h.get("name").and_then(|n| n.as_str()) == Some(VMUX_HOOK_NAME))
+    let command = format!("{vmux_command} notify-file-touch");
+    if let Some(existing) = hooks
+        .iter_mut()
+        .find(|h| h.get("name").and_then(|n| n.as_str()) == Some(VMUX_HOOK_NAME))
     {
-        return;
+        if existing.get("command").and_then(|c| c.as_str()) == Some(command.as_str()) {
+            return;
+        }
+        let toml::Value::Table(table) = existing else {
+            return;
+        };
+        table.insert("type".into(), "after_tool".into());
+        table.insert("match".into(), "re:^(read|edit|write)$".into());
+        table.insert("command".into(), command.into());
+        table.insert("strict".into(), false.into());
+    } else {
+        let mut hook = toml::Table::new();
+        hook.insert("name".into(), VMUX_HOOK_NAME.into());
+        hook.insert("type".into(), "after_tool".into());
+        hook.insert("match".into(), "re:^(read|edit|write)$".into());
+        hook.insert("command".into(), command.into());
+        hook.insert("strict".into(), false.into());
+        hooks.push(toml::Value::Table(hook));
     }
-    let mut hook = toml::Table::new();
-    hook.insert("name".into(), VMUX_HOOK_NAME.into());
-    hook.insert("type".into(), "after_tool".into());
-    hook.insert("match".into(), "re:^(read|edit|write)$".into());
-    hook.insert(
-        "command".into(),
-        format!("{vmux_command} notify-file-touch").into(),
-    );
-    hook.insert("strict".into(), false.into());
-    hooks.push(toml::Value::Table(hook));
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -398,6 +407,27 @@ mod tests {
             .filter(|h| h.get("name").and_then(|n| n.as_str()) == Some("vmux-file-follow"))
             .count();
         assert_eq!(count, 1, "idempotent: no duplicate");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn vmux_hook_reconciles_stale_command() {
+        let tmp = unique_tmp("vibe-hooks-stale");
+        let path = tmp.join("hooks.toml");
+        write_vmux_hook(&path, "/old/path/vmux");
+        write_vmux_hook(&path, "/new/path/vmux");
+        let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let hooks = doc.get("hooks").and_then(|h| h.as_array()).unwrap();
+        let ours: Vec<_> = hooks
+            .iter()
+            .filter(|h| h.get("name").and_then(|n| n.as_str()) == Some("vmux-file-follow"))
+            .collect();
+        assert_eq!(ours.len(), 1, "no duplicate after reconcile");
+        assert_eq!(
+            ours[0].get("command").and_then(|c| c.as_str()),
+            Some("/new/path/vmux notify-file-touch"),
+            "stale command updated"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

@@ -758,12 +758,12 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 }
                 button {
                     r#type: "button",
-                    aria_label: "Fold stack",
+                    aria_label: if folded() { "Unfold stack" } else { "Fold stack" },
                     title: if folded() { "Unfold stack" } else { "Fold stack" },
                     class: if folded() {
                         "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
-                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
                     },
                     onclick: move |_| {
                         let next = !folded();

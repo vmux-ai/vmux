@@ -34,13 +34,12 @@ impl BuiltinIcon {
     /// -> `Nushell`. Returns `None` for unrecognized shells (caller falls back to
     /// the generic terminal icon).
     pub fn for_shell(command: &str) -> Option<BuiltinIcon> {
-        let name = command
+        let lower = command
             .rsplit(['/', '\\'])
             .next()
             .unwrap_or(command)
-            .trim_end_matches(".exe")
             .to_ascii_lowercase();
-        match name.as_str() {
+        match lower.trim_end_matches(".exe") {
             "nu" | "nushell" => Some(BuiltinIcon::Nushell),
             "bash" | "sh" => Some(BuiltinIcon::Bash),
             "zsh" => Some(BuiltinIcon::Zsh),

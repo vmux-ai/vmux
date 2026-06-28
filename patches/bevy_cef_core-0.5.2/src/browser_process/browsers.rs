@@ -118,9 +118,10 @@ pub struct WebviewBrowser {
     #[cfg(target_os = "macos")]
     agent_badge_img:
         RefCell<Option<(u8, objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>)>>,
-    /// Last applied badge `(kind_tag, bounds_w, bounds_h)` to skip redundant work.
+    /// Last applied badge `(kind_tag, bounds_w, bounds_h, scale_x100)` to skip
+    /// redundant work (scale feeds the badge inset + border width).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    last_badge: Cell<Option<(u8, i32, i32)>>,
+    last_badge: Cell<Option<(u8, i32, i32, i32)>>,
 }
 
 pub struct Browsers {
@@ -1156,6 +1157,7 @@ impl Browsers {
             tag,
             bounds.size.width.round() as i32,
             bounds.size.height.round() as i32,
+            (scale * 100.0).round() as i32,
         );
         if browser.last_badge.get() == Some(key) && browser.agent_badge.borrow().is_some() {
             return;

@@ -73,7 +73,16 @@ New variant on the existing agent command enum (where `AgentCommand`/`AgentQuery
 
 ```rust
 enum FileTouchKind { Read, Edit }
-AgentCommand::FileTouched { path: String, line: Option<usize>, kind: FileTouchKind }
+AgentCommand::FileTouched {
+    anchor: ProcessId,
+    path: String,
+    line: Option<u32>,
+    // `col`/`end_col` are 0-based UTF-16 columns on `line`; when both are set the
+    // follow-pane highlights that range (used by `grep`), otherwise it just scrolls.
+    col: Option<u32>,
+    end_col: Option<u32>,
+    kind: FileTouchKind,
+}
 ```
 
 The service forwards `{ anchor, command }` into the ECS exactly like the other `AgentCommand`s (e.g. the `Notify`/`OpenBeside` path in `vmux_agent::plugin`), producing the `AgentFileTouch` message.

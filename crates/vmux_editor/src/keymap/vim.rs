@@ -163,16 +163,24 @@ impl VimKeymap {
                 let n = self.take_count();
                 rep(DeleteBack, n)
             }
-            "D" => vec![DeleteToLineEnd],
+            "D" => {
+                let _ = self.take_count();
+                vec![DeleteToLineEnd]
+            }
             "C" => {
+                let _ = self.take_count();
                 self.mode = EditMode::Insert;
                 vec![DeleteToLineEnd, SetMode(EditMode::Insert)]
             }
             "s" => {
+                let n = self.take_count();
                 self.mode = EditMode::Insert;
-                vec![DeleteForward, SetMode(EditMode::Insert)]
+                let mut ops = rep(DeleteForward, n);
+                ops.push(SetMode(EditMode::Insert));
+                ops
             }
             "S" => {
+                let _ = self.take_count();
                 self.mode = EditMode::Insert;
                 vec![
                     Move(Motion::LineStart),
