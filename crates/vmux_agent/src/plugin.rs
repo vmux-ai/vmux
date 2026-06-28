@@ -25,8 +25,8 @@ use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
-    ProcessExited, ServiceMessageSet, Terminal, TerminalGridSize, TerminalStackSpawnRequest,
-    new_terminal_bundle_with_cwd,
+    AwaitingProcessCreated, ProcessExited, ServiceMessageSet, Terminal, TerminalGridSize,
+    TerminalStackSpawnRequest, new_terminal_bundle_with_cwd,
 };
 
 use crate::AgentVariant;
@@ -2099,6 +2099,7 @@ fn handle_restart_agent_pty(
     )>,
     service: Option<Res<ServiceClient>>,
     strategies: Option<Res<AgentStrategies>>,
+    mut commands: Commands,
 ) {
     let Some(service) = service else {
         for _ in reader.read() {}
@@ -2140,11 +2141,9 @@ fn handle_restart_agent_pty(
             cols,
             rows,
         });
-        service
-            .0
-            .send(ClientMessage::AttachProcess { process_id: new_id });
 
         *pid = new_id;
+        commands.entity(msg.entity).insert(AwaitingProcessCreated);
         if let Some(l) = launch.as_mut() {
             l.args = args;
             l.env = env;

@@ -788,7 +788,7 @@ struct ShellOutputSeen;
 
 /// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
-struct AwaitingProcessCreated;
+pub struct AwaitingProcessCreated;
 
 pub fn apply_process_created(
     commands: &mut Commands,
@@ -3006,6 +3006,7 @@ fn on_restart_pty(
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
     mut restart_agent: MessageWriter<vmux_core::agent::RestartAgentPty>,
+    mut commands: Commands,
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
@@ -3050,11 +3051,9 @@ fn on_restart_pty(
         cols,
         rows,
     });
-    service
-        .0
-        .send(ClientMessage::AttachProcess { process_id: new_id });
 
     *pid = new_id;
+    commands.entity(entity).insert(AwaitingProcessCreated);
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
