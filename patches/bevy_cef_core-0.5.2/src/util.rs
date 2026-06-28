@@ -410,7 +410,7 @@ pub fn build_raw_media_response(
         };
     }
 
-    let (start, last, partial) = match range {
+    let (start, last) = match range {
         Some((s, end_opt)) => {
             let s = *s;
             if s >= total {
@@ -423,14 +423,14 @@ pub fn build_raw_media_response(
                     len: 0,
                 };
             }
-            (
-                s,
-                end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s),
-                true,
-            )
+            (s, end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s))
         }
-        None => (0, total - 1, false),
+        None => (0, total - 1),
     };
+    // A request for the whole resource (`bytes=0-` or no Range) is answered 200;
+    // only a true sub-range is 206. Returning 206 for `bytes=0-` confuses
+    // Chromium's media data source (it loops re-fetching instead of playing).
+    let partial = start > 0 || last < total - 1;
     let status = if partial { 206 } else { 200 };
     if partial {
         headers.push((
