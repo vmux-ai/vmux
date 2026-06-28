@@ -718,37 +718,64 @@ fn on_file_open_external(
 
 fn on_file_open(
     trigger: On<BinReceive<FileOpenEvent>>,
+    views: Query<(), With<FileView>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    if views.get(entity).is_err() {
+        return;
+    }
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let url = url::Url::from_file_path(&path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
+    commands.entity(entity).insert(WebviewSource::new(url));
+}
+
+/// Sync a file:// view to its committed webview URL. Opening a file/dir navigates
+/// the webview (see [`on_file_open`]); this handler reacts to every committed
+/// navigation — including browser back/forward — by updating the [`FileView`]
+/// path and dropping its loaded state so it reloads. Routing all navigation
+/// through CEF is what gives the editor working native back/forward.
+fn reload_file_view_on_nav(
+    mut events: bevy::ecs::message::MessageReader<WebviewCommittedNavigationEvent>,
     mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
-        return;
-    };
-    manager.close(&fv.path);
-    let url = url::Url::from_file_path(&path)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
-    meta.title = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string_lossy().to_string());
-    meta.url = url;
-    fv.path = path;
-    vp.top_line = 0;
-    commands
-        .entity(entity)
-        .remove::<FileDir>()
-        .remove::<FileBuffer>()
-        .remove::<FileMedia>()
-        .remove::<EditState>()
-        .remove::<EditorKeymap>()
-        .remove::<LspEditDirty>()
-        .remove::<FileInitialMetaSent>()
-        .remove::<crate::lsp::manager::LspOpened>()
-        .remove::<crate::lsp::manager::LintRan>();
+    for ev in events.read() {
+        if !ev.is_main_frame {
+            continue;
+        }
+        let Some(path) = path_from_files_url(&ev.url) else {
+            continue;
+        };
+        let Ok((mut fv, mut vp, mut meta)) = views.get_mut(ev.webview) else {
+            continue;
+        };
+        if fv.path == path {
+            continue;
+        }
+        manager.close(&fv.path);
+        meta.title = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        meta.url = ev.url.clone();
+        fv.path = path;
+        vp.top_line = 0;
+        commands
+            .entity(ev.webview)
+            .remove::<FileDir>()
+            .remove::<FileBuffer>()
+            .remove::<FileMedia>()
+            .remove::<EditState>()
+            .remove::<EditorKeymap>()
+            .remove::<LspEditDirty>()
+            .remove::<FileInitialMetaSent>()
+            .remove::<crate::lsp::manager::LspOpened>()
+            .remove::<crate::lsp::manager::LintRan>();
+    }
 }
 
 #[derive(Component)]
@@ -1517,6 +1544,7 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
+                    reload_file_view_on_nav,
                     load_file_buffers,
                     send_initial_meta,
                     send_initial_text_meta,
