@@ -2988,25 +2988,19 @@ fn theme_signature(
     hasher.finish()
 }
 
-/// Map a terminal color scheme to its light/dark sibling for the app appearance.
-/// Schemes without a known counterpart are honored as-is.
+/// Map a terminal color scheme across the light/dark boundary for the app
+/// appearance. Only crosses the boundary: a chosen dark flavor (e.g. frappe,
+/// macchiato) is preserved in dark mode, and any scheme without a known
+/// counterpart is honored as-is.
 fn scheme_for_appearance(name: &str, dark: bool) -> &str {
-    match name {
-        "catppuccin-mocha" | "catppuccin-latte" | "catppuccin-frappe" | "catppuccin-macchiato" => {
-            if dark {
-                "catppuccin-mocha"
-            } else {
-                "catppuccin-latte"
-            }
+    match (name, dark) {
+        ("catppuccin-mocha" | "catppuccin-frappe" | "catppuccin-macchiato", false) => {
+            "catppuccin-latte"
         }
-        "solarized-dark" | "solarized-light" => {
-            if dark {
-                "solarized-dark"
-            } else {
-                "solarized-light"
-            }
-        }
-        other => other,
+        ("catppuccin-latte", true) => "catppuccin-mocha",
+        ("solarized-dark", false) => "solarized-light",
+        ("solarized-light", true) => "solarized-dark",
+        (other, _) => other,
     }
 }
 
