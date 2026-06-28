@@ -63,7 +63,7 @@ Native owns detection and execution (it has process + filesystem access); the WA
 a dumb renderer of state pushed over the bin-event bridge. Mirrors the LSP/Mason manager
 page wiring (`crates/vmux_editor/src/lsp_page.rs` ↔ `lsp/manager_page.rs`).
 
-```
+```text
 page (WASM)                         native (Bevy)
 -----------                         -------------
 on mount ── AgentSetupPrereqRequest ──▶ detect brew (exec::find_executable)
@@ -79,7 +79,7 @@ click ──── AgentInstallRunRequest ────▶ on_agent_install_run:
                                         on Ended (matching pid):
                                           find_executable(exe)?
                                             present ─▶ existing success redirect
-                                            absent/exit≠0 ─▶ AgentSetupResult{ok:false}
+                                            absent ─▶ AgentSetupResult{ok:false}
         ◀── AgentSetupResult{ok:false} ─
 render "Retry"
 click Retry ─ AgentInstallRunRequest ─▶ (reuse install pane)
@@ -108,7 +108,7 @@ pub fn install_command_chained(segment: &str, brew_present: bool) -> Option<Stri
 
 Chained form (claude, brew absent):
 
-```
+```bash
 bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install --cask claude-code'
 ```
 
@@ -167,7 +167,7 @@ Forwarding `Started` too lets the consumer arm itself and ignore the spurious in
   On `Started` → `armed = true`. On `Ended` while `armed`:
   - `exec::find_executable(kind.executable())` present → reuse the existing success path
     (redirect + `ForcePaneClose`).
-  - absent, or `exit_code != Some(0)` → emit `AgentSetupResult { ok: false }` to the setup
+  - absent → emit `AgentSetupResult { ok: false }` to the setup
     page webview; leave the failed terminal pane open.
 - Retry: the page re-emits `AgentInstallRunRequest`. `on_agent_install_run` detects an
   existing `AgentInstallPane` for the stack and reuses it (re-send `pending_input`,
@@ -193,8 +193,8 @@ Forwarding `Started` too lets the consumer arm itself and ignore the spurious in
 
 - Completion is detected from the shell's real `$?` at prompt return (OSC 133), not a
   timer — no false-positive on slow `brew install` (which can take minutes).
-- Failure branch triggers on missing binary **or** non-zero exit, so a cancelled `sudo`,
-  a network failure, or a brew error all surface as Retry.
+- Failure branch triggers on the agent binary still being absent after the command
+  finishes, so a cancelled `sudo`, a network failure, or a brew error all surface as Retry.
 - Page pushes are guarded by `has_browser` / `host_emit_ready`; if the page isn't ready the
   request/response handshake retries on the page side (the listener fires page-ready once
   attached).

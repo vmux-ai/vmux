@@ -157,7 +157,7 @@ fn on_agent_install_run(
         warn!("agent install run: unknown agent segment '{segment}'");
         return;
     };
-    let brew_present = crate::exec::find_executable("brew").is_some();
+    let brew_present = !cfg!(target_os = "macos") || crate::exec::find_executable("brew").is_some();
     let Some(command) = vmux_core::agent_setup::install_command_chained(segment, brew_present)
     else {
         warn!("agent install run: unknown agent segment '{segment}'");
