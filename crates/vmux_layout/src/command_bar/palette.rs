@@ -224,7 +224,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         };
         if let Some(first) = completions.first() {
             let full = &first.full_path;
-            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase()) {
+            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase())
+                && full.is_char_boundary(q_trimmed.len())
+            {
                 full[q_trimmed.len()..].to_string()
             } else {
                 String::new()
@@ -720,26 +722,32 @@ fn focus_and_install_ctrl_bindings() {
                 let _ = input2.set_selection_range(p, p);
             }
             CtrlEditAction::Delete => {
-                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
-                let new_val = format!("{}{}", &v[..s], &v[(s + 1).min(v.len())..]);
+                let s = floor_char_boundary(&v, raw_selection_start(&input2));
+                let end = v[s..].chars().next().map(|c| s + c.len_utf8()).unwrap_or(s);
+                let new_val = format!("{}{}", &v[..s], &v[end..]);
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(s as u32, s as u32);
                 dispatch_input_event(&input2);
             }
             CtrlEditAction::Backspace => {
-                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
+                let v = input2.value();
+                let s = floor_char_boundary(&v, raw_selection_start(&input2));
                 if s > 0 {
-                    let v = input2.value();
-                    let new_val = format!("{}{}", &v[..s - 1], &v[s..]);
+                    let prev = v[..s]
+                        .chars()
+                        .next_back()
+                        .map(|c| s - c.len_utf8())
+                        .unwrap_or(0);
+                    let new_val = format!("{}{}", &v[..prev], &v[s..]);
                     input2.set_value(&new_val);
-                    let _ = input2.set_selection_range((s - 1) as u32, (s - 1) as u32);
+                    let _ = input2.set_selection_range(prev as u32, prev as u32);
                     dispatch_input_event(&input2);
                 }
             }
             CtrlEditAction::DeleteWord => {
-                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
+                let s = floor_char_boundary(&v, raw_selection_start(&input2));
                 let bytes = v.as_bytes();
                 let mut i = s.saturating_sub(1);
                 while i > 0 && bytes[i - 1] == b' ' {
@@ -748,14 +756,15 @@ fn focus_and_install_ctrl_bindings() {
                 while i > 0 && bytes[i - 1] != b' ' {
                     i -= 1;
                 }
+                let i = floor_char_boundary(&v, i);
                 let new_val = format!("{}{}", &v[..i], &v[s..]);
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(i as u32, i as u32);
                 dispatch_input_event(&input2);
             }
             CtrlEditAction::DeleteToBeginning => {
-                let s = input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize;
                 let v = input2.value();
+                let s = floor_char_boundary(&v, raw_selection_start(&input2));
                 input2.set_value(&v[s..]);
                 let _ = input2.set_selection_range(0, 0);
                 dispatch_input_event(&input2);
@@ -831,6 +840,22 @@ fn dispatch_ctrl_keydown(el: &web_sys::HtmlInputElement, code: &str) {
         );
         let _ = el.dispatch_event(&evt);
     }
+}
+
+/// Largest char boundary of `s` at or before `i`, so DOM text offsets never slice a
+/// UTF-8 string mid-character (which would panic the WASM UI on non-ASCII input).
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn raw_selection_start(input: &web_sys::HtmlInputElement) -> usize {
+    input.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize
 }
 
 /// Dispatch a synthetic "input" event so Dioxus picks up value changes.
