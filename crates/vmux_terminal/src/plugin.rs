@@ -358,8 +358,14 @@ fn on_terminal_removed(
 
 fn add_terminal_update_systems(app: &mut App) -> &mut App {
     app.add_message::<ProcessExitedEvent>()
+        .add_message::<CommandLifecycleEvent>()
+        .add_message::<TerminalReinputRequest>()
         .add_message::<OscTitleChanged>()
         .add_message::<vmux_core::notify::BellReceived>()
+        .add_systems(
+            Update,
+            handle_terminal_reinput_requests.after(poll_service_messages),
+        )
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
         .add_systems(Update, sync_agent_focus.after(poll_service_messages))
@@ -1043,6 +1049,7 @@ struct PollServiceWriters<'w> {
     agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
     agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
+    command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
 }
@@ -1506,6 +1513,11 @@ fn poll_service_messages(
                     vmux_service::agent_events::AgentQueryResultEvent { request_id, result },
                 );
             }
+            ServiceMessage::CommandLifecycle { process_id, kind } => {
+                writers
+                    .command_lifecycle
+                    .write(CommandLifecycleEvent { process_id, kind });
+            }
             _ => {}
         }
     }
@@ -1532,6 +1544,22 @@ fn flush_pending_terminal_input(
             data: input.data.clone(),
         });
         commands.entity(entity).remove::<PendingTerminalInput>();
+    }
+}
+
+fn handle_terminal_reinput_requests(
+    mut requests: MessageReader<TerminalReinputRequest>,
+    terminals: Query<(Entity, &ProcessId), With<Terminal>>,
+    mut commands: Commands,
+) {
+    for req in requests.read() {
+        for (entity, pid) in &terminals {
+            if *pid == req.process_id {
+                commands.entity(entity).insert(PendingTerminalInput {
+                    data: req.data.clone(),
+                });
+            }
+        }
     }
 }
 
@@ -3143,6 +3171,18 @@ fn copy_mode_key_exits(key: vmux_service::protocol::CopyModeKey) -> bool {
 #[derive(Message, Debug, Clone)]
 pub struct ProcessExitedEvent {
     pub process_id: ProcessId,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct CommandLifecycleEvent {
+    pub process_id: ProcessId,
+    pub kind: vmux_service::protocol::CommandLifecycleKind,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct TerminalReinputRequest {
+    pub process_id: ProcessId,
+    pub data: Vec<u8>,
 }
 
 #[derive(Message, Debug, Clone)]
