@@ -391,7 +391,6 @@ pub(crate) fn rebuild_space_views(
     browser_q: Query<(), With<Browser>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     settings: Res<AppSettings>,
-    mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -538,10 +537,9 @@ pub(crate) fn rebuild_space_views(
                 if let Some(launch) = saved_launch {
                     commands.entity(term).insert(launch.clone());
                 }
-            } else if let Some(kind) = vmux_agent::AgentKind::all()
-                .into_iter()
-                .find(|k| meta.url.starts_with(&k.cli_url_prefix()))
-            {
+            } else if let Some(kind) = vmux_agent::AgentKind::all().into_iter().find(|k| {
+                meta.url.starts_with(&k.cli_url_prefix()) || meta.url.starts_with(&k.compose_url())
+            }) {
                 let id_part = meta.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
                 let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
                 let cwd = saved_launch
@@ -549,13 +547,16 @@ pub(crate) fn rebuild_space_views(
                     .unwrap_or_else(|| {
                         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
                     });
-                spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
+                vmux_agent::compose::attach_compose_to_stack(
                     kind,
                     cwd,
                     session_id,
-                    stack: entity,
-                    initial_prompt: None,
-                });
+                    entity,
+                    &all_children,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                );
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                 commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else if meta

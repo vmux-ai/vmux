@@ -29,12 +29,15 @@ mod host {
         command_bar: false,
     };
 
-    /// Carries the agent kind + working directory from compose-page attach to the
-    /// submit observer, so spawning the CLI doesn't have to re-derive them.
+    /// Carries the agent kind, working directory, and (when reopening a persisted
+    /// agent) the session id from compose-page attach to the submit observer, so
+    /// spawning the CLI doesn't have to re-derive them. `session_id` is `Some`
+    /// only when composing over a restored agent, so submit resumes that session.
     #[derive(Component, Clone)]
     pub struct ComposeContext {
         pub kind: AgentKind,
         pub cwd: std::path::PathBuf,
+        pub session_id: Option<String>,
     }
 
     /// On the compose page's stack: the sibling stack where the agent terminal is
@@ -58,10 +61,13 @@ mod host {
         }
     }
 
-    /// Replace a stack's content with the compose page for `kind`.
+    /// Replace a stack's content with the compose page for `kind`. Pass
+    /// `session_id: Some(..)` when composing over a restored agent so submit
+    /// resumes that session instead of starting a fresh one.
     pub fn attach_compose_to_stack(
         kind: AgentKind,
         cwd: std::path::PathBuf,
+        session_id: Option<String>,
         stack: Entity,
         children_q: &Query<&Children>,
         commands: &mut Commands,
@@ -80,7 +86,11 @@ mod host {
         let browser = commands
             .spawn((
                 vmux_layout::Browser::new_with_title(meshes, webview_mt, &url, &title),
-                ComposeContext { kind, cwd },
+                ComposeContext {
+                    kind,
+                    cwd,
+                    session_id,
+                },
                 ChildOf(stack),
             ))
             .id();
@@ -108,7 +118,7 @@ mod host {
             spawn_agent.write(SpawnAgentInStackRequest {
                 kind: ctx.kind,
                 cwd: ctx.cwd.clone(),
-                session_id: None,
+                session_id: ctx.session_id.clone(),
                 stack: compose_stack,
                 initial_prompt: run.then(|| text.clone()),
             });
@@ -125,7 +135,7 @@ mod host {
         spawn_agent.write(SpawnAgentInStackRequest {
             kind: ctx.kind,
             cwd: ctx.cwd.clone(),
-            session_id: None,
+            session_id: ctx.session_id.clone(),
             stack: terminal_stack,
             initial_prompt: Some(text),
         });

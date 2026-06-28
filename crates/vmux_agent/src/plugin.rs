@@ -1840,6 +1840,7 @@ fn handle_agent_page_open_task(
                         crate::compose::attach_compose_to_stack(
                             kind,
                             default_cwd.to_path_buf(),
+                            None,
                             task.stack,
                             children_q,
                             commands,
