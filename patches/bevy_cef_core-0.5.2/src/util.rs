@@ -383,9 +383,7 @@ pub fn build_raw_media_response(
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let path = canonical.as_path();
 
-    let allowed = is_media_path_allowed(path);
-    raw_media_debug(&format!("req path={} allowed={allowed}", path.display()));
-    if !allowed {
+    if !is_media_path_allowed(path) {
         return deny(404, "text/plain");
     }
     let mime = raw_media_mime(path).to_string();
@@ -396,27 +394,12 @@ pub fn build_raw_media_response(
         Err(_) => return deny(404, "text/plain"),
     };
 
-    raw_media_debug(&format!(
-        "serve path={} total={total} status=200 full",
-        path.display()
-    ));
     RawMediaResponse {
         status: 200,
         headers: cors_headers(),
         mime,
         file: Some(file),
         len: total,
-    }
-}
-
-fn raw_media_debug(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/vmux_media_debug.log")
-    {
-        let _ = writeln!(f, "{msg}");
     }
 }
 
