@@ -13,6 +13,8 @@ pub mod page;
 pub mod plugin;
 pub mod schema;
 pub mod themes;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod appearance;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -36,3 +38,5 @@ pub use plugin::runtime::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::view::Settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
