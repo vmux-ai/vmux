@@ -205,6 +205,14 @@ async fn grep_result(
         .stdout
         .take()
         .ok_or("grep: failed to capture rg output")?;
+    let mut stderr_pipe = child.stderr.take();
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(stderr) = stderr_pipe.as_mut() {
+            let _ = stderr.read_to_string(&mut buf);
+        }
+        buf
+    });
 
     let mut order: Vec<String> = Vec::new();
     let mut first_line: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
@@ -254,7 +262,7 @@ async fn grep_result(
         if lines_out.len() < GREP_MAX_LINES {
             lines_out.push(format!("{path}:{lineno}: {}", raw.trim_end()));
         }
-        if lines_out.len() >= GREP_MAX_LINES && order.len() >= GREP_MAX_FILES {
+        if lines_out.len() >= GREP_MAX_LINES || order.len() >= GREP_MAX_FILES {
             capped = true;
             break;
         }
@@ -263,14 +271,11 @@ async fn grep_result(
         let _ = child.kill();
     }
     let status = child.wait().map_err(|e| format!("grep: {e}"))?;
+    let stderr = stderr_handle.join().unwrap_or_default();
 
     if order.is_empty() {
         if !capped && status.code() != Some(0) && status.code() != Some(1) {
-            let mut err = String::new();
-            if let Some(mut stderr) = child.stderr.take() {
-                let _ = stderr.read_to_string(&mut err);
-            }
-            let err = err.trim();
+            let err = stderr.trim();
             return Err(if err.is_empty() {
                 "grep: rg failed".to_string()
             } else {
