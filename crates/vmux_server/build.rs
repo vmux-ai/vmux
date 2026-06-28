@@ -22,6 +22,7 @@ fn main() {
             "../vmux_service/src",
             "../vmux_setting/src",
             "../vmux_space/src",
+            "../vmux_team/src",
             "../vmux_terminal/src",
             "../vmux_terminal/assets/fonts",
             "../vmux_agent/src/vibe.rs",
