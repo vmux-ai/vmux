@@ -140,6 +140,36 @@ pub fn Page() -> Element {
                 .set_property("--radius", &format!("{radius_px}px"));
         }
     });
+    use_effect(move || {
+        let PaneTreeEvent { panes } = pane_tree_state();
+        let active_pane = panes.iter().find(|p| p.is_active);
+        let target = active_pane
+            .and_then(|p| {
+                p.stacks
+                    .iter()
+                    .find(|s| s.is_active)
+                    .map(|s| (p.id, s.stack_index))
+            })
+            .or_else(|| {
+                panes.iter().find_map(|p| {
+                    p.stacks
+                        .iter()
+                        .find(|s| s.is_active)
+                        .map(|s| (p.id, s.stack_index))
+                })
+            });
+        let Some((pane_id, stack_index)) = target else {
+            return;
+        };
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(&format!("sidesheet-stack-{pane_id}-{stack_index}")))
+        {
+            let opts = web_sys::ScrollIntoViewOptions::new();
+            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            el.scroll_into_view_with_scroll_into_view_options(&opts);
+        }
+    });
     let side_sheet_vars = format!(
         "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
         state.side_sheet_width,
@@ -706,32 +736,55 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
+    let mut folded = use_signal(|| false);
 
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "glass mb-2 flex flex-col rounded-lg p-1.5 pane-loading-ring"
+                "glass group mb-2 flex flex-col rounded-lg p-1.5 pane-loading-ring"
             } else if pane.is_active {
-                "glass mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
+                "glass group mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
             } else {
-                "glass mb-2 flex flex-col rounded-lg p-1.5"
+                "glass group mb-2 flex flex-col rounded-lg p-1.5"
             },
             div {
-                class: if pane.is_active {
-                    "mb-0.5 rounded-md px-2 py-1 text-ui font-semibold text-foreground"
-                } else {
-                    "mb-0.5 rounded-md px-2 py-1 text-ui font-medium text-muted-foreground"
-                },
-                "{label}"
-            }
-            div { class: "flex flex-col gap-1",
-                for stack in pane
-                    .stacks
-                    .iter()
-                    .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
-                {
-                    SideSheetStackRow { stack: stack.clone(), pane_id }
+                class: "mb-0.5 flex items-center gap-1 rounded-md px-2 py-1",
+                span {
+                    class: if pane.is_active {
+                        "min-w-0 flex-1 text-ui font-semibold text-foreground"
+                    } else {
+                        "min-w-0 flex-1 text-ui font-medium text-muted-foreground"
+                    },
+                    "{label}"
                 }
-                NewStackRow { pane_id }
+                button {
+                    r#type: "button",
+                    aria_label: if folded() { "Unfold stack" } else { "Fold stack" },
+                    title: if folded() { "Unfold stack" } else { "Fold stack" },
+                    class: if folded() {
+                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    } else {
+                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    onclick: move |_| {
+                        let next = !folded();
+                        folded.set(next);
+                    },
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                }
+            }
+            if !folded() {
+                div { class: "flex flex-col gap-1",
+                    for stack in pane
+                        .stacks
+                        .iter()
+                        .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
+                    {
+                        SideSheetStackRow { stack: stack.clone(), pane_id }
+                    }
+                    NewStackRow { pane_id }
+                }
             }
         }
     }
@@ -766,6 +819,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
 
     rsx! {
         div {
+            id: "sidesheet-stack-{pane_id}-{stack_index}",
             class: if is_active {
                 "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
             } else {

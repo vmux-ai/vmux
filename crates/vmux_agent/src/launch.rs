@@ -15,6 +15,7 @@ pub fn build_agent_launch(
         .get_cli(kind)
         .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
     let mcp_cfg = mcp::resolve(cwd, anchor)?;
+    strategy.prepare_launch(&mcp_cfg);
     let args = strategy.build_args(&mcp_cfg, session_id);
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.extend(strategy.build_env(&mcp_cfg));

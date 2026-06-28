@@ -24,6 +24,28 @@ pub enum BuiltinIcon {
     Sparkles,
     Activity,
     Puzzle,
+    Nushell,
+    Bash,
+    Zsh,
+}
+
+impl BuiltinIcon {
+    /// Map a shell binary path/name to its brand icon, e.g. `/opt/homebrew/bin/nu`
+    /// -> `Nushell`. Returns `None` for unrecognized shells (caller falls back to
+    /// the generic terminal icon).
+    pub fn for_shell(command: &str) -> Option<BuiltinIcon> {
+        let lower = command
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(command)
+            .to_ascii_lowercase();
+        match lower.trim_end_matches(".exe") {
+            "nu" | "nushell" => Some(BuiltinIcon::Nushell),
+            "bash" | "sh" => Some(BuiltinIcon::Bash),
+            "zsh" => Some(BuiltinIcon::Zsh),
+            _ => None,
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), derive(bevy_reflect::Reflect))]
@@ -78,6 +100,18 @@ impl PageIcon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn for_shell_maps_known_shells() {
+        assert_eq!(
+            BuiltinIcon::for_shell("/opt/homebrew/bin/nu"),
+            Some(BuiltinIcon::Nushell)
+        );
+        assert_eq!(BuiltinIcon::for_shell("/bin/bash"), Some(BuiltinIcon::Bash));
+        assert_eq!(BuiltinIcon::for_shell("/bin/zsh"), Some(BuiltinIcon::Zsh));
+        assert_eq!(BuiltinIcon::for_shell("nu"), Some(BuiltinIcon::Nushell));
+        assert_eq!(BuiltinIcon::for_shell("/usr/bin/fish"), None);
+    }
 
     #[test]
     fn favicon_constructor_collapses_empty_to_none() {

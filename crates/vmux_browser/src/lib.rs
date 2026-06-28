@@ -1010,21 +1010,21 @@ fn windowed_ring_for(
     active_panes: &vmux_layout::active_panes::ActivePanes,
     settings: &AppSettings,
     scale: f32,
-) -> (f32, [f32; 3]) {
+) -> (f32, [f32; 3], Option<vmux_core::agent::AgentKind>) {
     use vmux_layout::active_panes::ProfileId;
     let width = settings.layout.focus_ring.width * scale;
     let user = &settings.layout.focus_ring.color;
     if focus.stack == Some(stack) && visible_pane_count > 1 {
-        return (width, [user.r, user.g, user.b]);
+        return (width, [user.r, user.g, user.b], None);
     }
     for (profile, active) in active_panes.0.iter() {
         if let ProfileId::Agent(key) = profile
             && active.pane == Some(pane)
         {
-            return (width, agent_ring_rgb(key));
+            return (width, agent_ring_rgb(key), active.kind);
         }
     }
-    (0.0, [user.r, user.g, user.b])
+    (0.0, [user.r, user.g, user.b], None)
 }
 
 /// Deterministic, distinct ring color per agent (so multiple agents read apart).
@@ -1051,6 +1051,77 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
     };
     let m = l - c / 2.0;
     [r + m, g + m, b + m]
+}
+
+const CLAUDE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/claude.png");
+const CODEX_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/codex.png");
+const VIBE_LOGO_PNG: &[u8] = include_bytes!("../assets/agent-logos/vibe.png");
+
+/// A decoded, premultiplied-RGBA agent logo, ready to hand to the native badge.
+struct LogoBitmap {
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+fn decode_premultiplied(png: &[u8]) -> Option<LogoBitmap> {
+    let img = image::load_from_memory(png).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    let mut rgba = img.into_raw();
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3] as u16;
+        px[0] = (px[0] as u16 * a / 255) as u8;
+        px[1] = (px[1] as u16 * a / 255) as u8;
+        px[2] = (px[2] as u16 * a / 255) as u8;
+    }
+    Some(LogoBitmap {
+        rgba,
+        width,
+        height,
+    })
+}
+
+/// The agent's logo bitmap, decoded once and cached for the process lifetime.
+fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> {
+    use std::sync::OnceLock;
+    use vmux_core::agent::AgentKind;
+    static CLAUDE: OnceLock<Option<LogoBitmap>> = OnceLock::new();
+    static CODEX: OnceLock<Option<LogoBitmap>> = OnceLock::new();
+    static VIBE: OnceLock<Option<LogoBitmap>> = OnceLock::new();
+    let (cell, png) = match kind {
+        AgentKind::Claude => (&CLAUDE, CLAUDE_LOGO_PNG),
+        AgentKind::Codex => (&CODEX, CODEX_LOGO_PNG),
+        AgentKind::Vibe => (&VIBE, VIBE_LOGO_PNG),
+    };
+    cell.get_or_init(|| decode_premultiplied(png)).as_ref()
+}
+
+/// Stable per-kind tag the native layer caches on, so the badge image is only
+/// rebuilt when the owning agent's kind changes.
+fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
+    use vmux_core::agent::AgentKind;
+    match kind {
+        AgentKind::Claude => 1,
+        AgentKind::Codex => 2,
+        AgentKind::Vibe => 3,
+    }
+}
+
+fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
+    let h = hex.trim_start_matches('#');
+    if h.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&h[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&h[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&h[4..6], 16).ok()?;
+    Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
+}
+
+/// The agent's brand color (Claude clay / Codex green / Mistral purple), used as
+/// the badge circle fill behind its logo.
+fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
+    hex_to_rgb(&vmux_core::team::AvatarSpec::for_agent(kind).color).unwrap_or([0.5, 0.5, 0.5])
 }
 
 /// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
@@ -1135,7 +1206,7 @@ fn sync_windowed_frames(
             scale,
             all_corners,
         );
-        let (focus_ring_width, focus_ring_rgb) = windowed_ring_for(
+        let (focus_ring_width, focus_ring_rgb, focus_ring_kind) = windowed_ring_for(
             parent,
             pane_entity,
             &focus,
@@ -1145,6 +1216,18 @@ fn sync_windowed_frames(
             scale,
         );
         browsers.set_windowed_focus_ring(&entity, focus_ring_width, scale, focus_ring_rgb);
+        let badge = focus_ring_kind.and_then(|kind| {
+            agent_logo(kind).map(|logo| {
+                (
+                    logo.rgba.as_slice(),
+                    logo.width,
+                    logo.height,
+                    agent_brand_rgb(kind),
+                    agent_kind_tag(kind),
+                )
+            })
+        });
+        browsers.set_agent_badge(&entity, scale, badge);
         let cover_rgb = clear_color.0.to_srgba();
         browsers.set_windowed_corner_cover(
             &entity,

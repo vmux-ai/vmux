@@ -202,11 +202,18 @@ pub fn handle_file_page_open(
             });
             continue;
         };
+        let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
+        let pending = parse_goto_fragment(&task.url);
         clear_stack_children(task.stack, &children_q, &mut commands);
-        commands.spawn((
-            new_file_view_bundle(&task.url, path, &mut meshes, &mut webview_mt),
-            ChildOf(task.stack),
-        ));
+        let view = commands
+            .spawn((
+                new_file_view_bundle(&clean_url, path, &mut meshes, &mut webview_mt),
+                ChildOf(task.stack),
+            ))
+            .id();
+        if let Some(pg) = pending {
+            commands.entity(view).insert(pg);
+        }
         commands.entity(entity).insert(PageOpenHandled);
     }
 }
@@ -300,6 +307,30 @@ fn load_file_buffers(
         commands
             .entity(entity)
             .insert((EditState { core, hl }, EditorKeymap(kind.make())));
+    }
+}
+
+/// Re-apply the editor keymap to already-open files when `editor.keymap`
+/// changes at runtime (the keymap is otherwise only set at file open). Swaps
+/// the keymap and resets each editor to the new keymap's initial mode (Vim ->
+/// Normal, VSCode -> Insert) so switching to Vim engages without reopening.
+fn reapply_keymap_on_change(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut last: Local<Option<vmux_core::KeymapKind>>,
+    mut q: Query<(&mut EditState, &mut EditorKeymap)>,
+) {
+    let kind = settings_keymap(&settings);
+    if *last == Some(kind) {
+        return;
+    }
+    let first = last.is_none();
+    *last = Some(kind);
+    if first {
+        return;
+    }
+    for (mut edit, mut keymap) in &mut q {
+        keymap.0 = kind.make();
+        edit.core.mode = kind.initial_mode();
     }
 }
 
@@ -672,17 +703,17 @@ fn drain_thumb_tasks(
     }
 }
 
-fn on_file_open(
-    trigger: On<BinReceive<FileOpenEvent>>,
-    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
-    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
-    mut commands: Commands,
+#[allow(clippy::too_many_arguments)]
+fn navigate_file_view(
+    entity: Entity,
+    path: PathBuf,
+    top_line: u32,
+    fv: &mut FileView,
+    vp: &mut FileViewport,
+    meta: &mut PageMetadata,
+    manager: &mut crate::lsp::manager::LspManager,
+    commands: &mut Commands,
 ) {
-    let entity = trigger.event().webview;
-    let path = PathBuf::from(&trigger.event().payload.path);
-    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
-        return;
-    };
     manager.close(&fv.path);
     let url = url::Url::from_file_path(&path)
         .map(|u| u.to_string())
@@ -693,7 +724,7 @@ fn on_file_open(
         .unwrap_or_else(|| path.to_string_lossy().to_string());
     meta.url = url;
     fv.path = path;
-    vp.top_line = 0;
+    vp.top_line = top_line;
     commands
         .entity(entity)
         .remove::<FileDir>()
@@ -705,6 +736,29 @@ fn on_file_open(
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LspOpened>()
         .remove::<crate::lsp::manager::LintRan>();
+}
+
+fn on_file_open(
+    trigger: On<BinReceive<FileOpenEvent>>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok((mut fv, mut vp, mut meta)) = views.get_mut(entity) else {
+        return;
+    };
+    navigate_file_view(
+        entity,
+        path,
+        0,
+        &mut fv,
+        &mut vp,
+        &mut meta,
+        &mut manager,
+        &mut commands,
+    );
 }
 
 #[derive(Component)]
@@ -1142,6 +1196,29 @@ fn on_file_hover_request(
 struct PendingGoto {
     line: u32,
     utf16_col: u32,
+    /// When set, select from `utf16_col` to this column on `line` (highlights a
+    /// match); otherwise just place the caret.
+    select_end_col: Option<u32>,
+}
+
+/// Parse an editor goto fragment from a `file://` URL: `#L<line>` (1-based) or
+/// `#L<line>:<col>-<end>` (0-based cols, to highlight a match).
+fn parse_goto_fragment(url: &str) -> Option<PendingGoto> {
+    let body = url.split_once('#')?.1.strip_prefix('L')?;
+    let (line_s, sel) = match body.split_once(':') {
+        Some((l, r)) => (l, Some(r)),
+        None => (body, None),
+    };
+    let line = line_s.parse::<u32>().ok()?.saturating_sub(1);
+    let (utf16_col, select_end_col) = match sel.and_then(|r| r.split_once('-')) {
+        Some((s, e)) => (s.parse().unwrap_or(0), e.parse::<u32>().ok()),
+        None => (0, None),
+    };
+    Some(PendingGoto {
+        line,
+        utf16_col,
+        select_end_col,
+    })
 }
 
 fn req_pos(edit: &EditState, line: u32, col: u32) -> (u32, u32, String) {
@@ -1332,6 +1409,7 @@ fn apply_goto(
                 .insert(PendingGoto {
                     line: g.line,
                     utf16_col: g.utf16_col,
+                    select_end_col: None,
                 });
         }
     }
@@ -1350,6 +1428,22 @@ fn apply_pending_goto(
 ) {
     for (entity, mut edit, mut vp, keymap, pg) in &mut q {
         goto_caret(&mut edit, pg.line, pg.utf16_col, &mut vp);
+        if let Some(end) = pg.select_end_col {
+            let line = (pg.line as usize).min(edit.core.buffer.len_lines().saturating_sub(1));
+            let lt: String = edit
+                .core
+                .buffer
+                .rope
+                .line(line)
+                .chars()
+                .filter(|c| *c != '\n' && *c != '\r')
+                .collect();
+            let s = crate::lsp::manager::utf16_to_char_col(&lt, pg.utf16_col) as usize;
+            let e = crate::lsp::manager::utf16_to_char_col(&lt, end) as usize;
+            let a = edit.core.buffer.coords_to_char(line, s);
+            let b = edit.core.buffer.coords_to_char(line, e);
+            edit.core.selections = vec![Selection { anchor: a, head: b }];
+        }
         let vpc = *vp;
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
         emit_cursor(
@@ -1482,6 +1576,7 @@ impl Plugin for EditorPlugin {
                     flush_lsp_changes,
                     apply_goto,
                     apply_pending_goto,
+                    reapply_keymap_on_change,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
@@ -1506,6 +1601,16 @@ impl Plugin for EditorPlugin {
 mod edit_flow_tests {
     use super::*;
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn parse_goto_fragment_line_and_select() {
+        let g = parse_goto_fragment("file:///a/b.rs#L10").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 0, None));
+        let g = parse_goto_fragment("file:///a/b.rs#L10:5-12").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 5, Some(12)));
+        assert!(parse_goto_fragment("file:///a/b.rs").is_none());
+        assert!(parse_goto_fragment("file:///a/b.rs#x").is_none());
+    }
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {

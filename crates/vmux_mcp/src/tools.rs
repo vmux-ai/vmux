@@ -366,6 +366,47 @@ new pane."
     }
 }
 
+fn read_file_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_file".into(),
+        description: "Read a local file and show it in the vmux editor in a pane beside YOUR pane \
+(the agent calling this). Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
+via run (that dumps into a terminal). path is an absolute filesystem path. offset is the 1-based line \
+to start at; limit is the number of lines (default: the whole file)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "offset": {"type": "integer"},
+                "limit": {"type": "integer"}
+            }
+        }),
+    }
+}
+
+fn grep_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "grep".into(),
+        description: "Search files with ripgrep and open each matching file in the vmux editor \
+beside YOUR pane, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
+run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
+regex; path is an absolute directory or file to search (default: the current working directory)."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "additionalProperties": false,
+            "properties": {
+                "query": {"type": "string"},
+                "path": {"type": "string"}
+            }
+        }),
+    }
+}
+
 fn run_definition() -> ToolDefinition {
     ToolDefinition {
         name: "run".into(),
@@ -485,17 +526,13 @@ the focused page. Prefer scrolling to read long pages instead of assuming off-sc
         input_schema: serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "oneOf": [
-                { "required": ["to"] },
-                { "required": ["delta"] }
-            ],
             "properties": {
-                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom."},
+                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom. Pass exactly one of `to` or `delta`."},
                 "delta": {
                     "type": "integer",
                     "minimum": i32::MIN,
                     "maximum": i32::MAX,
-                    "description": "Scroll by pixels; positive = down."
+                    "description": "Scroll by pixels; positive = down. Pass exactly one of `to` or `delta`."
                 },
                 "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."}
             }
@@ -561,6 +598,8 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(list_spaces_definition());
     defs.push(open_page_definition());
     defs.push(open_file_definition());
+    defs.push(read_file_definition());
+    defs.push(grep_definition());
     defs.push(run_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
@@ -1477,6 +1516,8 @@ mod tests {
         assert!(dispatch_with_anchor("open_page", serde_json::json!({"url": "x"}), None).is_err());
         assert!(tool_definitions().iter().any(|d| d.name == "open_page"));
         assert!(tool_definitions().iter().any(|d| d.name == "run"));
+        assert!(tool_definitions().iter().any(|d| d.name == "read_file"));
+        assert!(tool_definitions().iter().any(|d| d.name == "grep"));
     }
 
     #[test]

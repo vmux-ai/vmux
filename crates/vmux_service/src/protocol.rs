@@ -51,6 +51,12 @@ pub enum PlacementMode {
     Stack,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum FileTouchKind {
+    Read,
+    Edit,
+}
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
@@ -141,6 +147,16 @@ pub enum AgentCommand {
     Notify {
         title: Option<String>,
         body: Option<String>,
+    },
+    FileTouched {
+        anchor: ProcessId,
+        path: String,
+        line: Option<u32>,
+        /// 0-based start/end columns of the match on `line`, for highlighting
+        /// (e.g. a grep hit). `None` = no column highlight (plain open/scroll).
+        col: Option<u32>,
+        end_col: Option<u32>,
+        kind: FileTouchKind,
     },
 }
 
@@ -285,6 +301,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::Run { command, .. } if command.trim().is_empty() => {
             Err("run.command is empty")
+        }
+        AgentCommand::FileTouched { path, .. } if path.trim().is_empty() => {
+            Err("file_touched.path is empty")
         }
         _ => Ok(()),
     }
@@ -804,6 +823,33 @@ mod tests {
             direction: Some(AgentPaneDirection::Right),
             url: "  ".into(),
             focus: true,
+        };
+        assert!(validate_agent_command(&empty).is_err());
+    }
+
+    #[test]
+    fn file_touched_round_trips_and_validates() {
+        let cmd = AgentCommand::FileTouched {
+            anchor: ProcessId::new(),
+            path: "/abs/x.rs".into(),
+            line: Some(42),
+            col: Some(4),
+            end_col: Some(12),
+            kind: FileTouchKind::Edit,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let back: AgentCommand =
+            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, cmd);
+        assert!(validate_agent_command(&cmd).is_ok());
+
+        let empty = AgentCommand::FileTouched {
+            anchor: ProcessId::new(),
+            path: "  ".into(),
+            line: None,
+            col: None,
+            end_col: None,
+            kind: FileTouchKind::Read,
         };
         assert!(validate_agent_command(&empty).is_err());
     }
