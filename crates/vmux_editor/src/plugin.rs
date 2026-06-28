@@ -529,6 +529,22 @@ fn emit_cursor(
     ));
 }
 
+fn rehighlight_on_color_scheme(
+    mut reader: bevy::ecs::message::MessageReader<vmux_setting::ColorSchemeChanged>,
+    mut views: Query<(Entity, &mut EditState, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let Some(ev) = reader.read().last().copied() else {
+        return;
+    };
+    crate::highlight::set_dark_theme(matches!(ev.0, vmux_setting::ResolvedScheme::Dark));
+    for (entity, mut edit, vp) in &mut views {
+        let vpc = *vp;
+        emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
+    }
+}
+
 fn reset_file_sent_markers_on_page_ready(
     trigger: On<BinReceive<vmux_core::page::PageReady>>,
     file_views: Query<(), With<FileView>>,
@@ -1571,6 +1587,7 @@ impl Plugin for EditorPlugin {
                     send_initial_dir,
                     send_initial_image,
                     send_file_theme,
+                    rehighlight_on_color_scheme,
                     drain_thumb_tasks,
                     reconcile_file_watches,
                     flush_lsp_changes,

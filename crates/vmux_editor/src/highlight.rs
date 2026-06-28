@@ -27,8 +27,30 @@ pub fn select_syntax(path: &Path) -> &'static syntect::parsing::SyntaxReference 
         .unwrap_or_else(|| ss.find_syntax_plain_text())
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static DARK_THEME: AtomicBool = AtomicBool::new(true);
+
+/// Select the dark or light syntax-highlight theme. Returns true if it changed.
+pub fn set_dark_theme(dark: bool) -> bool {
+    DARK_THEME.swap(dark, Ordering::Relaxed) != dark
+}
+
+/// Whether syntax highlighting currently uses the dark theme.
+pub fn is_dark_theme() -> bool {
+    DARK_THEME.load(Ordering::Relaxed)
+}
+
+fn theme_name() -> &'static str {
+    if is_dark_theme() {
+        "base16-ocean.dark"
+    } else {
+        "base16-ocean.light"
+    }
+}
+
 pub fn default_theme() -> syntect::highlighting::Theme {
-    ThemeSet::load_defaults().themes["base16-ocean.dark"].clone()
+    ThemeSet::load_defaults().themes[theme_name()].clone()
 }
 
 pub(crate) fn styled_span(style: Style, text: &str) -> StyledSpan {
@@ -89,7 +111,7 @@ impl Highlighter {
             .and_then(|e| e.to_str())
             .and_then(|ext| syntaxes.find_syntax_by_extension(ext))
             .unwrap_or_else(|| syntaxes.find_syntax_plain_text());
-        let theme = &self.themes.themes["base16-ocean.dark"];
+        let theme = &self.themes.themes[theme_name()];
         let mut h = HighlightLines::new(syntax, theme);
 
         let mut lines = Vec::new();
