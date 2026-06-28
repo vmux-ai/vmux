@@ -33,6 +33,7 @@ pub fn Page() -> Element {
     let mut theme = use_signal(|| None::<TermThemeEvent>);
     let mut service_error = use_signal(String::new);
     let mut loading = use_signal(|| None::<(String, String)>);
+    let mut prompt_draft = use_signal(|| (String::new(), false));
 
     let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
         SERVICE_UNAVAILABLE_EVENT,
@@ -119,8 +120,14 @@ pub fn Page() -> Element {
             loading.set(if evt.loading {
                 Some((evt.label, evt.segment))
             } else {
+                prompt_draft.set((String::new(), false));
                 None
             });
+        });
+
+    let _prompt_draft_listener =
+        use_bin_event_listener::<AgentPromptDraftEvent, _>(AGENT_PROMPT_DRAFT_EVENT, move |evt| {
+            prompt_draft.set((evt.draft, evt.skipped));
         });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
@@ -304,6 +311,8 @@ pub fn Page() -> Element {
                     let accent = agent_accent(&segment);
                     let favicon_url = format!("vmux://agent/{segment}/cli/");
                     let words = vec![label.to_uppercase()];
+                    let (draft_text, draft_skipped) = prompt_draft.read().clone();
+                    let composing = !draft_skipped && !draft_text.is_empty();
                     rsx! {
                         div {
                             class: "pointer-events-none absolute inset-0 z-40 overflow-hidden bg-term-bg",
@@ -323,10 +332,28 @@ pub fn Page() -> Element {
                                     }
                                     div {
                                         div { class: "text-sm font-semibold {accent.accent_text}", "{label}" }
-                                        div {
-                                            class: "flex items-center gap-1.5 text-xs text-muted-foreground",
-                                            span { class: "font-mono", "> booting" }
-                                            span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
+                                        if composing {
+                                            div {
+                                                class: "mt-0.5 max-w-md whitespace-pre-wrap break-words font-mono text-sm text-foreground",
+                                                "{draft_text}"
+                                                span { class: "ml-px inline-block h-3.5 w-1.5 align-middle animate-pulse {accent.accent_bg}" }
+                                            }
+                                            div {
+                                                class: "mt-1 text-[10px] text-muted-foreground/70",
+                                                "runs when ready · Ctrl+C clears · Esc skips"
+                                            }
+                                        } else {
+                                            div {
+                                                class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                                                span { class: "font-mono", "> booting" }
+                                                span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
+                                            }
+                                            if !draft_skipped {
+                                                div {
+                                                    class: "mt-1 text-[10px] text-muted-foreground/50",
+                                                    "type a prompt to run when ready"
+                                                }
+                                            }
                                         }
                                     }
                                 }

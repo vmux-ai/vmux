@@ -163,12 +163,23 @@ pub struct AgentLoading {
     pub since: Instant,
 }
 
-/// A prompt (from the agent compose page) to type into an agent terminal once
-/// its TUI is up. Delivered by [`flush_buffered_agent_prompt`] on alt-screen.
+/// A prompt to type into an agent terminal once its TUI is up. Delivered by
+/// [`flush_buffered_agent_prompt`] on alt-screen.
 #[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 pub struct BufferedAgentPrompt {
     pub text: String,
     pub submit: bool,
+}
+
+/// While an agent terminal's TUI is booting, the prompt the user types on the
+/// boot screen. Keystrokes are captured here instead of being sent to the
+/// not-yet-ready PTY (see [`handle_terminal_keyboard`]); on alt-screen
+/// [`clear_agent_loading`] moves a non-empty draft into a [`BufferedAgentPrompt`]
+/// and removes this, so keys then flow to the PTY normally.
+#[derive(Component, Debug, Clone, Default)]
+pub struct PromptCapture {
+    pub draft: String,
+    pub skipped: bool,
 }
 
 /// Bytes to deliver for a buffered prompt once the agent TUI is ready, or `None`
@@ -1644,6 +1655,7 @@ fn handle_terminal_keyboard(
     >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    mut capture_q: Query<(Entity, &ProcessId, &mut PromptCapture), With<Terminal>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<vmux_layout::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
@@ -1651,6 +1663,7 @@ fn handle_terminal_keyboard(
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
+    mut commands: Commands,
 ) {
     let target_processes = resolve_terminal_input_targets(
         targeted_terminals
@@ -1681,6 +1694,74 @@ fn handle_terminal_keyboard(
     let alt = input.pressed(KeyCode::AltLeft) || input.pressed(KeyCode::AltRight);
     let shift = input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight);
     let super_key = input.pressed(KeyCode::SuperLeft) || input.pressed(KeyCode::SuperRight);
+
+    if let Some(cap_e) = active_process_id.and_then(|pid| {
+        capture_q
+            .iter()
+            .find(|(_, p, _)| **p == pid)
+            .map(|(e, _, _)| e)
+    }) {
+        let (mut draft, mut skipped) = capture_q
+            .get(cap_e)
+            .map(|(_, _, c)| (c.draft.clone(), c.skipped))
+            .unwrap_or_default();
+        let mut changed = false;
+        let mut seen_keys: Vec<KeyCode> = Vec::new();
+        for event in er.read() {
+            if event.state != ButtonState::Pressed {
+                continue;
+            }
+            if !event.repeat && is_non_character_key(event.key_code) {
+                if seen_keys.contains(&event.key_code) {
+                    continue;
+                }
+                seen_keys.push(event.key_code);
+                if !input.just_pressed(event.key_code) {
+                    continue;
+                }
+            }
+            if ctrl && event.key_code == KeyCode::KeyC {
+                draft.clear();
+                skipped = false;
+                changed = true;
+                continue;
+            }
+            match &event.logical_key {
+                Key::Escape => {
+                    draft.clear();
+                    skipped = true;
+                    changed = true;
+                }
+                Key::Backspace => {
+                    draft.pop();
+                    changed = true;
+                }
+                Key::Space => {
+                    draft.push(' ');
+                    skipped = false;
+                    changed = true;
+                }
+                Key::Character(s) if !ctrl && !alt && !super_key => {
+                    draft.push_str(s);
+                    skipped = false;
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        if changed {
+            if let Ok((_, _, mut cap)) = capture_q.get_mut(cap_e) {
+                cap.draft = draft.clone();
+                cap.skipped = skipped;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                cap_e,
+                AGENT_PROMPT_DRAFT_EVENT,
+                &AgentPromptDraftEvent { draft, skipped },
+            ));
+        }
+        return;
+    }
 
     let copy_mode_active = active_process_id
         .map(|process_id| is_copy_mode_active(&mode_map, &local_copy_mode, process_id))
@@ -2789,6 +2870,9 @@ fn arm_agent_loading(
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
+        if session.is_some() {
+            commands.entity(entity).insert(PromptCapture::default());
+        }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2818,6 +2902,9 @@ fn arm_agent_loading_on_restart(
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
+        if session.is_some() {
+            commands.entity(entity).insert(PromptCapture::default());
+        }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             TERM_LOADING_EVENT,
@@ -2837,13 +2924,14 @@ fn clear_agent_loading(
             &ProcessId,
             Option<&vmux_core::agent::AgentSession>,
             &AgentLoading,
+            Option<&PromptCapture>,
         ),
         With<Terminal>,
     >,
     mode_map: Res<TerminalModeMap>,
     mut commands: Commands,
 ) {
-    for (entity, pid, session, loading) in &loading_q {
+    for (entity, pid, session, loading, capture) in &loading_q {
         // Agents clear when the TUI takes over (alt-screen); plain terminals,
         // whose shell prints instantly, show a brief minimum splash instead.
         let ready = match session {
@@ -2856,6 +2944,17 @@ fn clear_agent_loading(
         };
         if ready || loading.since.elapsed() >= AGENT_LOADING_TIMEOUT {
             let (label, segment) = terminal_loading_labels(session);
+            // Flip keyboard back to the PTY: deliver the captured boot prompt (if
+            // any) and drop the capture so keys stop being buffered.
+            if let Some(capture) = capture {
+                if !capture.skipped && !capture.draft.trim().is_empty() {
+                    commands.entity(entity).insert(BufferedAgentPrompt {
+                        text: capture.draft.clone(),
+                        submit: true,
+                    });
+                }
+                commands.entity(entity).remove::<PromptCapture>();
+            }
             commands.entity(entity).remove::<AgentLoading>();
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
@@ -4296,6 +4395,64 @@ mod tests {
             );
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_none());
+    }
+
+    fn clear_with_capture(capture: PromptCapture) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<TerminalModeMap>()
+            .add_systems(Update, clear_agent_loading);
+        let pid = ProcessId::new();
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Claude,
+                },
+                pid,
+                AgentLoading {
+                    since: Instant::now(),
+                },
+                capture,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<TerminalModeMap>()
+            .modes
+            .insert(
+                pid,
+                TerminalModeFlags {
+                    mouse_capture: false,
+                    copy_mode: false,
+                    alt_screen: true,
+                    focus_reporting: false,
+                },
+            );
+        app.update();
+        (app, e)
+    }
+
+    #[test]
+    fn ready_flips_capture_into_buffered_prompt() {
+        let (app, e) = clear_with_capture(PromptCapture {
+            draft: "find me a hotel".to_string(),
+            skipped: false,
+        });
+        assert!(app.world().get::<PromptCapture>(e).is_none());
+        let buffered = app.world().get::<BufferedAgentPrompt>(e).unwrap();
+        assert_eq!(buffered.text, "find me a hotel");
+        assert!(buffered.submit);
+    }
+
+    #[test]
+    fn ready_with_skipped_capture_delivers_nothing() {
+        let (app, e) = clear_with_capture(PromptCapture {
+            draft: "ignored".to_string(),
+            skipped: true,
+        });
+        assert!(app.world().get::<PromptCapture>(e).is_none());
+        assert!(app.world().get::<BufferedAgentPrompt>(e).is_none());
     }
 
     #[test]

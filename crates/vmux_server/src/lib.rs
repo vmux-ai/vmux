@@ -53,7 +53,6 @@ web_pages! {
     render_team: "team" => vmux_team::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,
     render_agent: "agent" => vmux_agent::vibe::setup::page::Page,
-    render_compose: "compose" => vmux_agent::compose::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,

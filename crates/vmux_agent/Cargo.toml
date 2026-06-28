@@ -42,16 +42,7 @@ vmux_terminal = { path = "../vmux_terminal" }
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
-vmux_terminal = { path = "../vmux_terminal", default-features = false }
-wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = [
-    "Window",
-    "Location",
-    "Document",
-    "Element",
-    "HtmlElement",
-    "KeyboardEvent",
-] }
+web-sys = { version = "0.3", features = ["Window"] }
 
 [dev-dependencies]
 mockito = "1"

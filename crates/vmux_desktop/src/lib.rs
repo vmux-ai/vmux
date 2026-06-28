@@ -132,7 +132,6 @@ impl Plugin for VmuxPlugin {
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
                 vmux_agent::vibe::setup::AgentSetupPlugin,
-                vmux_agent::compose::AgentComposePlugin,
                 vmux_layout::start::StartPlugin,
                 LayoutCefPlugin,
                 vmux_browser::ExtensionsPlugin,

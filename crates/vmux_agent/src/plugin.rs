@@ -1833,20 +1833,14 @@ fn handle_agent_page_open_task(
                 // this agent kind, a repeat open is a no-op instead of spawning
                 // (and abandoning) another agent process.
                 if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                    // Compose first: a non-terminal page where the user types a
-                    // prompt; the CLI is spawned (with the prompt) on submit. If
-                    // the CLI isn't installed, go straight to setup instead.
                     if crate::exec::find_executable(kind.executable()).is_some() {
-                        crate::compose::attach_compose_to_stack(
+                        spawn_agent.write(SpawnAgentInStackRequest {
                             kind,
-                            default_cwd.to_path_buf(),
-                            None,
-                            task.stack,
-                            children_q,
-                            commands,
-                            meshes,
-                            webview_mt,
-                        );
+                            cwd: default_cwd.to_path_buf(),
+                            session_id: None,
+                            stack: task.stack,
+                            initial_prompt: None,
+                        });
                     } else {
                         attach_cli_setup_to_stack(
                             kind, task.stack, children_q, commands, meshes, webview_mt,

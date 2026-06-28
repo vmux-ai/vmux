@@ -64,10 +64,6 @@ impl AgentKind {
         format!("vmux://agent/{}/setup", self.as_url_segment())
     }
 
-    pub fn compose_url(self) -> String {
-        format!("vmux://compose/{}/", self.as_url_segment())
-    }
-
     pub fn all() -> [AgentKind; 3] {
         [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
     }
@@ -114,8 +110,8 @@ pub struct SpawnAgentInStackRequest {
     pub cwd: PathBuf,
     pub session_id: Option<String>,
     pub stack: Entity,
-    /// Prompt typed in the compose page, delivered into the agent once its TUI is
-    /// ready. `None` opens the agent with no pre-filled prompt.
+    /// Optional prompt to deliver into the agent once its TUI is ready. `None`
+    /// opens the agent with no pre-filled prompt.
     pub initial_prompt: Option<String>,
 }
 
