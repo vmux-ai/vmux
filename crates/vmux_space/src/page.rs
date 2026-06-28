@@ -162,7 +162,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                 div { class: "flex min-w-0 items-center gap-2",
                     span { class: "truncate text-sm font-medium text-foreground", "{space.name}" }
                     if space.is_active {
-                        span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
+                        span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-300", "active" }
                     }
                 }
                 div { class: "mt-1 truncate text-xs text-muted-foreground", "{space.profile}" }
