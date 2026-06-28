@@ -12,6 +12,7 @@ fn main() {
     let target = std::env::var("TARGET").unwrap_or_default();
     PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[
+            "src",
             "../vmux_ui/assets/theme.css",
             "../vmux_ui/src",
             "../vmux_editor/src",
