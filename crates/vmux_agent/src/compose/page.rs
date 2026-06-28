@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use vmux_core::event::AgentComposeSubmitEvent;
+use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_theme};
@@ -27,10 +28,7 @@ pub fn Page() -> Element {
     let accent = agent_accent(&segment);
     let label = title_case(&segment);
     let favicon_url = format!("vmux://agent/{segment}/cli/");
-    let backdrop = format!(
-        "background: radial-gradient(120% 80% at 50% 0%, rgb({} / 0.18), transparent 60%), #0b0c0f;",
-        accent.rain_rgb
-    );
+    let words = vec![label.to_uppercase()];
 
     let mut draft = use_signal(String::new);
     let mut committed = use_signal(|| false);
@@ -53,8 +51,8 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
-            class: "relative h-screen w-screen overflow-hidden text-foreground",
-            style: "{backdrop}",
+            class: "relative h-screen w-screen overflow-hidden bg-term-bg text-foreground",
+            MatrixRain { accent_rgb: accent.rain_rgb.to_string(), words }
             div {
                 class: "relative z-10 flex h-full w-full items-center justify-center",
                 div {
