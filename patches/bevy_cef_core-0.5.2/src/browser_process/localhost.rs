@@ -328,14 +328,13 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
                         let mut h = headers_responser.lock().unwrap();
                         h.mime_type = resp.mime;
                         h.status_code = resp.status;
-                        h.response_length = resp.data.len();
+                        h.response_length = resp.len;
                         h.headers = resp.headers;
                     }
-                    let n = resp.data.len();
-                    data_responser
-                        .lock()
-                        .unwrap()
-                        .prepare(resp.data, &Some((0, Some(n))));
+                    match resp.file {
+                        Some(file) => data_responser.lock().unwrap().prepare_file(file, resp.len),
+                        None => data_responser.lock().unwrap().prepare(Vec::new(), &None),
+                    }
                     callback.cont();
                 })
                 .detach();
