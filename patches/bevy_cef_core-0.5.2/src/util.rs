@@ -363,97 +363,49 @@ fn deny(status: u32, mime: &str) -> RawMediaResponse {
     }
 }
 
-/// Resolve an allowlisted media file and return a file handle seeked to the start
-/// of the requested byte range, to be streamed on demand. `range` is the parsed
-/// single byte-range `(start, end_inclusive?)` with HTTP-inclusive end semantics.
-/// The full requested range is served (no chunk cap) so the player can seek to an
-/// end-located moov atom; memory stays bounded because bytes are read lazily.
-/// Returns 404 if the path is not allowlisted or unreadable, 416 if the range
-/// start is past the end of the file.
+/// Resolve an allowlisted media file and return a file handle for streaming its
+/// full contents as a single `200` response (read lazily, so memory stays bounded).
+///
+/// The path is canonicalized once and used for both the allowlist check and the
+/// open, so a symlink swap can't redirect to a non-allowlisted file. Returns 404
+/// if the path is not allowlisted or unreadable.
+///
+/// Range serving is intentionally not advertised. Chromium's media pipeline does
+/// not consume our `file://` scheme-handler `206`/`Content-Range` responses — it
+/// loops re-requesting the trailing moov atom instead of playing — so a single
+/// non-seekable `200` forces its sequential progressive-download path, which plays
+/// even moov-at-end recordings. (Range support can return once media is served
+/// same-origin over the `vmux://` scheme.)
 pub fn build_raw_media_response(
     path: &std::path::Path,
-    range: &Option<(usize, Option<usize>)>,
+    _range: &Option<(usize, Option<usize>)>,
 ) -> RawMediaResponse {
-    use std::io::{Seek, SeekFrom};
-
-    // Canonicalize once and use the result for both the allowlist check and the
-    // open, so a symlink swap between them can't redirect to a non-allowlisted file.
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let path = canonical.as_path();
 
     let allowed = is_media_path_allowed(path);
-    raw_media_debug(&format!(
-        "req path={} allowed={allowed} range={range:?}",
-        path.display()
-    ));
+    raw_media_debug(&format!("req path={} allowed={allowed}", path.display()));
     if !allowed {
         return deny(404, "text/plain");
     }
     let mime = raw_media_mime(path).to_string();
-    let (mut file, total) = match std::fs::File::open(path)
+    let (file, total) = match std::fs::File::open(path)
         .and_then(|f| Ok((f.metadata()?.len() as usize, f)))
     {
         Ok((len, f)) => (f, len),
         Err(_) => return deny(404, "text/plain"),
     };
 
-    let mut headers = cors_headers();
-    headers.push(("Accept-Ranges".to_string(), "bytes".to_string()));
-
-    if total == 0 {
-        return RawMediaResponse {
-            status: 200,
-            headers,
-            mime,
-            file: None,
-            len: 0,
-        };
-    }
-
-    let (start, last) = match range {
-        Some((s, end_opt)) => {
-            let s = *s;
-            if s >= total {
-                headers.push(("Content-Range".to_string(), format!("bytes */{total}")));
-                return RawMediaResponse {
-                    status: 416,
-                    headers,
-                    mime,
-                    file: None,
-                    len: 0,
-                };
-            }
-            (s, end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s))
-        }
-        None => (0, total - 1),
-    };
-    // A request for the whole resource (`bytes=0-` or no Range) is answered 200;
-    // only a true sub-range is 206. Returning 206 for `bytes=0-` confuses
-    // Chromium's media data source (it loops re-fetching instead of playing).
-    let partial = start > 0 || last < total - 1;
-    let status = if partial { 206 } else { 200 };
-    if partial {
-        headers.push((
-            "Content-Range".to_string(),
-            format!("bytes {start}-{last}/{total}"),
-        ));
-    }
-
-    if file.seek(SeekFrom::Start(start as u64)).is_err() {
-        return deny(404, &mime);
-    }
-    let len = last - start + 1;
     raw_media_debug(&format!(
-        "serve path={} total={total} start={start} last={last} status={status} len={len}",
+        "serve path={} total={total} status=200 full",
         path.display()
     ));
-
     RawMediaResponse {
-        status,
-        headers,
+        status: 200,
+        headers: cors_headers(),
         mime,
         file: Some(file),
-        len,
+        len: total,
     }
 }
 
@@ -520,7 +472,7 @@ mod raw_response_tests {
     }
 
     #[test]
-    fn serves_inclusive_range_with_content_range_header() {
+    fn serves_full_file_as_200() {
         let _g = ALLOWLIST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join("vmux_raw_test");
         let _ = std::fs::create_dir_all(&dir);
@@ -532,17 +484,13 @@ mod raw_response_tests {
         set.insert(canon.clone());
         set_media_allowlist(set);
 
-        let r = build_raw_media_response(&canon, &Some((10, Some(20))));
-        assert_eq!(r.status, 206);
-        assert_eq!(r.len, 11);
+        let r = build_raw_media_response(&canon, &None);
+        assert_eq!(r.status, 200);
+        assert_eq!(r.len, 100);
         let mut buf = vec![0u8; r.len];
         std::io::Read::read_exact(&mut r.file.expect("file"), &mut buf).unwrap();
-        assert_eq!(buf, (10u8..=20).collect::<Vec<u8>>());
-        assert!(
-            r.headers
-                .iter()
-                .any(|(k, v)| k == "Content-Range" && v == "bytes 10-20/100")
-        );
+        assert_eq!(buf, (0u8..100).collect::<Vec<u8>>());
+        assert!(!r.headers.iter().any(|(k, _)| k == "Content-Range"));
 
         set_media_allowlist(HashSet::new());
         let _ = std::fs::remove_file(&p);
