@@ -21,12 +21,14 @@ pub fn requires_homebrew(segment: &str) -> bool {
     matches!(segment, "claude" | "codex")
 }
 
-/// The official Homebrew installer one-liner, run non-interactively.
+/// The official Homebrew installer one-liner.
 ///
-/// `NONINTERACTIVE=1` skips the installer's "Press RETURN" prompt; `sudo` still
-/// prompts for a password once on a fresh machine.
+/// Runs interactively in the terminal pane: Homebrew asks the user to press
+/// Return, then `sudo` prompts for the password on the TTY. We deliberately do
+/// not set `NONINTERACTIVE=1` — that mode refuses to prompt and aborts with
+/// "Need sudo access" when credentials aren't already cached.
 pub fn homebrew_install_command() -> &'static str {
-    "NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
 }
 
 /// The command vmux runs in the terminal to install `segment`.
@@ -91,13 +93,13 @@ mod tests {
         assert_eq!(
             install_command_chained("claude", false).as_deref(),
             Some(
-                "bash -c 'NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)\" && brew install --cask claude-code'"
+                "bash -c '/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)\" && brew install --cask claude-code'"
             )
         );
         assert_eq!(
             install_command_chained("codex", false).as_deref(),
             Some(
-                "bash -c 'NONINTERACTIVE=1 /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)\" && brew install --cask codex'"
+                "bash -c '/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && eval \"$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)\" && brew install --cask codex'"
             )
         );
     }

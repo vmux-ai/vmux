@@ -107,7 +107,7 @@ pub fn Page() -> Element {
                         code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{command}" }
                     }
                     p { class: "mb-5 text-xs text-muted-foreground/70",
-                        "You'll be asked for your Mac password once during the Homebrew install."
+                        "In the terminal, press Return to start, then enter your Mac password when prompted."
                     }
                 } else {
                     p { class: "mb-5 text-sm leading-relaxed text-muted-foreground",

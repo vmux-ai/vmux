@@ -35,8 +35,9 @@ fails or is cancelled, show an actionable error instead of spinning forever.
   current behavior.
 - Fully silent Homebrew install. The official installer requires a `sudo` password (and on
   a fresh Mac, may install the Xcode Command Line Tools). We run it in the visible terminal
-  pane so the user types their password once. We pass `NONINTERACTIVE=1` to skip the
-  "Press RETURN" prompt.
+  pane so the user can press Return and enter their password. We do NOT set
+  `NONINTERACTIVE=1` — that mode refuses to prompt for `sudo` and aborts with "Need sudo
+  access" when credentials aren't already cached (confirmed in runtime testing).
 
 ## User experience (Transparent step)
 
@@ -95,9 +96,9 @@ click Retry ─ AgentInstallRunRequest ─▶ (reuse install pane)
 /// True for agents installed via Homebrew (claude, codex).
 pub fn requires_homebrew(segment: &str) -> bool;
 
-/// The official Homebrew installer one-liner (NONINTERACTIVE).
+/// The official Homebrew installer one-liner (interactive — prompts for sudo on the TTY).
 pub fn homebrew_install_command() -> &'static str;
-//  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+//  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 /// Full command to run in the terminal. When the agent needs Homebrew and it is
 /// absent, prepend the installer + `brew shellenv`, wrapped in `bash -c '…'` so it
@@ -108,7 +109,7 @@ pub fn install_command_chained(segment: &str, brew_present: bool) -> Option<Stri
 Chained form (claude, brew absent):
 
 ```
-bash -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install --cask claude-code'
+bash -c '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install --cask claude-code'
 ```
 
 Notes:
