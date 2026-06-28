@@ -46,15 +46,14 @@ pub struct AgentSetupPlugin;
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.add_plugins(
-            BinEventEmitterPlugin::<(AgentInstallRunRequest, AgentSetupPrereqRequest)>::for_hosts(
-                &["agent"],
-            ),
-        )
-        .add_observer(on_agent_install_run)
-        .add_observer(on_agent_setup_prereq_request)
-        .add_systems(Update, auto_redirect_agent_setup_when_installed)
-        .add_systems(Update, detect_agent_install_outcome);
+        app.add_plugins(BinEventEmitterPlugin::<(
+            AgentInstallRunRequest,
+            AgentSetupPrereqRequest,
+        )>::for_hosts(&["agent"]))
+            .add_observer(on_agent_install_run)
+            .add_observer(on_agent_setup_prereq_request)
+            .add_systems(Update, auto_redirect_agent_setup_when_installed)
+            .add_systems(Update, detect_agent_install_outcome);
     }
 }
 
@@ -122,8 +121,7 @@ fn detect_agent_install_outcome(
             match ev.kind {
                 CommandLifecycleKind::Started => pane.armed = true,
                 CommandLifecycleKind::Ended { .. } => {
-                    let installed =
-                        crate::exec::find_executable(pane.agent.executable()).is_some();
+                    let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
                     match install_outcome(pane.armed, installed) {
                         Some(false) => {
                             if browsers.has_browser(pane.setup_webview)
@@ -163,7 +161,8 @@ fn on_agent_install_run(
         return;
     };
     let brew_present = crate::exec::find_executable("brew").is_some();
-    let Some(command) = vmux_core::agent_setup::install_command_chained(segment, brew_present) else {
+    let Some(command) = vmux_core::agent_setup::install_command_chained(segment, brew_present)
+    else {
         warn!("agent install run: unknown agent segment '{segment}'");
         return;
     };
