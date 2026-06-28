@@ -317,6 +317,30 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
             *handle_request = 0;
         }
         let url = request.url().into_string();
+        if let Some(media_path) = crate::util::raw_media_request(&url) {
+            let headers_responser = self.headers.clone();
+            let data_responser = self.data.clone();
+            webview_debug_log(format!("scheme raw-media open url={url} range={range:?}"));
+            IoTaskPool::get()
+                .spawn(async move {
+                    let resp = crate::util::build_raw_media_response(&media_path, &range);
+                    {
+                        let mut h = headers_responser.lock().unwrap();
+                        h.mime_type = resp.mime;
+                        h.status_code = resp.status;
+                        h.response_length = resp.data.len();
+                        h.headers = resp.headers;
+                    }
+                    let n = resp.data.len();
+                    data_responser
+                        .lock()
+                        .unwrap()
+                        .prepare(resp.data, &Some((0, Some(n))));
+                    callback.cont();
+                })
+                .detach();
+            return 1;
+        }
         let uri = asset_load_path_from_request_url(&url);
         webview_debug_log(format!("scheme open url={url} uri={uri} range={range:?}"));
         let requester = self.requester.clone();

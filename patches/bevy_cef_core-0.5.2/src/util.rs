@@ -238,6 +238,270 @@ pub fn cef_scheme_flags() -> u32 {
         | CEF_SCHEME_OPTION_FETCH_ENABLED as u32
 }
 
+static MEDIA_ALLOWLIST: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashSet<PathBuf>>,
+> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashSet::new()));
+
+/// Replace the set of absolute paths the raw-media resource handler is allowed to
+/// read. Paths are canonicalized; callers pass the live set each frame.
+pub fn set_media_allowlist(paths: std::collections::HashSet<PathBuf>) {
+    let canon: std::collections::HashSet<PathBuf> = paths
+        .into_iter()
+        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+        .collect();
+    if let Ok(mut w) = MEDIA_ALLOWLIST.write() {
+        *w = canon;
+    }
+}
+
+/// Whether `path` is currently allowed to be served as raw media.
+pub fn is_media_path_allowed(path: &std::path::Path) -> bool {
+    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    MEDIA_ALLOWLIST
+        .read()
+        .map(|s| s.contains(&canon))
+        .unwrap_or(false)
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode_path(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(a), Some(b)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            out.push(a * 16 + b);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// If `url` is a `file://` URL carrying the `vmux-raw=1` marker, return its
+/// decoded absolute path. Otherwise `None` (normal document/asset navigation).
+pub fn raw_media_request(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("file://")?;
+    let (path_part, query) = rest.split_once('?')?;
+    if !query.split('&').any(|kv| kv == "vmux-raw=1") {
+        return None;
+    }
+    let path = PathBuf::from(percent_decode_path(path_part));
+    path.is_absolute().then_some(path)
+}
+
+/// MIME type for raw-media serving (kept local to avoid a patch→vmux_core dep).
+pub fn raw_media_mime(path: &std::path::Path) -> &'static str {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "svg" => "image/svg+xml",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "ogv" => "video/ogg",
+        "mp3" => "audio/mpeg",
+        "m4a" | "aac" => "audio/mp4",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "ogg" | "opus" => "audio/ogg",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Resolved raw-media response: HTTP status, the bytes to stream (already sliced
+/// to the requested range), the response headers, and the MIME type.
+pub struct RawMediaResponse {
+    pub status: u32,
+    pub data: Vec<u8>,
+    pub headers: Vec<(String, String)>,
+    pub mime: String,
+}
+
+fn cors_headers() -> Vec<(String, String)> {
+    vec![
+        ("Access-Control-Allow-Origin".to_string(), "*".to_string()),
+        ("Access-Control-Allow-Methods".to_string(), "*".to_string()),
+        ("Access-Control-Allow-Headers".to_string(), "*".to_string()),
+    ]
+}
+
+fn deny_404(mime: &str) -> RawMediaResponse {
+    RawMediaResponse {
+        status: 404,
+        data: Vec::new(),
+        headers: cors_headers(),
+        mime: mime.to_string(),
+    }
+}
+
+/// Read the requested byte range of an allowlisted media file from disk and build
+/// the response. `range` is the parsed single byte-range `(start, end_inclusive?)`
+/// with HTTP-inclusive end semantics. Returns 404 if the path is not allowlisted
+/// or unreadable, 416 if the range start is past the end of the file.
+pub fn build_raw_media_response(
+    path: &std::path::Path,
+    range: &Option<(usize, Option<usize>)>,
+) -> RawMediaResponse {
+    use std::io::{Read, Seek, SeekFrom};
+
+    if !is_media_path_allowed(path) {
+        return deny_404("text/plain");
+    }
+    let mime = raw_media_mime(path).to_string();
+    let (mut file, total) = match std::fs::File::open(path)
+        .and_then(|f| Ok((f.metadata()?.len() as usize, f)))
+    {
+        Ok((len, f)) => (f, len),
+        Err(_) => return deny_404("text/plain"),
+    };
+
+    let mut headers = cors_headers();
+    headers.push(("Accept-Ranges".to_string(), "bytes".to_string()));
+
+    if total == 0 {
+        return RawMediaResponse {
+            status: 200,
+            data: Vec::new(),
+            headers,
+            mime,
+        };
+    }
+
+    let (start, last, status) = match range {
+        Some((s, end_opt)) => {
+            let s = *s;
+            if s >= total {
+                headers.push(("Content-Range".to_string(), format!("bytes */{total}")));
+                return RawMediaResponse {
+                    status: 416,
+                    data: Vec::new(),
+                    headers,
+                    mime,
+                };
+            }
+            let last = end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s);
+            headers.push((
+                "Content-Range".to_string(),
+                format!("bytes {s}-{last}/{total}"),
+            ));
+            (s, last, 206)
+        }
+        None => (0, total - 1, 200),
+    };
+
+    let len = last - start + 1;
+    let mut data = vec![0u8; len];
+    if file.seek(SeekFrom::Start(start as u64)).is_err() || file.read_exact(&mut data).is_err() {
+        return deny_404(&mime);
+    }
+
+    RawMediaResponse {
+        status,
+        data,
+        headers,
+        mime,
+    }
+}
+
+#[cfg(test)]
+mod media_raw_tests {
+    use super::*;
+
+    #[test]
+    fn raw_marker_detected_and_decoded() {
+        assert_eq!(
+            raw_media_request("file:///a/b/Screenshot%20x.png?vmux-raw=1"),
+            Some(PathBuf::from("/a/b/Screenshot x.png"))
+        );
+        assert_eq!(
+            raw_media_request("file:///a/b/c.mp4?foo=1&vmux-raw=1"),
+            Some(PathBuf::from("/a/b/c.mp4"))
+        );
+    }
+
+    #[test]
+    fn non_raw_returns_none() {
+        assert_eq!(raw_media_request("file:///a/b/c.png"), None);
+        assert_eq!(raw_media_request("file:///a/b/c.png?other=1"), None);
+        assert_eq!(raw_media_request("vmux://files/index.html?vmux-raw=1"), None);
+    }
+
+    #[test]
+    fn mime_lookup() {
+        assert_eq!(raw_media_mime(std::path::Path::new("a.mp4")), "video/mp4");
+        assert_eq!(raw_media_mime(std::path::Path::new("a.png")), "image/png");
+        assert_eq!(
+            raw_media_mime(std::path::Path::new("a.bin")),
+            "application/octet-stream"
+        );
+    }
+}
+
+#[cfg(test)]
+mod raw_response_tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::io::Write;
+
+    #[test]
+    fn denied_when_not_allowlisted() {
+        set_media_allowlist(HashSet::new());
+        let r = build_raw_media_response(std::path::Path::new("/no/such/file.png"), &None);
+        assert_eq!(r.status, 404);
+        assert!(r.data.is_empty());
+    }
+
+    #[test]
+    fn serves_inclusive_range_with_content_range_header() {
+        let dir = std::env::temp_dir().join("vmux_raw_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("blob.bin");
+        std::fs::write(&p, (0u8..100).collect::<Vec<u8>>()).unwrap();
+        let canon = std::fs::canonicalize(&p).unwrap();
+
+        let mut set = HashSet::new();
+        set.insert(canon.clone());
+        set_media_allowlist(set);
+
+        let r = build_raw_media_response(&canon, &Some((10, Some(20))));
+        assert_eq!(r.status, 206);
+        assert_eq!(r.data, (10u8..=20).collect::<Vec<u8>>());
+        assert!(
+            r.headers
+                .iter()
+                .any(|(k, v)| k == "Content-Range" && v == "bytes 10-20/100")
+        );
+
+        set_media_allowlist(HashSet::new());
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
 pub fn debug_chromium_libraries_path() -> PathBuf {
     debug_chromium_embedded_framework_dir_path().join("Libraries")
 }
