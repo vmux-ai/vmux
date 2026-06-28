@@ -526,17 +526,13 @@ the focused page. Prefer scrolling to read long pages instead of assuming off-sc
         input_schema: serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "oneOf": [
-                { "required": ["to"] },
-                { "required": ["delta"] }
-            ],
             "properties": {
-                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom."},
+                "to": {"enum": ["top", "bottom"], "description": "Scroll to page top or bottom. Pass exactly one of `to` or `delta`."},
                 "delta": {
                     "type": "integer",
                     "minimum": i32::MIN,
                     "maximum": i32::MAX,
-                    "description": "Scroll by pixels; positive = down."
+                    "description": "Scroll by pixels; positive = down. Pass exactly one of `to` or `delta`."
                 },
                 "target": {"type": "string", "description": "Optional pane:<id> or stack:<id>; if omitted, an agent caller's own browser pane (resolved via anchor), else the focused page."}
             }
