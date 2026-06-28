@@ -368,7 +368,17 @@ pub fn build_raw_media_response(
 ) -> RawMediaResponse {
     use std::io::{Read, Seek, SeekFrom};
 
-    if !is_media_path_allowed(path) {
+    // Canonicalize once and use the result for both the allowlist check and the
+    // open, so a symlink swap between them can't redirect to a non-allowlisted file.
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = canonical.as_path();
+
+    let allowed = is_media_path_allowed(path);
+    raw_media_debug(&format!(
+        "req path={} allowed={allowed} range={range:?}",
+        path.display()
+    ));
+    if !allowed {
         return deny_404("text/plain");
     }
     let mime = raw_media_mime(path).to_string();
@@ -391,7 +401,8 @@ pub fn build_raw_media_response(
         };
     }
 
-    let (start, last, status) = match range {
+    const RAW_MEDIA_CHUNK: usize = 4 * 1024 * 1024;
+    let (start, requested_last, had_range) = match range {
         Some((s, end_opt)) => {
             let s = *s;
             if s >= total {
@@ -403,27 +414,52 @@ pub fn build_raw_media_response(
                     mime,
                 };
             }
-            let last = end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s);
-            headers.push((
-                "Content-Range".to_string(),
-                format!("bytes {s}-{last}/{total}"),
-            ));
-            (s, last, 206)
+            (
+                s,
+                end_opt.map(|e| e.min(total - 1)).unwrap_or(total - 1).max(s),
+                true,
+            )
         }
-        None => (0, total - 1, 200),
+        None => (0, total - 1, false),
     };
+    // Cap each response to a chunk so large videos stream (and the player can
+    // cheaply range to an end-located moov atom) instead of buffering the whole file.
+    let last = requested_last.min(start + RAW_MEDIA_CHUNK - 1);
+    let partial = had_range || last < total - 1;
+    let status = if partial { 206 } else { 200 };
+    if partial {
+        headers.push((
+            "Content-Range".to_string(),
+            format!("bytes {start}-{last}/{total}"),
+        ));
+    }
 
     let len = last - start + 1;
     let mut data = vec![0u8; len];
     if file.seek(SeekFrom::Start(start as u64)).is_err() || file.read_exact(&mut data).is_err() {
         return deny_404(&mime);
     }
+    raw_media_debug(&format!(
+        "serve path={} total={total} start={start} last={last} status={status} len={len}",
+        path.display()
+    ));
 
     RawMediaResponse {
         status,
         data,
         headers,
         mime,
+    }
+}
+
+fn raw_media_debug(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/vmux_media_debug.log")
+    {
+        let _ = writeln!(f, "{msg}");
     }
 }
 
@@ -467,8 +503,12 @@ mod raw_response_tests {
     use std::collections::HashSet;
     use std::io::Write;
 
+    // These tests mutate the process-global allowlist; serialize them.
+    static ALLOWLIST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn denied_when_not_allowlisted() {
+        let _g = ALLOWLIST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         set_media_allowlist(HashSet::new());
         let r = build_raw_media_response(std::path::Path::new("/no/such/file.png"), &None);
         assert_eq!(r.status, 404);
@@ -477,6 +517,7 @@ mod raw_response_tests {
 
     #[test]
     fn serves_inclusive_range_with_content_range_header() {
+        let _g = ALLOWLIST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join("vmux_raw_test");
         let _ = std::fs::create_dir_all(&dir);
         let p = dir.join("blob.bin");
