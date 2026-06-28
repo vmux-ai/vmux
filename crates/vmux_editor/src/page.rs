@@ -54,10 +54,7 @@ fn revoke(url: &str) {
     let _ = web_sys::Url::revoke_object_url(url);
 }
 
-fn clear_blob_state(
-    mut preview: Signal<Preview>,
-    mut thumbs: Signal<HashMap<String, String>>,
-) {
+fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
     if let Preview::Image(old) = &*preview.read() {
         revoke(old);
     }
