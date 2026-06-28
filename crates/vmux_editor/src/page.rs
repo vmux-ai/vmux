@@ -108,7 +108,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-white/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
 
 fn row_class(selected: bool) -> String {
     let base =
@@ -118,7 +118,7 @@ fn row_class(selected: bool) -> String {
             "{base} bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
         )
     } else {
-        format!("{base} text-foreground/75 hover:bg-white/[0.05]")
+        format!("{base} text-foreground/75 hover:bg-foreground/[0.05]")
     }
 }
 
@@ -641,7 +641,7 @@ pub fn Page() -> Element {
             },
 
             div {
-                class: "flex h-9 shrink-0 items-center gap-2 border-b border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
+                class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
@@ -652,7 +652,7 @@ pub fn Page() -> Element {
                     let lbl = ed_label();
                     (!lbl.is_empty() && mode() == Mode::Text).then(|| rsx! {
                         span {
-                            class: "shrink-0 rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-cyan-200",
+                            class: "shrink-0 rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-cyan-700 dark:text-cyan-200",
                             "{lbl}"
                         }
                     })
@@ -719,7 +719,7 @@ pub fn Page() -> Element {
                             for e in visible_entries(&parent_entries(), show_hidden()) {
                                 div {
                                     key: "{e.path}",
-                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-white/[0.04]" },
+                                    class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-foreground/[0.04]" },
                                     {entry_visual(&e, None)}
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
@@ -757,7 +757,7 @@ pub fn Page() -> Element {
                             }
                         }
 
-                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-white/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
+                        div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
                             {render_preview(&preview())}
                         }
                     }
@@ -815,7 +815,7 @@ pub fn Page() -> Element {
                                                 rsx! {
                                                     div {
                                                         key: "{ln}",
-                                                        class: "group flex hover:bg-white/[0.035]",
+                                                        class: "group flex hover:bg-foreground/[0.035]",
                                                         style: "position:absolute;left:0;right:0;top:{lt}px;",
                                                         onmousedown: move |e: Event<MouseData>| {
                                                             e.prevent_default();
@@ -1048,7 +1048,7 @@ pub fn Page() -> Element {
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
-                                                        class: "pointer-events-none absolute z-30 max-w-2xl overflow-hidden rounded-xl bg-white/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        class: "pointer-events-none absolute z-30 max-w-2xl overflow-hidden rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (bi, b) in h.blocks.iter().enumerate() {
                                                             if b.code {
@@ -1083,7 +1083,7 @@ pub fn Page() -> Element {
                                                 let left = gutter + cfrom as f64 * cw;
                                                 rsx! {
                                                     div {
-                                                        class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-white/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                                                        class: "absolute z-40 max-h-56 min-w-48 overflow-auto rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                                                         style: "left:{left}px;top:{top}px;",
                                                         for (i, it) in comp_filtered.iter().enumerate() {
                                                             div {
@@ -1110,7 +1110,7 @@ pub fn Page() -> Element {
             {
                 hover_diag().map(|d| rsx! {
                     div {
-                        class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-white/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         div { class: "flex items-center gap-2",
                             span { class: "{severity_color_class(d.severity)}", "●" }
                             span { class: "whitespace-pre-wrap", "{d.message}" }
@@ -1133,7 +1133,7 @@ pub fn Page() -> Element {
                         },
                     }
                     div {
-                        class: "fixed z-50 min-w-44 overflow-hidden rounded-lg bg-white/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                        class: "fixed z-50 min-w-44 overflow-hidden rounded-lg bg-foreground/[0.06] py-1 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                         style: "left:{x}px;top:{y}px;",
                         div {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
@@ -1164,7 +1164,7 @@ pub fn Page() -> Element {
                         div {
                             id: "refs-panel",
                             tabindex: "0",
-                            class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-white/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
+                            class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
                                 let key = e
                                     .data()
@@ -1212,7 +1212,7 @@ pub fn Page() -> Element {
                                     rsx! {
                                         div {
                                             key: "{i}",
-                                            class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-white/[0.05]" },
+                                            class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                                             onmousedown: move |e: Event<MouseData>| {
                                                 e.prevent_default();
                                                 let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
@@ -1223,7 +1223,7 @@ pub fn Page() -> Element {
                                                 refs_open.set(false);
                                                 focus_file_input();
                                             },
-                                            span { class: "shrink-0 text-cyan-300/80", "{it.display}" }
+                                            span { class: "shrink-0 text-cyan-700/80 dark:text-cyan-300/80", "{it.display}" }
                                             span { class: "truncate text-foreground/60", "{it.preview}" }
                                         }
                                     }
