@@ -29,10 +29,10 @@ impl UiTextTone {
     fn default_class(self) -> &'static str {
         match self {
             UiTextTone::Inherit => "",
-            UiTextTone::Default => "text-white/90",
-            UiTextTone::Muted => "text-white/55",
-            UiTextTone::Dim => "text-white/28",
-            UiTextTone::Accent => "text-sky-300/95",
+            UiTextTone::Default => "text-foreground/90",
+            UiTextTone::Muted => "text-foreground/55",
+            UiTextTone::Dim => "text-foreground/28",
+            UiTextTone::Accent => "text-sky-600/95 dark:text-sky-300/95",
         }
     }
 }
