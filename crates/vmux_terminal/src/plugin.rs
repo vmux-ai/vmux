@@ -2988,12 +2988,35 @@ fn theme_signature(
     hasher.finish()
 }
 
+/// Map a terminal color scheme to its light/dark sibling for the app appearance.
+/// Schemes without a known counterpart are honored as-is.
+fn scheme_for_appearance(name: &str, dark: bool) -> &str {
+    match name {
+        "catppuccin-mocha" | "catppuccin-latte" | "catppuccin-frappe" | "catppuccin-macchiato" => {
+            if dark {
+                "catppuccin-mocha"
+            } else {
+                "catppuccin-latte"
+            }
+        }
+        "solarized-dark" | "solarized-light" => {
+            if dark {
+                "solarized-dark"
+            } else {
+                "solarized-light"
+            }
+        }
+        other => other,
+    }
+}
+
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
     newly_ready: Query<Entity, (With<Terminal>, Added<PageReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
+    scheme: Option<Res<vmux_setting::ResolvedColorScheme>>,
     mut commands: Commands,
     mut last_theme_hash: Local<u64>,
 ) {
@@ -3002,8 +3025,12 @@ fn sync_terminal_theme(
     };
 
     let theme = terminal_settings.resolve_theme(&terminal_settings.default_theme);
+    let dark = scheme
+        .map(|s| matches!(s.0, vmux_setting::ResolvedScheme::Dark))
+        .unwrap_or(true);
+    let scheme_name = scheme_for_appearance(&theme.color_scheme, dark);
     let colors =
-        vmux_setting::themes::resolve_theme(&theme.color_scheme, &terminal_settings.custom_themes);
+        vmux_setting::themes::resolve_theme(scheme_name, &terminal_settings.custom_themes);
 
     let hash = theme_signature(&theme, &colors);
 
