@@ -1,4 +1,4 @@
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (@media (prefers-color-scheme: dark));
 
 :root {
   --radius: 0.625rem;
@@ -35,9 +35,18 @@
   --sidebar-ring: oklch(0.708 0 0);
   --scrim: oklch(0.145 0 0 / 0.35);
   --scrim-strong: oklch(0.145 0 0 / 0.55);
+  --glass: oklch(1 0 0 / 0.55);
+  --glass-hover: oklch(1 0 0 / 0.7);
+  --glass-active: oklch(1 0 0 / 0.85);
+  --glass-border: oklch(0 0 0 / 0.08);
+  --cef-surface: oklch(0.98 0 0 / 0.86);
+  --cef-surface-hover: oklch(0.94 0 0 / 0.78);
+  --cef-surface-active: oklch(0.9 0 0 / 0.82);
+  --cef-surface-border: oklch(0 0 0 / 0.1);
 }
 
-.dark {
+@media (prefers-color-scheme: dark) {
+  :root {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -79,6 +88,7 @@
   --cef-surface-hover: oklch(0.58 0 0 / 0.72);
   --cef-surface-active: oklch(0.64 0 0 / 0.78);
   --cef-surface-border: oklch(1 0 0 / 0.22);
+  }
 }
 
 @theme inline {
@@ -253,6 +263,25 @@
   border: 1px solid var(--glass-border);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   backdrop-filter: blur(20px) saturate(1.4);
+}
+
+body {
+  --glass: oklch(1 0 0 / 0.55);
+  --glass-hover: oklch(0 0 0 / 0.04);
+  --glass-active: oklch(0 0 0 / 0.07);
+  --glass-border: oklch(0 0 0 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    --foreground: oklch(1 0 0);
+    --muted-foreground: oklch(0.82 0 0);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --glass: oklch(0.18 0 0 / 0.82);
+    --glass-hover: oklch(1 0 0 / 0.08);
+    --glass-active: oklch(1 0 0 / 0.14);
+    --glass-border: oklch(1 0 0 / 0.2);
+  }
 }
 
 .truncate-start {
