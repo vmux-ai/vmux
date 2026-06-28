@@ -175,6 +175,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             combined
         }
     };
+    let results: Vec<ResultItem> = if matches!(variant, PaletteVariant::Start) {
+        results
+            .into_iter()
+            .filter(|item| {
+                !matches!(
+                    item,
+                    ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
+                        if url.trim_end_matches('/') == "vmux://start"
+                )
+            })
+            .collect()
+    } else {
+        results
+    };
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
     let nav = nav_mode();
