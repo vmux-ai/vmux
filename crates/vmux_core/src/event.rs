@@ -24,6 +24,8 @@ pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
 pub const FILE_IMAGE_EVENT: &str = "file_image";
+pub const FILE_MEDIA_EVENT: &str = "file_media";
+pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
@@ -300,6 +302,41 @@ pub struct FileOpenEvent {
 pub struct FileImageEvent {
     pub mime: String,
     pub bytes: Vec<u8>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileMediaEvent {
+    pub kind: crate::media::MediaKind,
+    pub mime: String,
+    /// Raw-media URL (`file://…?vmux-raw=1`) for the media element `src`.
+    pub url: String,
+    /// Absolute filesystem path, for the PDF "open externally" intent.
+    pub abs_path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileOpenExternalRequest {
+    pub path: String,
 }
 
 #[derive(
