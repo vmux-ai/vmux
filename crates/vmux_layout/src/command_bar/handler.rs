@@ -1,5 +1,6 @@
 pub(crate) use crate::NewStackContext;
 use crate::cef::Browser;
+use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
 use crate::{
     Header,
     pane::{Pane, PaneSplit},
@@ -98,7 +99,7 @@ impl Plugin for CommandBarInputPlugin {
                 CommandBarReadyEvent,
                 CommandBarRenderedEvent,
                 CommandBarSizeEvent,
-            )>::for_hosts(&["command-bar", "home"]))
+            )>::for_hosts(&["command-bar", "start"]))
             .add_observer(on_command_bar_action)
             .add_observer(on_path_complete_request)
             .add_observer(on_command_bar_ready)
@@ -719,6 +720,41 @@ fn handle_open_command_bar(
         return;
     }
 
+    let is_new_stack = snapshot_params.p2().stack.is_some();
+
+    if !is_new_stack {
+        let active_stack = active_stack_override.or_else(|| {
+            let (_, _, active_stack) = focused_stack(
+                active_tab_param.get(),
+                &all_children,
+                &leaf_panes,
+                &pane_ts,
+                &pane_children,
+                &stack_ts,
+            );
+            active_stack
+        });
+        let start_browser = active_stack.and_then(|stack| {
+            all_children.get(stack).ok().and_then(|children| {
+                children.iter().find_map(|e| {
+                    browser_meta
+                        .get(e)
+                        .ok()
+                        .filter(|meta| meta.url == crate::start::START_PAGE_URL)
+                        .map(|_| e)
+                })
+            })
+        });
+        if let Some(browser_e) = start_browser {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                browser_e,
+                START_FOCUS_INPUT_EVENT,
+                &StartFocusInput,
+            ));
+            return;
+        }
+    }
+
     let Ok((
         modal_e,
         mut modal_node,
@@ -733,7 +769,6 @@ fn handle_open_command_bar(
         return;
     };
 
-    let is_new_stack = snapshot_params.p2().stack.is_some();
     let was_open = command_bar_modal_is_open(modal_node.display, has_keyboard_target);
 
     if !was_open {

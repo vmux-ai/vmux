@@ -5,30 +5,59 @@ use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
 };
+use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
 use crate::command_bar::handler::{
     TabGatherParams, build_command_bar_open_payload, gather_command_bar_tabs,
 };
-use crate::home::event::HomeDataRequest;
+use crate::start::START_PAGE_URL;
+use crate::start::event::StartDataRequest;
 
-/// Bevy plugin for `vmux://home/`: spawns the page manifest and answers
-/// [`HomeDataRequest`] with the shared command-bar launcher payload.
-pub struct HomePlugin;
+type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-impl Plugin for HomePlugin {
+/// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open
+/// tasks, and answers [`StartDataRequest`] with the shared command-bar launcher payload.
+pub struct StartPlugin;
+
+impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::home::PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(HomeDataRequest,)>::for_hosts(&[
-            "home",
+        app.world_mut().spawn(crate::start::PAGE_MANIFEST);
+        app.add_plugins(BinEventEmitterPlugin::<(StartDataRequest,)>::for_hosts(&[
+            "start",
         ]))
-        .add_observer(on_home_data_request);
+        .add_observer(on_start_data_request)
+        .add_systems(
+            Update,
+            handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
+        );
+    }
+}
+
+/// Claim `vmux://start/` page-open tasks and attach the launcher webview (titled "Start"),
+/// so the start page is a first-class known page rather than falling to the unknown-URL page.
+fn handle_start_page_open(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    mut attach: MessageWriter<CefPageAttachRequest>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &tasks {
+        if task.url != START_PAGE_URL {
+            continue;
+        }
+        attach.write(CefPageAttachRequest {
+            stack: task.stack,
+            url: START_PAGE_URL.to_string(),
+            title: "Start".to_string(),
+            bg_color: None,
+        });
+        commands.entity(entity).insert(PageOpenHandled);
     }
 }
 
 /// Builds the command-bar launcher payload and emits it back to the requesting
-/// `vmux://home/` webview as a `CommandBarOpenEvent` (opening in place).
-fn on_home_data_request(
-    trigger: On<BinReceive<HomeDataRequest>>,
+/// `vmux://start/` webview as a `CommandBarOpenEvent` (opening in place).
+fn on_start_data_request(
+    trigger: On<BinReceive<StartDataRequest>>,
     tab_gather: TabGatherParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
@@ -74,10 +103,10 @@ mod tests {
     use vmux_core::page::PageManifest;
 
     #[test]
-    fn home_plugin_spawns_manifest() {
+    fn start_plugin_spawns_manifest() {
         let mut app = App::new();
-        app.add_plugins(HomePlugin);
+        app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
-        assert!(q.iter(app.world()).any(|m| m.host == "home"));
+        assert!(q.iter(app.world()).any(|m| m.host == "start"));
     }
 }

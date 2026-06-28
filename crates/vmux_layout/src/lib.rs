@@ -14,13 +14,13 @@ pub mod error_page;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod extensions_page;
-pub mod home;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 pub mod protocol;
 pub mod reconcile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod snapshot;
+pub mod start;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod active_panes;

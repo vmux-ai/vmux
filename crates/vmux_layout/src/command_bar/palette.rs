@@ -27,13 +27,13 @@ use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-/// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://home/` page.
+/// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
 #[derive(Clone, Copy, PartialEq)]
 pub enum PaletteVariant {
     /// The Cmd+K command-bar modal overlay.
     Modal,
-    /// The `vmux://home/` launcher page.
-    Home,
+    /// The `vmux://start/` launcher page.
+    Start,
 }
 
 /// Props for [`CommandPalette`].
@@ -53,7 +53,7 @@ pub struct PaletteProps {
 
 /// The shared command-bar body: input, live-filtered results, file-path completion,
 /// history suggestions, keyboard navigation, and action dispatch. Rendered by both
-/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the home launcher ([`PaletteVariant::Home`]).
+/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
@@ -271,7 +271,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     let placeholder = match variant {
-        PaletteVariant::Home => "Search or ask\u{2026}",
+        PaletteVariant::Start => "Search or ask\u{2026}",
         PaletteVariant::Modal => {
             if is_new_tab {
                 "Search or type a URL, or select Terminal..."

@@ -1,6 +1,6 @@
 (
     browser: (
-        startup_url: "vmux://home/",
+        startup_url: "vmux://start/",
     ),
     layout: (
         window: (

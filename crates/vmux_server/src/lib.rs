@@ -56,7 +56,7 @@ web_pages! {
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,
-    render_home: "home" => vmux_layout::home::page::Page,
+    render_start: "start" => vmux_layout::start::page::Page,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
