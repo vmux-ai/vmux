@@ -513,11 +513,16 @@ pub fn Page() -> Element {
             style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
-                if mode() == Mode::Text {
-                    e.prevent_default();
-                    focus_file_input();
-                } else {
-                    focus_container();
+                match mode() {
+                    Mode::Text => {
+                        e.prevent_default();
+                        focus_file_input();
+                    }
+                    Mode::Dir => {
+                        e.prevent_default();
+                        focus_container();
+                    }
+                    Mode::Media(_) => focus_container(),
                 }
             },
 
