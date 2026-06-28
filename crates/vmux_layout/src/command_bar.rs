@@ -1,5 +1,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod page;
+#[cfg(target_arch = "wasm32")]
+pub mod palette;
 
 pub mod keyboard;
 pub mod results;

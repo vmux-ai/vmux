@@ -20,6 +20,7 @@ pub mod protocol;
 pub mod reconcile;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod snapshot;
+pub mod start;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod active_panes;
