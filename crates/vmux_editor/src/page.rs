@@ -8,6 +8,7 @@ use crate::page_model::{
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_core::media::MediaKind;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -24,7 +25,7 @@ const SCROLL_EDGE: u32 = 16;
 enum Mode {
     Dir,
     Text,
-    Image,
+    Media(MediaKind),
 }
 
 #[derive(Clone, PartialEq)]
@@ -251,6 +252,7 @@ pub fn Page() -> Element {
     let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
     let mut image_url = use_signal(|| Option::<String>::None);
+    let mut media = use_signal(|| Option::<FileMediaEvent>::None);
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
@@ -284,6 +286,7 @@ pub fn Page() -> Element {
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         clear_blob_state(image_url, preview, thumbs);
+        media.set(None);
         reset_file_scroll();
         last_scroll_req.set(0);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -362,6 +365,7 @@ pub fn Page() -> Element {
 
     let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         clear_blob_state(image_url, preview, thumbs);
+        media.set(None);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = d
                 .path
@@ -395,10 +399,11 @@ pub fn Page() -> Element {
         );
     });
 
-    let _img = use_bin_event_listener::<FileImageEvent, _>(FILE_IMAGE_EVENT, move |e| {
+    let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
         clear_blob_state(image_url, preview, thumbs);
-        image_url.set(blob_url(&e.bytes));
-        mode.set(Mode::Image);
+        let kind = e.kind;
+        media.set(Some(e));
+        mode.set(Mode::Media(kind));
         diagnostics.set(Vec::new());
         hover_diag.set(None);
         lsp_status.set(None);
@@ -703,10 +708,42 @@ pub fn Page() -> Element {
             }
 
             match mode() {
-                Mode::Image => rsx! {
+                Mode::Media(kind) => rsx! {
                     div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",
-                        if let Some(url) = image_url() {
-                            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+                        if let Some(m) = media() {
+                            match kind {
+                                MediaKind::Image => rsx! {
+                                    img { src: "{m.url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+                                },
+                                MediaKind::Video => rsx! {
+                                    video {
+                                        src: "{m.url}",
+                                        controls: true,
+                                        autoplay: false,
+                                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                                    }
+                                },
+                                MediaKind::Audio => rsx! {
+                                    audio { src: "{m.url}", controls: true, class: "w-2/3" }
+                                },
+                                MediaKind::Pdf => {
+                                    let display = path();
+                                    let abs = m.abs_path.clone();
+                                    rsx! {
+                                        div { class: "flex flex-col items-center gap-3 rounded-2xl bg-white/[0.03] px-8 py-6 ring-1 ring-inset ring-cyan-400/15 backdrop-blur-2xl",
+                                            span { class: "text-xs uppercase tracking-wide text-foreground/70", "PDF" }
+                                            span { class: "max-w-md truncate text-sm text-foreground/90", "{display}" }
+                                            button {
+                                                class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-400/25",
+                                                onclick: move |_| {
+                                                    let _ = try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path: abs.clone() });
+                                                },
+                                                "Open externally"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },

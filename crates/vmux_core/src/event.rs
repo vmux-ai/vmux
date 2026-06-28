@@ -23,7 +23,6 @@ pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
-pub const FILE_IMAGE_EVENT: &str = "file_image";
 pub const FILE_MEDIA_EVENT: &str = "file_media";
 pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
@@ -286,22 +285,6 @@ pub struct FilePreviewEvent {
 )]
 pub struct FileOpenEvent {
     pub path: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FileImageEvent {
-    pub mime: String,
-    pub bytes: Vec<u8>,
 }
 
 #[derive(
