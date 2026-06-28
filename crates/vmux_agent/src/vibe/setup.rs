@@ -122,20 +122,17 @@ fn detect_agent_install_outcome(
                 CommandLifecycleKind::Started => pane.armed = true,
                 CommandLifecycleKind::Ended { .. } => {
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
-                    match install_outcome(pane.armed, installed) {
-                        Some(false) => {
-                            if browsers.has_browser(pane.setup_webview)
-                                && browsers.host_emit_ready(&pane.setup_webview)
-                            {
-                                commands.trigger(BinHostEmitEvent::from_rkyv(
-                                    pane.setup_webview,
-                                    AGENT_SETUP_RESULT_EVENT,
-                                    &AgentSetupResult { ok: false },
-                                ));
-                            }
-                            pane.armed = false;
+                    if let Some(false) = install_outcome(pane.armed, installed) {
+                        if browsers.has_browser(pane.setup_webview)
+                            && browsers.host_emit_ready(&pane.setup_webview)
+                        {
+                            commands.trigger(BinHostEmitEvent::from_rkyv(
+                                pane.setup_webview,
+                                AGENT_SETUP_RESULT_EVENT,
+                                &AgentSetupResult { ok: false },
+                            ));
                         }
-                        Some(true) | None => {}
+                        pane.armed = false;
                     }
                 }
             }
