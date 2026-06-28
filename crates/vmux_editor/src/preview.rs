@@ -27,6 +27,16 @@ pub fn downscale_to_png(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> 
     Ok(out.into_inner())
 }
 
+fn raw_preview_url(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .map(|u| {
+            let mut s = u.to_string();
+            s.push_str("?vmux-raw=1");
+            s
+        })
+        .unwrap_or_default()
+}
+
 pub fn build_preview_sync(path: &Path) -> PreviewKind {
     build_preview_with_cap(path, false, IMAGE_BYTES_CAP)
 }
@@ -49,6 +59,13 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
                 bytes,
             },
             Err(e) => PreviewKind::Error(e.to_string()),
+        };
+    }
+    if vmux_core::media::media_kind(&path.to_string_lossy())
+        == Some(vmux_core::media::MediaKind::Video)
+    {
+        return PreviewKind::Video {
+            url: raw_preview_url(path),
         };
     }
     if is_probably_binary(path) {

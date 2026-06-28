@@ -250,6 +250,9 @@ pub enum PreviewKind {
         mime: String,
         bytes: Vec<u8>,
     },
+    Video {
+        url: String,
+    },
     Info {
         size: u64,
         modified: String,

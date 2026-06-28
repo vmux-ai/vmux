@@ -55,6 +55,11 @@ pub struct FileMedia {
     pub mime: String,
 }
 
+/// The video path currently shown in a dir-browser preview pane, allowlisted for
+/// raw-media serving so the preview `<video>` can fetch it.
+#[derive(Resource, Default)]
+struct PreviewMediaPath(Option<PathBuf>);
+
 #[derive(Component)]
 struct ThumbTask {
     webview: Entity,
@@ -561,9 +566,15 @@ fn on_file_scroll(
 
 /// Mirror the set of currently-open media paths into the CEF raw-media allowlist
 /// each frame, so the resource handler only serves files the user is viewing.
-fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>) {
-    let paths: std::collections::HashSet<std::path::PathBuf> =
+fn sync_media_allowlist(
+    media: Query<&FileView, With<FileMedia>>,
+    preview_media: Res<PreviewMediaPath>,
+) {
+    let mut paths: std::collections::HashSet<std::path::PathBuf> =
         media.iter().map(|fv| fv.path.clone()).collect();
+    if let Some(p) = preview_media.0.clone() {
+        paths.insert(p);
+    }
     set_media_allowlist(paths);
 }
 
@@ -606,6 +617,7 @@ fn on_file_preview_request(
     trigger: On<BinReceive<FilePreviewRequest>>,
     file_views: Query<(), With<FileView>>,
     browsers: NonSend<Browsers>,
+    mut preview_media: ResMut<PreviewMediaPath>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -637,6 +649,9 @@ fn on_file_preview_request(
     }
     if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
         return;
+    }
+    if vmux_core::media::media_kind(&req.path) == Some(vmux_core::media::MediaKind::Video) {
+        preview_media.0 = Some(path.clone());
     }
     let kind = preview::build_preview_sync(&path);
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1475,6 +1490,7 @@ impl Plugin for EditorPlugin {
         }
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .insert_non_send(SelfWrites::default())
+            .init_resource::<PreviewMediaPath>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,

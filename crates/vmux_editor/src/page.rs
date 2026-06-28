@@ -34,6 +34,7 @@ enum Preview {
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
     Image(String),
+    Video(String),
     Info {
         size: u64,
         modified: String,
@@ -183,6 +184,15 @@ fn render_preview(preview: &Preview) -> Element {
         },
         Preview::Image(url) => rsx! {
             img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+        },
+        Preview::Video(url) => rsx! {
+            video {
+                id: "preview-video",
+                src: "{url}",
+                controls: true,
+                autoplay: false,
+                class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+            }
         },
         Preview::Text(lines) => rsx! {
             div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
@@ -422,6 +432,7 @@ pub fn Page() -> Element {
                 Some(u) => Preview::Image(u),
                 None => Preview::Error("failed to decode image".into()),
             },
+            PreviewKind::Video { url } => Preview::Video(url),
             PreviewKind::Text(l) => Preview::Text(l),
             PreviewKind::Dir(e) => Preview::Dir(e),
             PreviewKind::Info {
@@ -626,6 +637,10 @@ pub fn Page() -> Element {
                                 if let Some(p) = vis2.get(idx).map(|x| x.path.clone()) {
                                     request_preview(p);
                                 }
+                            }
+                            " " => {
+                                e.prevent_default();
+                                toggle_preview_video();
                             }
                             _ => {}
                         }
@@ -1289,6 +1304,26 @@ fn scroll_dir_row_into_view(idx: usize) {
     let opts = web_sys::ScrollIntoViewOptions::new();
     opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
     el.scroll_into_view_with_scroll_into_view_options(&opts);
+}
+
+fn toggle_preview_video() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("preview-video"))
+    else {
+        return;
+    };
+    let target: &JsValue = el.as_ref();
+    let paused = js_sys::Reflect::get(target, &JsValue::from_str("paused"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let method = if paused { "play" } else { "pause" };
+    if let Ok(f) = js_sys::Reflect::get(target, &JsValue::from_str(method))
+        && let Ok(f) = f.dyn_into::<js_sys::Function>()
+    {
+        let _ = f.call0(target);
+    }
 }
 
 fn focus_container() {
