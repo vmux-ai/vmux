@@ -58,7 +58,7 @@ pub fn Page() -> Element {
                     }
                     p { class: "text-base text-muted-foreground", "One prompt. Anything, done." }
                 }
-                div { class: "w-full overflow-hidden rounded-2xl bg-white/[0.05] ring-1 ring-inset ring-white/10 shadow-[0_40px_120px_-32px_rgba(0,0,0,0.85)] backdrop-blur-2xl",
+                div { class: "w-full overflow-hidden rounded-2xl bg-foreground/[0.05] ring-1 ring-inset ring-foreground/10 shadow-2xl dark:shadow-[0_40px_120px_-32px_rgba(0,0,0,0.85)] backdrop-blur-2xl",
                     CommandPalette {
                         state,
                         variant: PaletteVariant::Start,

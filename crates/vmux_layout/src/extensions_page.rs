@@ -44,13 +44,13 @@ pub fn Page() -> Element {
             class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm",
             style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);",
 
-            div { class: "flex shrink-0 items-center gap-3 border-b border-white/[0.07] px-5 py-3",
+            div { class: "flex shrink-0 items-center gap-3 border-b border-foreground/[0.07] px-5 py-3",
                 div { class: "text-base font-semibold tracking-tight", "Extensions" }
-                div { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-xs text-muted-foreground", "{snap.extensions.len()}" }
+                div { class: "rounded-full bg-foreground/[0.06] px-2 py-0.5 text-xs text-muted-foreground", "{snap.extensions.len()}" }
                 div { class: "flex min-w-0 flex-1 items-center",
                     input {
                         r#type: "search",
-                        class: "w-full max-w-80 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-white/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-white/[0.08] focus:ring-cyan-400/30",
+                        class: "w-full max-w-80 rounded-lg bg-foreground/[0.05] px-3 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.08] focus:ring-cyan-400/30",
                         placeholder: "Search the Chrome Web Store…",
                         value: "{search}",
                         oninput: move |e| search.set(e.value()),
@@ -89,10 +89,10 @@ pub fn Page() -> Element {
                         div {
                             key: "{i}",
                             class: "flex items-center gap-3 rounded-xl px-3 py-2.5",
-                            div { class: "h-6 w-6 shrink-0 animate-pulse rounded bg-white/[0.06]" }
+                            div { class: "h-6 w-6 shrink-0 animate-pulse rounded bg-foreground/[0.06]" }
                             div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
-                                div { class: "h-3 w-32 animate-pulse rounded bg-white/[0.06]" }
-                                div { class: "h-2.5 w-16 animate-pulse rounded bg-white/[0.05]" }
+                                div { class: "h-3 w-32 animate-pulse rounded bg-foreground/[0.06]" }
+                                div { class: "h-2.5 w-16 animate-pulse rounded bg-foreground/[0.05]" }
                             }
                         }
                     }
@@ -113,7 +113,7 @@ pub fn Page() -> Element {
                         rsx! {
                             div {
                                 key: "{e.id}",
-                                class: "flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-white/[0.04]",
+                                class: "flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-foreground/[0.04]",
                                 if let Some(icon) = e.icon.as_ref() {
                                     img { class: "h-6 w-6 shrink-0 rounded", src: "{icon}" }
                                 }
@@ -122,12 +122,12 @@ pub fn Page() -> Element {
                                     span { class: "text-xs text-muted-foreground/70", "v{e.version}" }
                                 }
                                 button {
-                                    class: "shrink-0 rounded-lg px-3 py-1.5 text-xs ring-1 ring-inset ring-white/10 transition-colors hover:bg-white/[0.09]",
+                                    class: "shrink-0 rounded-lg px-3 py-1.5 text-xs ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.09]",
                                     onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtToggleRequest { id: toggle_id.clone(), enabled: !toggle_enabled }); },
                                     if e.enabled { "On" } else { "Off" }
                                 }
                                 button {
-                                    class: "shrink-0 rounded-lg bg-white/[0.05] px-3 py-1.5 text-xs text-foreground/70 ring-1 ring-inset ring-white/10 transition-colors hover:bg-ansi-1/15 hover:text-ansi-1",
+                                    class: "shrink-0 rounded-lg bg-foreground/[0.05] px-3 py-1.5 text-xs text-foreground/70 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-ansi-1/15 hover:text-ansi-1",
                                     onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtUninstallRequest { id: remove_id.clone() }); },
                                     "Remove"
                                 }
