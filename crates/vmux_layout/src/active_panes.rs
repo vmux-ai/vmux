@@ -19,6 +19,9 @@ pub struct ActiveStack {
     pub tab: Option<Entity>,
     pub pane: Option<Entity>,
     pub stack: Option<Entity>,
+    /// The agent kind owning this pane, when the profile is an agent. Drives the
+    /// avatar badge on that agent's focus ring. `None` for the local human.
+    pub kind: Option<vmux_core::agent::AgentKind>,
 }
 
 /// Per-profile active pane. `ProfileId::Local` mirrors `FocusedStack` every
@@ -74,6 +77,7 @@ fn mirror_local_active_pane(focus: Res<FocusedStack>, mut active: ResMut<ActiveP
             tab: focus.tab,
             pane: focus.pane,
             stack: focus.stack,
+            kind: None,
         },
     );
 }
@@ -114,6 +118,7 @@ mod tests {
                 tab: None,
                 pane: Some(user_pane),
                 stack: None,
+                kind: None,
             },
         });
         app.world_mut().write_message(ActivatePane {
@@ -122,6 +127,7 @@ mod tests {
                 tab: None,
                 pane: Some(agent_pane),
                 stack: None,
+                kind: None,
             },
         });
         app.update();
@@ -151,6 +157,7 @@ mod tests {
                 tab: None,
                 pane: None,
                 stack: None,
+                kind: None,
             },
         );
         app.world_mut().write_message(ActivatePane {
@@ -159,6 +166,7 @@ mod tests {
                 tab: None,
                 pane: Some(agent_pane),
                 stack: None,
+                kind: None,
             },
         });
         app.update();

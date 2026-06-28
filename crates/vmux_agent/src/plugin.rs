@@ -556,8 +556,11 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     agent_terms: Query<
         'w,
         's,
-        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
-        With<AgentSession>,
+        (
+            &'static vmux_service::protocol::ProcessId,
+            &'static AgentSession,
+            &'static ChildOf,
+        ),
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
@@ -590,8 +593,19 @@ impl AgentBrowserResolve<'_, '_> {
     /// The agent's own terminal pane (its stack's parent pane), from its anchor.
     fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
-        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        let (_, _, term_co) = self
+            .agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
+        self.agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)
+            .map(|(_, session, _)| session.kind)
     }
 
     /// Resolve the agent's browser pane from its anchor, and record it as that
@@ -599,6 +613,7 @@ impl AgentBrowserResolve<'_, '_> {
     /// `None` if the agent has no browser pane yet (caller keeps the default).
     fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
+        let kind = self.agent_kind(anchor);
         self.activate
             .write(vmux_layout::active_panes::ActivatePane {
                 profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
@@ -606,6 +621,7 @@ impl AgentBrowserResolve<'_, '_> {
                     tab: None,
                     pane: Some(pane),
                     stack: None,
+                    kind,
                 },
             });
         Some(pane)
@@ -647,8 +663,11 @@ pub(crate) struct AgentFileResolve<'w, 's> {
     agent_terms: Query<
         'w,
         's,
-        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
-        With<AgentSession>,
+        (
+            &'static vmux_service::protocol::ProcessId,
+            &'static AgentSession,
+            &'static ChildOf,
+        ),
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
@@ -657,8 +676,19 @@ pub(crate) struct AgentFileResolve<'w, 's> {
 impl AgentFileResolve<'_, '_> {
     fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
-        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        let (_, _, term_co) = self
+            .agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
+        self.agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)
+            .map(|(_, session, _)| session.kind)
     }
 
     /// The agent's existing `file://` follow-page (the page entity) and its leaf
@@ -742,6 +772,7 @@ fn handle_agent_file_touch(
             focus: existing.is_some(),
         });
         if let Some((_, pane)) = existing {
+            let kind = resolve.agent_kind(*anchor);
             resolve
                 .activate
                 .write(vmux_layout::active_panes::ActivatePane {
@@ -750,6 +781,7 @@ fn handle_agent_file_touch(
                         tab: None,
                         pane: Some(pane),
                         stack: None,
+                        kind,
                     },
                 });
         }

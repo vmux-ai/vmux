@@ -120,4 +120,8 @@ features = ["CALayer", "CAShapeLayer", "objc2-core-graphics"]
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-graphics]
 version = "0.3"
-features = ["CGPath"]
+features = ["CGPath", "CGImage", "CGColorSpace", "CGContext", "CGBitmapContext"]
+
+[target.'cfg(target_os = "macos")'.dependencies.objc2-core-foundation]
+version = "0.3"
+features = ["CFBase"]

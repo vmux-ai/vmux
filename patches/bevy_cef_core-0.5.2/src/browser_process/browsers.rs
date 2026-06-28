@@ -110,6 +110,17 @@ pub struct WebviewBrowser {
     corner_cover: RefCell<Option<objc2::rc::Retained<objc2_quartz_core::CAShapeLayer>>>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_corner_cover: Cell<Option<(i32, bool, i32, i32)>>,
+    /// The agent presence badge (logo avatar) layer on a windowed pane's focus ring.
+    #[cfg(target_os = "macos")]
+    agent_badge: RefCell<Option<objc2::rc::Retained<objc2_quartz_core::CALayer>>>,
+    /// Cached decoded badge image, keyed by agent-kind tag, so it is rebuilt only
+    /// when the owning agent changes.
+    #[cfg(target_os = "macos")]
+    agent_badge_img:
+        RefCell<Option<(u8, objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>)>>,
+    /// Last applied badge `(kind_tag, bounds_w, bounds_h)` to skip redundant work.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    last_badge: Cell<Option<(u8, i32, i32)>>,
 }
 
 pub struct Browsers {
@@ -360,6 +371,11 @@ impl Browsers {
             #[cfg(target_os = "macos")]
             corner_cover: RefCell::new(None),
             last_corner_cover: Cell::new(None),
+            #[cfg(target_os = "macos")]
+            agent_badge: RefCell::new(None),
+            #[cfg(target_os = "macos")]
+            agent_badge_img: RefCell::new(None),
+            last_badge: Cell::new(None),
         };
         self.browsers.insert(webview, webview_browser);
         webview_debug_log(format!(
@@ -1061,6 +1077,145 @@ impl Browsers {
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_focus_ring(&self, _: &Entity, _: f32, _: f32, _: [f32; 3]) {}
+
+    /// Decode premultiplied RGBA pixels into a `CGImage` for use as layer contents.
+    #[cfg(target_os = "macos")]
+    fn cgimage_from_premultiplied_rgba(
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Option<objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>> {
+        use objc2_core_graphics::{
+            CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGImageAlphaInfo,
+        };
+        use std::ffi::c_void;
+        let (w, h) = (width as usize, height as usize);
+        let bytes_per_row = w * 4;
+        if w == 0 || h == 0 || rgba.len() < bytes_per_row * h {
+            return None;
+        }
+        let mut buf = rgba.to_vec();
+        let color_space = CGColorSpace::new_device_rgb()?;
+        let ctx = unsafe {
+            CGBitmapContextCreate(
+                buf.as_mut_ptr() as *mut c_void,
+                w,
+                h,
+                8,
+                bytes_per_row,
+                Some(&color_space),
+                CGImageAlphaInfo::PremultipliedLast.0,
+            )
+        }?;
+        let img = CGBitmapContextCreateImage(Some(&ctx));
+        drop(ctx);
+        img
+    }
+
+    /// Draw (or clear) the agent presence badge — a brand-colored circle bearing
+    /// the agent's product logo — at the top-right corner of a windowed pane,
+    /// sitting on its focus ring. `badge` is `(premultiplied_rgba, w, h, brand_rgb,
+    /// kind_tag)`; `None` removes the badge. The decoded image is cached per
+    /// `kind_tag`, and the whole call early-returns when nothing changed.
+    #[cfg(target_os = "macos")]
+    pub fn set_agent_badge(
+        &self,
+        webview: &Entity,
+        scale: f32,
+        badge: Option<(&[u8], u32, u32, [f32; 3], u8)>,
+    ) {
+        use objc2_app_kit::{NSColor, NSView};
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        use objc2_quartz_core::CALayer;
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            return;
+        };
+
+        let Some((rgba, img_w, img_h, brand, tag)) = badge else {
+            if browser.last_badge.get().is_some() {
+                if let Some(b) = browser.agent_badge.borrow_mut().take() {
+                    b.removeFromSuperlayer();
+                }
+                *browser.agent_badge_img.borrow_mut() = None;
+                browser.last_badge.set(None);
+            }
+            return;
+        };
+
+        let bounds = layer.bounds();
+        let key = (
+            tag,
+            bounds.size.width.round() as i32,
+            bounds.size.height.round() as i32,
+        );
+        if browser.last_badge.get() == Some(key) && browser.agent_badge.borrow().is_some() {
+            return;
+        }
+        browser.last_badge.set(Some(key));
+
+        let need_img = !matches!(&*browser.agent_badge_img.borrow(), Some((t, _)) if *t == tag);
+        if need_img {
+            let Some(cg) = Self::cgimage_from_premultiplied_rgba(rgba, img_w, img_h) else {
+                return;
+            };
+            *browser.agent_badge_img.borrow_mut() = Some((tag, cg));
+        }
+        let img = browser.agent_badge_img.borrow();
+        let Some((_, cg)) = img.as_ref() else {
+            return;
+        };
+
+        let s = (scale as f64).max(1.0e-6);
+        let size = 24.0_f64.min(bounds.size.width.min(bounds.size.height) * 0.5);
+        let inset = 8.0 / s;
+        let frame = NSRect::new(
+            NSPoint::new(
+                bounds.size.width - size - inset,
+                bounds.size.height - size - inset,
+            ),
+            NSSize::new(size, size),
+        );
+
+        let existing = browser.agent_badge.borrow().clone();
+        let badge_layer = match existing {
+            Some(b) => b,
+            None => {
+                let b = CALayer::new();
+                b.setZPosition(2.0);
+                b.setMasksToBounds(true);
+                *browser.agent_badge.borrow_mut() = Some(b.clone());
+                b
+            }
+        };
+        badge_layer.setFrame(frame);
+        badge_layer.setCornerRadius(size / 2.0);
+        let bg = NSColor::colorWithSRGBRed_green_blue_alpha(
+            brand[0].clamp(0.0, 1.0) as f64,
+            brand[1].clamp(0.0, 1.0) as f64,
+            brand[2].clamp(0.0, 1.0) as f64,
+            1.0,
+        );
+        badge_layer.setBackgroundColor(Some(&bg.CGColor()));
+        badge_layer.setBorderWidth(1.5 / s);
+        let white = NSColor::colorWithSRGBRed_green_blue_alpha(1.0, 1.0, 1.0, 1.0);
+        badge_layer.setBorderColor(Some(&white.CGColor()));
+        let cg_ref: &objc2_core_graphics::CGImage = cg;
+        let cg_obj: &objc2::runtime::AnyObject = unsafe { &*core::ptr::from_ref(cg_ref).cast() };
+        unsafe { badge_layer.setContents(Some(cg_obj)) };
+        layer.addSublayer(&badge_layer);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_agent_badge(&self, _: &Entity, _: f32, _: Option<(&[u8], u32, u32, [f32; 3], u8)>) {}
 
     #[cfg(target_os = "macos")]
     pub fn set_windowed_hidden(&self, webview: &Entity, hidden: bool) {
