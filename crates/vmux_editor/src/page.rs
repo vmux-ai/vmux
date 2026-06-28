@@ -543,6 +543,7 @@ pub fn Page() -> Element {
                     return;
                 };
                 let key = raw.key();
+                web_sys::console::log_1(&format!("vmux-keydown key={key:?} mode-dir").into());
                 match mode() {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
