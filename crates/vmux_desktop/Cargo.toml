@@ -65,6 +65,7 @@ tray-icon = "0.24"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = [
     "NSAlert",
+    "NSAppearance",
     "NSApplication",
     "NSEvent",
     "NSView",
