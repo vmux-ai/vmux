@@ -55,14 +55,9 @@ fn revoke(url: &str) {
 }
 
 fn clear_blob_state(
-    mut image_url: Signal<Option<String>>,
     mut preview: Signal<Preview>,
     mut thumbs: Signal<HashMap<String, String>>,
 ) {
-    if let Some(old) = image_url() {
-        revoke(&old);
-        image_url.set(None);
-    }
     if let Preview::Image(old) = &*preview.read() {
         revoke(old);
     }
@@ -251,7 +246,6 @@ pub fn Page() -> Element {
     let mut back_dir = use_signal(|| Option::<String>::None);
     let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
-    let mut image_url = use_signal(|| Option::<String>::None);
     let mut media = use_signal(|| Option::<FileMediaEvent>::None);
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
@@ -285,7 +279,7 @@ pub fn Page() -> Element {
     let mut last_scroll_req = use_signal(|| 0u32);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
-        clear_blob_state(image_url, preview, thumbs);
+        clear_blob_state(preview, thumbs);
         media.set(None);
         reset_file_scroll();
         last_scroll_req.set(0);
@@ -364,7 +358,7 @@ pub fn Page() -> Element {
     });
 
     let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
-        clear_blob_state(image_url, preview, thumbs);
+        clear_blob_state(preview, thumbs);
         media.set(None);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = d
@@ -400,7 +394,7 @@ pub fn Page() -> Element {
     });
 
     let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
-        clear_blob_state(image_url, preview, thumbs);
+        clear_blob_state(preview, thumbs);
         let kind = e.kind;
         media.set(Some(e));
         mode.set(Mode::Media(kind));
