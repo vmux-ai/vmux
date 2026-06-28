@@ -3029,8 +3029,7 @@ fn sync_terminal_theme(
         .map(|s| matches!(s.0, vmux_setting::ResolvedScheme::Dark))
         .unwrap_or(true);
     let scheme_name = scheme_for_appearance(&theme.color_scheme, dark);
-    let colors =
-        vmux_setting::themes::resolve_theme(scheme_name, &terminal_settings.custom_themes);
+    let colors = vmux_setting::themes::resolve_theme(scheme_name, &terminal_settings.custom_themes);
 
     let hash = theme_signature(&theme, &colors);
 
