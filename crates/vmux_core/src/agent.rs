@@ -114,12 +114,9 @@ pub struct SpawnAgentInStackRequest {
     pub cwd: PathBuf,
     pub session_id: Option<String>,
     pub stack: Entity,
-    /// Prompt to deliver into the agent once its TUI is ready. `None` opens the
-    /// agent with no pre-filled prompt.
+    /// Prompt typed in the compose page, delivered into the agent once its TUI is
+    /// ready. `None` opens the agent with no pre-filled prompt.
     pub initial_prompt: Option<String>,
-    /// Show the typeable loading page over the booting terminal so the user can
-    /// compose a first prompt while the agent boots (delivered when ready).
-    pub compose: bool,
 }
 
 #[derive(Message, Debug, Clone)]

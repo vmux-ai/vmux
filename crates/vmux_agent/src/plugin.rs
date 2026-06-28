@@ -1821,7 +1821,6 @@ fn handle_agent_page_open_task(
                 session_id: Some(sid),
                 stack: task.stack,
                 initial_prompt: None,
-                compose: false,
             });
             Ok(())
         }
@@ -1834,18 +1833,19 @@ fn handle_agent_page_open_task(
                 // this agent kind, a repeat open is a no-op instead of spawning
                 // (and abandoning) another agent process.
                 if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                    // Spawn the agent (it boots) and, if the CLI is installed,
-                    // show the typeable loading page over it so the user can
-                    // compose a first prompt while it boots. Uninstalled → setup.
+                    // Compose first: a non-terminal page where the user types a
+                    // prompt; the CLI is spawned (with the prompt) on submit. If
+                    // the CLI isn't installed, go straight to setup instead.
                     if crate::exec::find_executable(kind.executable()).is_some() {
-                        spawn_agent.write(SpawnAgentInStackRequest {
+                        crate::compose::attach_compose_to_stack(
                             kind,
-                            cwd: default_cwd.to_path_buf(),
-                            session_id: None,
-                            stack: task.stack,
-                            initial_prompt: None,
-                            compose: true,
-                        });
+                            default_cwd.to_path_buf(),
+                            task.stack,
+                            children_q,
+                            commands,
+                            meshes,
+                            webview_mt,
+                        );
                     } else {
                         attach_cli_setup_to_stack(
                             kind, task.stack, children_q, commands, meshes, webview_mt,
@@ -2072,16 +2072,6 @@ fn handle_spawn_agent_requests(
                             text: prompt,
                             submit: true,
                         });
-                }
-                if req.compose {
-                    crate::compose::attach_compose_over_terminal(
-                        req.kind,
-                        terminal,
-                        req.stack,
-                        &mut commands,
-                        &mut meshes,
-                        &mut webview_mt,
-                    );
                 }
             }
             Err(e) => {

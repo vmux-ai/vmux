@@ -1,22 +1,21 @@
-//! Agent loading page: a pure-Dioxus (non-terminal) webview shown over a freshly
-//! spawned agent terminal while it boots. Because it's a normal native-focus
-//! page (not the keyboard-suppressed terminal window), its textarea works — so
-//! the user can type a first prompt during the boot. On submit the prompt is
-//! buffered onto the booting terminal (delivered when its TUI is ready) and the
-//! loading page is removed, revealing the live agent.
+//! Agent compose page: a normal (non-terminal) webview shown when opening an
+//! agent. The user types a prompt while a Matrix-rain backdrop plays; on Enter
+//! the agent CLI is spawned and the prompt is delivered into it. Because this is
+//! not a terminal, CEF keyboard input is not suppressed, so the textarea simply
+//! works (unlike an in-terminal overlay).
 
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod host {
+    use bevy::ecs::relationship::Relationship;
     use bevy::prelude::*;
     use bevy_cef::prelude::{
         BinEventEmitterPlugin, BinReceive, CefKeyboardTarget, WebviewExtendStandardMaterial,
     };
-    use vmux_core::LastActivatedAt;
     use vmux_core::PageMetadata;
-    use vmux_core::agent::AgentKind;
+    use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
     use vmux_core::event::AgentComposeSubmitEvent;
 
     pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -27,11 +26,12 @@ mod host {
         command_bar: false,
     };
 
-    /// On the loading page: the booting terminal it sits over, so submit can
-    /// deliver the prompt to it.
-    #[derive(Component, Clone, Copy)]
+    /// Carries the agent kind + working directory from compose-page attach to the
+    /// submit observer, so spawning the CLI doesn't have to re-derive them.
+    #[derive(Component, Clone)]
     pub struct ComposeContext {
-        pub terminal: Entity,
+        pub kind: AgentKind,
+        pub cwd: std::path::PathBuf,
     }
 
     pub struct AgentComposePlugin;
@@ -46,16 +46,17 @@ mod host {
         }
     }
 
-    /// Spawn the loading page as the active content of `stack`, sitting over the
-    /// already-spawned, still-booting `terminal` (also a child of `stack`).
-    pub fn attach_compose_over_terminal(
+    /// Replace a stack's content with the compose page for `kind`.
+    pub fn attach_compose_to_stack(
         kind: AgentKind,
-        terminal: Entity,
+        cwd: std::path::PathBuf,
         stack: Entity,
+        children_q: &Query<&Children>,
         commands: &mut Commands,
         meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) {
+        crate::plugin::clear_stack_children(stack, children_q, commands);
         let title = format!("Start {}", kind.display_name());
         let url = kind.compose_url();
         commands.entity(stack).insert(PageMetadata {
@@ -67,8 +68,7 @@ mod host {
         let browser = commands
             .spawn((
                 vmux_layout::Browser::new_with_title(meshes, webview_mt, &url, &title),
-                ComposeContext { terminal },
-                LastActivatedAt::now(),
+                ComposeContext { kind, cwd },
                 ChildOf(stack),
             ))
             .id();
@@ -77,26 +77,26 @@ mod host {
 
     fn on_agent_compose_submit(
         trigger: On<BinReceive<AgentComposeSubmitEvent>>,
-        ctx_q: Query<&ComposeContext>,
-        mut commands: Commands,
+        ctx_q: Query<(&ComposeContext, &ChildOf)>,
+        mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     ) {
-        let page = trigger.event_target();
-        let Ok(ctx) = ctx_q.get(page) else {
-            warn!("agent compose submit: no ComposeContext on {page:?}");
+        let entity = trigger.event_target();
+        let Ok((ctx, child_of)) = ctx_q.get(entity) else {
+            warn!("agent compose submit: no ComposeContext on {entity:?}");
             return;
         };
         let text = trigger.event().payload.text.trim().to_string();
         let submit = trigger.event().payload.submit;
-        if submit && !text.is_empty() {
-            commands
-                .entity(ctx.terminal)
-                .insert(vmux_terminal::BufferedAgentPrompt { text, submit: true });
-        }
-        // Remove the loading page → the booting terminal becomes the active
-        // content. Its TUI delivery happens via BufferedAgentPrompt on ready.
-        commands.entity(page).try_despawn();
+        let initial_prompt = (submit && !text.is_empty()).then_some(text);
+        spawn_agent.write(SpawnAgentInStackRequest {
+            kind: ctx.kind,
+            cwd: ctx.cwd.clone(),
+            session_id: None,
+            stack: child_of.get(),
+            initial_prompt,
+        });
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use host::{AgentComposePlugin, ComposeContext, PAGE_MANIFEST, attach_compose_over_terminal};
+pub use host::{AgentComposePlugin, ComposeContext, PAGE_MANIFEST, attach_compose_to_stack};

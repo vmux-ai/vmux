@@ -330,7 +330,6 @@ fn handle_reopen_closed_page(
             session_id,
             stack,
             initial_prompt: None,
-            compose: false,
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
         let cwd = page

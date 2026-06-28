@@ -555,7 +555,6 @@ pub(crate) fn rebuild_space_views(
                     session_id,
                     stack: entity,
                     initial_prompt: None,
-                    compose: false,
                 });
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                 commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
