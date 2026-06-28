@@ -1833,19 +1833,13 @@ fn handle_agent_page_open_task(
                 // this agent kind, a repeat open is a no-op instead of spawning
                 // (and abandoning) another agent process.
                 if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                    if crate::exec::find_executable(kind.executable()).is_some() {
-                        spawn_agent.write(SpawnAgentInStackRequest {
-                            kind,
-                            cwd: default_cwd.to_path_buf(),
-                            session_id: None,
-                            stack: task.stack,
-                            initial_prompt: None,
-                        });
-                    } else {
-                        attach_cli_setup_to_stack(
-                            kind, task.stack, children_q, commands, meshes, webview_mt,
-                        );
-                    }
+                    spawn_agent.write(SpawnAgentInStackRequest {
+                        kind,
+                        cwd: default_cwd.to_path_buf(),
+                        session_id: None,
+                        stack: task.stack,
+                        initial_prompt: None,
+                    });
                 }
                 return Ok(());
             }
