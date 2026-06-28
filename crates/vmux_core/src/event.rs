@@ -12,6 +12,7 @@ pub const TERM_RESIZE_EVENT: &str = "term_resize";
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
 pub const TERM_LOADING_EVENT: &str = "term_loading";
+pub const AGENT_COMPOSE_SUBMIT_EVENT: &str = "agent_compose_submit";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
 pub const FILE_META_EVENT: &str = "file_meta";
 pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
@@ -789,6 +790,26 @@ pub struct TermLoadingEvent {
     pub loading: bool,
     pub label: String,
     pub segment: String,
+}
+
+/// Page → host: the user finished (or cancelled) the agent compose page.
+/// `agent` is the agent url segment (e.g. "claude"); `text` is the prompt;
+/// `submit` is true on Enter (run the prompt) and false on cancel (open empty).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentComposeSubmitEvent {
+    pub agent: String,
+    pub text: String,
+    pub submit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

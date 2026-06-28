@@ -163,6 +163,50 @@ pub struct AgentLoading {
     pub since: Instant,
 }
 
+/// A prompt (from the agent compose page) to type into an agent terminal once
+/// its TUI is up. Delivered by [`flush_buffered_agent_prompt`] on alt-screen.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
+pub struct BufferedAgentPrompt {
+    pub text: String,
+    pub submit: bool,
+}
+
+/// Bytes to deliver for a buffered prompt once the agent TUI is ready, or `None`
+/// if not ready yet or there's nothing to send.
+fn agent_prompt_flush_bytes(alt_screen: bool, buf: &BufferedAgentPrompt) -> Option<Vec<u8>> {
+    if !alt_screen {
+        return None;
+    }
+    let bytes = crate::shell_input::bracketed_paste_input(&buf.text, buf.submit);
+    (!bytes.is_empty()).then_some(bytes)
+}
+
+fn flush_buffered_agent_prompt(
+    q: Query<(Entity, &ProcessId, &BufferedAgentPrompt), With<vmux_core::agent::AgentSession>>,
+    mode_map: Res<TerminalModeMap>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
+    let Some(service) = service else { return };
+    for (entity, pid, buf) in &q {
+        let alt_screen = mode_map
+            .modes
+            .get(pid)
+            .map(|m| m.alt_screen)
+            .unwrap_or(false);
+        if !alt_screen {
+            continue;
+        }
+        if let Some(data) = agent_prompt_flush_bytes(true, buf) {
+            service.0.send(ClientMessage::ProcessInput {
+                process_id: *pid,
+                data,
+            });
+        }
+        commands.entity(entity).remove::<BufferedAgentPrompt>();
+    }
+}
+
 /// Last char-grid size (cols/rows) the page measured for this terminal, so a PTY
 /// restart can recreate the process at the current pane size instead of 80x24.
 #[derive(Component, Debug, Clone, Copy)]
@@ -335,6 +379,7 @@ impl Plugin for TerminalPlugin {
                     arm_agent_loading,
                     arm_agent_loading_on_restart,
                     clear_agent_loading.after(poll_service_messages),
+                    flush_buffered_agent_prompt.after(poll_service_messages),
                     reset_terminal_title_on_agent_removed,
                     set_terminal_shell_icon,
                 ),

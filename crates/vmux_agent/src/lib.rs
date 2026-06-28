@@ -5,6 +5,8 @@
 
 pub mod vibe;
 
+pub mod compose;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 #[cfg(not(target_arch = "wasm32"))]

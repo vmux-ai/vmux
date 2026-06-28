@@ -9777,6 +9777,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "wasm-bindgen",
  "web-sys",
 ]
 
