@@ -13,7 +13,7 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
-    on_settings_command, reset_sent_markers_on_page_ready,
+    handle_settings_page_open, on_settings_command, reset_sent_markers_on_page_ready,
 };
 
 /// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
@@ -23,6 +23,7 @@ pub struct SettingsPlugin;
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "settings");
         app.init_resource::<LastSelfWriteHash>()
             .init_resource::<SettingsSaveDebounce>()
             .add_message::<SettingsWriteRequest>()
@@ -45,6 +46,10 @@ impl Plugin for SettingsPlugin {
             )
             .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
             .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))
+            .add_systems(
+                Update,
+                handle_settings_page_open.in_set(vmux_core::PageOpenSet::HandleKnownPages),
+            )
             .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::for_hosts(
                 &["settings"],
             ))

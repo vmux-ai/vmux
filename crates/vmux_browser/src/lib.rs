@@ -29,8 +29,8 @@ use vmux_command::{
     LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
 };
 use vmux_core::{
-    CefPageAttachRequest, OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
-    PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
+    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenError,
+    PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
     page::{PageManifest, PageReady},
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -208,6 +208,7 @@ impl Plugin for BrowserPlugin {
             .add_systems(Last, refresh_active_windowed_hover)
             .init_resource::<HostFocusIntent>()
             .init_resource::<PendingNavSnapshots>()
+            .init_resource::<HostSpawnRegistry>()
             .add_systems(
                 PostUpdate,
                 (
@@ -2859,6 +2860,7 @@ fn handle_browser_commands(
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    host_spawn: Res<HostSpawnRegistry>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
     mut commands: Commands,
@@ -2930,8 +2932,8 @@ fn handle_browser_commands(
                         .map(|m| m.url.clone())
                         .unwrap_or_default();
                     if is_terminal
-                        || page_needs_host_spawn(&current_url)
-                        || page_needs_host_spawn(&resolved)
+                        || host_spawn.needs_host_spawn(&current_url)
+                        || host_spawn.needs_host_spawn(&resolved)
                     {
                         page_open_requests.write(PageOpenRequest {
                             target: PageOpenTarget::Stack(active),
@@ -3369,19 +3371,6 @@ fn normalize_vmux_url(url: &str) -> String {
         return format!("vmux://{rest}/");
     }
     url.to_string()
-}
-
-fn page_needs_host_spawn(url: &str) -> bool {
-    fn has_vmux_host(url: &str, host: &str) -> bool {
-        let Some(rest) = url.strip_prefix("vmux://") else {
-            return false;
-        };
-        let Some(tail) = rest.strip_prefix(host) else {
-            return false;
-        };
-        tail.is_empty() || matches!(tail.as_bytes().first(), Some(b'/' | b'?' | b'#'))
-    }
-    url.starts_with("file:") || has_vmux_host(url, "terminal") || has_vmux_host(url, "agent")
 }
 
 fn resolve_page_open_target(
@@ -3840,21 +3829,6 @@ mod tests {
             normalize_vmux_url("file:///tmp/main.rs"),
             "file:///tmp/main.rs"
         );
-    }
-
-    #[test]
-    fn page_needs_host_spawn_matches_host_on_boundaries() {
-        assert!(page_needs_host_spawn("file:///tmp/x"));
-        assert!(page_needs_host_spawn("vmux://terminal"));
-        assert!(page_needs_host_spawn("vmux://terminal/"));
-        assert!(page_needs_host_spawn("vmux://terminal/?pid=1"));
-        assert!(page_needs_host_spawn("vmux://agent"));
-        assert!(page_needs_host_spawn("vmux://agent/vibe/setup"));
-
-        assert!(!page_needs_host_spawn("vmux://agentic/"));
-        assert!(!page_needs_host_spawn("vmux://terminals/"));
-        assert!(!page_needs_host_spawn("vmux://settings/"));
-        assert!(!page_needs_host_spawn("https://example.com"));
     }
 
     #[test]
@@ -5772,6 +5746,11 @@ mod tests {
                         captured.0.push(trigger.url.clone());
                     },
                 );
+            for host in [
+                "terminal", "agent", "services", "settings", "team", "spaces",
+            ] {
+                vmux_core::register_host_spawn(&mut app, host);
+            }
             app
         }
 
@@ -5890,7 +5869,7 @@ mod tests {
         #[test]
         fn in_place_from_plain_vmux_to_web_navigates_in_place() {
             let mut app = build_app();
-            build_focused_native_stack(&mut app, "vmux://spaces/");
+            build_focused_native_stack(&mut app, "vmux://history/");
 
             app.world_mut()
                 .resource_mut::<Messages<AppCommand>>()
@@ -5917,7 +5896,7 @@ mod tests {
                 .resource_mut::<Messages<AppCommand>>()
                 .write(AppCommand::Browser(BrowserCommand::Open(
                     OpenCommand::InPlace {
-                        url: Some("vmux://settings/".into()),
+                        url: Some("vmux://history/".into()),
                     },
                 )));
 
@@ -5926,7 +5905,30 @@ mod tests {
             let page_opens = app.world().resource::<CapturedPageOpenRequests>();
             assert!(page_opens.0.is_empty());
             let navigates = app.world().resource::<CapturedNavigateUrls>();
-            assert_eq!(navigates.0, vec!["vmux://settings/".to_string()]);
+            assert_eq!(navigates.0, vec!["vmux://history/".to_string()]);
+        }
+
+        #[test]
+        fn in_place_to_settings_routes_through_page_open() {
+            let mut app = build_app();
+            build_focused_native_stack(&mut app, "https://example.com/");
+
+            app.world_mut()
+                .resource_mut::<Messages<AppCommand>>()
+                .write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InPlace {
+                        url: Some("vmux://settings/".into()),
+                    },
+                )));
+
+            app.update();
+
+            let navigates = app.world().resource::<CapturedNavigateUrls>();
+            assert!(navigates.0.is_empty());
+            let page_opens = app.world().resource::<CapturedPageOpenRequests>();
+            assert_eq!(page_opens.0.len(), 1);
+            assert_eq!(page_opens.0[0].url, "vmux://settings/");
+            assert!(matches!(page_opens.0[0].target, PageOpenTarget::Stack(_)));
         }
 
         #[test]

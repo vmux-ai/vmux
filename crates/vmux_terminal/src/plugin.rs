@@ -318,6 +318,8 @@ pub fn format_terminal_url(
 impl Plugin for TerminalPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "terminal");
+        vmux_core::register_host_spawn(app, "services");
         app.register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
             .add_message::<TerminalSendRequest>()

@@ -12,6 +12,8 @@ pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod host_spawn;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod page_open;
@@ -32,6 +34,8 @@ pub mod notify;
 pub mod team;
 #[cfg(not(target_arch = "wasm32"))]
 pub use archive::{ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PaneStep, SplitAxis};
+#[cfg(not(target_arch = "wasm32"))]
+pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 #[cfg(not(target_arch = "wasm32"))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 #[cfg(not(target_arch = "wasm32"))]
