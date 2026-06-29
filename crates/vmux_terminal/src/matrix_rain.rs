@@ -143,12 +143,12 @@ fn start_rain(
     let bg = if dark {
         "rgb(30 30 46)"
     } else {
-        "rgb(238 239 242)"
+        "rgb(209 213 219)"
     };
     let fade = if dark {
         "rgba(30, 30, 46, 0.08)"
     } else {
-        "rgba(238, 239, 242, 0.1)"
+        "rgba(209, 213, 219, 0.1)"
     };
 
     if reduced {
