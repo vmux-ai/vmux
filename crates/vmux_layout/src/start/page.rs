@@ -48,12 +48,12 @@ pub fn Page() -> Element {
                 div { class: "absolute left-1/2 top-[16%] h-[36rem] w-[36rem] -translate-x-1/2 rounded-full bg-indigo-500/15 blur-[150px]" }
                 div { class: "absolute left-[12%] top-1/3 h-80 w-80 rounded-full bg-cyan-400/10 blur-[130px]" }
                 div { class: "absolute right-[12%] top-1/4 h-80 w-80 rounded-full bg-violet-500/12 blur-[130px]" }
-                div { class: "absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent" }
+                div { class: "absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-transparent to-transparent dark:from-black/40" }
             }
             div {
                 class: "relative flex w-full max-w-2xl flex-col items-center gap-8 transition-all duration-700 ease-out motion-reduce:transition-none {reveal}",
                 div { class: "flex flex-col items-center gap-2",
-                    h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-6xl font-semibold leading-none tracking-tight text-transparent",
+                    h1 { class: "bg-gradient-to-b from-foreground to-foreground/55 bg-clip-text text-6xl font-semibold leading-none tracking-tight text-transparent",
                         "vmux"
                     }
                     p { class: "text-base text-muted-foreground", "One prompt. Anything, done." }

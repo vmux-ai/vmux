@@ -1,8 +1,8 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3.5 py-2.5 text-sidebar-primary-foreground"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-blue-600 px-3.5 py-2.5 text-white"
     } else {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-white/5"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
     }
 }
 
@@ -23,7 +23,7 @@ pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
 }
 
 pub fn command_bar_input_row_class() -> &'static str {
-    "flex min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-white/5 px-3"
+    "flex min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3"
 }
 
 pub fn command_bar_input_wrap_class() -> &'static str {
@@ -82,8 +82,8 @@ mod tests {
     fn selected_result_item_uses_blue_full_row_background() {
         let class = result_item_class(true);
 
-        assert!(class.contains("bg-sidebar-primary"));
-        assert!(class.contains("text-sidebar-primary-foreground"));
+        assert!(class.contains("bg-blue-600"));
+        assert!(class.contains("text-white"));
         assert!(class.contains("w-full"));
         assert!(!class.contains("bg-white/10"));
     }
