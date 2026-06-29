@@ -8,6 +8,7 @@
 @source "../../vmux_service/src";
 @source "../../vmux_setting/src";
 @source "../../vmux_space/src";
+@source "../../vmux_team/src";
 @source "../../vmux_terminal/src";
 @source "../../vmux_ui/src";
 @source ".";
@@ -68,9 +69,9 @@
     --ansi-15: rgb(166, 173, 200);
   }
 
-  html.dark {
+  html {
     height: 100%;
-    color-scheme: dark;
+    color-scheme: light dark;
   }
 
   html,
@@ -97,16 +98,6 @@
   #main > * {
     flex: 1 1 0%;
     min-height: 0;
-  }
-
-  html.dark body {
-    --foreground: oklch(1 0 0);
-    --muted-foreground: oklch(0.82 0 0);
-    --sidebar-primary-foreground: oklch(1 0 0);
-    --glass: oklch(0.18 0 0 / 0.82);
-    --glass-hover: oklch(1 0 0 / 0.08);
-    --glass-active: oklch(1 0 0 / 0.14);
-    --glass-border: oklch(1 0 0 / 0.20);
   }
 }
 

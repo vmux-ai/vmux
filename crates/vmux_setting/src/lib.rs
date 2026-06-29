@@ -6,6 +6,8 @@
     clippy::new_ret_no_self
 )]
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod appearance;
 pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
@@ -23,6 +25,8 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::SettingsPlugin;
 #[cfg(not(target_arch = "wasm32"))]

@@ -60,7 +60,7 @@ pub fn Page() -> Element {
                 }
                 if has_processes {
                     button {
-                        class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
+                        class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: move |e: Event<MouseData>| {
                             e.stop_propagation();
                             let _ = try_cef_bin_emit_rkyv(&ProcessKillAllEvent { kill_all: true });
@@ -88,7 +88,7 @@ pub fn Page() -> Element {
                 // Search filter
                 div { class: "mb-3",
                     input {
-                        class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-foreground/30",
+                        class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-cyan-400/50",
                         r#type: "text",
                         placeholder: "Filter processes...",
                         value: "{search}",
@@ -198,7 +198,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                         "{shell_name}"
                     }
                     if process.attached {
-                        span { class: "rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-400",
+                        span { class: "rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400",
                             "attached"
                         }
                     }
@@ -206,7 +206,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                 div { class: "flex items-center gap-2",
                     span { class: "text-xs text-muted-foreground", "{uptime}" }
                     button {
-                        class: "rounded px-1.5 py-0.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors",
+                        class: "rounded px-1.5 py-0.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: onkill,
                         "Kill"
                     }

@@ -76,9 +76,9 @@ pub fn Page() -> Element {
             div { class: "{accent.glow_top}" }
             div { class: "{accent.glow_bottom}" }
 
-            section { class: "relative w-full max-w-lg rounded-3xl bg-white/[0.04] p-8 ring-1 ring-inset ring-white/10 backdrop-blur-2xl shadow-[0_24px_80px_-24px_rgba(0,0,0,0.7)]",
+            section { class: "relative w-full max-w-lg rounded-3xl bg-foreground/[0.04] p-8 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-xl dark:shadow-[0_24px_80px_-24px_rgba(0,0,0,0.7)]",
                 div { class: "mb-6 flex items-center gap-4",
-                    div { class: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/[0.06] ring-1 ring-inset ring-white/10",
+                    div { class: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
                         Favicon {
                             favicon_url: "".to_string(),
                             url: format!("vmux://agent/{segment}/cli/"),
@@ -95,14 +95,14 @@ pub fn Page() -> Element {
                 if needs_homebrew() {
                     p { class: "mb-5 text-sm leading-relaxed text-muted-foreground",
                         "Homebrew is required to install "
-                        code { class: "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
+                        code { class: "rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
                         " and isn't set up yet. vmux will install Homebrew first, then {name}."
                     }
-                    div { class: "mb-2 flex items-center gap-3 rounded-xl bg-black/40 p-4 ring-1 ring-inset ring-white/10",
+                    div { class: "mb-2 flex items-center gap-3 rounded-xl bg-foreground/[0.08] p-4 ring-1 ring-inset ring-foreground/10",
                         span { class: "{prompt_class}", "1" }
                         code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{brew_command}" }
                     }
-                    div { class: "mb-3 flex items-center gap-3 rounded-xl bg-black/40 p-4 ring-1 ring-inset ring-white/10",
+                    div { class: "mb-3 flex items-center gap-3 rounded-xl bg-foreground/[0.08] p-4 ring-1 ring-inset ring-foreground/10",
                         span { class: "{prompt_class}", "2" }
                         code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{command}" }
                     }
@@ -112,17 +112,17 @@ pub fn Page() -> Element {
                 } else {
                     p { class: "mb-5 text-sm leading-relaxed text-muted-foreground",
                         "vmux opened this page because the local "
-                        code { class: "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
+                        code { class: "rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
                         " command isn't installed yet. Run the command below to get it."
                     }
-                    div { class: "mb-5 flex items-center gap-3 rounded-xl bg-black/40 p-4 ring-1 ring-inset ring-white/10",
+                    div { class: "mb-5 flex items-center gap-3 rounded-xl bg-foreground/[0.08] p-4 ring-1 ring-inset ring-foreground/10",
                         span { class: "{prompt_class}", "$" }
                         code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{command}" }
                     }
                 }
 
                 if failed() {
-                    p { class: "mb-3 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-300 ring-1 ring-inset ring-red-500/20",
+                    p { class: "mb-3 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300 ring-1 ring-inset ring-red-500/20",
                         "Install didn't finish. Check the terminal for details, then retry."
                     }
                 }

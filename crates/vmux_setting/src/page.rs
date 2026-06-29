@@ -63,7 +63,7 @@ pub fn Page() -> Element {
                         a {
                             key: "{sec.id}",
                             href: "#{sec.id}",
-                            class: "rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+                            class: "rounded-md px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground",
                             "{sec.title}"
                         }
                     }

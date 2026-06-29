@@ -9,6 +9,7 @@
     clippy::new_ret_no_self
 )]
 
+mod appearance;
 mod background_lifecycle;
 mod boot_status;
 mod browser_scroll;
@@ -179,6 +180,7 @@ impl Plugin for VmuxPlugin {
                     .after(WriteAppCommands),
             )
             .add_systems(Startup, notify::request_notification_auth)
+            .add_systems(Startup, appearance::seed_system_appearance)
             .add_systems(Update, notify::post_os_notifications);
 
         #[cfg(target_os = "macos")]

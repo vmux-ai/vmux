@@ -92,7 +92,7 @@ fn TeamRow(member: TeamMemberRow) -> Element {
 
     rsx! {
         div {
-            class: "flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted/40",
+            class: "flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-foreground/[0.04]",
             TeamAvatar { member: member.clone(), size: 32 }
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",
@@ -105,12 +105,12 @@ fn TeamRow(member: TeamMemberRow) -> Element {
                         "{member.name}"
                     }
                     if member.is_running {
-                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400",
+                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400",
                             span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
                             "running"
                         }
                     } else if member.is_done_unseen {
-                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400",
+                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400",
                             span { class: "size-1.5 rounded-full bg-amber-400 animate-pulse" }
                             "done"
                         }

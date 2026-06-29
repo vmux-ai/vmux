@@ -350,7 +350,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                     rsx! {
                         button {
                             key: "{ext.id}",
-                            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-white/[0.08]",
+                            class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-foreground/[0.08]",
                             title: "{name}",
                             onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtActionRequest { id: id.clone() }); },
                             img { class: "h-4 w-4", src: "{icon}" }
@@ -359,7 +359,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                 }
             }
             button {
-                class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-white/[0.08]",
+                class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
                 title: "Manage extensions",
                 onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
                 Icon { class: "h-4 w-4",
@@ -673,7 +673,7 @@ fn SideSheetView(
                 div { class: "glass mb-2 flex flex-col overflow-hidden rounded-md",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
                     if !space.startup_dir.is_empty() {
-                        div { class: "flex items-center gap-1.5 border-t border-white/5 px-2 py-1.5 text-muted-foreground",
+                        div { class: "flex items-center gap-1.5 border-t border-foreground/5 px-2 py-1.5 text-muted-foreground",
                             Icon { class: "h-3.5 w-3.5 shrink-0",
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                             }
@@ -709,7 +709,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
     rsx! {
         button {
             r#type: "button",
-            class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-white/5",
+            class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-foreground/5",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),

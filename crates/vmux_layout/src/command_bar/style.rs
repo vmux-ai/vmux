@@ -1,8 +1,8 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-sidebar-primary px-3.5 py-2.5 text-sidebar-primary-foreground"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-cyan-400/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
     } else {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-white/5"
+        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
     }
 }
 
@@ -23,7 +23,7 @@ pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
 }
 
 pub fn command_bar_input_row_class() -> &'static str {
-    "flex min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-white/5 px-3"
+    "flex min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3"
 }
 
 pub fn command_bar_input_wrap_class() -> &'static str {
@@ -79,11 +79,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selected_result_item_uses_blue_full_row_background() {
+    fn selected_result_item_uses_accent_full_row_background() {
         let class = result_item_class(true);
 
-        assert!(class.contains("bg-sidebar-primary"));
-        assert!(class.contains("text-sidebar-primary-foreground"));
+        assert!(class.contains("bg-cyan-400/12"));
+        assert!(class.contains("text-foreground"));
         assert!(class.contains("w-full"));
         assert!(!class.contains("bg-white/10"));
     }
@@ -331,20 +331,12 @@ mod tests {
     }
 
     #[test]
-    fn layout_css_gives_controls_readable_glass_background() {
-        let css = include_str!("../../assets/index.css");
+    fn theme_css_gives_controls_readable_glass_background() {
+        let css = include_str!("../../../vmux_ui/assets/theme.css");
 
+        assert!(css.contains("prefers-color-scheme: dark"));
         assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));
+        assert!(css.contains("--glass: oklch(1 0 0 / 0.55);"));
         assert!(!css.contains("--glass: transparent;"));
-        assert!(!css.contains("--glass: oklch(0.36 0 0 / 0.82);"));
-    }
-
-    #[test]
-    fn bundled_layout_css_gives_controls_readable_glass_background() {
-        let css = include_str!("../../../vmux_server/assets/index.css");
-
-        assert!(css.contains("--glass: oklch(0.18 0 0 / 0.82);"));
-        assert!(!css.contains("--glass: transparent;"));
-        assert!(!css.contains("--glass: oklch(0.36 0 0 / 0.82);"));
     }
 }

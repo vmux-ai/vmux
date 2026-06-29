@@ -4,11 +4,11 @@
 @source ".";
 
 @layer base {
-  html.dark {
-    color-scheme: dark;
+  html {
+    color-scheme: light dark;
   }
 
-  html.dark body {
+  body {
     background-color: transparent;
     color: var(--foreground);
     font-family: "Inter", system-ui, -apple-system, sans-serif;

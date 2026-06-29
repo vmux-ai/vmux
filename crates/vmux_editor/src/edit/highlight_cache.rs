@@ -3,11 +3,12 @@ use syntect::highlighting::{HighlightIterator, HighlightState, Highlighter, Them
 use syntect::parsing::{ParseState, ScopeStack, SyntaxReference};
 use vmux_core::event::{FileLine, StyledSpan};
 
-use crate::highlight::{default_theme, select_syntax, styled_span, syntax_set};
+use crate::highlight::{default_theme, is_dark_theme, select_syntax, styled_span, syntax_set};
 
 pub struct HighlightCache {
     syntax: &'static SyntaxReference,
     theme: Theme,
+    dark: bool,
     befores: Vec<(ParseState, HighlightState)>,
     pub language: String,
 }
@@ -19,7 +20,16 @@ impl HighlightCache {
             language: syntax.name.clone(),
             syntax,
             theme: default_theme(),
+            dark: is_dark_theme(),
             befores: Vec::new(),
+        }
+    }
+
+    fn refresh_theme(&mut self) {
+        if is_dark_theme() != self.dark {
+            self.theme = default_theme();
+            self.dark = is_dark_theme();
+            self.befores.clear();
         }
     }
 
@@ -56,6 +66,7 @@ impl HighlightCache {
     }
 
     pub fn line_window(&mut self, rope: &Rope, start: usize, end: usize) -> Vec<FileLine> {
+        self.refresh_theme();
         let total = rope.len_lines();
         let end = end.min(total);
         if start >= end {

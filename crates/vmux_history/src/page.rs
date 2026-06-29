@@ -136,7 +136,7 @@ pub fn Page() -> Element {
                     div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
                     for entry in group {
                         div {
-                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group cursor-pointer",
+                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-foreground/[0.04] group cursor-pointer",
                             onclick: {
                                 let url = entry.url.clone();
                                 move |_| {
@@ -175,7 +175,7 @@ pub fn Page() -> Element {
             }
         }
         if *confirm_open.read() {
-            div { class: "fixed inset-0 bg-black/80 flex items-center justify-center z-50",
+            div { class: "fixed inset-0 bg-scrim-strong flex items-center justify-center z-50",
                 div { class: "bg-card border border-border p-6 rounded max-w-sm",
                     h3 { class: "text-lg mb-2", "Clear all history?" }
                     p { class: "text-sm text-muted-foreground mb-4", "This cannot be undone." }
