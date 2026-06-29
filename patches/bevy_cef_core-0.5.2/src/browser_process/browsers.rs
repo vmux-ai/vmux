@@ -65,6 +65,19 @@ pub const HIDDEN_WINDOWLESS_FRAME_RATE: i32 = 1;
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
+/// Whether a webview at `uri` must use an extension-free request context.
+///
+/// User browser extensions are loaded globally via Chromium's `--load-extension` switch
+/// into the default profile. Their content scripts can match `file://` — the only internal
+/// scheme a content script can match (`<all_urls>` covers `http`/`https`/`file`/`ftp`,
+/// never the custom embedded schemes `vmux://`/`cef://`). Routing `file://` webviews (the
+/// editor) to a request context that does not carry those extensions stops the content
+/// scripts from hijacking the editor's keyboard handling, while extensions keep working on
+/// real web pages, which stay on the shared (extension-enabled) context.
+fn requires_extension_free_context(uri: &str) -> bool {
+    uri.starts_with("file://")
+}
+
 /// Disk profile root for [`RequestContextSettings::cache_path`], aligned with `CefPlugin::root_cache_path` in the `bevy_cef` crate.
 /// Inserted by that plugin; when `bevy_cef_core` is used without it, initialize via `init_resource` (default `None`).
 #[derive(Resource, Clone, Debug, Default)]
@@ -278,7 +291,10 @@ impl Browsers {
         #[allow(unused_assignments)]
         let mut ephemeral_local: Option<RequestContext> = None;
         let color_scheme = self.color_scheme;
-        let context_for_browser = match disk_profile_root.filter(|s| !s.trim().is_empty()) {
+        let context_for_browser = match disk_profile_root
+            .filter(|s| !s.trim().is_empty())
+            .filter(|_| !requires_extension_free_context(_uri))
+        {
             Some(root) => {
                 if self.shared_disk_context.is_none() {
                     self.ensure_shared_disk_context(requester, root);
@@ -1930,9 +1946,23 @@ mod tests {
         windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
+    use super::requires_extension_free_context;
     use crate::prelude::modifiers_from_mouse_buttons;
     use bevy::prelude::*;
     use std::time::Duration;
+
+    #[test]
+    fn only_file_scheme_uses_extension_free_context() {
+        assert!(requires_extension_free_context(
+            "file:///Users/x/Projects/readme.md"
+        ));
+        assert!(requires_extension_free_context("file://"));
+        assert!(!requires_extension_free_context("vmux://layout/"));
+        assert!(!requires_extension_free_context("cef://localhost/"));
+        assert!(!requires_extension_free_context("https://example.com/"));
+        assert!(!requires_extension_free_context("http://example.com/"));
+        assert!(!requires_extension_free_context("about:blank"));
+    }
 
     #[test]
     fn focused_window_keeps_monitor_frame_rate() {
