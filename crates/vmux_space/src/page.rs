@@ -77,7 +77,7 @@ pub fn Page() -> Element {
                 }
                 div { class: "flex shrink-0 items-center gap-2",
                     input {
-                        class: "w-44 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-foreground/30",
+                        class: "w-44 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-cyan-400/50",
                         r#type: "text",
                         placeholder: "New space name",
                         value: "{new_name}",
@@ -91,7 +91,7 @@ pub fn Page() -> Element {
                         },
                     }
                     button {
-                        class: "rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:border-foreground/30 hover:bg-muted",
+                        class: "rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:border-cyan-400/40 hover:bg-foreground/[0.04]",
                         onclick: move |_| {
                             emit_command("new", None, Some(new_space_name(&new_name(), count)));
                             new_name.set(String::new());
@@ -142,9 +142,9 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
     let nav_id = space.id.clone();
     let delete_id = space.id.clone();
     let class = if selected {
-        "flex cursor-pointer items-center justify-between rounded-lg border border-foreground/30 bg-muted px-3 py-3"
+        "flex cursor-pointer items-center justify-between rounded-lg border border-cyan-400/40 bg-cyan-400/[0.08] px-3 py-3 shadow-[0_0_18px_-6px_rgba(34,211,238,0.5)]"
     } else {
-        "flex cursor-pointer items-center justify-between rounded-lg border border-border bg-card px-3 py-3 transition-colors hover:border-foreground/30 hover:bg-muted/60"
+        "flex cursor-pointer items-center justify-between rounded-lg border border-border bg-card px-3 py-3 transition-colors hover:border-cyan-400/40 hover:bg-foreground/[0.04]"
     };
     let tab_label = if space.tab_count == 1 {
         "1 tab".to_string()

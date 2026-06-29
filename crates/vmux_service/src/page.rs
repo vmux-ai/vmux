@@ -88,7 +88,7 @@ pub fn Page() -> Element {
                 // Search filter
                 div { class: "mb-3",
                     input {
-                        class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-foreground/30",
+                        class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-cyan-400/50",
                         r#type: "text",
                         placeholder: "Filter processes...",
                         value: "{search}",

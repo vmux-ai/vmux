@@ -92,7 +92,7 @@ fn TeamRow(member: TeamMemberRow) -> Element {
 
     rsx! {
         div {
-            class: "flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted/40",
+            class: "flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-foreground/[0.04]",
             TeamAvatar { member: member.clone(), size: 32 }
             div { class: "flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5",
                 div { class: "flex min-w-0 items-center gap-2",

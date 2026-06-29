@@ -136,7 +136,7 @@ pub fn Page() -> Element {
                     div { class: "text-xs text-muted-foreground uppercase mt-4 mb-1", "{label}" }
                     for entry in group {
                         div {
-                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-muted group cursor-pointer",
+                            class: "flex items-center gap-2 py-1 border-b border-border hover:bg-foreground/[0.04] group cursor-pointer",
                             onclick: {
                                 let url = entry.url.clone();
                                 move |_| {
