@@ -311,9 +311,9 @@ pub fn Page() -> Element {
                             div {
                                 class: "relative z-10 flex h-full w-full items-center justify-center",
                                 div {
-                                    class: "flex items-center gap-3 rounded-2xl bg-black/40 px-5 py-4 ring-1 ring-inset ring-white/10 backdrop-blur-md",
+                                    class: "flex items-center gap-3 rounded-2xl bg-white/70 px-5 py-4 ring-1 ring-inset ring-black/10 backdrop-blur-md dark:bg-black/40 dark:ring-white/10",
                                     div {
-                                        class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] ring-1 ring-inset ring-white/10",
+                                        class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
                                         Favicon {
                                             favicon_url: "".to_string(),
                                             url: favicon_url.clone(),

@@ -71,6 +71,21 @@ fn brighten(accent_rgb: &str) -> String {
     format!("rgb({} {} {})", mix(parts[0]), mix(parts[1]), mix(parts[2]))
 }
 
+/// Scale an `"r g b"` accent toward black by `pct`%, returning a bare `"r g b"`
+/// triple (no wrapper) so callers can build `rgb(...)` or `rgb(... / a)`. Used
+/// for the light-mode rain, where the dark-mode `brighten` would vanish.
+fn darken(accent_rgb: &str, pct: u16) -> String {
+    let parts: Vec<u16> = accent_rgb
+        .split_whitespace()
+        .filter_map(|p| p.parse::<u16>().ok())
+        .collect();
+    if parts.len() != 3 {
+        return "20 24 33".to_string();
+    }
+    let mix = |c: u16| -> u16 { c * pct / 100 };
+    format!("{} {} {}", mix(parts[0]), mix(parts[1]), mix(parts[2]))
+}
+
 fn pick_glyph(glyphs: &[char], words: &[Vec<char>], col: usize, head_row: f64) -> char {
     if !words.is_empty() && col % 7 == 3 {
         let word = &words[col % words.len()];
@@ -119,13 +134,30 @@ fn start_rain(
         .map(|m| m.matches())
         .unwrap_or(false);
 
+    let dark = window
+        .match_media("(prefers-color-scheme: dark)")
+        .ok()
+        .flatten()
+        .map(|m| m.matches())
+        .unwrap_or(true);
+    let bg = if dark {
+        "rgb(30 30 46)"
+    } else {
+        "rgb(238 239 242)"
+    };
+    let fade = if dark {
+        "rgba(30, 30, 46, 0.08)"
+    } else {
+        "rgba(238, 239, 242, 0.1)"
+    };
+
     if reduced {
         let w = canvas.client_width().max(1) as f64;
         let h = canvas.client_height().max(1) as f64;
         canvas.set_width((w * dpr) as u32);
         canvas.set_height((h * dpr) as u32);
         let _ = ctx.scale(dpr, dpr);
-        ctx.set_fill_style_str("rgb(30 30 46)");
+        ctx.set_fill_style_str(bg);
         ctx.fill_rect(0.0, 0.0, w, h);
         return;
     }
@@ -136,8 +168,16 @@ fn start_rain(
         .filter(|w| !w.is_empty())
         .map(|w| w.chars().collect())
         .collect();
-    let head_color = brighten(&accent_rgb);
-    let trail_color = format!("rgb({accent_rgb} / 0.85)");
+    let head_color = if dark {
+        brighten(&accent_rgb)
+    } else {
+        format!("rgb({})", darken(&accent_rgb, 42))
+    };
+    let trail_color = if dark {
+        format!("rgb({accent_rgb} / 0.85)")
+    } else {
+        format!("rgb({} / 0.8)", darken(&accent_rgb, 62))
+    };
 
     let mut cols = (canvas.client_width().max(1) as f64 / FONT_PX)
         .floor()
@@ -170,7 +210,7 @@ fn start_rain(
         ctx.set_font(&format!("{FONT_PX}px monospace"));
         ctx.set_text_baseline("top");
 
-        ctx.set_fill_style_str("rgba(30, 30, 46, 0.08)");
+        ctx.set_fill_style_str(fade);
         ctx.fill_rect(0.0, 0.0, w, h);
 
         for (i, drop) in drops.iter_mut().enumerate().take(cols) {
