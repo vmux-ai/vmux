@@ -56,14 +56,7 @@ pub enum ContentClass {
 }
 
 pub fn image_mime(path: &str) -> Option<&'static str> {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "webp" => Some("image/webp"),
-        _ => None,
-    }
+    vmux_core::media::image_mime(path)
 }
 
 pub fn classify(path: &str, is_dir: bool) -> ContentClass {

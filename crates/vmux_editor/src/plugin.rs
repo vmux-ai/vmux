@@ -47,10 +47,12 @@ pub struct FileDir {
     pub entries: Vec<FileDirEntry>,
 }
 
+/// A media file (image/video/audio/pdf) opened in a `file://` view. Holds only
+/// the kind and MIME; the bytes are served on demand over the CEF resource pipe.
 #[derive(Component, Clone, Debug)]
-pub struct FileImage {
+pub struct FileMedia {
+    pub kind: vmux_core::media::MediaKind,
     pub mime: String,
-    pub bytes: Vec<u8>,
 }
 
 #[derive(Component)]
@@ -86,7 +88,7 @@ type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
     Without<FileDir>,
-    Without<FileImage>,
+    Without<FileMedia>,
     Without<EditState>,
 );
 type ReadyUnsentMeta = (
@@ -236,28 +238,12 @@ fn load_file_buffers(
             commands.entity(entity).insert(FileDir { entries });
             continue;
         }
-        if preview::is_image_path(&fv.path) {
-            match std::fs::metadata(&fv.path).map(|m| m.len()) {
-                Ok(len) if len <= preview::IMAGE_BYTES_CAP => match std::fs::read(&fv.path) {
-                    Ok(bytes) => {
-                        let mime = preview::image_mime(&fv.path).unwrap_or("image/png");
-                        commands.entity(entity).insert(FileImage {
-                            mime: mime.to_string(),
-                            bytes,
-                        });
-                    }
-                    Err(e) => {
-                        commands
-                            .entity(entity)
-                            .insert(FileBuffer::error(format!("__error__:{e}")));
-                    }
-                },
-                _ => {
-                    commands.entity(entity).insert(FileBuffer::error(
-                        "__error__:image too large to preview".into(),
-                    ));
-                }
-            }
+        let path_str = fv.path.to_string_lossy();
+        if let Some(kind) = vmux_core::media::media_kind(&path_str) {
+            let mime = vmux_core::media::media_mime(&path_str)
+                .unwrap_or("application/octet-stream")
+                .to_string();
+            commands.entity(entity).insert(FileMedia { kind, mime });
             continue;
         }
         match std::fs::metadata(&fv.path).map(|m| m.len()) {
@@ -604,24 +590,104 @@ fn on_file_scroll(
     );
 }
 
-fn send_initial_image(
-    q: Query<(Entity, &FileImage), ReadyUnsentMeta>,
+/// Mirror the set of paths the raw-media handler may serve into the CEF allowlist
+/// each frame: open media views plus every file inside an open directory (so the
+/// dir browser can preview/play any of its files without a per-selection race).
+fn sync_media_allowlist(media: Query<&FileView, With<FileMedia>>, dirs: Query<&FileDir>) {
+    let mut paths: std::collections::HashSet<std::path::PathBuf> =
+        media.iter().map(|fv| fv.path.clone()).collect();
+    for dir in &dirs {
+        for entry in &dir.entries {
+            paths.insert(std::path::PathBuf::from(&entry.path));
+        }
+    }
+    set_media_allowlist(paths);
+}
+
+/// Build the raw-media URL (`file://<abs>?vmux-raw=1`) that the page points media
+/// elements at; the CEF resource handler range-serves the file behind it.
+fn raw_media_url(path: &std::path::Path) -> String {
+    let mut url = url::Url::from_file_path(path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{}", path.to_string_lossy()));
+    url.push_str("?vmux-raw=1");
+    url
+}
+
+/// Emit [`FileMediaEvent`] once the page is ready, so it can render the media
+/// element pointed at the raw-media URL.
+fn send_initial_media(
+    q: Query<(Entity, &FileView, &FileMedia), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, img) in &q {
+    for (entity, fv, media) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
-            FILE_IMAGE_EVENT,
-            &FileImageEvent {
-                mime: img.mime.clone(),
-                bytes: img.bytes.clone(),
+            FILE_MEDIA_EVENT,
+            &FileMediaEvent {
+                kind: media.kind,
+                mime: media.mime.clone(),
+                url: raw_media_url(&fv.path),
+                abs_path: fv.path.to_string_lossy().into_owned(),
             },
         ));
         commands.entity(entity).insert(FileInitialMetaSent);
+    }
+}
+
+/// Containers AVFoundation decodes but this codec-less CEF build cannot. Open-codec
+/// containers (webm/ogv) play in the page `<video>`, so we must not cover them with
+/// a native overlay that AVFoundation can't render.
+fn needs_native_video(path: &Path) -> bool {
+    vmux_core::media::is_proprietary_video(&path.to_string_lossy())
+}
+
+/// Attach a native macOS `AVPlayer` overlay filling a full video view. This CEF
+/// build lacks proprietary codecs (H.264/HEVC), so `.mov`/`.mp4` won't play in
+/// `<video>`; the overlay decodes them through AVFoundation. Idempotent per path.
+fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: NonSend<Browsers>) {
+    for (entity, fv, media) in &q {
+        if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        browsers.attach_media_overlay(&entity, &fv.path.to_string_lossy());
+    }
+}
+
+/// Position/replace the native overlay over the dir-browser preview pane, using the
+/// rect the page measured for its video host element.
+fn on_file_video_rect(
+    trigger: On<BinReceive<FileVideoRect>>,
+    file_views: Query<(), With<FileView>>,
+    browsers: NonSend<Browsers>,
+) {
+    let entity = trigger.event().webview;
+    if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
+        return;
+    }
+    let r = &trigger.event().payload;
+    if !vmux_core::media::is_proprietary_video(&r.path) || r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
+    browsers.set_media_overlay(&entity, &r.path, (r.x, r.y, r.w, r.h));
+}
+
+/// Tear down the native video overlay when a view stops being a video media view
+/// or a dir browser (navigated away, reloaded as text, or despawned).
+fn detach_video_overlays(
+    mut removed_media: RemovedComponents<FileMedia>,
+    mut removed_dir: RemovedComponents<FileDir>,
+    browsers: NonSend<Browsers>,
+) {
+    for entity in removed_media.read().chain(removed_dir.read()) {
+        browsers.detach_media_overlay(&entity);
     }
 }
 
@@ -637,6 +703,9 @@ fn on_file_preview_request(
     }
     let req = trigger.event().payload.clone();
     let path = PathBuf::from(&req.path);
+    if !needs_native_video(&path) {
+        browsers.detach_media_overlay(&entity);
+    }
     if req.thumb && preview::is_image_path(&path) {
         let within_cap = std::fs::metadata(&path)
             .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
@@ -703,6 +772,27 @@ fn drain_thumb_tasks(
     }
 }
 
+/// Open a media file in the system default app (the PDF view's "Open externally"
+/// action). Restricted to the requesting view's own path.
+fn on_file_open_external(
+    trigger: On<BinReceive<FileOpenExternalRequest>>,
+    views: Query<&FileView, With<FileMedia>>,
+) {
+    let entity = trigger.event().webview;
+    let Ok(fv) = views.get(entity) else {
+        return;
+    };
+    let req_path = PathBuf::from(&trigger.event().payload.path);
+    if fv.path != req_path {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(not(target_os = "macos"))]
+    let program = "xdg-open";
+    let _ = std::process::Command::new(program).arg(&req_path).spawn();
+}
+
 #[allow(clippy::too_many_arguments)]
 fn navigate_file_view(
     entity: Entity,
@@ -729,7 +819,7 @@ fn navigate_file_view(
         .entity(entity)
         .remove::<FileDir>()
         .remove::<FileBuffer>()
-        .remove::<FileImage>()
+        .remove::<FileMedia>()
         .remove::<EditState>()
         .remove::<EditorKeymap>()
         .remove::<LspEditDirty>()
@@ -866,26 +956,26 @@ fn reload_changed_files(
             continue;
         }
 
-        if preview::is_image_path(&fv.path) {
-            let within = std::fs::metadata(&fv.path)
-                .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
-                .unwrap_or(false);
-            if within && let Ok(bytes) = std::fs::read(&fv.path) {
-                let mime = preview::image_mime(&fv.path).unwrap_or("image/png");
-                commands.entity(entity).insert(FileImage {
-                    mime: mime.to_string(),
-                    bytes: bytes.clone(),
-                });
-                if ready {
-                    commands.trigger(BinHostEmitEvent::from_rkyv(
-                        entity,
-                        FILE_IMAGE_EVENT,
-                        &FileImageEvent {
-                            mime: mime.to_string(),
-                            bytes,
-                        },
-                    ));
-                }
+        if let Some(kind) = vmux_core::media::media_kind(&fv.path.to_string_lossy()) {
+            if ready {
+                let mime = vmux_core::media::media_mime(&fv.path.to_string_lossy())
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                let nonce = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let url = format!("{}&v={nonce}", raw_media_url(&fv.path));
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_MEDIA_EVENT,
+                    &FileMediaEvent {
+                        kind,
+                        mime,
+                        url,
+                        abs_path: fv.path.to_string_lossy().into_owned(),
+                    },
+                ));
             }
             continue;
         }
@@ -1401,7 +1491,7 @@ fn apply_goto(
                 .entity(g.entity)
                 .remove::<EditState>()
                 .remove::<FileBuffer>()
-                .remove::<FileImage>()
+                .remove::<FileMedia>()
                 .remove::<FileDir>()
                 .remove::<FileInitialMetaSent>()
                 .remove::<crate::lsp::manager::LspOpened>()
@@ -1557,6 +1647,8 @@ impl Plugin for EditorPlugin {
                 FileCompletionRequest,
                 FileGotoRequest,
                 FileCompletionCommit,
+                FileOpenExternalRequest,
+                FileVideoRect,
             )>::default())
             .add_systems(
                 Update,
@@ -1569,7 +1661,9 @@ impl Plugin for EditorPlugin {
                     send_initial_meta,
                     send_initial_text_meta,
                     send_initial_dir,
-                    send_initial_image,
+                    sync_media_allowlist,
+                    send_initial_media.after(sync_media_allowlist),
+                    (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
                     drain_thumb_tasks,
                     reconcile_file_watches,
@@ -1585,6 +1679,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_scroll)
             .add_observer(on_file_preview_request)
             .add_observer(on_file_open)
+            .add_observer(on_file_open_external)
+            .add_observer(on_file_video_rect)
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)

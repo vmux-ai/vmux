@@ -8,6 +8,7 @@ use crate::page_model::{
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_core::media::MediaKind;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -16,6 +17,7 @@ use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
+const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
 const SCROLL_EDGE: u32 = 16;
@@ -24,7 +26,7 @@ const SCROLL_EDGE: u32 = 16;
 enum Mode {
     Dir,
     Text,
-    Image,
+    Media(MediaKind),
 }
 
 #[derive(Clone, PartialEq)]
@@ -33,6 +35,11 @@ enum Preview {
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
     Image(String),
+    Video {
+        url: String,
+        path: String,
+        native: bool,
+    },
     Info {
         size: u64,
         modified: String,
@@ -53,15 +60,7 @@ fn revoke(url: &str) {
     let _ = web_sys::Url::revoke_object_url(url);
 }
 
-fn clear_blob_state(
-    mut image_url: Signal<Option<String>>,
-    mut preview: Signal<Preview>,
-    mut thumbs: Signal<HashMap<String, String>>,
-) {
-    if let Some(old) = image_url() {
-        revoke(&old);
-        image_url.set(None);
-    }
+fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
     if let Preview::Image(old) = &*preview.read() {
         revoke(old);
     }
@@ -191,6 +190,29 @@ fn render_preview(preview: &Preview) -> Element {
         Preview::Image(url) => rsx! {
             img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
         },
+        Preview::Video { url, path, native } => {
+            if *native {
+                let path = path.clone();
+                rsx! {
+                    div {
+                        key: "{path}",
+                        id: VIDEO_HOST_ID,
+                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+                        onmounted: move |_| report_video_rect(path.clone()),
+                    }
+                }
+            } else {
+                rsx! {
+                    video {
+                        id: "preview-video",
+                        src: "{url}",
+                        controls: true,
+                        autoplay: false,
+                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                    }
+                }
+            }
+        }
         Preview::Text(lines) => rsx! {
             div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
                 for line in lines.iter() {
@@ -250,7 +272,7 @@ pub fn Page() -> Element {
     let mut back_dir = use_signal(|| Option::<String>::None);
     let mut show_hidden = use_signal(|| true);
     let mut mode = use_signal(|| Mode::Text);
-    let mut image_url = use_signal(|| Option::<String>::None);
+    let mut media = use_signal(|| Option::<FileMediaEvent>::None);
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
@@ -283,7 +305,8 @@ pub fn Page() -> Element {
     let mut last_scroll_req = use_signal(|| 0u32);
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
-        clear_blob_state(image_url, preview, thumbs);
+        clear_blob_state(preview, thumbs);
+        media.set(None);
         reset_file_scroll();
         last_scroll_req.set(0);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -361,7 +384,8 @@ pub fn Page() -> Element {
     });
 
     let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
-        clear_blob_state(image_url, preview, thumbs);
+        clear_blob_state(preview, thumbs);
+        media.set(None);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             let name = d
                 .path
@@ -395,10 +419,11 @@ pub fn Page() -> Element {
         );
     });
 
-    let _img = use_bin_event_listener::<FileImageEvent, _>(FILE_IMAGE_EVENT, move |e| {
-        clear_blob_state(image_url, preview, thumbs);
-        image_url.set(blob_url(&e.bytes));
-        mode.set(Mode::Image);
+    let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
+        clear_blob_state(preview, thumbs);
+        let kind = e.kind;
+        media.set(Some(e));
+        mode.set(Mode::Media(kind));
         diagnostics.set(Vec::new());
         hover_diag.set(None);
         lsp_status.set(None);
@@ -426,6 +451,7 @@ pub fn Page() -> Element {
                 Some(u) => Preview::Image(u),
                 None => Preview::Error("failed to decode image".into()),
             },
+            PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
             PreviewKind::Text(l) => Preview::Text(l),
             PreviewKind::Dir(e) => Preview::Dir(e),
             PreviewKind::Info {
@@ -517,11 +543,16 @@ pub fn Page() -> Element {
             style: "outline:none;background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);{theme_style}",
 
             onmousedown: move |e: Event<MouseData>| {
-                if mode() == Mode::Text {
-                    e.prevent_default();
-                    focus_file_input();
-                } else {
-                    focus_container();
+                match mode() {
+                    Mode::Text => {
+                        e.prevent_default();
+                        focus_file_input();
+                    }
+                    Mode::Dir => {
+                        e.prevent_default();
+                        focus_container();
+                    }
+                    Mode::Media(_) => focus_container(),
                 }
             },
 
@@ -626,6 +657,10 @@ pub fn Page() -> Element {
                                     request_preview(p);
                                 }
                             }
+                            " " => {
+                                e.prevent_default();
+                                toggle_preview_video();
+                            }
                             _ => {}
                         }
                     }
@@ -703,10 +738,42 @@ pub fn Page() -> Element {
             }
 
             match mode() {
-                Mode::Image => rsx! {
+                Mode::Media(kind) => rsx! {
                     div { class: "flex min-h-0 flex-1 items-center justify-center overflow-auto p-4",
-                        if let Some(url) = image_url() {
-                            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+                        if let Some(m) = media() {
+                            match kind {
+                                MediaKind::Image => rsx! {
+                                    img { src: "{m.url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+                                },
+                                MediaKind::Video => rsx! {
+                                    video {
+                                        src: "{m.url}",
+                                        controls: true,
+                                        autoplay: false,
+                                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                                    }
+                                },
+                                MediaKind::Audio => rsx! {
+                                    audio { src: "{m.url}", controls: true, class: "w-2/3" }
+                                },
+                                MediaKind::Pdf => {
+                                    let display = path();
+                                    let abs = m.abs_path.clone();
+                                    rsx! {
+                                        div { class: "flex flex-col items-center gap-3 rounded-2xl bg-white/[0.03] px-8 py-6 ring-1 ring-inset ring-cyan-400/15 backdrop-blur-2xl",
+                                            span { class: "text-xs uppercase tracking-wide text-foreground/70", "PDF" }
+                                            span { class: "max-w-md truncate text-sm text-foreground/90", "{display}" }
+                                            button {
+                                                class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-400/25",
+                                                onclick: move |_| {
+                                                    let _ = try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path: abs.clone() });
+                                                },
+                                                "Open externally"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 },
@@ -1258,6 +1325,26 @@ fn scroll_dir_row_into_view(idx: usize) {
     el.scroll_into_view_with_scroll_into_view_options(&opts);
 }
 
+fn toggle_preview_video() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("preview-video"))
+    else {
+        return;
+    };
+    let target: &JsValue = el.as_ref();
+    let paused = js_sys::Reflect::get(target, &JsValue::from_str("paused"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let method = if paused { "play" } else { "pause" };
+    if let Ok(f) = js_sys::Reflect::get(target, &JsValue::from_str(method))
+        && let Ok(f) = f.dyn_into::<js_sys::Function>()
+    {
+        let _ = f.call0(target);
+    }
+}
+
 fn focus_container() {
     if let Some(el) = web_sys::window()
         .and_then(|w| w.document())
@@ -1378,6 +1465,48 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
         observer.observe(&container);
         observer.observe(&measure);
+        std::mem::forget(observer);
+    }
+    callback.forget();
+}
+
+/// Emit the current on-screen rect of the native video host element so the backend
+/// can position the `AVPlayer` overlay over it.
+fn emit_video_rect(path: &str) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
+        return;
+    };
+    let rect = el.get_bounding_client_rect();
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let _ = try_cef_bin_emit_rkyv(&FileVideoRect {
+        path: path.to_string(),
+        x: rect.left() as f32,
+        y: rect.top() as f32,
+        w: rect.width() as f32,
+        h: rect.height() as f32,
+    });
+}
+
+/// Report the video host rect now and on every subsequent resize (window/layout),
+/// keeping the native overlay aligned with the page element.
+fn report_video_rect(path: String) {
+    emit_video_rect(&path);
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+        emit_video_rect(&path);
+    }) as Box<dyn FnMut(JsValue)>);
+    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+        observer.observe(&el);
         std::mem::forget(observer);
     }
     callback.forget();

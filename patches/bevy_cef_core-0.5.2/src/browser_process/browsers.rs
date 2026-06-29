@@ -120,6 +120,8 @@ pub struct WebviewBrowser {
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
     #[cfg(target_os = "macos")]
+    media_overlay: RefCell<Option<MediaOverlay>>,
+    #[cfg(target_os = "macos")]
     corner_cover: RefCell<Option<objc2::rc::Retained<objc2_quartz_core::CAShapeLayer>>>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_corner_cover: Cell<Option<(i32, bool, i32, i32)>>,
@@ -135,6 +137,13 @@ pub struct WebviewBrowser {
     /// redundant work (scale feeds the badge inset + border width).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_badge: Cell<Option<(u8, i32, i32, i32)>>,
+}
+
+#[cfg(target_os = "macos")]
+struct MediaOverlay {
+    view: objc2::rc::Retained<objc2_av_kit::AVPlayerView>,
+    player: objc2::rc::Retained<objc2_av_foundation::AVPlayer>,
+    path: String,
 }
 
 pub struct Browsers {
@@ -385,6 +394,8 @@ impl Browsers {
             allow_native_focus,
             #[cfg(target_os = "macos")]
             native_liquid_glass,
+            #[cfg(target_os = "macos")]
+            media_overlay: RefCell::new(None),
             #[cfg(target_os = "macos")]
             corner_cover: RefCell::new(None),
             last_corner_cover: Cell::new(None),
@@ -726,6 +737,154 @@ impl Browsers {
             browser.host.notify_screen_info_changed();
             browser.host.was_resized();
         }
+    }
+
+    /// Play `file_path` through a native macOS `AVPlayer` overlay filling the whole
+    /// webview (used by the full media view). AVFoundation decodes H.264/HEVC that
+    /// this codec-less CEF build cannot. Idempotent for the same path.
+    #[cfg(target_os = "macos")]
+    pub fn attach_media_overlay(&self, webview: &Entity, file_path: &str) {
+        self.upsert_media_overlay(webview, file_path, None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn attach_media_overlay(&self, _webview: &Entity, _file_path: &str) {}
+
+    /// Play `file_path` through a native `AVPlayer` overlay positioned over a
+    /// sub-rect of the webview (CSS px, viewport-relative top-left) — used by the
+    /// dir-browser preview pane. Repositions in place when the path is unchanged.
+    #[cfg(target_os = "macos")]
+    pub fn set_media_overlay(&self, webview: &Entity, file_path: &str, rect: (f32, f32, f32, f32)) {
+        self.upsert_media_overlay(webview, file_path, Some(rect));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn set_media_overlay(
+        &self,
+        _webview: &Entity,
+        _file_path: &str,
+        _rect: (f32, f32, f32, f32),
+    ) {
+    }
+
+    #[cfg(target_os = "macos")]
+    fn upsert_media_overlay(
+        &self,
+        webview: &Entity,
+        file_path: &str,
+        rect: Option<(f32, f32, f32, f32)>,
+    ) {
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if let Some(overlay) = browser.media_overlay.borrow().as_ref()
+            && overlay.path == file_path
+        {
+            if let Some(rect) = rect {
+                Self::position_overlay(&browser.host, &overlay.view, rect);
+            }
+            return;
+        }
+        if let Some(old) = browser.media_overlay.borrow_mut().take() {
+            let view: &objc2_app_kit::NSView = &old.view;
+            view.removeFromSuperview();
+            unsafe { old.player.pause() };
+        }
+        if let Some(overlay) = Self::build_media_overlay(&browser.host, file_path, rect) {
+            *browser.media_overlay.borrow_mut() = Some(overlay);
+        }
+    }
+
+    /// Remove the native media overlay from a webview, if present.
+    #[cfg(target_os = "macos")]
+    pub fn detach_media_overlay(&self, webview: &Entity) {
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        if let Some(overlay) = browser.media_overlay.borrow_mut().take() {
+            let view: &objc2_app_kit::NSView = &overlay.view;
+            view.removeFromSuperview();
+            unsafe { overlay.player.pause() };
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn detach_media_overlay(&self, _webview: &Entity) {}
+
+    /// Convert a webview-relative rect (CSS px, top-left origin) into the CEF view's
+    /// AppKit frame, accounting for the view's flipped-ness. `None` fills the view.
+    #[cfg(target_os = "macos")]
+    fn overlay_frame(
+        cef_view: &objc2_app_kit::NSView,
+        rect: Option<(f32, f32, f32, f32)>,
+    ) -> objc2_foundation::NSRect {
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        let Some((x, y, w, h)) = rect else {
+            return cef_view.bounds();
+        };
+        let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+        let oy = if cef_view.isFlipped() {
+            y
+        } else {
+            cef_view.bounds().size.height - y - h
+        };
+        NSRect::new(NSPoint::new(x, oy), NSSize::new(w, h))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn position_overlay(
+        host: &BrowserHost,
+        view: &objc2_av_kit::AVPlayerView,
+        rect: (f32, f32, f32, f32),
+    ) {
+        let handle = host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let cef_view: &objc2_app_kit::NSView = unsafe { &*handle.cast::<objc2_app_kit::NSView>() };
+        let nsview: &objc2_app_kit::NSView = view;
+        nsview.setFrame(Self::overlay_frame(cef_view, Some(rect)));
+    }
+
+    #[cfg(target_os = "macos")]
+    fn build_media_overlay(
+        host: &BrowserHost,
+        file_path: &str,
+        rect: Option<(f32, f32, f32, f32)>,
+    ) -> Option<MediaOverlay> {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSAutoresizingMaskOptions, NSView};
+        use objc2_av_foundation::AVPlayer;
+        use objc2_av_kit::AVPlayerView;
+        use objc2_foundation::{NSString, NSURL};
+
+        let mtm = MainThreadMarker::new()?;
+        let handle = host.window_handle();
+        if handle.is_null() {
+            webview_debug_log("media_overlay missing host window handle");
+            return None;
+        }
+        let cef_view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let url = NSURL::fileURLWithPath(&NSString::from_str(file_path));
+        let player = unsafe { AVPlayer::playerWithURL(&url, mtm) };
+        let player_view = unsafe { AVPlayerView::new(mtm) };
+        unsafe { player_view.setPlayer(Some(&player)) };
+        let view: &NSView = &player_view;
+        view.setFrame(Self::overlay_frame(cef_view, rect));
+        if rect.is_none() {
+            view.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+        }
+        cef_view.addSubview(view);
+        unsafe { player.play() };
+        webview_debug_log("media_overlay attached");
+        Some(MediaOverlay {
+            view: player_view,
+            player,
+            path: file_path.to_string(),
+        })
     }
 
     #[cfg(target_os = "macos")]

@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct DataResponser {
     data: Vec<u8>,
     offset: usize,
     end_offset: usize,
+    file: Option<std::fs::File>,
+    remaining: usize,
 }
 
 impl DataResponser {
@@ -13,6 +15,7 @@ impl DataResponser {
     /// The range header values only support the `bytes` range unit type and single range.
     /// TODO: Support multiple ranges.
     pub fn prepare(&mut self, data: Vec<u8>, range: &Option<(usize, Option<usize>)>) {
+        self.file = None;
         if let Some((start, end)) = range {
             self.offset = *start;
             self.end_offset = end.unwrap_or(data.len());
@@ -24,7 +27,21 @@ impl DataResponser {
         }
     }
 
+    /// Stream `len` bytes from `file` (already seeked to the response's start
+    /// offset), reading small chunks on demand so large media never materializes
+    /// fully in memory.
+    pub fn prepare_file(&mut self, file: std::fs::File, len: usize) {
+        self.file = Some(file);
+        self.remaining = len;
+        self.data.clear();
+        self.offset = 0;
+        self.end_offset = 0;
+    }
+
     pub fn read(&mut self, bytes_to_read: isize) -> Option<&[u8]> {
+        if self.file.is_some() {
+            return self.read_from_file(bytes_to_read);
+        }
         if self.offset >= self.data.len() {
             return None;
         }
@@ -43,6 +60,41 @@ impl DataResponser {
         let slice = &self.data[start..end.min(self.data.len())];
         self.offset += slice.len();
         Some(slice)
+    }
+
+    fn read_from_file(&mut self, bytes_to_read: isize) -> Option<&[u8]> {
+        use std::io::Read;
+        if self.remaining == 0 {
+            self.file = None;
+            return None;
+        }
+        let want = if bytes_to_read < 0 {
+            self.remaining
+        } else {
+            (bytes_to_read as usize).min(self.remaining)
+        };
+        let want = want.min(256 * 1024);
+        if want == 0 {
+            return None;
+        }
+        self.data.resize(want, 0);
+        let Some(file) = self.file.as_mut() else {
+            return None;
+        };
+        match file.read(&mut self.data) {
+            Ok(0) => {
+                self.remaining = 0;
+                None
+            }
+            Ok(n) => {
+                self.remaining -= n;
+                Some(&self.data[..n])
+            }
+            Err(_) => {
+                self.remaining = 0;
+                None
+            }
+        }
     }
 }
 

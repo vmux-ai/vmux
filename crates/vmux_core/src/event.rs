@@ -24,7 +24,13 @@ pub const FILE_THEME_EVENT: &str = "file_theme";
 pub const FILE_PREVIEW_REQUEST_EVENT: &str = "file_preview_request";
 pub const FILE_PREVIEW_EVENT: &str = "file_preview";
 pub const FILE_OPEN_EVENT: &str = "file_open";
-pub const FILE_IMAGE_EVENT: &str = "file_image";
+/// Backend → page: a media file (image/video/audio/pdf) is ready to render.
+pub const FILE_MEDIA_EVENT: &str = "file_media";
+/// Page → backend: open a media file in the system default application.
+pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
+/// Page → backend: the on-screen rect (CSS px, viewport-relative) of the native
+/// video host element, so the backend can position the `AVPlayer` overlay over it.
+pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
@@ -150,6 +156,24 @@ pub struct FileResizeEvent {
     Debug,
     Clone,
     PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileVideoRect {
+    pub path: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
     Eq,
     Default,
     Serialize,
@@ -248,6 +272,14 @@ pub enum PreviewKind {
         mime: String,
         bytes: Vec<u8>,
     },
+    Video {
+        url: String,
+        /// Absolute path, so the page can key the native-overlay rect report to it.
+        path: String,
+        /// `true` when the backend will play this via a native overlay (macOS,
+        /// proprietary codec); the page then reports a rect instead of `<video>`.
+        native: bool,
+    },
     Info {
         size: u64,
         modified: String,
@@ -298,9 +330,33 @@ pub struct FileOpenEvent {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct FileImageEvent {
+/// Tells the page how to render an opened media file and where to fetch its bytes.
+pub struct FileMediaEvent {
+    /// Which media element to render.
+    pub kind: crate::media::MediaKind,
+    /// MIME type of the file.
     pub mime: String,
-    pub bytes: Vec<u8>,
+    /// Raw-media URL (`file://…?vmux-raw=1`) for the media element `src`.
+    pub url: String,
+    /// Absolute filesystem path, for the PDF "open externally" intent.
+    pub abs_path: String,
+}
+
+/// Page → backend request to open a media file in the system default app.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileOpenExternalRequest {
+    /// Absolute path of the file to open.
+    pub path: String,
 }
 
 #[derive(

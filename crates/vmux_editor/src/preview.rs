@@ -10,18 +10,7 @@ pub const THUMB_MAX_EDGE: u32 = 64;
 const TEXT_PREVIEW_LINES: usize = 200;
 
 pub fn image_mime(path: &Path) -> Option<&'static str> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "webp" => Some("image/webp"),
-        _ => None,
-    }
+    vmux_core::media::image_mime(&path.to_string_lossy())
 }
 
 pub fn is_image_path(path: &Path) -> bool {
@@ -36,6 +25,16 @@ pub fn downscale_to_png(bytes: &[u8], max_edge: u32) -> Result<Vec<u8>, String> 
         .write_to(&mut out, image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
     Ok(out.into_inner())
+}
+
+fn raw_preview_url(path: &Path) -> String {
+    url::Url::from_file_path(path)
+        .map(|u| {
+            let mut s = u.to_string();
+            s.push_str("?vmux-raw=1");
+            s
+        })
+        .unwrap_or_default()
 }
 
 pub fn build_preview_sync(path: &Path) -> PreviewKind {
@@ -60,6 +59,16 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
                 bytes,
             },
             Err(e) => PreviewKind::Error(e.to_string()),
+        };
+    }
+    if vmux_core::media::media_kind(&path.to_string_lossy())
+        == Some(vmux_core::media::MediaKind::Video)
+    {
+        let path_str = path.to_string_lossy();
+        return PreviewKind::Video {
+            url: raw_preview_url(path),
+            path: path_str.clone().into_owned(),
+            native: cfg!(target_os = "macos") && vmux_core::media::is_proprietary_video(&path_str),
         };
     }
     if is_probably_binary(path) {
