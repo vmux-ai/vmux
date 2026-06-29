@@ -266,6 +266,8 @@
 }
 
 body {
+  --foreground: oklch(0.13 0 0);
+  --muted-foreground: oklch(0.42 0 0);
   --glass: oklch(1 0 0 / 0.55);
   --glass-hover: oklch(0 0 0 / 0.04);
   --glass-active: oklch(0 0 0 / 0.07);
