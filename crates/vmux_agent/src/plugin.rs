@@ -97,6 +97,7 @@ pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
     fn build(&self, app: &mut App) {
+        vmux_core::register_host_spawn(app, "agent");
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
         strategies.register_cli(Box::new(ClaudeStrategy));

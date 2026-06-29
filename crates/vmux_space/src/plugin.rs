@@ -37,6 +37,7 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "spaces");
         app.init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()

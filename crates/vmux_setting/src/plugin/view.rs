@@ -1,8 +1,8 @@
 use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
-use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenTask};
 use vmux_history::{CreatedAt, LastActivatedAt};
 use vmux_layout::{
     Browser,
@@ -59,6 +59,43 @@ impl Settings {
                 Pickable::default(),
             ),
         )
+    }
+}
+
+/// Spawn the settings webview (with its [`Settings`] marker) when a `vmux://settings/`
+/// page is opened by URL, so the backend settings broadcasts target it. Without this,
+/// in-place navigation would reuse a markerless webview that never receives settings.
+pub(crate) fn handle_settings_page_open(
+    tasks: Query<(Entity, &PageOpenTask), (Without<PageOpenHandled>, Without<PageOpenError>)>,
+    children_q: Query<&Children>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    let mut handled_stacks = std::collections::HashSet::new();
+    for (entity, task) in &tasks {
+        if task.url != SETTINGS_PAGE_URL {
+            continue;
+        }
+        if !handled_stacks.insert(task.stack) {
+            commands.entity(entity).insert(PageOpenHandled);
+            continue;
+        }
+        if let Ok(children) = children_q.get(task.stack) {
+            for child in children.iter() {
+                commands.entity(child).try_despawn();
+            }
+        }
+        commands.entity(task.stack).insert(PageMetadata {
+            title: "Settings".to_string(),
+            url: SETTINGS_PAGE_URL.to_string(),
+            ..default()
+        });
+        commands.spawn((
+            Settings::new(&mut meshes, &mut webview_mt),
+            ChildOf(task.stack),
+        ));
+        commands.entity(entity).insert(PageOpenHandled);
     }
 }
 
@@ -425,5 +462,65 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+}
+
+#[cfg(test)]
+mod page_open_tests {
+    use super::*;
+    use vmux_core::PageOpenId;
+
+    #[test]
+    fn settings_page_open_spawns_marker_and_handles() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_settings_page_open);
+        let stack = app.world_mut().spawn_empty().id();
+        let claimed = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: SETTINGS_PAGE_URL.to_string(),
+                request_id: None,
+            })
+            .id();
+        let decoy = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: "vmux://history/".to_string(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(claimed).is_some());
+        assert!(app.world().get::<PageOpenHandled>(decoy).is_none());
+        let mut q = app.world_mut().query_filtered::<(), With<Settings>>();
+        assert_eq!(q.iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn settings_page_open_dedupes_per_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_settings_page_open);
+        let stack = app.world_mut().spawn_empty().id();
+        for _ in 0..2 {
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: SETTINGS_PAGE_URL.to_string(),
+                request_id: None,
+            });
+        }
+        app.update();
+        let mut q = app.world_mut().query_filtered::<(), With<Settings>>();
+        assert_eq!(q.iter(app.world()).count(), 1);
     }
 }

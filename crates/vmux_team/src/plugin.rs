@@ -29,6 +29,7 @@ pub struct TeamPlugin;
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "team");
         app.add_systems(Startup, spawn_user_profile)
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(
