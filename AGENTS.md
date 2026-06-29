@@ -22,6 +22,13 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
 
+**Always read the app's own logs in Application Support first** — do not ask the user to capture stderr. vmux writes them to:
+
+- `~/Library/Application Support/Vmux/<build-profile>/logs/vmux-<build-profile>.<date>.log` — the Bevy/tracing output (`info!`/`warn!`/`error!`). For the `dev` build that's `…/Vmux/dev/logs/vmux-dev.<date>.log`.
+- `~/Library/Application Support/Vmux/<build-profile>/profiles/<profile>/chrome_debug.log` — CEF/Chromium plus the page JS console (surfaced via `display_handler`).
+
+Diagnostics must use the tracing macros (`bevy::log::info!`/`warn!`) to land in the tracing log — **raw `eprintln!`/stderr is NOT captured there**.
+
 ## Platform-Specific Code
 
 This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
