@@ -140,10 +140,9 @@ pub fn Page() -> Element {
         match t {
             Some(t) => {
                 let [fr, fg, fb] = t.foreground;
-                let [br, bg, bb] = t.background;
                 let [cr, cg, cb] = t.cursor;
                 let mut s = format!(
-                    "--term-fg:rgb({fr},{fg},{fb});--term-bg:rgb({br},{bg},{bb});--term-cursor:rgb({cr},{cg},{cb});"
+                    "--term-fg:rgb({fr},{fg},{fb});--term-bg:var(--background);--term-cursor:rgb({cr},{cg},{cb});"
                 );
                 for (i, [r, g, b]) in t.ansi.iter().enumerate() {
                     s.push_str(&format!("--ansi-{i}:rgb({r},{g},{b});"));

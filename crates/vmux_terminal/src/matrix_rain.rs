@@ -140,15 +140,18 @@ fn start_rain(
         .flatten()
         .map(|m| m.matches())
         .unwrap_or(true);
+    // Match the shared app background token (`--background` in theme.css) so the
+    // rain canvas reads the same as every other vmux:// / file:// page. Keep these
+    // in sync with that token.
     let bg = if dark {
-        "rgb(30 30 46)"
+        "oklch(0.145 0 0)"
     } else {
-        "rgb(209 213 219)"
+        "oklch(0.88 0 0)"
     };
     let fade = if dark {
-        "rgba(30, 30, 46, 0.08)"
+        "oklch(0.145 0 0 / 0.08)"
     } else {
-        "rgba(209, 213, 219, 0.1)"
+        "oklch(0.88 0 0 / 0.1)"
     };
 
     if reduced {
