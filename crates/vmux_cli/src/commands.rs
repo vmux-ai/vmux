@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 pub mod mcp;
 pub mod notify;
+pub mod notify_file_touch;
 pub mod open;
 pub mod service;
 
@@ -25,6 +26,10 @@ pub enum Command {
         title: Option<String>,
         #[arg(long)]
         body: Option<String>,
+        #[arg(long)]
+        anchor: Option<String>,
+    },
+    NotifyFileTouch {
         #[arg(long)]
         anchor: Option<String>,
     },

@@ -9,10 +9,14 @@ use crate::{AgentKind, AgentVariant, McpServerConfig};
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
 const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
-commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Do ALL \
-web access via the vmux browser tools in the user's visible browser: mcp__vmux__browser_navigate (it \
-returns the page snapshot on load), then mcp__vmux__browser_scroll to read more. Omit the pane \
-argument - it targets your own browser pane. Do not look for a built-in web search.";
+commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). To READ \
+a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
+text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
+opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Do ALL web access via the vmux browser tools in the \
+user's visible browser: mcp__vmux__browser_navigate (it returns the page snapshot on load), then \
+mcp__vmux__browser_scroll to read more. Omit the pane argument - it targets your own browser pane. \
+Do not look for a built-in web search.";
+const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
 pub struct CodexStrategy;
 
@@ -58,6 +62,10 @@ impl CliAgentStrategy for CodexStrategy {
             "developer_instructions={}",
             quote_toml(RUN_STEER_PROMPT)
         ));
+        args.push("-c".into());
+        args.push("features.hooks=true".into());
+        args.push("-c".into());
+        args.push(build_file_touch_hook_override(mcp));
         for feature in DISABLED_FEATURES {
             args.push("--disable".into());
             args.push((*feature).to_string());
@@ -102,6 +110,26 @@ pub(crate) fn quote_toml(s: &str) -> String {
 pub(crate) fn toml_array(items: &[String]) -> String {
     let inner: Vec<String> = items.iter().map(|s| quote_toml(s)).collect();
     format!("[{}]", inner.join(","))
+}
+
+/// `-c` override registering a PostToolUse hook that pings vmux on file edits.
+/// Codex has no structured read tool (reads go via shell), so this is edits
+/// only (`apply_patch`/`Edit`/`Write`). Inline TOML array-of-tables.
+fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
+    let mut hook_args = vec![quote_toml("notify-file-touch")];
+    if let Some(i) = mcp.args.iter().position(|a| a == "--anchor")
+        && let Some(anchor) = mcp.args.get(i + 1)
+    {
+        hook_args.push(quote_toml("--anchor"));
+        hook_args.push(quote_toml(anchor));
+    }
+    format!(
+        "hooks.PostToolUse=[{{matcher={},hooks=[{{type={},command={},args=[{}]}}]}}]",
+        quote_toml(FILE_TOUCH_MATCHER),
+        quote_toml("command"),
+        quote_toml(&mcp.command),
+        hook_args.join(","),
+    )
 }
 
 fn normalize_cwd(path: &Path) -> String {
@@ -237,6 +265,25 @@ mod tests {
                 .any(|a| a == "mcp_servers.vmux.command=\"/bin/vmux\"")
         );
         assert!(args.iter().any(|a| a == "mcp_servers.vmux.args=[\"mcp\"]"));
+    }
+
+    #[test]
+    fn build_args_injects_file_touch_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into(), "--anchor".into(), "42".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        assert!(args.iter().any(|a| a == "features.hooks=true"));
+        let hook = args
+            .iter()
+            .find(|a| a.starts_with("hooks.PostToolUse="))
+            .expect("hook override present");
+        assert!(hook.contains("apply_patch|Edit|Write"), "hook: {hook}");
+        assert!(hook.contains("notify-file-touch"));
+        assert!(hook.contains("--anchor"));
+        assert!(hook.contains("\"42\""));
     }
 
     #[test]

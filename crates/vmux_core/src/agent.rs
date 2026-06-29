@@ -110,6 +110,9 @@ pub struct SpawnAgentInStackRequest {
     pub cwd: PathBuf,
     pub session_id: Option<String>,
     pub stack: Entity,
+    /// Optional prompt to deliver into the agent once its TUI is ready. `None`
+    /// opens the agent with no pre-filled prompt.
+    pub initial_prompt: Option<String>,
 }
 
 #[derive(Message, Debug, Clone)]

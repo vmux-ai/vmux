@@ -180,6 +180,7 @@ impl Plugin for AgentPlugin {
                     handle_agent_tool_calls,
                     handle_agent_commands,
                     handle_agent_self_commands,
+                    handle_agent_file_touch,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -555,8 +556,11 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     agent_terms: Query<
         'w,
         's,
-        (&'static vmux_service::protocol::ProcessId, &'static ChildOf),
-        With<AgentSession>,
+        (
+            &'static vmux_service::protocol::ProcessId,
+            &'static AgentSession,
+            &'static ChildOf,
+        ),
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
@@ -589,8 +593,19 @@ impl AgentBrowserResolve<'_, '_> {
     /// The agent's own terminal pane (its stack's parent pane), from its anchor.
     fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
-        let (_, term_co) = self.agent_terms.iter().find(|(pid, _)| **pid == anchor)?;
+        let (_, _, term_co) = self
+            .agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
+        self.agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)
+            .map(|(_, session, _)| session.kind)
     }
 
     /// Resolve the agent's browser pane from its anchor, and record it as that
@@ -598,6 +613,7 @@ impl AgentBrowserResolve<'_, '_> {
     /// `None` if the agent has no browser pane yet (caller keeps the default).
     fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
+        let kind = self.agent_kind(anchor);
         self.activate
             .write(vmux_layout::active_panes::ActivatePane {
                 profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
@@ -605,6 +621,7 @@ impl AgentBrowserResolve<'_, '_> {
                     tab: None,
                     pane: Some(pane),
                     stack: None,
+                    kind,
                 },
             });
         Some(pane)
@@ -636,6 +653,140 @@ impl AgentBrowserResolve<'_, '_> {
             _ => None,
         };
         self.resolve_pane(pane, &anchor)
+    }
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct AgentFileResolve<'w, 's> {
+    activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
+    agent_terms: Query<
+        'w,
+        's,
+        (
+            &'static vmux_service::protocol::ProcessId,
+            &'static AgentSession,
+            &'static ChildOf,
+        ),
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
+}
+
+impl AgentFileResolve<'_, '_> {
+    fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, _, term_co) = self
+            .agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+    }
+
+    /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
+        self.agent_terms
+            .iter()
+            .find(|(pid, _, _)| **pid == anchor)
+            .map(|(_, session, _)| session.kind)
+    }
+
+    /// The agent's existing `file://` follow-page (the page entity) and its leaf
+    /// pane: a sibling pane (same parent split) hosting a file page. `None` if
+    /// the agent has no file pane yet.
+    fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
+        use bevy::ecs::relationship::Relationship;
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        for (page, page_co, meta) in self.file_pages.iter() {
+            if !meta.url.starts_with("file:") {
+                continue;
+            }
+            let Ok(pane_co) = self.child_of.get(page_co.get()) else {
+                continue;
+            };
+            let pane = pane_co.get();
+            if pane == agent_pane {
+                continue;
+            }
+            if let Ok(parent_co) = self.child_of.get(pane)
+                && parent_co.get() == agent_parent
+            {
+                return Some((page, pane));
+            }
+        }
+        None
+    }
+}
+
+/// Build the `file://` URL for a touched file, encoding an optional goto/select
+/// as a fragment the editor understands: `#L<line>` (scroll) or
+/// `#L<line>:<col>-<end>` (scroll + highlight the match). `line` is 1-based;
+/// `col`/`end_col` are 0-based.
+fn file_touch_url(path: &str, line: Option<u32>, col: Option<u32>, end_col: Option<u32>) -> String {
+    let mut url = url::Url::from_file_path(path)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| format!("file://{path}"));
+    if let Some(l) = line {
+        url.push_str(&format!("#L{l}"));
+        if let (Some(c), Some(e)) = (col, end_col) {
+            url.push_str(&format!(":{c}-{e}"));
+        }
+    }
+    url
+}
+
+/// On an agent file read/edit, open the file in a `file://` pane beside that
+/// agent and record it as the agent's active pane (its focus ring). The first
+/// file spirals a new pane; later reads stack as new tabs on top of that pane
+/// (placement `AddTab`), and re-reading the same file refocuses its tab. `focus`
+/// only brings the new tab to the front of the file pane (it does not move the
+/// human's focused pane), so it is set only once that pane already exists.
+fn handle_agent_file_touch(
+    mut reader: MessageReader<AgentCommandRequest>,
+    mut resolve: AgentFileResolve,
+    settings: Res<AppSettings>,
+) {
+    if !settings.agent.follow_files {
+        for _ in reader.read() {}
+        return;
+    }
+    for request in reader.read() {
+        let ServiceAgentCommand::FileTouched {
+            anchor,
+            path,
+            line,
+            col,
+            end_col,
+            ..
+        } = &request.command
+        else {
+            continue;
+        };
+        let Some(agent_pane) = resolve.agent_pane(*anchor) else {
+            continue;
+        };
+        let existing = resolve.file_page_for(agent_pane);
+        resolve.open_beside.write(vmux_layout::OpenBesideRequest {
+            pane: agent_pane,
+            direction: None,
+            url: file_touch_url(path, *line, *col, *end_col),
+            request_id: request.request_id.0,
+            focus: existing.is_some(),
+        });
+        if let Some((_, pane)) = existing {
+            let kind = resolve.agent_kind(*anchor);
+            resolve
+                .activate
+                .write(vmux_layout::active_panes::ActivatePane {
+                    profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                    active: vmux_layout::active_panes::ActiveStack {
+                        tab: None,
+                        pane: Some(pane),
+                        stack: None,
+                        kind,
+                    },
+                });
+        }
     }
 }
 
@@ -681,6 +832,7 @@ fn handle_agent_commands(
             _ => None,
         };
         let result = match &request.command {
+            ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
                     serde_json::json!({})
@@ -1668,6 +1820,7 @@ fn handle_agent_page_open_task(
                 cwd: default_cwd.to_path_buf(),
                 session_id: Some(sid),
                 stack: task.stack,
+                initial_prompt: None,
             });
             Ok(())
         }
@@ -1685,6 +1838,7 @@ fn handle_agent_page_open_task(
                         cwd: default_cwd.to_path_buf(),
                         session_id: None,
                         stack: task.stack,
+                        initial_prompt: None,
                     });
                 }
                 return Ok(());
@@ -1724,7 +1878,11 @@ fn stack_has_agent_of_kind(
         .unwrap_or(false)
 }
 
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+pub(crate) fn clear_stack_children(
+    stack: Entity,
+    children_q: &Query<&Children>,
+    commands: &mut Commands,
+) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
             commands.entity(child).try_despawn();
@@ -1895,6 +2053,14 @@ fn handle_spawn_agent_requests(
                         spawn_time: std::time::SystemTime::now(),
                         cwd: req.cwd.clone(),
                     });
+                }
+                if let Some(prompt) = req.initial_prompt.clone().filter(|p| !p.trim().is_empty()) {
+                    commands
+                        .entity(terminal)
+                        .insert(vmux_terminal::BufferedAgentPrompt {
+                            text: prompt,
+                            submit: true,
+                        });
                 }
             }
             Err(e) => {
@@ -2159,6 +2325,22 @@ mod tests {
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
     use vmux_terminal::Terminal;
+
+    #[test]
+    fn file_touch_url_builds_goto_fragment() {
+        assert_eq!(
+            file_touch_url("/a/b.rs", None, None, None),
+            "file:///a/b.rs"
+        );
+        assert_eq!(
+            file_touch_url("/a/b.rs", Some(10), None, None),
+            "file:///a/b.rs#L10"
+        );
+        assert_eq!(
+            file_touch_url("/a/b.rs", Some(10), Some(5), Some(12)),
+            "file:///a/b.rs#L10:5-12"
+        );
+    }
 
     fn bell_test_app() -> App {
         let mut app = App::new();

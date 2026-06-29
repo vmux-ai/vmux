@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use std::time::{Duration, Instant};
 use vmux_service::protocol::{
-    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, ServiceMessage,
+    AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
+    ServiceMessage,
 };
 
 /// How long `run` waits for a command to finish before returning a partial
@@ -109,6 +110,14 @@ async fn tool_call_result(
         .cloned()
         .unwrap_or_else(|| json!({}));
 
+    if name == "read_file" {
+        return read_file_result(&arguments, anchor).await;
+    }
+
+    if name == "grep" {
+        return grep_result(&arguments, anchor).await;
+    }
+
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
         crate::tools::DispatchTarget::Command(AgentCommand::Run {
             anchor,
@@ -135,6 +144,240 @@ async fn tool_call_result(
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
+}
+
+async fn read_file_result(
+    arguments: &Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
+    let path = arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("read_file.path is required")?;
+    if !std::path::Path::new(path).is_absolute() {
+        return Err("read_file.path must be an absolute path".to_string());
+    }
+    let offset = opt_u32(arguments, "offset", "read_file")?;
+    let limit = opt_usize(arguments, "limit", "read_file")?;
+    let meta = std::fs::metadata(path).map_err(|e| format!("read_file: {e}"))?;
+    if !meta.is_file() {
+        return Err("read_file: not a regular file".to_string());
+    }
+    let text = read_lines_bounded(path, offset, limit).map_err(|e| format!("read_file: {e}"))?;
+    if let Some(anchor) = anchor {
+        let _ = run_agent_command(
+            AgentCommand::FileTouched {
+                anchor,
+                path: path.to_string(),
+                line: offset,
+                col: None,
+                end_col: None,
+                kind: FileTouchKind::Read,
+            },
+            Some(anchor),
+        )
+        .await;
+    }
+    Ok(json!({ "content": [{"type": "text", "text": text}] }))
+}
+
+const GREP_MAX_FILES: usize = 10;
+const GREP_MAX_LINES: usize = 200;
+
+async fn grep_result(
+    arguments: &Value,
+    anchor: Option<vmux_service::protocol::ProcessId>,
+) -> Result<Value, String> {
+    let query = arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .ok_or("grep.query is required")?;
+    let search_path = arguments.get("path").and_then(Value::as_str).unwrap_or(".");
+
+    use std::io::{BufRead, Read};
+    let mut child = std::process::Command::new("rg")
+        .args(["--json", "--", query, search_path])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("grep: cannot run rg (is ripgrep installed?): {e}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("grep: failed to capture rg output")?;
+    let mut stderr_pipe = child.stderr.take();
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(stderr) = stderr_pipe.as_mut() {
+            let _ = stderr.read_to_string(&mut buf);
+        }
+        buf
+    });
+
+    let mut order: Vec<String> = Vec::new();
+    let mut first_line: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut first_cols: std::collections::HashMap<String, (u32, u32)> =
+        std::collections::HashMap::new();
+    let mut lines_out: Vec<String> = Vec::new();
+    let mut capped = false;
+    for line in std::io::BufReader::new(stdout).lines() {
+        let Ok(line) = line else { break };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("match") {
+            continue;
+        }
+        let Some(data) = v.get("data") else { continue };
+        let path = data
+            .get("path")
+            .and_then(|p| p.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if path.is_empty() {
+            continue;
+        }
+        let lineno = data.get("line_number").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let raw = data
+            .get("lines")
+            .and_then(|l| l.get("text"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !first_line.contains_key(path) {
+            first_line.insert(path.to_string(), lineno);
+            if let Some(sm) = data
+                .get("submatches")
+                .and_then(|s| s.as_array())
+                .and_then(|a| a.first())
+            {
+                let s = sm.get("start").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let e = sm.get("end").and_then(Value::as_u64).unwrap_or(0) as usize;
+                first_cols.insert(
+                    path.to_string(),
+                    (byte_to_utf16(raw, s), byte_to_utf16(raw, e)),
+                );
+            }
+            order.push(path.to_string());
+        }
+        if lines_out.len() < GREP_MAX_LINES {
+            lines_out.push(format!("{path}:{lineno}: {}", raw.trim_end()));
+        }
+        if lines_out.len() >= GREP_MAX_LINES || order.len() >= GREP_MAX_FILES {
+            capped = true;
+            break;
+        }
+    }
+    if capped {
+        let _ = child.kill();
+    }
+    let status = child.wait().map_err(|e| format!("grep: {e}"))?;
+    let stderr = stderr_handle.join().unwrap_or_default();
+
+    if order.is_empty() {
+        if !capped && status.code() != Some(0) && status.code() != Some(1) {
+            let err = stderr.trim();
+            return Err(if err.is_empty() {
+                "grep: rg failed".to_string()
+            } else {
+                format!("grep: {err}")
+            });
+        }
+        return Ok(
+            json!({ "content": [{"type": "text", "text": format!("no matches for {query:?}")}] }),
+        );
+    }
+
+    if let Some(anchor) = anchor {
+        for file in order.iter().take(GREP_MAX_FILES) {
+            let Ok(abs) = std::fs::canonicalize(file) else {
+                continue;
+            };
+            let _ = run_agent_command(
+                AgentCommand::FileTouched {
+                    anchor,
+                    path: abs.to_string_lossy().to_string(),
+                    line: first_line.get(file).copied(),
+                    col: first_cols.get(file).map(|c| c.0),
+                    end_col: first_cols.get(file).map(|c| c.1),
+                    kind: FileTouchKind::Read,
+                },
+                Some(anchor),
+            )
+            .await;
+        }
+    }
+
+    let mut text = lines_out.join("\n");
+    if capped {
+        text.push_str(&format!(
+            "\n\u{2026} results truncated at {GREP_MAX_FILES} files / {GREP_MAX_LINES} lines; refine the query"
+        ));
+    } else if order.len() > GREP_MAX_FILES {
+        text.push_str(&format!(
+            "\n\u{2026} opened first {GREP_MAX_FILES} of {} matching files",
+            order.len()
+        ));
+    }
+    Ok(json!({ "content": [{"type": "text", "text": text}] }))
+}
+
+/// Parse an optional non-negative `u32` argument, erroring on present-but-invalid
+/// values (negative, fractional, or out of range) instead of silently ignoring
+/// or wrapping them.
+fn opt_u32(arguments: &Value, key: &str, tool: &str) -> Result<Option<u32>, String> {
+    match arguments.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .filter(|n| *n <= u32::MAX as u64)
+            .map(|n| Some(n as u32))
+            .ok_or_else(|| format!("{tool}.{key} must be an integer between 0 and {}", u32::MAX)),
+    }
+}
+
+/// Parse an optional non-negative `usize` argument, erroring on present-but-invalid values.
+fn opt_usize(arguments: &Value, key: &str, tool: &str) -> Result<Option<usize>, String> {
+    match arguments.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .map(|n| Some(n as usize))
+            .ok_or_else(|| format!("{tool}.{key} must be a non-negative integer")),
+    }
+}
+
+const READ_FILE_DEFAULT_LINES: usize = 2000;
+const READ_FILE_MAX_LINES: usize = 50_000;
+
+/// Read `path` line by line, skipping `offset-1` lines and taking at most `limit`
+/// (capped) lines — never loading the whole file. Caller must verify the path is
+/// a regular file first.
+fn read_lines_bounded(
+    path: &str,
+    offset: Option<u32>,
+    limit: Option<usize>,
+) -> std::io::Result<String> {
+    use std::io::BufRead;
+    let reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let start = offset.map(|o| o.saturating_sub(1) as usize).unwrap_or(0);
+    let take = limit
+        .map(|l| l.min(READ_FILE_MAX_LINES))
+        .unwrap_or(READ_FILE_DEFAULT_LINES);
+    let mut out: Vec<String> = Vec::new();
+    for line in reader.lines().skip(start).take(take) {
+        out.push(line?);
+    }
+    Ok(out.join("\n"))
+}
+
+/// Count UTF-16 code units in `line` up to byte offset `byte` (snapping down to a
+/// char boundary). Converts ripgrep byte offsets to the editor's UTF-16 columns.
+fn byte_to_utf16(line: &str, byte: usize) -> u32 {
+    let mut idx = byte.min(line.len());
+    while idx > 0 && !line.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    line[..idx].encode_utf16().count() as u32
 }
 
 fn output_since(baseline: &str, final_text: &str) -> String {
@@ -459,6 +702,48 @@ pub fn tool_error(message: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_lines_bounded_offset_and_limit() {
+        let dir = std::env::temp_dir().join(format!("vmux-mcp-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("f.txt");
+        std::fs::write(&path, "a\nb\nc\nd\ne\n").unwrap();
+        let p = path.to_str().unwrap();
+        assert_eq!(read_lines_bounded(p, None, None).unwrap(), "a\nb\nc\nd\ne");
+        assert_eq!(read_lines_bounded(p, Some(2), Some(2)).unwrap(), "b\nc");
+        assert_eq!(read_lines_bounded(p, Some(4), None).unwrap(), "d\ne");
+        assert_eq!(read_lines_bounded(p, Some(99), None).unwrap(), "");
+        assert_eq!(
+            read_lines_bounded(p, Some(1), Some(100)).unwrap(),
+            "a\nb\nc\nd\ne"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn byte_to_utf16_converts_multibyte_offsets() {
+        // 'a'=1B/1u, 'é'=2B/1u, '😀'=4B/2u, 'b'=1B/1u
+        let line = "aé😀b";
+        assert_eq!(byte_to_utf16(line, 0), 0);
+        assert_eq!(byte_to_utf16(line, 1), 1);
+        assert_eq!(byte_to_utf16(line, 2), 1); // mid-'é' snaps down to a boundary
+        assert_eq!(byte_to_utf16(line, 3), 2);
+        assert_eq!(byte_to_utf16(line, 7), 4);
+        assert_eq!(byte_to_utf16(line, 999), 5); // clamps to end
+    }
+
+    #[test]
+    fn opt_u32_rejects_invalid() {
+        assert_eq!(opt_u32(&json!({}), "offset", "read_file").unwrap(), None);
+        assert_eq!(
+            opt_u32(&json!({"offset": 7}), "offset", "read_file").unwrap(),
+            Some(7)
+        );
+        assert!(opt_u32(&json!({"offset": -1}), "offset", "read_file").is_err());
+        assert!(opt_u32(&json!({"offset": 1.5}), "offset", "read_file").is_err());
+        assert!(opt_u32(&json!({"offset": 5_000_000_000u64}), "offset", "read_file").is_err());
+    }
 
     #[test]
     fn newline_framing_reads_single_json_message() {

@@ -329,6 +329,7 @@ fn handle_reopen_closed_page(
             cwd,
             session_id,
             stack,
+            initial_prompt: None,
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
         let cwd = page

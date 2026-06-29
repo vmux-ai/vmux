@@ -1,5 +1,8 @@
 #![allow(non_snake_case)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::event::*;
 use crate::matrix_rain::MatrixRain;
 use crate::render_model::{
@@ -33,6 +36,7 @@ pub fn Page() -> Element {
     let mut theme = use_signal(|| None::<TermThemeEvent>);
     let mut service_error = use_signal(String::new);
     let mut loading = use_signal(|| None::<(String, String)>);
+    let mut prompt_draft = use_signal(|| (String::new(), false));
 
     let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
         SERVICE_UNAVAILABLE_EVENT,
@@ -119,8 +123,14 @@ pub fn Page() -> Element {
             loading.set(if evt.loading {
                 Some((evt.label, evt.segment))
             } else {
+                prompt_draft.set((String::new(), false));
                 None
             });
+        });
+
+    let _prompt_draft_listener =
+        use_bin_event_listener::<AgentPromptDraftEvent, _>(AGENT_PROMPT_DRAFT_EVENT, move |evt| {
+            prompt_draft.set((evt.draft, evt.skipped));
         });
 
     // Cell dimensions (char_width, char_height), updated by resize observer.
@@ -304,6 +314,8 @@ pub fn Page() -> Element {
                     let accent = agent_accent(&segment);
                     let favicon_url = format!("vmux://agent/{segment}/cli/");
                     let words = vec![label.to_uppercase()];
+                    let (draft_text, draft_skipped) = prompt_draft.read().clone();
+                    let composing = !draft_skipped && !draft_text.is_empty();
                     rsx! {
                         div {
                             class: "pointer-events-none absolute inset-0 z-40 overflow-hidden bg-term-bg",
@@ -323,10 +335,31 @@ pub fn Page() -> Element {
                                     }
                                     div {
                                         div { class: "text-sm font-semibold {accent.accent_text}", "{label}" }
-                                        div {
-                                            class: "flex items-center gap-1.5 text-xs text-muted-foreground",
-                                            span { class: "font-mono", "> booting" }
-                                            span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
+                                        if composing {
+                                            div {
+                                                class: "mt-0.5 w-80 whitespace-pre-wrap break-words font-mono text-sm text-foreground",
+                                                "{draft_text}"
+                                                span { class: "ml-px inline-block h-3.5 w-1.5 align-middle animate-pulse {accent.accent_bg}" }
+                                            }
+                                            div {
+                                                class: "mt-1 text-[10px] text-muted-foreground/70",
+                                                "runs when ready · Ctrl+C clears · Esc skips"
+                                            }
+                                        } else if draft_skipped {
+                                            div {
+                                                class: "flex items-center gap-1.5 text-xs text-muted-foreground",
+                                                span { class: "font-mono", "> booting" }
+                                                span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
+                                            }
+                                        } else {
+                                            div {
+                                                class: "mt-0.5",
+                                                PromptGhost { accent_bg: accent.accent_bg.to_string() }
+                                            }
+                                            div {
+                                                class: "mt-1 text-[10px] text-muted-foreground/70",
+                                                "type a prompt · runs when ready · Esc skips"
+                                            }
                                         }
                                     }
                                 }
@@ -870,4 +903,77 @@ fn row_selection_cols(
     } else {
         Some((start, end_exclusive))
     }
+}
+
+/// Example prompts cycled by [`PromptGhost`] while the boot prompt is empty.
+const PROMPT_EXAMPLES: &[&str] = &[
+    "Find me a hotel with AC near Paris for this weekend",
+    "Find the best flight from Paris to Tokyo next month",
+    "Build a landing site for my new restaurant — make it themeable",
+    "Open a PR for my staged changes",
+];
+
+/// Placeholder that types out [`PROMPT_EXAMPLES`] one character at a time with a
+/// blinking caret while the agent boot prompt is empty. The live draft replaces
+/// it the moment the user types; unmounting clears the interval.
+#[component]
+fn PromptGhost(accent_bg: String) -> Element {
+    let ex_idx = use_signal(|| 0usize);
+    let typed = use_signal(|| 0usize);
+    let cb: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    use_effect({
+        let cb = cb.clone();
+        let timer = timer.clone();
+        move || start_prompt_typewriter(ex_idx, typed, cb.clone(), timer.clone())
+    });
+    use_drop({
+        let cb = cb.clone();
+        let timer = timer.clone();
+        move || {
+            if let Some(id) = timer.borrow_mut().take()
+                && let Some(win) = web_sys::window()
+            {
+                win.clear_interval_with_handle(id);
+            }
+            *cb.borrow_mut() = None;
+        }
+    });
+    let example = PROMPT_EXAMPLES[ex_idx() % PROMPT_EXAMPLES.len()];
+    let full = example.chars().count();
+    let shown: String = example.chars().take(typed().min(full)).collect();
+    rsx! {
+        div {
+            class: "w-80 whitespace-pre-wrap break-words font-mono text-sm text-muted-foreground/50",
+            "{shown}"
+            span { class: "ml-px inline-block h-3.5 w-1.5 align-middle animate-pulse {accent_bg}" }
+        }
+    }
+}
+
+fn start_prompt_typewriter(
+    mut ex_idx: Signal<usize>,
+    mut typed: Signal<usize>,
+    cb_cell: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
+    timer_cell: Rc<RefCell<Option<i32>>>,
+) {
+    const PAUSE_TICKS: usize = 28;
+    let cb = Closure::wrap(Box::new(move || {
+        let idx = *ex_idx.peek();
+        let full = PROMPT_EXAMPLES[idx % PROMPT_EXAMPLES.len()].chars().count();
+        let t = *typed.peek();
+        if t >= full + PAUSE_TICKS {
+            typed.set(0);
+            ex_idx.set((idx + 1) % PROMPT_EXAMPLES.len());
+        } else {
+            typed.set(t + 1);
+        }
+    }) as Box<dyn FnMut()>);
+    if let Some(win) = web_sys::window()
+        && let Ok(id) = win
+            .set_interval_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 60)
+    {
+        *timer_cell.borrow_mut() = Some(id);
+    }
+    *cb_cell.borrow_mut() = Some(cb);
 }
