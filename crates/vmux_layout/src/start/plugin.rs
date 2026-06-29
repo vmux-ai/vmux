@@ -32,6 +32,12 @@ const WARM_START_POOL_SIZE: usize = 1;
 #[derive(Component)]
 struct WarmStartSpare;
 
+/// Set on a warm spare once its page has actually mounted (it emitted [`StartDataRequest`]),
+/// so a claim only reuses a spare that is genuinely warm — never one whose CEF browser or
+/// WASM is still loading (which would defeat the near-instant path and fall to a cold paint).
+#[derive(Component)]
+struct WarmStartReady;
+
 /// The hidden, zero-size holding node the warm spares are parked under so they keep their
 /// CEF browser + WASM warm without compositing (a `Visibility::Hidden` ancestor makes them
 /// non-renderable, so `sync_children_to_ui` collapses them and CEF hides the native view).
@@ -74,7 +80,7 @@ impl Plugin for StartPlugin {
 /// cold launcher webview via [`CefPageAttachRequest`].
 fn handle_start_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    spares: Query<Entity, With<WarmStartSpare>>,
+    spares: Query<Entity, (With<WarmStartSpare>, With<WarmStartReady>)>,
     children_q: Query<&Children>,
     mut attach: MessageWriter<CefPageAttachRequest>,
     mut revealed: MessageWriter<StartSpareRevealed>,
@@ -95,7 +101,7 @@ fn handle_start_page_open(
             commands
                 .entity(spare)
                 .insert((ChildOf(task.stack), CefKeyboardTarget))
-                .remove::<WarmStartSpare>();
+                .remove::<(WarmStartSpare, WarmStartReady)>();
             revealed.write(StartSpareRevealed { webview: spare });
         } else {
             attach.write(CefPageAttachRequest {
@@ -182,6 +188,7 @@ fn on_start_spare_revealed(
 /// command-bar launcher payload (opening selections in place).
 fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
+    spares: Query<(), With<WarmStartSpare>>,
     tab_gather: TabGatherParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
@@ -189,6 +196,9 @@ fn on_start_data_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
+    if spares.contains(webview) {
+        commands.entity(webview).insert(WarmStartReady);
+    }
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -276,7 +286,7 @@ mod tests {
             .add_message::<StartSpareRevealed>()
             .add_systems(Update, handle_start_page_open);
         let stack = app.world_mut().spawn_empty().id();
-        let spare = app.world_mut().spawn(WarmStartSpare).id();
+        let spare = app.world_mut().spawn((WarmStartSpare, WarmStartReady)).id();
         let task = app.world_mut().spawn(start_task(stack)).id();
         app.update();
 
@@ -309,6 +319,35 @@ mod tests {
             .collect();
         assert_eq!(reveals.len(), 1);
         assert_eq!(reveals[0].webview, spare);
+    }
+
+    #[test]
+    fn not_ready_spare_is_not_claimed() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CefPageAttachRequest>()
+            .add_message::<StartSpareRevealed>()
+            .add_systems(Update, handle_start_page_open);
+        let stack = app.world_mut().spawn_empty().id();
+        let spare = app.world_mut().spawn(WarmStartSpare).id();
+        let task = app.world_mut().spawn(start_task(stack)).id();
+        app.update();
+
+        assert!(
+            app.world().get::<ChildOf>(spare).is_none(),
+            "an unready spare must not be reparented"
+        );
+        assert!(
+            app.world().get::<WarmStartSpare>(spare).is_some(),
+            "an unready spare stays in the pool"
+        );
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let attaches = app
+            .world_mut()
+            .resource_mut::<Messages<CefPageAttachRequest>>()
+            .drain()
+            .count();
+        assert_eq!(attaches, 1, "unready spare falls back to the cold path");
     }
 
     #[test]
