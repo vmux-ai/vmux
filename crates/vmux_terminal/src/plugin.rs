@@ -38,6 +38,10 @@ use crate::{ProcessExited, Terminal};
 
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
+/// `Ctrl+V` control byte. Sent on ⌘V when the clipboard holds an image, so the
+/// focused agent CLI (Claude Code / Codex) reads the image from the pasteboard
+/// itself — image data never transits the PTY.
+const CTRL_V: u8 = 0x16;
 
 /// Check if confirmation is needed based on settings.
 pub fn should_confirm_close(settings: &AppSettings) -> bool {
@@ -194,20 +198,15 @@ fn agent_prompt_flush_bytes(alt_screen: bool, buf: &BufferedAgentPrompt) -> Opti
 
 fn flush_buffered_agent_prompt(
     q: Query<(Entity, &ProcessId, &BufferedAgentPrompt), With<vmux_core::agent::AgentSession>>,
-    mode_map: Res<TerminalModeMap>,
     service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let Some(service) = service else { return };
     for (entity, pid, buf) in &q {
-        let alt_screen = mode_map
-            .modes
-            .get(pid)
-            .map(|m| m.alt_screen)
-            .unwrap_or(false);
-        if !alt_screen {
-            continue;
-        }
+        // Readiness is already decided by `clear_agent_loading` (which only
+        // creates a `BufferedAgentPrompt` once the TUI is up); deliver as soon as
+        // one exists. Re-gating on `alt_screen` here strands the prompt forever
+        // for inline TUIs (Claude Code, Codex, Vibe) that never use alt-screen.
         if let Some(data) = agent_prompt_flush_bytes(true, buf) {
             service.0.send(ClientMessage::ProcessInput {
                 process_id: *pid,
@@ -1685,6 +1684,14 @@ fn handle_terminal_keyboard(
     >,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    terminal_kinds: Query<
+        (
+            &ProcessId,
+            Option<&vmux_core::agent::AgentSession>,
+            Option<&crate::launch::TerminalLaunch>,
+        ),
+        With<Terminal>,
+    >,
     mut capture_q: Query<(Entity, &ProcessId, &mut PromptCapture), With<Terminal>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     mode: Res<vmux_layout::scene::InteractionMode>,
@@ -1735,6 +1742,13 @@ fn handle_terminal_keyboard(
             .get(cap_e)
             .map(|(_, _, c)| (c.draft.clone(), c.skipped))
             .unwrap_or_default();
+        let is_vibe = active_process_id
+            .and_then(|pid| terminal_kinds.iter().find(|(p, ..)| **p == pid))
+            .map(|(_, agent, launch)| {
+                agent.map(|s| s.kind) == Some(vmux_core::agent::AgentKind::Vibe)
+                    || launch.map(|l| l.kind.clone()) == Some(crate::launch::TerminalKind::Vibe)
+            })
+            .unwrap_or(false);
         let mut changed = false;
         let mut seen_keys: Vec<KeyCode> = Vec::new();
         for event in er.read() {
@@ -1754,6 +1768,19 @@ fn handle_terminal_keyboard(
                 draft.clear();
                 skipped = false;
                 changed = true;
+                continue;
+            }
+            if super_key && event.key_code == KeyCode::KeyV {
+                if let Some(pasted) =
+                    active_process_id.and_then(|pid| resolve_paste_text(is_vibe, pid))
+                {
+                    if !draft.is_empty() && !draft.ends_with(char::is_whitespace) {
+                        draft.push(' ');
+                    }
+                    draft.push_str(&pasted);
+                    skipped = false;
+                    changed = true;
+                }
                 continue;
             }
             match &event.logical_key {
@@ -1842,15 +1869,16 @@ fn handle_terminal_keyboard(
         if super_key {
             match event.key_code {
                 KeyCode::KeyV => {
-                    // Paste via OS clipboard.
-                    if let Some(text) = crate::clipboard::read_blocking()
-                        && !text.is_empty()
+                    let active = active_process_id
+                        .and_then(|pid| terminal_kinds.iter().find(|(p, ..)| **p == pid));
+                    let agent_kind = active.and_then(|(_, agent, _)| agent.map(|s| s.kind));
+                    let launch_kind =
+                        active.and_then(|(_, _, launch)| launch.map(|l| l.kind.clone()));
+                    let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
+                        || launch_kind == Some(crate::launch::TerminalKind::Vibe);
+                    if let Some(data) =
+                        active_process_id.and_then(|pid| resolve_paste(is_vibe, pid))
                     {
-                        // Wrap in bracketed paste sequences
-                        let mut data = Vec::new();
-                        data.extend_from_slice(b"\x1b[200~");
-                        data.extend_from_slice(text.as_bytes());
-                        data.extend_from_slice(b"\x1b[201~");
                         for process_id in &target_processes {
                             service.0.send(ClientMessage::ProcessInput {
                                 process_id: *process_id,
@@ -2240,6 +2268,75 @@ fn term_key_event_to_key(event: &TermKeyEvent) -> Key {
             Key::Character(text.into())
         }
     }
+}
+
+/// Wrap `payload` in terminal bracketed-paste markers.
+fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(payload.len() + 12);
+    data.extend_from_slice(b"\x1b[200~");
+    data.extend_from_slice(payload);
+    data.extend_from_slice(b"\x1b[201~");
+    data
+}
+
+/// Paste payload for an image file path. Vibe attaches a single-quoted path
+/// (it prepends its own `@` on paste; the quotes keep paths with spaces as one
+/// token); Claude Code and Codex auto-detect a bare path.
+fn image_path_payload(is_vibe: bool, path: &str) -> String {
+    if is_vibe {
+        format!("'{path}'")
+    } else {
+        path.to_string()
+    }
+}
+
+/// Write clipboard PNG bytes to a per-process temp file and return its path.
+fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::path::PathBuf> {
+    let path = std::env::temp_dir().join(format!("vmux-clip-{process_id}.png"));
+    std::fs::write(&path, png).ok()?;
+    Some(path)
+}
+
+/// Resolve the bytes to forward to the PTY for a ⌘V paste. A copied image *file*
+/// is pasted as its path; raw image *data* goes to the CLI via `Ctrl+V` (Claude
+/// Code, Codex read the pasteboard), except Vibe (`is_vibe`) — which cannot read
+/// the pasteboard, so its data is written to a temp file and pasted as a path.
+/// Otherwise the clipboard text is bracketed-pasted. `None` when nothing to paste.
+fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
+    if let Some(path) = crate::clipboard::image_file_path() {
+        return Some(bracketed_paste(
+            image_path_payload(is_vibe, &path).as_bytes(),
+        ));
+    }
+    if crate::clipboard::has_image() {
+        if is_vibe {
+            let png = crate::clipboard::read_image_png()?;
+            let path = write_clipboard_image_temp(process_id, &png)?;
+            let payload = image_path_payload(true, &path.to_string_lossy());
+            return Some(bracketed_paste(payload.as_bytes()));
+        }
+        return Some(vec![CTRL_V]);
+    }
+    let text = crate::clipboard::read_blocking()?;
+    (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
+}
+
+/// Text to append to an agent's boot-time draft prompt for a ⌘V paste. Unlike
+/// [`resolve_paste`], an image always resolves to a *path* (raw clipboard data is
+/// written to a temp file) — the booting CLI isn't running yet to read the
+/// pasteboard via `Ctrl+V`, and the draft is delivered later as text. Returns
+/// `None` when there is nothing to paste.
+fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
+    if let Some(path) = crate::clipboard::image_file_path() {
+        return Some(image_path_payload(is_vibe, &path));
+    }
+    if crate::clipboard::has_image() {
+        let png = crate::clipboard::read_image_png()?;
+        let path = write_clipboard_image_temp(process_id, &png)?;
+        return Some(image_path_payload(is_vibe, &path.to_string_lossy()));
+    }
+    let text = crate::clipboard::read_blocking()?;
+    (!text.is_empty()).then_some(text)
 }
 
 fn term_key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
@@ -2784,6 +2881,8 @@ fn on_term_mouse(
 fn on_term_key(
     trigger: On<BinReceive<TermKeyEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
+    agents: Query<&vmux_core::agent::AgentSession>,
+    launches: Query<&crate::launch::TerminalLaunch>,
     service: Option<Res<ServiceClient>>,
     mode_map: Res<TerminalModeMap>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
@@ -2822,13 +2921,11 @@ fn on_term_key(
     if super_key {
         match event.code.as_str() {
             "KeyV" => {
-                if let Some(text) = crate::clipboard::read_blocking()
-                    && !text.is_empty()
-                {
-                    let mut data = Vec::new();
-                    data.extend_from_slice(b"\x1b[200~");
-                    data.extend_from_slice(text.as_bytes());
-                    data.extend_from_slice(b"\x1b[201~");
+                let agent_kind = agents.get(entity).ok().map(|session| session.kind);
+                let launch_kind = launches.get(entity).ok().map(|launch| launch.kind.clone());
+                let is_vibe = agent_kind == Some(vmux_core::agent::AgentKind::Vibe)
+                    || launch_kind == Some(crate::launch::TerminalKind::Vibe);
+                if let Some(data) = resolve_paste(is_vibe, process_id) {
                     service
                         .0
                         .send(ClientMessage::ProcessInput { process_id, data });
@@ -2962,13 +3059,15 @@ fn clear_agent_loading(
     mut commands: Commands,
 ) {
     for (entity, pid, session, loading, capture) in &loading_q {
-        // Agents clear when the TUI takes over (alt-screen); plain terminals,
-        // whose shell prints instantly, show a brief minimum splash instead.
+        // Agents clear when the TUI takes over its terminal. Inline TUIs (Claude
+        // Code, Codex, Vibe) never enter alt-screen, so also treat mouse or focus
+        // reporting — enabled when their input is ready — as readiness. Plain
+        // terminals, whose shell prints instantly, show a brief minimum splash.
         let ready = match session {
             Some(_) => mode_map
                 .modes
                 .get(pid)
-                .map(|m| m.alt_screen)
+                .map(|m| m.alt_screen || m.mouse_capture || m.focus_reporting)
                 .unwrap_or(false),
             None => loading.since.elapsed() >= TERMINAL_LOADING_MIN_DISPLAY,
         };
@@ -3510,6 +3609,25 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn bracketed_paste_wraps_payload() {
+        assert_eq!(bracketed_paste(b"hi"), b"\x1b[200~hi\x1b[201~".to_vec());
+    }
+
+    #[test]
+    fn image_path_payload_uses_vibe_attach_syntax() {
+        assert_eq!(image_path_payload(true, "/tmp/a b.png"), "'/tmp/a b.png'");
+        assert_eq!(image_path_payload(false, "/tmp/a b.png"), "/tmp/a b.png");
+    }
+
+    #[test]
+    fn write_clipboard_image_temp_writes_png_bytes() {
+        let png = [137u8, 80, 78, 71, 1, 2, 3];
+        let path = write_clipboard_image_temp(process_id(7), &png).expect("temp write");
+        assert_eq!(std::fs::read(&path).unwrap(), png);
+        let _ = std::fs::remove_file(&path);
+    }
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])

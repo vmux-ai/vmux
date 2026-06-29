@@ -20,6 +20,104 @@ pub fn read_blocking() -> Option<String> {
     read_inner()
 }
 
+/// Whether the system clipboard currently holds image data (PNG/TIFF).
+///
+/// On ⌘V in a terminal this decides whether to forward `Ctrl+V` (`0x16`) so the
+/// focused agent CLI grabs the image from the pasteboard itself, instead of a
+/// text paste. Returns `false` where no pasteboard image query is available.
+pub fn has_image() -> bool {
+    has_image_inner()
+}
+
+#[cfg(target_os = "macos")]
+fn has_image_inner() -> bool {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+    use objc2_foundation::NSArray;
+    let image_types = unsafe { NSArray::from_slice(&[NSPasteboardTypePNG, NSPasteboardTypeTIFF]) };
+    NSPasteboard::generalPasteboard()
+        .availableTypeFromArray(&image_types)
+        .is_some()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn has_image_inner() -> bool {
+    false
+}
+
+/// Read PNG image bytes from the system clipboard, if present.
+///
+/// Used for the Vibe fallback, which cannot read the pasteboard itself: vmux
+/// writes these bytes to a temp file and pastes its path instead of `Ctrl+V`.
+pub fn read_image_png() -> Option<Vec<u8>> {
+    read_image_png_inner()
+}
+
+#[cfg(target_os = "macos")]
+fn read_image_png_inner() -> Option<Vec<u8>> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
+    let png_type = unsafe { NSPasteboardTypePNG };
+    let data = NSPasteboard::generalPasteboard().dataForType(png_type)?;
+    Some(data.to_vec())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_image_png_inner() -> Option<Vec<u8>> {
+    None
+}
+
+/// Absolute path of an image *file* on the clipboard (a copied file, e.g. a
+/// saved screenshot), if any.
+///
+/// Distinct from [`has_image`], which reports raw image *data*. Agent CLIs
+/// auto-detect an image path pasted as text, so this lets ⌘V attach a copied
+/// image file without raw clipboard image data.
+pub fn image_file_path() -> Option<String> {
+    image_file_path_inner()
+}
+
+#[cfg(target_os = "macos")]
+fn image_file_path_inner() -> Option<String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    let url_type = unsafe { NSPasteboardTypeFileURL };
+    let url_str = NSPasteboard::generalPasteboard()
+        .stringForType(url_type)?
+        .to_string();
+    let path = url::Url::parse(&url_str).ok()?.to_file_path().ok()?;
+    path_looks_like_image(&path).then(|| path.to_string_lossy().into_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn image_file_path_inner() -> Option<String> {
+    None
+}
+
+/// Whether `path` has a known raster-image extension.
+#[cfg(target_os = "macos")]
+fn path_looks_like_image(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "tiff" | "tif" | "bmp" | "heic")
+    )
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn image_extensions_detected_case_insensitively() {
+        assert!(path_looks_like_image(Path::new("/tmp/Screenshot.png")));
+        assert!(path_looks_like_image(Path::new("/tmp/a.JPG")));
+        assert!(path_looks_like_image(Path::new("/tmp/a.jpeg")));
+        assert!(!path_looks_like_image(Path::new("/tmp/notes.txt")));
+        assert!(!path_looks_like_image(Path::new("/tmp/noext")));
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn write_blocking(text: &str) {
     use std::io::Write;
