@@ -12,6 +12,7 @@ pub const TERM_RESIZE_EVENT: &str = "term_resize";
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
 pub const TERM_LOADING_EVENT: &str = "term_loading";
+pub const AGENT_PROMPT_DRAFT_EVENT: &str = "agent_prompt_draft";
 pub const SERVICE_UNAVAILABLE_EVENT: &str = "service_unavailable";
 pub const FILE_META_EVENT: &str = "file_meta";
 pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
@@ -791,6 +792,26 @@ pub struct TermLoadingEvent {
     pub segment: String,
 }
 
+/// Host → page: the prompt the user is typing on an agent's boot screen, mirrored
+/// from the backend capture buffer so the terminal overlay can render it. `draft`
+/// is the current text; `skipped` is true after the user pressed Esc to dismiss
+/// the prompt (overlay shows plain "booting" until they type again).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentPromptDraftEvent {
+    pub draft: String,
+    pub skipped: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TermViewportEvent {
     pub lines: Vec<TermLine>,
@@ -1488,6 +1509,18 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
         let recovered =
             rkyv::from_bytes::<TermLoadingEvent, rkyv::rancor::Error>(&bytes).expect("deserialize");
+        assert_eq!(original, recovered);
+    }
+
+    #[test]
+    fn agent_prompt_draft_event_rkyv_roundtrip() {
+        let original = AgentPromptDraftEvent {
+            draft: "find me a hotel".to_string(),
+            skipped: false,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("serialize");
+        let recovered = rkyv::from_bytes::<AgentPromptDraftEvent, rkyv::rancor::Error>(&bytes)
+            .expect("deserialize");
         assert_eq!(original, recovered);
     }
 }

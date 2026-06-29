@@ -42,7 +42,7 @@ vmux_terminal = { path = "../vmux_terminal" }
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
-web-sys = { version = "0.3", features = ["Window", "Location"] }
+web-sys = { version = "0.3", features = ["Window"] }
 
 [dev-dependencies]
 mockito = "1"

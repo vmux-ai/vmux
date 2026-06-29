@@ -1820,6 +1820,7 @@ fn handle_agent_page_open_task(
                 cwd: default_cwd.to_path_buf(),
                 session_id: Some(sid),
                 stack: task.stack,
+                initial_prompt: None,
             });
             Ok(())
         }
@@ -1837,6 +1838,7 @@ fn handle_agent_page_open_task(
                         cwd: default_cwd.to_path_buf(),
                         session_id: None,
                         stack: task.stack,
+                        initial_prompt: None,
                     });
                 }
                 return Ok(());
@@ -1876,7 +1878,11 @@ fn stack_has_agent_of_kind(
         .unwrap_or(false)
 }
 
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
+pub(crate) fn clear_stack_children(
+    stack: Entity,
+    children_q: &Query<&Children>,
+    commands: &mut Commands,
+) {
     if let Ok(children) = children_q.get(stack) {
         for child in children.iter() {
             commands.entity(child).try_despawn();
@@ -2047,6 +2053,14 @@ fn handle_spawn_agent_requests(
                         spawn_time: std::time::SystemTime::now(),
                         cwd: req.cwd.clone(),
                     });
+                }
+                if let Some(prompt) = req.initial_prompt.clone().filter(|p| !p.trim().is_empty()) {
+                    commands
+                        .entity(terminal)
+                        .insert(vmux_terminal::BufferedAgentPrompt {
+                            text: prompt,
+                            submit: true,
+                        });
                 }
             }
             Err(e) => {
