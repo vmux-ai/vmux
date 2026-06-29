@@ -72,8 +72,13 @@ pub(crate) fn handle_settings_page_open(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    let mut handled_stacks = std::collections::HashSet::new();
     for (entity, task) in &tasks {
         if task.url != SETTINGS_PAGE_URL {
+            continue;
+        }
+        if !handled_stacks.insert(task.stack) {
+            commands.entity(entity).insert(PageOpenHandled);
             continue;
         }
         if let Ok(children) = children_q.get(task.stack) {
@@ -494,6 +499,27 @@ mod page_open_tests {
         app.update();
         assert!(app.world().get::<PageOpenHandled>(claimed).is_some());
         assert!(app.world().get::<PageOpenHandled>(decoy).is_none());
+        let mut q = app.world_mut().query_filtered::<(), With<Settings>>();
+        assert_eq!(q.iter(app.world()).count(), 1);
+    }
+
+    #[test]
+    fn settings_page_open_dedupes_per_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_settings_page_open);
+        let stack = app.world_mut().spawn_empty().id();
+        for _ in 0..2 {
+            app.world_mut().spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: SETTINGS_PAGE_URL.to_string(),
+                request_id: None,
+            });
+        }
+        app.update();
         let mut q = app.world_mut().query_filtered::<(), With<Settings>>();
         assert_eq!(q.iter(app.world()).count(), 1);
     }
