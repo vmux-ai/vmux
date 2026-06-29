@@ -90,9 +90,13 @@ of any size renders.
 - `plugin.rs`:
   - `load_file_buffers`: replace the `is_image_path` branch with the media
     classifier → insert `FileMedia { kind, mime }` (no read). Drop the 25 MB read.
-  - `MediaAllowlist` Resource (`HashSet<PathBuf>` or `HashSet<String>` of abs
-    paths currently open as media views). Insert on `FileMedia` spawn; remove on
-    view despawn / navigation.
+  - `sync_media_allowlist` system: recompute the **full** allowlist
+    (`HashSet<PathBuf>`) every frame from the live ECS state — every open
+    `FileMedia` view plus every file inside an open `FileDir` (so the dir browser
+    can preview any of its entries) — and replace it wholesale via
+    `set_media_allowlist`. A recomputed live set (not incremental insert/remove)
+    avoids revoking a path that another view still has open and avoids teardown
+    ordering races with navigation.
   - `send_initial_media` system (mirrors `send_initial_image`): emits
     `FILE_MEDIA_EVENT` once page is ready.
   - `on_file_open_external` observer: `BinReceive<FileOpenExternalRequest>` →
@@ -110,44 +114,47 @@ of any size renders.
   the dir preview pane / thumbnails). Drop the `_img` listener.
 - PDF card "Open externally" → `try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path })`.
 
+One raw-media URL contract end-to-end: `file://<abs>?vmux-raw=1`. The page points
+media elements at it; the handler recognizes the `vmux-raw=1` query, validates the
+decoded path against the allowlist, and serves the file from disk. No second scheme.
+
 ### patches/bevy_cef_core-0.5.2
 
-- `browser_process/localhost.rs`:
-  - `CefRequest`: add `range: Option<(u64, Option<u64>)>` (or reuse the existing
-    parsed range type).
-  - `asset_load_path_from_request_url_with`: for a `file://` URL with `vmux-raw=1`
-    in the query, return a raw-disk uri (e.g. `vmuxraw://<abs>`) instead of the
-    SPA shell. All other `file://` behavior unchanged.
-  - `open()`: pass the parsed `range` into `CefRequest`.
+- `util.rs`: `raw_media_request` parses a `file://…?vmux-raw=1` URL into a `PathBuf`
+  (inline percent-decode); `is_media_path_allowed` checks the canonicalized path
+  against the allowlist (`set_media_allowlist`); `build_raw_media_response` opens
+  the file and returns a single full `200` (`RawMediaResponse { status, headers,
+  mime, file, len }`), canonicalized to defeat symlink swaps. `raw_media_mime` maps
+  `mov → video/mp4`.
+- `browser_process/localhost.rs` `open()`: on a raw-media request, build the
+  response via `build_raw_media_response` and stream it file-backed
+  (`DataResponser::prepare_file`). All other `file://` behavior unchanged.
+- `browser_process/localhost/data_responser.rs`: file-backed mode
+  (`prepare_file(file, len)` + `read_from_file`, 256 KB chunks) so multi-MB media
+  never loads fully into memory.
 
-### patches/bevy_cef-0.5.2
-
-- `common/localhost/responser.rs` `coming_request`: branch on the `vmuxraw://`
-  uri → read **only the requested byte range** from disk (`File::seek` + bounded
-  read), set mime from the patch's existing `EXTENSION_MAP` (asset_loader.rs — do
-  not add a patch→vmux_core dependency), return a
-  `CefResponse` carrying the ranged bytes + total length so `HeadersResponser`
-  emits correct `Content-Range`/`Content-Length`/`Accept-Ranges`. Non-raw uris
-  unchanged (asset-server path).
-  - `CefResponse` may need a `total_len` hint (or reuse existing range plumbing)
-    so 206 headers report the full resource size, not the slice size. Verify
-    `HeadersResponser`/`DataResponser` semantics and feed them pre-sliced data
-    with the correct full length.
+Chromium's `file://` media element does not consume `206` partial responses from a
+custom scheme handler, so the handler returns one full `200` (no `Accept-Ranges`)
+rather than range-serving; the file-backed `DataResponser` keeps memory bounded.
+Native `AVPlayer` playback (H.264/HEVC) reads the file path directly via
+AVFoundation and does not use this pipe at all.
 
 ## Security
 
 The page can only emit URLs the backend handed it, but a buggy/compromised page
 must not read arbitrary disk. The raw-file branch serves a path **only if it is in
 the `MediaAllowlist`** (abs paths currently open as media views). Anything else →
-`404`. The allowlist Resource is read by `coming_request`; the editor plugin is
-the sole writer. Paths are canonicalized before allowlist insert and before
-compare to defeat `..`/symlink tricks.
+`404`. The allowlist is read in the raw-media handler (`is_media_path_allowed`);
+the editor plugin (`sync_media_allowlist`) is the sole writer. Paths are
+canonicalized before the allowlist set and before compare to defeat `..`/symlink
+tricks.
 
 ## Error / fallback handling
 
 - Non-allowlisted or missing file → `404` (element shows broken state; acceptable).
-- Unsupported-but-detected codec (e.g. HEVC mov) → browser shows its own media
-  error; best-effort, documented.
+- Proprietary-codec video (H.264/HEVC in `.mov`/`.mp4`) → played by a native macOS
+  `AVPlayer` overlay (AVFoundation), since this CEF build lacks those codecs. On
+  non-macOS the in-page `<video>` shows its own media error; best-effort, documented.
 - PDF → always the info card (no inline attempt in v1).
 - heic/tiff → fall through to existing "not a UTF-8 text file" path for now
   (phase 2 transcode). Acceptable; documented.
