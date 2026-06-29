@@ -73,6 +73,13 @@ pub fn media_kind(path: &str) -> Option<MediaKind> {
     })
 }
 
+/// Whether a path is a proprietary-codec video container (H.264/HEVC in mp4/mov)
+/// that a codec-less CEF build can't decode in `<video>`. macOS plays these through
+/// a native `AVPlayer` overlay instead; open containers (webm/ogv) stay in `<video>`.
+pub fn is_proprietary_video(path: &str) -> bool {
+    matches!(ext_of(path).as_str(), "mp4" | "m4v" | "mov")
+}
+
 /// MIME type for an image path only (used by the dir-browser thumbnail path,
 /// which renders raster previews and must not treat video/audio/pdf as images).
 pub fn image_mime(path: &str) -> Option<&'static str> {
@@ -105,6 +112,16 @@ mod tests {
         assert_eq!(media_mime("a.mp3"), Some("audio/mpeg"));
         assert_eq!(media_mime("a.pdf"), Some("application/pdf"));
         assert_eq!(media_mime("a.rs"), None);
+    }
+
+    #[test]
+    fn proprietary_video_only_mp4_family() {
+        assert!(is_proprietary_video("a.mov"));
+        assert!(is_proprietary_video("A.MP4"));
+        assert!(is_proprietary_video("clip.m4v"));
+        assert!(!is_proprietary_video("a.webm"));
+        assert!(!is_proprietary_video("a.ogv"));
+        assert!(!is_proprietary_video("a.png"));
     }
 
     #[test]

@@ -64,8 +64,11 @@ pub fn build_preview_with_cap(path: &Path, _thumb: bool, cap: u64) -> PreviewKin
     if vmux_core::media::media_kind(&path.to_string_lossy())
         == Some(vmux_core::media::MediaKind::Video)
     {
+        let path_str = path.to_string_lossy();
         return PreviewKind::Video {
             url: raw_preview_url(path),
+            path: path_str.clone().into_owned(),
+            native: cfg!(target_os = "macos") && vmux_core::media::is_proprietary_video(&path_str),
         };
     }
     if is_probably_binary(path) {

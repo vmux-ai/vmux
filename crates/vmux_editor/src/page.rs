@@ -17,6 +17,7 @@ use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
 const MEASURE_ID: &str = "file-measure";
+const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
 const SCROLL_EDGE: u32 = 16;
@@ -34,7 +35,11 @@ enum Preview {
     Dir(Vec<FileDirEntry>),
     Text(Vec<FileLine>),
     Image(String),
-    Video(String),
+    Video {
+        url: String,
+        path: String,
+        native: bool,
+    },
     Info {
         size: u64,
         modified: String,
@@ -185,15 +190,29 @@ fn render_preview(preview: &Preview) -> Element {
         Preview::Image(url) => rsx! {
             img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
         },
-        Preview::Video(url) => rsx! {
-            video {
-                id: "preview-video",
-                src: "{url}",
-                controls: true,
-                autoplay: false,
-                class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+        Preview::Video { url, path, native } => {
+            if *native {
+                let path = path.clone();
+                rsx! {
+                    div {
+                        key: "{path}",
+                        id: VIDEO_HOST_ID,
+                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+                        onmounted: move |_| report_video_rect(path.clone()),
+                    }
+                }
+            } else {
+                rsx! {
+                    video {
+                        id: "preview-video",
+                        src: "{url}",
+                        controls: true,
+                        autoplay: false,
+                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                    }
+                }
             }
-        },
+        }
         Preview::Text(lines) => rsx! {
             div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
                 for line in lines.iter() {
@@ -432,7 +451,7 @@ pub fn Page() -> Element {
                 Some(u) => Preview::Image(u),
                 None => Preview::Error("failed to decode image".into()),
             },
-            PreviewKind::Video { url } => Preview::Video(url),
+            PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
             PreviewKind::Text(l) => Preview::Text(l),
             PreviewKind::Dir(e) => Preview::Dir(e),
             PreviewKind::Info {
@@ -1446,6 +1465,48 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
         observer.observe(&container);
         observer.observe(&measure);
+        std::mem::forget(observer);
+    }
+    callback.forget();
+}
+
+/// Emit the current on-screen rect of the native video host element so the backend
+/// can position the `AVPlayer` overlay over it.
+fn emit_video_rect(path: &str) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
+        return;
+    };
+    let rect = el.get_bounding_client_rect();
+    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    let _ = try_cef_bin_emit_rkyv(&FileVideoRect {
+        path: path.to_string(),
+        x: rect.left() as f32,
+        y: rect.top() as f32,
+        w: rect.width() as f32,
+        h: rect.height() as f32,
+    });
+}
+
+/// Report the video host rect now and on every subsequent resize (window/layout),
+/// keeping the native overlay aligned with the page element.
+fn report_video_rect(path: String) {
+    emit_video_rect(&path);
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+        emit_video_rect(&path);
+    }) as Box<dyn FnMut(JsValue)>);
+    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+        observer.observe(&el);
         std::mem::forget(observer);
     }
     callback.forget();

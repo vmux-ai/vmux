@@ -27,6 +27,9 @@ pub const FILE_OPEN_EVENT: &str = "file_open";
 pub const FILE_MEDIA_EVENT: &str = "file_media";
 /// Page → backend: open a media file in the system default application.
 pub const FILE_OPEN_EXTERNAL_EVENT: &str = "file_open_external";
+/// Page → backend: the on-screen rect (CSS px, viewport-relative) of the native
+/// video host element, so the backend can position the `AVPlayer` overlay over it.
+pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
@@ -152,6 +155,24 @@ pub struct FileResizeEvent {
     Debug,
     Clone,
     PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileVideoRect {
+    pub path: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
     Eq,
     Default,
     Serialize,
@@ -252,6 +273,11 @@ pub enum PreviewKind {
     },
     Video {
         url: String,
+        /// Absolute path, so the page can key the native-overlay rect report to it.
+        path: String,
+        /// `true` when the backend will play this via a native overlay (macOS,
+        /// proprietary codec); the page then reports a rect instead of `<video>`.
+        native: bool,
     },
     Info {
         size: u64,

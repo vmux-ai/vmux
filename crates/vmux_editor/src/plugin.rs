@@ -608,6 +608,58 @@ fn send_initial_media(
     }
 }
 
+/// Containers AVFoundation decodes but this codec-less CEF build cannot. Open-codec
+/// containers (webm/ogv) play in the page `<video>`, so we must not cover them with
+/// a native overlay that AVFoundation can't render.
+fn needs_native_video(path: &Path) -> bool {
+    vmux_core::media::is_proprietary_video(&path.to_string_lossy())
+}
+
+/// Attach a native macOS `AVPlayer` overlay filling a full video view. This CEF
+/// build lacks proprietary codecs (H.264/HEVC), so `.mov`/`.mp4` won't play in
+/// `<video>`; the overlay decodes them through AVFoundation. Idempotent per path.
+fn attach_video_overlays(q: Query<(Entity, &FileView, &FileMedia)>, browsers: NonSend<Browsers>) {
+    for (entity, fv, media) in &q {
+        if media.kind != vmux_core::media::MediaKind::Video || !needs_native_video(&fv.path) {
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        browsers.attach_media_overlay(&entity, &fv.path.to_string_lossy());
+    }
+}
+
+/// Position/replace the native overlay over the dir-browser preview pane, using the
+/// rect the page measured for its video host element.
+fn on_file_video_rect(
+    trigger: On<BinReceive<FileVideoRect>>,
+    file_views: Query<(), With<FileView>>,
+    browsers: NonSend<Browsers>,
+) {
+    let entity = trigger.event().webview;
+    if file_views.get(entity).is_err() || !browsers.has_browser(entity) {
+        return;
+    }
+    let r = &trigger.event().payload;
+    if !vmux_core::media::is_proprietary_video(&r.path) || r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
+    browsers.set_media_overlay(&entity, &r.path, (r.x, r.y, r.w, r.h));
+}
+
+/// Tear down the native video overlay when a view stops being a video media view
+/// or a dir browser (navigated away, reloaded as text, or despawned).
+fn detach_video_overlays(
+    mut removed_media: RemovedComponents<FileMedia>,
+    mut removed_dir: RemovedComponents<FileDir>,
+    browsers: NonSend<Browsers>,
+) {
+    for entity in removed_media.read().chain(removed_dir.read()) {
+        browsers.detach_media_overlay(&entity);
+    }
+}
+
 fn on_file_preview_request(
     trigger: On<BinReceive<FilePreviewRequest>>,
     file_views: Query<(), With<FileView>>,
@@ -620,6 +672,9 @@ fn on_file_preview_request(
     }
     let req = trigger.event().payload.clone();
     let path = PathBuf::from(&req.path);
+    if !needs_native_video(&path) {
+        browsers.detach_media_overlay(&entity);
+    }
     if req.thumb && preview::is_image_path(&path) {
         let within_cap = std::fs::metadata(&path)
             .map(|m| m.len() <= preview::IMAGE_BYTES_CAP)
@@ -1499,6 +1554,7 @@ impl Plugin for EditorPlugin {
                 FileGotoRequest,
                 FileCompletionCommit,
                 FileOpenExternalRequest,
+                FileVideoRect,
             )>::default())
             .add_systems(
                 Update,
@@ -1513,6 +1569,7 @@ impl Plugin for EditorPlugin {
                     send_initial_dir,
                     sync_media_allowlist,
                     send_initial_media.after(sync_media_allowlist),
+                    (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
                     drain_thumb_tasks,
                     reconcile_file_watches,
@@ -1528,6 +1585,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_preview_request)
             .add_observer(on_file_open)
             .add_observer(on_file_open_external)
+            .add_observer(on_file_video_rect)
             .add_observer(on_file_key)
             .add_observer(on_file_text_input)
             .add_observer(on_file_pointer)
