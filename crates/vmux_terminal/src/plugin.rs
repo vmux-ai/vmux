@@ -3192,6 +3192,14 @@ fn on_term_resize(
     let rows = (vh / event.char_height).floor().max(1.0) as u16;
 
     if let Ok(mut grid) = grid_q.get_mut(entity) {
+        let dc = (cols as i32 - grid.cols as i32).unsigned_abs();
+        let dr = (rows as i32 - grid.rows as i32).unsigned_abs();
+        // Ignore ±1 sub-pixel measurement jitter (and exact no-ops). A 1-cell
+        // flip would resize the PTY, re-wrapping content and making TUIs
+        // re-emit their UI, which piles up in scrollback.
+        if dc <= 1 && dr <= 1 {
+            return;
+        }
         grid.cols = cols;
         grid.rows = rows;
     }

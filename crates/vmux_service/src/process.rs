@@ -96,8 +96,13 @@ pub struct Process {
     /// cells produces no line-content change but the screen cursor must
     /// still update).
     last_cursor: Option<(u16, u16)>,
-    /// Currently selected range (in viewport coords). None when no selection.
+    /// Currently selected range (in viewport coords, relative to
+    /// `selection_offset`). None when no selection.
     selection: Option<TermSelectionRange>,
+    /// Scrollback display offset captured when `selection` was set. The stored
+    /// viewport rows are re-projected by `current_offset - selection_offset` so
+    /// the highlight tracks the content as the user scrolls.
+    selection_offset: i32,
     /// Last broadcast selection (used for change detection).
     last_selection: Option<TermSelectionRange>,
     /// Last copy-mode value emitted in a viewport patch.
@@ -345,6 +350,7 @@ impl Process {
             line_hashes: Vec::new(),
             last_cursor: None,
             selection: None,
+            selection_offset: 0,
             last_selection: None,
             last_viewport_copy_mode: None,
             last_terminal_mode: None,
@@ -384,10 +390,20 @@ impl Process {
         self.sync_viewport();
     }
 
+    /// Store a selection, capturing the current scrollback offset so the range
+    /// can be re-projected to viewport coordinates as the user scrolls.
+    fn store_selection(&mut self, range: Option<TermSelectionRange>) {
+        if range.is_some() {
+            self.selection_offset = self.term.grid().display_offset() as i32;
+        }
+        self.selection = range;
+    }
+
     /// Replace the selection. None clears it. Range is clamped to the
     /// current viewport dimensions to defend against stale or buggy clients.
     pub fn set_selection(&mut self, range: Option<TermSelectionRange>) {
-        self.selection = range.map(|r| self.clamp_range(r));
+        let range = range.map(|r| self.clamp_range(r));
+        self.store_selection(range);
         self.sync_viewport();
     }
 
@@ -410,7 +426,7 @@ impl Process {
                 is_block: false,
             },
         };
-        self.selection = Some(range);
+        self.store_selection(Some(range));
         self.sync_viewport();
     }
 
@@ -443,13 +459,13 @@ impl Process {
         let offset = grid.display_offset() as i32;
         let line = &grid[Line(row as i32 - offset)];
         if !is_word_char(line[Column(col as usize)].c) {
-            self.selection = Some(TermSelectionRange {
+            self.store_selection(Some(TermSelectionRange {
                 start_col: col,
                 start_row: row,
                 end_col: col,
                 end_row: row,
                 is_block: false,
-            });
+            }));
             self.sync_viewport();
             return;
         }
@@ -461,13 +477,13 @@ impl Process {
         while end + 1 < num_cols && is_word_char(line[Column(end + 1)].c) {
             end += 1;
         }
-        self.selection = Some(TermSelectionRange {
+        self.store_selection(Some(TermSelectionRange {
             start_col: start as u16,
             start_row: row,
             end_col: end as u16,
             end_row: row,
             is_block: false,
-        });
+        }));
         self.sync_viewport();
     }
 
@@ -487,13 +503,13 @@ impl Process {
                 end = c;
             }
         }
-        self.selection = Some(TermSelectionRange {
+        self.store_selection(Some(TermSelectionRange {
             start_col: 0,
             start_row: row,
             end_col: end as u16,
             end_row: row,
             is_block: false,
-        });
+        }));
         self.sync_viewport();
     }
 
@@ -502,7 +518,7 @@ impl Process {
         let sel = self.selection.as_ref()?;
         let grid = self.term.grid();
         let num_cols = grid.columns();
-        let offset = grid.display_offset() as i32;
+        let offset = self.selection_offset;
 
         // Normalize so (start_row, start_col) <= (end_row, end_col) row-major.
         let (sr, sc, er, ec) = if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
@@ -784,7 +800,7 @@ impl Process {
         };
         let (ac, ar) = cm.anchor;
         let (new_col, new_row) = cm.cursor;
-        self.selection = match cm.visual {
+        let new_sel = match cm.visual {
             Some(CopyModeVisualMode::Character) => Some(TermSelectionRange {
                 start_col: ac,
                 start_row: ar,
@@ -805,6 +821,7 @@ impl Process {
             }
             None => None,
         };
+        self.store_selection(new_sel);
     }
 
     fn move_copy_mode_cursor_vertically(&mut self, col: u16, row: u16, delta: i32) -> (u16, u16) {
@@ -1167,6 +1184,9 @@ impl Process {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        if self.cols == cols && self.rows == rows {
+            return;
+        }
         self.cols = cols;
         self.rows = rows;
         let _ = self.master.resize(PtySize {
@@ -1257,13 +1277,21 @@ impl Process {
             }
         }
 
+        let mut view_selection = project_selection(
+            self.selection,
+            self.selection_offset,
+            offset,
+            num_lines as u16,
+            num_cols as u16,
+        );
+
         // If the buffer mutated under an active selection, the selection no
         // longer points at the same characters. Clear it (browser-style:
         // typing into a textarea drops the selection). Skip on `full` resyncs
         // (initial population) which mark every row as "changed".
         if self.copy_mode.is_none()
             && !full
-            && let Some(sel) = self.selection
+            && let Some(sel) = view_selection
             && changed_lines.iter().any(|(row, _)| {
                 let r = *row;
                 let lo = sel.start_row.min(sel.end_row);
@@ -1272,6 +1300,7 @@ impl Process {
             })
         {
             self.selection = None;
+            view_selection = None;
         }
 
         let copy_mode_cursor = self.copy_mode.as_ref().map(|cm| cm.cursor);
@@ -1280,7 +1309,7 @@ impl Process {
         let cursor_pos = copy_mode_cursor.unwrap_or(normal_cursor_pos);
         let cursor_moved = self.last_cursor != Some(cursor_pos);
 
-        let selection_changed = self.selection != self.last_selection;
+        let selection_changed = view_selection != self.last_selection;
         let copy_mode = self.copy_mode.is_some();
         let copy_mode_changed = self.last_viewport_copy_mode != Some(copy_mode);
 
@@ -1294,7 +1323,7 @@ impl Process {
             return;
         }
         self.last_cursor = Some(cursor_pos);
-        self.last_selection = self.selection;
+        self.last_selection = view_selection;
         self.last_viewport_copy_mode = Some(copy_mode);
 
         let scrolled_back = offset > 0;
@@ -1323,7 +1352,7 @@ impl Process {
             },
             cols: num_cols as u16,
             rows: num_lines as u16,
-            selection: self.selection,
+            selection: view_selection,
             copy_mode,
             full,
         };
@@ -1630,6 +1659,66 @@ fn cell_flags_to_u16(flags: CellFlags) -> u16 {
         f |= FLAG_INVERSE;
     }
     f
+}
+
+/// Re-project a selection stored in viewport coordinates (captured at
+/// `selection_offset`) into the current viewport frame at `current_offset`, so
+/// the highlight follows the content as the user scrolls. Rows are shifted by
+/// `current_offset - selection_offset` and clipped to `[0, rows)`. When a linear
+/// selection's endpoint scrolls off an edge, the now-interior visible row is
+/// extended to the full edge column so the frontend renders it as a middle row.
+/// Returns `None` when the selection is fully outside the viewport.
+fn project_selection(
+    sel: Option<TermSelectionRange>,
+    selection_offset: i32,
+    current_offset: i32,
+    rows: u16,
+    cols: u16,
+) -> Option<TermSelectionRange> {
+    let sel = sel?;
+    let delta = current_offset - selection_offset;
+    let max_row = rows.saturating_sub(1) as i32;
+    let max_col = cols.saturating_sub(1);
+    let sr = sel.start_row as i32 + delta;
+    let er = sel.end_row as i32 + delta;
+
+    if sel.is_block {
+        if sr.max(er) < 0 || sr.min(er) > max_row {
+            return None;
+        }
+        return Some(TermSelectionRange {
+            start_col: sel.start_col,
+            start_row: sr.clamp(0, max_row) as u16,
+            end_col: sel.end_col,
+            end_row: er.clamp(0, max_row) as u16,
+            is_block: true,
+        });
+    }
+
+    let ((mut top_row, mut top_col), (mut bot_row, mut bot_col)) =
+        if (sel.start_row, sel.start_col) <= (sel.end_row, sel.end_col) {
+            ((sr, sel.start_col), (er, sel.end_col))
+        } else {
+            ((er, sel.end_col), (sr, sel.start_col))
+        };
+    if bot_row < 0 || top_row > max_row {
+        return None;
+    }
+    if top_row < 0 {
+        top_row = 0;
+        top_col = 0;
+    }
+    if bot_row > max_row {
+        bot_row = max_row;
+        bot_col = max_col;
+    }
+    Some(TermSelectionRange {
+        start_col: top_col,
+        start_row: top_row as u16,
+        end_col: bot_col,
+        end_row: bot_row as u16,
+        is_block: false,
+    })
 }
 
 fn ansi_256_to_rgb(idx: u8) -> [u8; 3] {
@@ -2000,6 +2089,126 @@ mod tests {
             broadcast_patch,
             "scrollback scroll must broadcast a viewport patch so the frontend re-renders"
         );
+    }
+
+    #[test]
+    fn selection_tracks_scrollback_position() {
+        let (mut process, _captured) = capturing_process(12, 4);
+        let mut feed = Vec::new();
+        for i in 0..40 {
+            feed.extend_from_slice(format!("line{i}\r\n").as_bytes());
+        }
+        process.process_output_for_test(&feed);
+        assert_eq!(process.term.grid().display_offset(), 0);
+
+        process.set_selection(Some(TermSelectionRange {
+            start_col: 0,
+            start_row: 1,
+            end_col: 3,
+            end_row: 1,
+            is_block: false,
+        }));
+
+        let mut patches = process.subscribe();
+        process.handle_mouse_wheel(true, 0, 0, 0);
+        let offset = process.term.grid().display_offset() as u16;
+        process.kill();
+
+        assert!(
+            offset >= 1,
+            "wheel up should scroll into scrollback, got {offset}"
+        );
+
+        let broadcast_selection = std::iter::from_fn(|| patches.try_recv().ok())
+            .filter_map(|msg| match msg {
+                ServiceMessage::ViewportPatch { selection, .. } => Some(selection),
+                _ => None,
+            })
+            .last()
+            .expect("scroll should broadcast a viewport patch");
+
+        let sel = broadcast_selection.expect("selection should survive a scroll");
+        assert_eq!(
+            (sel.start_row, sel.end_row),
+            (1 + offset, 1 + offset),
+            "selection rows must follow content as it scrolls down the viewport"
+        );
+    }
+
+    #[test]
+    fn resize_to_same_dimensions_is_noop() {
+        let (mut process, _captured) = capturing_process(80, 24);
+        process.process_output_for_test(b"hello\r\n");
+
+        let mut patches = process.subscribe();
+        process.resize(80, 24);
+        process.process_output_for_test(b"");
+        process.kill();
+
+        let rebroadcast = std::iter::from_fn(|| patches.try_recv().ok())
+            .any(|m| matches!(m, ServiceMessage::ViewportPatch { .. }));
+        assert!(
+            !rebroadcast,
+            "resizing to the same dimensions must not force a viewport rebroadcast (spurious PTY SIGWINCH makes TUIs redraw)"
+        );
+    }
+
+    fn sel(
+        start_col: u16,
+        start_row: u16,
+        end_col: u16,
+        end_row: u16,
+        is_block: bool,
+    ) -> TermSelectionRange {
+        TermSelectionRange {
+            start_col,
+            start_row,
+            end_col,
+            end_row,
+            is_block,
+        }
+    }
+
+    #[test]
+    fn project_selection_shifts_rows_by_scroll_delta() {
+        let s = Some(sel(2, 1, 5, 1, false));
+        assert_eq!(project_selection(s, 0, 0, 10, 80), s);
+        let shifted = project_selection(s, 0, 3, 10, 80).unwrap();
+        assert_eq!((shifted.start_row, shifted.end_row), (4, 4));
+        assert_eq!((shifted.start_col, shifted.end_col), (2, 5));
+    }
+
+    #[test]
+    fn project_selection_clips_top_endpoint_to_full_row() {
+        let s = Some(sel(4, 1, 6, 3, false));
+        let p = project_selection(s, 5, 3, 10, 80).unwrap();
+        assert_eq!((p.start_row, p.start_col), (0, 0));
+        assert_eq!((p.end_row, p.end_col), (1, 6));
+    }
+
+    #[test]
+    fn project_selection_clips_bottom_endpoint_to_full_row() {
+        let s = Some(sel(4, 1, 6, 3, false));
+        let p = project_selection(s, 0, 1, 4, 80).unwrap();
+        assert_eq!((p.start_row, p.start_col), (2, 4));
+        assert_eq!((p.end_row, p.end_col), (3, 79));
+    }
+
+    #[test]
+    fn project_selection_none_when_fully_off_screen() {
+        let s = Some(sel(0, 1, 3, 1, false));
+        assert!(project_selection(s, 5, 0, 10, 80).is_none());
+        assert!(project_selection(s, 0, 20, 10, 80).is_none());
+        assert!(project_selection(None, 0, 0, 10, 80).is_none());
+    }
+
+    #[test]
+    fn project_selection_block_clamps_rows_keeps_cols() {
+        let s = Some(sel(2, 1, 7, 5, true));
+        let p = project_selection(s, 3, 0, 10, 80).unwrap();
+        assert_eq!((p.start_row, p.end_row), (0, 2));
+        assert_eq!((p.start_col, p.end_col), (2, 7));
+        assert!(p.is_block);
     }
 
     #[test]
