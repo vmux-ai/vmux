@@ -41,6 +41,8 @@ crossbeam-channel = "0.5"
 futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
+agent-client-protocol = "1.0.1"
+tokio-util = { version = "0.7", features = ["compat"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
