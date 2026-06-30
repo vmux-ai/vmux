@@ -2281,18 +2281,23 @@ fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
 
 /// Paste payload for an image file path. Vibe attaches a single-quoted path
 /// (it prepends its own `@` on paste; the quotes keep paths with spaces as one
-/// token); Claude Code and Codex auto-detect a bare path.
+/// token, with embedded `'` shell-escaped); Claude Code and Codex auto-detect a
+/// bare path.
 fn image_path_payload(is_vibe: bool, path: &str) -> String {
     if is_vibe {
-        format!("'{path}'")
+        format!("'{}'", path.replace('\'', "'\\''"))
     } else {
         path.to_string()
     }
 }
 
-/// Write clipboard PNG bytes to a per-process temp file and return its path.
+/// Write clipboard PNG bytes to a unique temp file and return its path. The
+/// per-paste sequence number prevents a later paste from overwriting an earlier
+/// one still pending delivery (e.g. several images in a boot-screen draft).
 fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::path::PathBuf> {
-    let path = std::env::temp_dir().join(format!("vmux-clip-{process_id}.png"));
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("vmux-clip-{process_id}-{seq}.png"));
     std::fs::write(&path, png).ok()?;
     Some(path)
 }
@@ -3619,6 +3624,10 @@ mod tests {
     fn image_path_payload_uses_vibe_attach_syntax() {
         assert_eq!(image_path_payload(true, "/tmp/a b.png"), "'/tmp/a b.png'");
         assert_eq!(image_path_payload(false, "/tmp/a b.png"), "/tmp/a b.png");
+        assert_eq!(
+            image_path_payload(true, "/tmp/bob's.png"),
+            "'/tmp/bob'\\''s.png'"
+        );
     }
 
     #[test]
