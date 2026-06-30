@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 
 use crate::AgentVariant;
+use crate::client::acp::AcpSession;
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::message::Message;
@@ -148,14 +149,22 @@ fn consume_page_agent_stream(
     mut snapshots: MessageReader<PageAgentSnapshot>,
     mut q: Query<(
         Entity,
-        &AgentSession,
         &mut AgentMessages,
         &mut AgentRunState,
+        Option<&AgentSession>,
+        Option<&AcpSession>,
     )>,
     mut commands: Commands,
 ) {
-    let by_sid: std::collections::HashMap<String, Entity> =
-        q.iter().map(|(e, s, _, _)| (s.sid.clone(), e)).collect();
+    let by_sid: std::collections::HashMap<String, Entity> = q
+        .iter()
+        .filter_map(|(e, _, _, page, acp)| {
+            let sid = page
+                .map(|s| s.sid.clone())
+                .or_else(|| acp.map(|s| s.sid.clone()))?;
+            Some((sid, e))
+        })
+        .collect();
 
     for delta in deltas.read() {
         if let Some(&entity) = by_sid.get(&delta.sid) {
@@ -167,7 +176,7 @@ fn consume_page_agent_stream(
     }
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
-            && let Ok((_, _, mut messages, _)) = q.get_mut(entity)
+            && let Ok((_, mut messages, _, _, _)) = q.get_mut(entity)
             && let Ok(parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
             messages.0 = parsed;
@@ -175,7 +184,7 @@ fn consume_page_agent_stream(
     }
     for status in statuses.read() {
         if let Some(&entity) = by_sid.get(&status.sid)
-            && let Ok((_, _, _, mut state)) = q.get_mut(entity)
+            && let Ok((_, _, mut state, _, _)) = q.get_mut(entity)
         {
             *state = match &status.status {
                 AgentRunStatus::Idle => AgentRunState::Idle,
@@ -190,7 +199,7 @@ fn consume_page_agent_stream(
         };
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
-        if let Ok((_, _, _, mut state)) = q.get_mut(entity) {
+        if let Ok((_, _, mut state, _, _)) = q.get_mut(entity) {
             *state = AgentRunState::AwaitingApproval {
                 call_id: approval.call_id.clone(),
                 name: approval.name.clone(),

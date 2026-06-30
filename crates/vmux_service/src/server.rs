@@ -63,6 +63,7 @@ pub async fn run_server(listener: UnixListener) {
     let pending_tool_calls: crate::agent_broker::PendingToolCalls =
         Arc::new(Mutex::new(HashMap::new()));
     let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
+    let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     init_started_at();
@@ -115,6 +116,7 @@ pub async fn run_server(listener: UnixListener) {
                 let pending_commands = Arc::clone(&pending_commands);
                 let pending_tool_calls = Arc::clone(&pending_tool_calls);
                 let agent_manager = Arc::clone(&agent_manager);
+                let acp_manager = Arc::clone(&acp_manager);
                 let shutdown_tx = shutdown_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(
@@ -126,6 +128,7 @@ pub async fn run_server(listener: UnixListener) {
                         pending_commands,
                         pending_tool_calls,
                         agent_manager,
+                        acp_manager,
                         shutdown_tx,
                     )
                     .await
@@ -214,6 +217,7 @@ async fn handle_client(
     pending_commands: PendingCommands,
     pending_tool_calls: crate::agent_broker::PendingToolCalls,
     agent_manager: Arc<Mutex<crate::agent::AgentSessionManager>>,
+    acp_manager: Arc<Mutex<crate::acp::AcpSessionManager>>,
     shutdown_tx: mpsc::Sender<()>,
 ) -> std::io::Result<()> {
     let (reader, writer) = stream.into_split();
@@ -726,10 +730,17 @@ async fn handle_client(
             }
 
             ClientMessage::AgentInput { sid, text } => {
-                agent_manager
-                    .lock()
-                    .await
-                    .input(&sid, crate::agent::SessionInput::User(text));
+                if acp_manager.lock().await.contains(&sid) {
+                    acp_manager
+                        .lock()
+                        .await
+                        .input(&sid, crate::acp::AcpInput::User(text));
+                } else {
+                    agent_manager
+                        .lock()
+                        .await
+                        .input(&sid, crate::agent::SessionInput::User(text));
+                }
             }
 
             ClientMessage::AgentApprove {
@@ -737,14 +748,25 @@ async fn handle_client(
                 call_id,
                 decision,
             } => {
-                agent_manager.lock().await.input(
-                    &sid,
-                    crate::agent::SessionInput::Approve { call_id, decision },
-                );
+                if acp_manager.lock().await.contains(&sid) {
+                    acp_manager
+                        .lock()
+                        .await
+                        .input(&sid, crate::acp::AcpInput::Approve { call_id, decision });
+                } else {
+                    agent_manager.lock().await.input(
+                        &sid,
+                        crate::agent::SessionInput::Approve { call_id, decision },
+                    );
+                }
             }
 
             ClientMessage::ClosePageAgent { sid } => {
-                agent_manager.lock().await.close(&sid);
+                if acp_manager.lock().await.contains(&sid) {
+                    acp_manager.lock().await.close(&sid);
+                } else {
+                    agent_manager.lock().await.close(&sid);
+                }
                 if let Some(handle) = page_agent_forwarders.remove(&sid) {
                     handle.abort();
                 }
@@ -758,8 +780,56 @@ async fn handle_client(
                 broker.resolve_tool(request_id, content, is_error).await;
             }
 
-            ClientMessage::SpawnAcpAgent { sid, .. } => {
-                tracing::warn!(%sid, "SpawnAcpAgent received before ACP dispatch is wired");
+            ClientMessage::SpawnAcpAgent {
+                sid,
+                agent_id: _,
+                command,
+                args,
+                env,
+                cwd,
+            } => {
+                acp_manager.lock().await.spawn(
+                    sid.clone(),
+                    command,
+                    args,
+                    env,
+                    std::path::PathBuf::from(cwd),
+                    Vec::new(),
+                );
+                // ACP has no separate Attach message; forward this session's stream now.
+                let rx = acp_manager.lock().await.subscribe(&sid);
+                if let Some(mut rx) = rx {
+                    if let Some(snapshot) = acp_manager.lock().await.snapshot(&sid) {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &snapshot)?;
+                    }
+                    if let Some(old) = page_agent_forwarders.remove(&sid) {
+                        old.abort();
+                    }
+                    let w = writer.clone();
+                    let handle = tokio::spawn(async move {
+                        loop {
+                            match rx.recv().await {
+                                Ok(msg) => {
+                                    let bytes = match rkyv::to_bytes::<rkyv::rancor::Error>(&msg) {
+                                        Ok(b) => b,
+                                        Err(_) => break,
+                                    };
+                                    let mut w = w.lock().await;
+                                    if crate::framing::write_raw_frame(&mut *w, &bytes)
+                                        .await
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                                Err(broadcast::error::RecvError::Closed) => break,
+                            }
+                        }
+                    });
+                    page_agent_forwarders.insert(sid, handle);
+                }
             }
         }
     }
