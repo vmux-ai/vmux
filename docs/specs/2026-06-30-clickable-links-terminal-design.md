@@ -5,22 +5,26 @@
 
 ## Goal
 
-Make URLs and file paths in terminal output clickable, like a normal terminal
-emulator (iTerm2/Kitty). Holding **cmd** highlights the link under the cursor;
-**cmd+click** opens it. Applies to both terminal panes and agent (vibe/codex)
-panes — they share `vmux_terminal/src/page.rs`.
+Make URLs and file paths in terminal output behave like web links. Plain hover
+highlights the link under the cursor; a plain click opens it. Applies to both
+terminal panes and agent (vibe/codex) panes — they share
+`vmux_terminal/src/page.rs`.
 
 ## Behavior (UX)
 
-- Hold **cmd** → any `http`/`https` URL or file path under the cursor underlines,
-  and the cursor becomes a pointer.
-- **cmd+click** on a highlighted link → opens it in a **new browser stack beside**
-  the current pane (`OpenCommand::InNewStack`):
+- **Hover** a `http`/`https` URL or file path → it underlines (in the theme accent
+  `var(--primary)`) and the cursor becomes a pointer. No modifier needed.
+- **Click** → opens it in a **new browser stack beside** the current pane
+  (`OpenCommand::InNewStack`):
   - URLs (`http(s)://…`) → web page.
   - File paths → `file://<abs>` → the vmux `file://` editor.
-- No cmd held → behavior unchanged: left-drag selects, mouse-reporting apps still
-  receive SGR mouse reports. `cmd`/`MOD_SUPER` is already never encoded into SGR
-  reports, so it is free for this app gesture.
+- Hovering/clicking elsewhere is unaffected: only the link's own columns are
+  interactive; selection and mouse-reporting work everywhere else.
+
+> Note: an earlier draft gated this behind **cmd** (cmd-hover / cmd+click). That
+> was dropped during implementation — plain hover/click is simpler and the
+> shipped behavior. The cmd path proved unreliable because this webview's
+> `mousemove` events carry an inconsistent modifier flag.
 
 ## Architecture
 
@@ -79,17 +83,22 @@ The service (`vmux_service`) always leaves `links` empty; the host fills it. No
 
 ### Page (render + intent only)
 
-`crates/vmux_terminal/src/page.rs`:
-- Store each row's `links` alongside its spans in the existing per-row signals.
-- Track cmd-held via the `META` modifier already read per mouse event
-  (`modifier_bits`, page.rs:666).
-- On `onmousemove` with `META`: find the `LinkRange` covering the hovered cell →
-  set a "hovered link" signal → render those cells underlined and set the
-  container cursor to pointer.
-- On `onmousedown`, left button, with `META`, over a link cell: emit
-  `TermLinkOpenRequest { url }` and **return early** — do not start selection or
-  forward a mouse event to the PTY.
-- Clear the highlight on `META` release / mouse leave.
+`crates/vmux_terminal/src/page.rs`: for each row, render one absolutely-positioned
+overlay div per `LinkRange`, sized to the link's columns via `--cw`:
+
+- **z-index:2** is required — `render_span` renders the text spans at `z-[1]`, so an
+  auto-z overlay would paint behind the glyphs and receive no pointer events
+  (renders but is dead to hover/click).
+- Hover highlight + pointer cursor come from **native CSS `:hover`** on the overlay
+  (`cursor:pointer` inline; underline via an injected stylesheet rule
+  `.vmux-link:hover{border-bottom:2px solid var(--primary)}`). CSS `:hover` is used
+  instead of a JS-tracked hover signal because the signal approach kept
+  flickering/clearing on this webview; CSS hover stays put while the pointer is
+  still. Tailwind `hover:`/`group-hover` variants did not reliably generate for
+  this page, hence the injected rule.
+- `onclick` emits `TermLinkOpenRequest { url }`; `onmousedown` only
+  `stop_propagation`/`prevent_default` so the open fires on click completion and
+  the terminal underneath doesn't start a selection.
 
 The page performs **no** URL/path detection — it only consumes pushed ranges.
 

@@ -495,6 +495,10 @@ fn TerminalRow(
                             onmousedown: move |e: Event<MouseData>| {
                                 e.stop_propagation();
                                 e.prevent_default();
+                            },
+                            onclick: move |e: Event<MouseData>| {
+                                e.stop_propagation();
+                                e.prevent_default();
                                 let _ = try_cef_bin_emit_rkyv(&TermLinkOpenRequest { url: url.clone() });
                             },
                         }
@@ -523,8 +527,6 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
         return;
     };
 
-    // Inject the link hover-underline rule once. Tailwind variant generation is
-    // unreliable for this page, so use a real stylesheet rule.
     if document.get_element_by_id("vmux-link-style").is_none()
         && let Ok(style_el) = document.create_element("style")
     {
