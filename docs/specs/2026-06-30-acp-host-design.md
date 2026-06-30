@@ -2,7 +2,7 @@
 
 - **Date:** 2026-06-30
 - **Status:** Approved (direction); spec under review
-- **Scope:** Milestones B + C (build + prove the host), then D (migrate the existing CLI agents to ACP, retire the bespoke path)
+- **Scope:** Milestones B + C (build + prove the host), then D (retire Page + Cli; vmux becomes ACP-only)
 - **Branch/worktree:** `feat/acp-host` / `.worktrees/acp-host`
 
 ## 1. Goal
@@ -19,16 +19,23 @@ an MCP sidecar (`AgentVariant::Cli`). Under the Zed model they instead run as AC
 (`@zed-industries/claude-code-acp`, `@zed-industries/codex-acp`, `vibe-acp`) driven over a real
 bidirectional protocol, and the bespoke machinery retires (Milestone D, §10).
 
-**Explicitly NOT in scope: the `Page` path** (Anthropic/OpenAI/Mistral provider-direct HTTP/SSE).
-That is vmux acting as its *own* agent — no external subprocess — analogous to Zed's native agent
-thread. It stays as-is; ACP is for external agents.
+**vmux is ACP-only.** There is no agent-integration taxonomy and no `AgentVariant`: every agent
+is an ACP agent, reached at `vmux://agent/<id>`. Both current paths retire — the `Cli` raw-PTY
+path **and** the `Page` provider-direct SSE loop (Anthropic/OpenAI/Mistral; vmux's own-agent
+analog of Zed's native thread). Provider chat re-enters as an ACP agent (vibe-acp /
+claude-code-acp / a provider→ACP adapter). **This plan (B+C) builds the host without touching
+Page/Cli;** the retirement is Milestone D once the host is proven.
+
+ACP sessions are identified by a dedicated **`AcpSession`** component (not a variant value); the
+old variant-carrying `components::AgentSession` belongs to Page/Cli and is removed in D.
 
 - **Milestone B** — agent-agnostic ACP-native host: `session/update` streaming,
   `request_permission`, fs read/write with editor diffs, terminal lifecycle → real panes.
 - **Milestone C** — layer the `vmux_mcp` toolset onto the ACP session (browser/editor/history
   tools) via `newSession.mcpServers`.
-- **Milestone D** — migrate claude/codex/vibe onto ACP by default and retire the `Cli` strategy
-  machinery, after B+C prove the host at runtime (§10).
+- **Milestone D** — migrate claude/codex/vibe onto ACP adapters and **retire both the `Cli` and
+  `Page` machinery + the `AgentVariant` enum** (vmux becomes ACP-only), after B+C prove the host
+  at runtime (§10).
 
 B + C are built together and sequenced so the tree compiles and runs at every step (§10); D
 follows once the host is proven.
@@ -93,8 +100,8 @@ exactly where `AgentSessionManager::run_session` already drives streaming LLM tu
 ```
 GUI process                                   vmux_service daemon
 -----------                                   -------------------
-AgentSession{variant:Acp}  --SpawnAcpAgent--> AcpSessionManager
-  (reuse Page components)                        ├─ spawn ACP subprocess (tokio::process)
+AcpSession{agent_id,sid,cwd} --SpawnAcpAgent-> AcpSessionManager
+  (+ reuse AgentMessages/RunState/Approval)      ├─ spawn ACP subprocess (tokio::process)
                                                  ├─ ByteStreams transport + Client.builder()
 PendingUserInput ----------AgentInput--------->  ├─ cx.send_request(Prompt/Initialize/NewSession)
 AgentApprovalReply --------AgentApprove------->  ├─ handlers: permission/fs/terminal
@@ -111,16 +118,20 @@ consume_page_agent_stream <--AgentDelta---------┘   (emits existing ServiceMes
 AgentMessagesSnapshot / AgentAwaitingApproval / AgentRunStatusChanged`. The existing pump in
 `vmux_terminal/src/plugin.rs:1280` already translates those into `PageAgent*` messages, and
 `consume_page_agent_stream` (`client/page/plugin.rs:144`) already updates `AgentMessages` /
-`AgentRunState`. The ACP path inherits all of it.
+`AgentRunState`. The ACP path inherits all of it. ACP entities carry `AgentMessages` /
+`AgentRunState` / `AgentApprovalPolicy` and register their `sid → entity` in the shared
+`AgentSessionToEntity` map so the consumer finds them; generalize the consumer's query if it
+hard-requires `components::AgentSession` (use `Or<(&AgentSession, &AcpSession)>` or a shared
+marker).
 
 ### Crate map
 
 | Crate | Change |
 |---|---|
 | `vmux_service` | **New** `AcpSessionManager` + ACP client (transport, handlers, projector); new `SpawnAcpAgent` ClientMessage + `AcpTerminalCreated`/`AcpProposedDiff` ServiceMessages; route `AgentInput`/`AgentApprove`/`ClosePageAgent` by sid to ACP when applicable |
-| `vmux_agent` | `AgentVariant::Acp`; `AcpAgentPlugin` (spawn/input/close systems mirroring Page); URL parse; ACP-aware approval routing; config loading |
+| `vmux_agent` | new `AcpSession` component; `AcpAgentPlugin` (spawn/input/close systems mirroring Page); URL parse `vmux://agent/<id>`; ACP-aware approval routing; config loading. **No `AgentVariant::Acp`** — ACP is not a variant |
 | `vmux_editor` | **New** proposed-edit diff overlay primitive (`ProposedEdit` component + `ProposedDiff*` wire events + accept/reject) |
-| `vmux_core` | `AgentKind::Acp`; shared `AcpAgentConfig` serde type; `agent.acp` settings section |
+| `vmux_core` | shared `AcpAgentConfig` serde type; `agent.acp` settings section; Bevy messages `AcpTerminalCreated`/`AcpProposedDiff` |
 | `vmux_cli` / `vmux_mcp` | tool-filter flag on the `vmux mcp` sidecar (`--omit-terminal-tools`) for scope C |
 
 No new workspace crate (project rule). Shared contracts go through `vmux_core` serde types.
@@ -142,21 +153,21 @@ No new workspace crate (project rule). Shared contracts go through `vmux_core` s
         args: ["-y", "@zed-industries/claude-code-acp@latest"]),
        (id: "gemini", name: "Gemini CLI (ACP)", command: "npx",
         args: ["-y", "--", "@google/gemini-cli@latest", "--experimental-acp"]),
-       (id: "vibe-acp", name: "Vibe (ACP)", command: "uv",
-        args: ["run", "--directory", "<vibe-dir>", "vibe-acp"]),
      ],
    )
    ```
    `AcpAgentConfig { id, name, command, args, env: Vec<(String,String)>, cwd: Option<PathBuf> }`
-   in `vmux_core`.
-2. **URL.** `vmux://agent/acp/<agent-id>` (new) or `vmux://agent/acp/<agent-id>/<sid>` (resume).
-   Extend `AgentVariant::{as,from}_url_segment` with `"acp"` (`variant.rs:12`) and `AgentUrl`
-   parsing (`url.rs`).
-3. **Attach pane.** Reuse `attach_page_agent_to_stack` to insert
-   `components::AgentSession { kind: AgentKind::Acp, variant: Acp, sid, provider: agent-id, model: "" }`,
-   `AgentMessages`, `AgentApprovalPolicy`, `AgentRunState::default()`. The agent pane is the
-   **same Page chat UI** (it renders `AgentMessages`/`AgentRunState`).
-4. **Spawn.** `Added<AgentSession>` with `variant == Acp` → `spawn_acp_session_on_add` →
+   in `vmux_core`. Only npx-spawnable agents are seeded (zero setup); `vibe-acp` is added by the
+   user since its `uv run --directory <vibe-dir>` path is machine-specific.
+2. **URL.** `vmux://agent/<agent-id>` (new) or `vmux://agent/<agent-id>/<sid>` (resume). **No
+   `/acp/` segment** — every `vmux://agent/<id>` is ACP. `AgentUrl` parsing (`url.rs`): `<id>`
+   resolves against the `agent.acp` config ids (precedence over the legacy Page/Cli forms, which
+   are removed in D).
+3. **Attach pane.** Insert a dedicated **`AcpSession { agent_id, sid, cwd }`** component plus the
+   reused `AgentMessages`, `AgentApprovalPolicy`, `AgentRunState::default()`; register `sid →
+   entity` in `AgentSessionToEntity`. The agent pane is the **same chat UI** (it renders
+   `AgentMessages`/`AgentRunState`). No `AgentVariant`, no `AgentKind`.
+4. **Spawn.** `Added<AcpSession>` → `spawn_acp_session_on_add` →
    `ClientMessage::SpawnAcpAgent { sid, agent_id, command, args, env, cwd }`. Daemon spawns
    subprocess → `initialize` (advertise caps) → mint an **anchor `ProcessId`** → build
    `mcp_servers` itself from that anchor (§9) → `session/new(cwd, mcp_servers)` → store
@@ -289,13 +300,15 @@ Projector (§5) → existing `AgentDelta`/`AgentMessagesSnapshot` → existing p
 - Existing pump → `AgentRunState::AwaitingApproval` + `commands.trigger(AgentApprovalRequest)`.
 - Page chat shows allow/allow-always/deny buttons → `AgentApprovalReply { session, call_id, decision }`.
 - **ACP-aware approval routing.** `approval.rs:handle_approval_reply` (`systems/approval.rs:9`)
-  branches on `session.variant`: for `Acp`, send `ClientMessage::AgentApprove { sid, call_id,
-  decision }` (reusing the wire) instead of resuming an SSE turn. `AllowAlways` still records the
-  tool name in `AgentApprovalPolicy.auto` (unchanged).
-- Daemon maps `ApprovalDecision` → `PermissionOptionId` by matching `PermissionOptionKind`
-  from the stored request options:
-  `Allow → AllowOnce`, `AllowAlways → AllowAlways`, `Deny → RejectOnce` (fallback to
-  `RejectAlways`/`Cancelled` if absent). Resolves `pending_perms[call_id]`; handler returns
+  branches on the presence of `AcpSession` on the entity: for ACP, send
+  `ClientMessage::AgentApprove { sid, call_id, decision }` (reusing the wire) instead of resuming
+  an SSE turn. `AllowAlways` still records the tool name in `AgentApprovalPolicy.auto`; a small
+  ACP system auto-replies `Allow` when an incoming `AgentApprovalRequest.name ∈ policy.auto`
+  (the ACP agent re-asks each time).
+- The **wire `ApprovalDecision` is `Allow`/`Deny` only** (`AllowAlways` collapses to `Allow` at
+  `approval.rs:30`). Daemon maps it → `PermissionOptionId` by `PermissionOptionKind`:
+  `Allow → AllowOnce` (fallback `AllowAlways`), `Deny → RejectOnce` (fallback `RejectAlways`),
+  else first option. Resolves `pending_perms[call_id]`; handler returns
   `RequestPermissionResponse::new(Selected(SelectedPermissionOutcome::new(option_id)))`.
 
 ### 7.3 fs read/write
@@ -374,9 +387,10 @@ Each step compiles + runs.
    `SpawnAcpAgent`; `initialize` + `session/new` + serial `prompt`; projector for
    message/thought/tool-call → `AgentDelta`/`AgentMessagesSnapshot`. Smoke: `npx claude-code-acp`
    (point a temporary spawn at it) streams into the chat.
-2. **Variant + plugin + URL + config.** `AgentVariant::Acp`, `AgentKind::Acp`, `agent.acp`
-   settings + built-in defaults, `AcpAgentPlugin` (`spawn_acp_session_on_add` / `send_acp_input`
-   / `close_acp_session_on_remove`), attach via `attach_page_agent_to_stack`. Launchable from URL.
+2. **AcpSession + plugin + URL + config.** new `AcpSession` component, `agent.acp` settings +
+   built-in defaults, `AcpAgentPlugin` (`spawn_acp_session_on_add` / `send_acp_input` /
+   `close_acp_session_on_remove`), URL `vmux://agent/<id>` attaches an `AcpSession`. Launchable
+   from URL. (No `AgentVariant`/`AgentKind` changes.)
 3. **Permission.** `request_permission` → `AwaitingApproval` → `approval.rs` (ACP branch) →
    daemon resolves the RPC.
 4. **Terminal.** `create/output/wait/kill/release` → daemon process API + `AcpTerminalCreated`
@@ -387,28 +401,32 @@ Each step compiles + runs.
    browser/editor/history tools reach panes.
 7. **Validate.** End-to-end `npx claude-code-acp`, then `vibe-acp`.
 
-### Milestone D — migrate external CLI agents to ACP (follow-on, after B+C proven)
+### Milestone D — retire Page + Cli; vmux becomes ACP-only (follow-on, after B+C proven)
 
-The Zed end-state: claude/codex/vibe are ACP agents, not raw-PTY CLIs.
+End-state: every agent is an ACP agent. claude/codex/vibe run as ACP adapters; provider chat
+runs as an ACP agent too.
 
-1. **Default the three agents to ACP adapters.** `claude` → `@zed-industries/claude-code-acp`,
-   `codex` → `@zed-industries/codex-acp`, `vibe` → `vibe-acp` (the built-in `agent.acp` entries
-   from §4 already name these). Point `vmux://agent/claude` (etc.) at the ACP variant.
-2. **Retire the `Cli` path.** Remove `CliAgentStrategy` + `vibe.rs`/`claude.rs`/`codex.rs`
-   strategy impls, session-log discovery (`discover_session`/`detect_end_time`, `~/.vibe/logs`
-   scraping), the filesystem hooks (`hooks.toml`, `vmux notify-file-touch`), and the dead
-   `AgentVariant::Cli` arms. The `vmux mcp --anchor` sidecar **stays** — it is now the ACP tool
-   channel (§9), no longer the CLI's only callback.
-3. **Reconcile `AgentKind`.** `Vibe`/`Claude`/`Codex` remain as identities but resolve to ACP
-   adapter configs rather than raw executables; the `executable()`/`TerminalKind` conversions for
-   the retired PTY path go away.
-4. **UX shift (intended).** These agents move from a raw CLI TUI in a terminal to vmux's native
-   chat + diff + terminal panes — the ACP/Zed agent-panel experience. No raw-PTY escape hatch is
-   kept (full migration, per decision).
+1. **Provide ACP entries for all agents.** `claude` → `@zed-industries/claude-code-acp`,
+   `codex` → `@zed-industries/codex-acp`, `vibe` → `vibe-acp`; provider chat (Anthropic/OpenAI/
+   Mistral) → a provider→ACP adapter agent (or the vendor's own adapter). All become `agent.acp`
+   entries; `vmux://agent/<id>` resolves to them.
+2. **Retire the `Cli` path.** Remove `CliAgentStrategy` + `vibe.rs`/`claude.rs`/`codex.rs` impls,
+   session-log discovery (`discover_session`/`detect_end_time`, `~/.vibe/logs`), the filesystem
+   hooks (`hooks.toml`, `vmux notify-file-touch`). The `vmux mcp --anchor` sidecar **stays** — it
+   is now the ACP tool channel (§9).
+3. **Retire the `Page` path.** Remove the provider plugins (`anthropic_plugin`/`openai_plugin`/
+   `mistral_plugin`/`echo_plugin`), `client/page/*`, the `vmux_service` SSE `run_session` loop,
+   and `components::AgentSession`'s Page usage. The streaming/approval/projector plumbing reused
+   by ACP stays.
+4. **Delete `AgentVariant`** and the `kind`/`variant` fields once Page/Cli are gone; `AgentKind`
+   collapses (or is removed) since identity is the `agent.acp` id. Fold `AgentMessages` /
+   `AgentRunState` / `AgentApprovalPolicy` onto `AcpSession` as the sole agent-session shape.
+5. **UX shift (intended).** Agents move from raw CLI TUIs / bespoke chat to vmux's native
+   chat + diff + terminal panes (the ACP/Zed agent-panel experience). No escape hatch kept.
 
-Sequencing rationale: B+C ship a working host with the adapters as additive `agent.acp` entries;
-D flips defaults and deletes the old machinery **only after** the ACP path is runtime-proven, so
-no working integration is removed before its replacement is validated.
+Sequencing rationale: B+C ship a working host with ACP agents as additive entries; D deletes the
+old machinery **only after** the ACP path is runtime-proven, so no working integration is removed
+before its replacement is validated.
 
 ## 11. Testing
 
@@ -440,9 +458,14 @@ observable behavior", "workspace test before push", "finish then test").
   builder runs handlers concurrently with the input loop (each is an independent future) so a
   pending approval never deadlocks `prompt`.
 - **CEF rebuild cost** for the new dep — expected, warm the target dir.
-- **`AgentKind::Acp` ripple.** Adding the variant touches `all()` arity, `executable()`,
-  `display_name()`, `From<AgentKind> for TerminalKind`, URL segments (`vmux_core/src/agent.rs`).
-  `executable()` returns the per-config command, not a fixed binary.
+- **`AcpSession` vs the Page stream consumer.** `consume_page_agent_stream` currently keys on
+  `components::AgentSession`. ACP entities use `AcpSession` + the shared `AgentMessages`/
+  `AgentRunState`; register them in `AgentSessionToEntity` and generalize the consumer's query
+  (`Or<(&AgentSession, &AcpSession)>` or a shared marker) so it drives ACP entities too. Verify
+  the chat page renders from `AgentMessages` (not `AgentSession`).
+- **URL disambiguation during transition.** `vmux://agent/<id>` (ACP) must take precedence over
+  the legacy `agent/<provider>/<model>` (Page) parse until D removes the latter — match `<id>`
+  against `agent.acp` config ids first.
 
 ## 13. Out of scope (future)
 
