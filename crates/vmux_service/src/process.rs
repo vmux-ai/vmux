@@ -1566,7 +1566,10 @@ fn build_line<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32)
             grid_cols: span_grid_cols,
         });
     }
-    TermLine { spans }
+    TermLine {
+        spans,
+        links: Vec::new(),
+    }
 }
 
 fn color_to_term_color(color: &Color) -> TermColor {
