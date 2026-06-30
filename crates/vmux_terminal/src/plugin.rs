@@ -347,6 +347,7 @@ impl Plugin for TerminalPlugin {
                 TermResizeEvent,
                 TermMouseEvent,
                 TermKeyEvent,
+                TermLinkOpenRequest,
             )>::for_hosts(&["terminal"]))
             .add_systems(
                 PreUpdate,
@@ -377,6 +378,7 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
             .add_observer(on_term_key)
+            .add_observer(on_term_link_open)
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed)
             .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
@@ -1341,6 +1343,10 @@ fn poll_service_messages(
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
+                        let mut changed_lines = changed_lines;
+                        for (_, line) in changed_lines.iter_mut() {
+                            crate::link::annotate_links(line, None);
+                        }
                         let patch = TermViewportPatch {
                             changed_lines,
                             cursor,
@@ -1402,12 +1408,16 @@ fn poll_service_messages(
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
+                        let mut changed_lines: Vec<(u16, TermLine)> = lines
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, l)| (i as u16, l))
+                            .collect();
+                        for (_, line) in changed_lines.iter_mut() {
+                            crate::link::annotate_links(line, None);
+                        }
                         let patch = TermViewportPatch {
-                            changed_lines: lines
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, l)| (i as u16, l))
-                                .collect(),
+                            changed_lines,
                             cursor,
                             cols,
                             rows,
@@ -2909,6 +2919,33 @@ fn on_term_mouse(
     }
 }
 
+/// Open a URL or file the user cmd+clicked in the terminal, in a new stack
+/// beside the current pane. Mirrors the web-shortcut dispatch in `on_term_key`.
+fn on_term_link_open(
+    trigger: On<BinReceive<TermLinkOpenRequest>>,
+    mut app_commands: MessageWriter<AppCommand>,
+    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    user_q: Query<Entity, With<vmux_core::team::User>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    let url = trigger.payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+        url: Some(url),
+    }));
+    let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
+    issued.write(vmux_command::CommandIssued {
+        caller,
+        command: cmd.clone(),
+    });
+    app_commands.write(cmd);
+    if let Some(proxy) = proxy.as_ref() {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+    }
+}
+
 fn on_term_key(
     trigger: On<BinReceive<TermKeyEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -3670,6 +3707,46 @@ mod tests {
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    #[test]
+    fn term_link_open_emits_browser_open_command() {
+        #[derive(Resource, Default)]
+        struct Captured(Vec<AppCommand>);
+        fn capture(mut r: MessageReader<AppCommand>, mut c: ResMut<Captured>) {
+            for m in r.read() {
+                c.0.push(m.clone());
+            }
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AppCommand>()
+            .add_message::<vmux_command::CommandIssued>()
+            .init_resource::<Captured>()
+            .add_observer(on_term_link_open)
+            .add_systems(Update, capture);
+        let webview = app.world_mut().spawn(vmux_core::team::User).id();
+
+        app.world_mut().trigger(BinReceive::<TermLinkOpenRequest> {
+            webview,
+            payload: TermLinkOpenRequest {
+                url: "https://vmux.ai".into(),
+            },
+        });
+        app.update();
+
+        let captured = app.world().resource::<Captured>();
+        assert!(
+            captured.0.iter().any(|c| matches!(
+                c,
+                AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                    url: Some(u),
+                })) if u == "https://vmux.ai"
+            )),
+            "expected InNewStack open command, got {:?}",
+            captured.0
+        );
     }
 
     fn test_settings() -> AppSettings {

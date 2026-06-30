@@ -139,7 +139,6 @@ pub fn Page() -> Element {
     let mut last_mouse_cell = use_signal(|| (-1i32, -1i32));
     // Accumulated wheel delta (pixels) not yet converted into scroll notches.
     let mut wheel_accum = use_signal(|| 0.0f64);
-
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
         setup_measurement(cell_dims);
@@ -483,6 +482,29 @@ fn TerminalRow(
                     style: "left:calc(var(--cw, 1ch) * {sel_start});width:calc(var(--cw, 1ch) * {sel_end - sel_start});background:rgba(255,255,255,0.25);",
                 }
             }
+            for link in line.links.iter() {
+                {
+                    let url = link.url.clone();
+                    let start = link.start_col;
+                    let width = link.end_col - link.start_col + 1;
+                    rsx! {
+                        div {
+                            key: "lnk-{start}",
+                            class: "vmux-link absolute top-0 bottom-0",
+                            style: "left:calc(var(--cw, 1ch) * {start});width:calc(var(--cw, 1ch) * {width});z-index:2;cursor:pointer;",
+                            onmousedown: move |e: Event<MouseData>| {
+                                e.stop_propagation();
+                                e.prevent_default();
+                            },
+                            onclick: move |e: Event<MouseData>| {
+                                e.stop_propagation();
+                                e.prevent_default();
+                                let _ = try_cef_bin_emit_rkyv(&TermLinkOpenRequest { url: url.clone() });
+                            },
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -504,6 +526,17 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
         return;
     };
+
+    if document.get_element_by_id("vmux-link-style").is_none()
+        && let Ok(style_el) = document.create_element("style")
+    {
+        let _ = style_el.set_attribute("id", "vmux-link-style");
+        let style_node: &web_sys::Node = style_el.as_ref();
+        style_node.set_text_content(Some(
+            ".vmux-link:hover{border-bottom:2px solid var(--primary)}",
+        ));
+        let _ = container.append_child(&style_el);
+    }
 
     // Create hidden measurement span (80 monospace characters).
     let measure: web_sys::Element = document.create_element("span").unwrap();

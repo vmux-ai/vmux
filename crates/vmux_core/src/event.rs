@@ -8,6 +8,7 @@ pub const TERM_VIEWPORT_EVENT: &str = "term_viewport";
 pub const TERM_KEY_EVENT: &str = "term_key";
 pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
+pub const TERM_LINK_OPEN_EVENT: &str = "term_link_open";
 
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
@@ -915,6 +916,30 @@ pub struct TermSelectionRange {
 )]
 pub struct TermLine {
     pub spans: Vec<TermSpan>,
+    /// Clickable URL/path ranges in this row, in column coordinates.
+    /// Computed by the host; the service always leaves this empty.
+    #[serde(default)]
+    pub links: Vec<LinkRange>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct LinkRange {
+    /// First column of the link (0-based, inclusive).
+    pub start_col: u16,
+    /// Last column of the link (0-based, inclusive).
+    pub end_col: u16,
+    /// Ready-to-open target: `http(s)://…`, `data:…`, or `file://…`.
+    pub url: String,
 }
 
 #[derive(
@@ -1089,6 +1114,23 @@ pub struct TermMouseEvent {
     /// true when this is a motion event (drag if button<3, move if button==3)
     #[serde(default)]
     pub moving: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Serialize,
+    Deserialize,
+    Default,
+    PartialEq,
+    Eq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TermLinkOpenRequest {
+    /// Ready-to-open target resolved by the host (http(s)://, data:, file://).
+    pub url: String,
 }
 
 #[derive(
