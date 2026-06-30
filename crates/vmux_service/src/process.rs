@@ -2043,6 +2043,39 @@ mod tests {
     }
 
     #[test]
+    fn scroll_changes_top_row_content() {
+        let (mut process, _cap) = capturing_process(20, 10);
+        let mut feed = Vec::new();
+        for i in 0..40 {
+            feed.extend_from_slice(format!("L{i:02}\r\n").as_bytes());
+        }
+        process.process_output_for_test(&feed);
+        assert_eq!(process.term.grid().display_offset(), 0);
+
+        let row_text = |line: &TermLine| -> String {
+            line.spans
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        };
+        let before = row_text(&build_line(&process.term, 0, 0));
+        for _ in 0..5 {
+            process.handle_mouse_wheel(true, 0, 0, 0);
+        }
+        let offset = process.term.grid().display_offset() as i32;
+        let after = row_text(&build_line(&process.term, 0, offset));
+        process.kill();
+
+        assert!(offset >= 1, "expected scrollback, offset={offset}");
+        assert_ne!(
+            before, after,
+            "top row should show older content after scrolling up; before={before:?} after={after:?}"
+        );
+    }
+
+    #[test]
     fn mouse_wheel_in_alt_screen_app_cursor_sends_ss3_arrows() {
         let (mut process, captured) = capturing_process(12, 8);
         process.process_output_for_test(b"\x1b[?1049h\x1b[?1h");
