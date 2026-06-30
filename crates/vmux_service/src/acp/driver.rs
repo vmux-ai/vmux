@@ -10,10 +10,10 @@ use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, CreateTerminalRequest, InitializeRequest,
     KillTerminalRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
-    PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionNotification, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest,
-    WriteTextFileRequest,
+    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionNotification, TerminalOutputRequest, TextContent,
+    WaitForTerminalExitRequest, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use tokio::process::Command;
@@ -102,6 +102,8 @@ pub async fn run(
     let perm_shared = shared.clone();
     let update_shared = shared.clone();
     let main_shared = shared.clone();
+    let read_cwd = shared.cwd.clone();
+    let write_cwd = shared.cwd.clone();
 
     let result = Client
         .builder()
@@ -142,14 +144,24 @@ pub async fn run(
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: ReadTextFileRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: fs/read_text_file not yet implemented")
+            async move |req: ReadTextFileRequest,
+                        responder: Responder<ReadTextFileResponse>,
+                        _cx| {
+                match read_text_file(&read_cwd, &req) {
+                    Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: WriteTextFileRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: fs/write_text_file not yet implemented")
+            async move |req: WriteTextFileRequest,
+                        responder: Responder<WriteTextFileResponse>,
+                        _cx| {
+                match write_text_file(&write_cwd, &req) {
+                    Ok(()) => responder.respond(WriteTextFileResponse::new()),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -290,6 +302,50 @@ fn pick_permission_option(
         .map(|option| option.option_id.clone())
 }
 
+/// Resolve an ACP fs path against the session cwd, rejecting traversal and anything outside
+/// the session root (ACP sends absolute paths).
+fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    abs.starts_with(cwd).then_some(abs)
+}
+
+fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
+    if line.is_none() && limit.is_none() {
+        return text.to_string();
+    }
+    let start = line.unwrap_or(1).saturating_sub(1) as usize;
+    let lines: Vec<&str> = text.lines().collect();
+    let end = limit
+        .map(|l| start.saturating_add(l as usize).min(lines.len()))
+        .unwrap_or(lines.len());
+    lines.get(start..end).unwrap_or(&[]).join("\n")
+}
+
+fn read_text_file(cwd: &std::path::Path, req: &ReadTextFileRequest) -> Result<String, String> {
+    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(slice_lines(&text, req.line, req.limit))
+}
+
+fn write_text_file(cwd: &std::path::Path, req: &WriteTextFileRequest) -> Result<(), String> {
+    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+    }
+    std::fs::write(&path, &req.content).map_err(|e| format!("write {}: {e}", path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +385,25 @@ mod tests {
                 .to_string(),
             "aa"
         );
+    }
+
+    #[test]
+    fn resolve_in_cwd_rejects_escape() {
+        let cwd = std::path::Path::new("/work");
+        assert_eq!(
+            resolve_in_cwd(cwd, std::path::Path::new("/work/a.rs")),
+            Some(PathBuf::from("/work/a.rs"))
+        );
+        assert!(resolve_in_cwd(cwd, std::path::Path::new("/etc/passwd")).is_none());
+        assert!(resolve_in_cwd(cwd, std::path::Path::new("/work/../etc/passwd")).is_none());
+    }
+
+    #[test]
+    fn slice_lines_honors_line_and_limit() {
+        let text = "a\nb\nc\nd";
+        assert_eq!(slice_lines(text, None, None), "a\nb\nc\nd");
+        assert_eq!(slice_lines(text, Some(2), None), "b\nc\nd");
+        assert_eq!(slice_lines(text, Some(2), Some(2)), "b\nc");
+        assert_eq!(slice_lines(text, Some(10), Some(2)), "");
     }
 }
