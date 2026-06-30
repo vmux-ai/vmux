@@ -94,8 +94,9 @@ The page performs **no** URL/path detection — it only consumes pushed ranges.
 ### Open routing (host)
 
 New event (rkyv + serde + `const TERM_LINK_OPEN_EVENT: &str`), registered with the
-bin emitter `for_hosts(&[...])` mirroring `TermMouseEvent`'s host list (terminal +
-agent):
+bin emitter `for_hosts(&["terminal"])` — same as `TermMouseEvent`. (Live terminals,
+including agent CLI panes, all load `vmux://terminal/`, so the `"terminal"` host
+covers both; `vmux://agent/…` is only the setup/Page-agent placeholder.)
 
 ```rust
 pub struct TermLinkOpenRequest { pub url: String }
