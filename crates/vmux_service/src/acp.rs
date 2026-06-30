@@ -2,6 +2,8 @@
 //! agents run as spawned subprocesses driven over JSON-RPC, surfaced through vmux's native
 //! panes.
 
+mod projector;
+
 #[allow(dead_code, unused_variables, unused_imports)]
 mod api_lock {
     use agent_client_protocol::schema::ProtocolVersion;
