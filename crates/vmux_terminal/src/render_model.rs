@@ -18,7 +18,7 @@ fn effective_colors(span: &TermSpan) -> (&TermColor, &TermColor) {
 pub fn span_classes(span: &TermSpan) -> String {
     let mut classes = Vec::new();
 
-    let (fg, bg) = effective_colors(span);
+    let (fg, _) = effective_colors(span);
 
     match fg {
         TermColor::Default => {
@@ -27,16 +27,6 @@ pub fn span_classes(span: &TermSpan) -> String {
             }
         }
         TermColor::Indexed(i) => classes.push(format!("text-ansi-{i}")),
-        TermColor::Rgb(..) => {}
-    }
-
-    match bg {
-        TermColor::Default => {
-            if span.flags & FLAG_INVERSE != 0 {
-                classes.push("bg-term-fg".into());
-            }
-        }
-        TermColor::Indexed(i) => classes.push(format!("bg-ansi-{i}")),
         TermColor::Rgb(..) => {}
     }
 
@@ -62,13 +52,10 @@ pub fn span_classes(span: &TermSpan) -> String {
 pub fn span_inline_style(span: &TermSpan) -> String {
     let mut parts = Vec::new();
 
-    let (fg, bg) = effective_colors(span);
+    let (fg, _) = effective_colors(span);
 
     if let TermColor::Rgb(r, g, b) = fg {
         parts.push(format!("color:rgb({r},{g},{b})"));
-    }
-    if let TermColor::Rgb(r, g, b) = bg {
-        parts.push(format!("background:rgb({r},{g},{b})"));
     }
 
     parts.join(";")
@@ -221,5 +208,29 @@ mod tests {
 
         assert!(overlay.class.contains("bg-ansi-4"));
         assert!(overlay.style.contains("width:calc(var(--cw, 1ch) * 80)"));
+    }
+
+    #[test]
+    fn rgb_background_renders_only_in_overlay() {
+        let span = TermSpan {
+            text: "selected".into(),
+            bg: TermColor::Rgb(32, 80, 160),
+            ..TermSpan::default()
+        };
+
+        assert!(!span_inline_style(&span).contains("background:"));
+        assert!(span_background_overlay(&span).is_some());
+    }
+
+    #[test]
+    fn indexed_background_renders_only_in_overlay() {
+        let span = TermSpan {
+            text: "selected".into(),
+            bg: TermColor::Indexed(4),
+            ..TermSpan::default()
+        };
+
+        assert!(!span_classes(&span).contains("bg-ansi-4"));
+        assert!(span_background_overlay(&span).is_some());
     }
 }
