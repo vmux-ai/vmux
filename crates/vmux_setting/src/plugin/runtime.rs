@@ -101,6 +101,9 @@ pub struct AgentSettings {
     /// `file://` follow-pane beside that agent.
     #[serde(default = "default_true")]
     pub follow_files: bool,
+    /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
+    #[serde(default = "default_acp_agents")]
+    pub acp: Vec<AcpAgentConfig>,
 }
 
 impl Default for AgentSettings {
@@ -117,7 +120,52 @@ fn default_agent_settings() -> AgentSettings {
             models: vec!["echo".to_string()],
         }],
         follow_files: true,
+        acp: default_acp_agents(),
     }
+}
+
+/// One external ACP agent the host can spawn. Identity is `id`; the binary is
+/// `command` + `args` (e.g. `npx -y @zed-industries/claude-code-acp@latest`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AcpAgentConfig {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<(String, String)>,
+    #[serde(default)]
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+fn default_acp_agents() -> Vec<AcpAgentConfig> {
+    vec![
+        AcpAgentConfig {
+            id: "claude-code-acp".to_string(),
+            name: "Claude Code (ACP)".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@zed-industries/claude-code-acp@latest".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+        },
+        AcpAgentConfig {
+            id: "gemini".to_string(),
+            name: "Gemini CLI (ACP)".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "--".to_string(),
+                "@google/gemini-cli@latest".to_string(),
+                "--experimental-acp".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+        },
+    ]
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1043,6 +1091,25 @@ fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_agent_config_parses() {
+        let cfg: AcpAgentConfig = ron::from_str(
+            r#"(id: "vibe-acp", name: "Vibe", command: "uv", args: ["run", "vibe-acp"])"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.id, "vibe-acp");
+        assert_eq!(cfg.command, "uv");
+        assert!(cfg.env.is_empty());
+        assert_eq!(cfg.cwd, None);
+    }
+
+    #[test]
+    fn agent_settings_default_seeds_acp_agents() {
+        let agent = AgentSettings::default();
+        assert!(agent.acp.iter().any(|c| c.id == "claude-code-acp"));
+        assert!(agent.acp.iter().any(|c| c.id == "gemini"));
+    }
 
     fn base_settings() -> AppSettings {
         AppSettings {
