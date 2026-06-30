@@ -75,6 +75,8 @@ fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
         })
         .ok()?;
 
+    let reader = pair.master.try_clone_reader().ok()?;
+
     let mut cmd = CommandBuilder::new(shell);
     cmd.args(&args);
     for (key, value) in std::env::vars() {
@@ -86,11 +88,10 @@ fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
     }
 
     let mut child = pair.slave.spawn_command(cmd).ok()?;
-    let reader = pair.master.try_clone_reader().ok()?;
     drop(pair.slave);
 
     let (tx, rx) = mpsc::channel();
-    std::thread::Builder::new()
+    if std::thread::Builder::new()
         .name("login-shell-env-capture".to_string())
         .spawn(move || {
             let mut reader = reader;
@@ -98,7 +99,12 @@ fn capture_via_pty(shell: &str) -> Option<Vec<(String, String)>> {
             let _ = reader.read_to_end(&mut buf);
             let _ = tx.send(buf);
         })
-        .ok()?;
+        .is_err()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
 
     let bytes = match rx.recv_timeout(CAPTURE_TIMEOUT) {
         Ok(buf) => buf,
@@ -273,7 +279,6 @@ mod tests {
 
     #[test]
     fn extract_env_finds_marker_with_prompt_prefix() {
-        // An interactive shell may print a prompt on the same line as the marker.
         let raw = format!("host% {ENV_BEGIN}\nKEY=val\n{ENV_END}\n");
         assert_eq!(
             extract_env_between_sentinels(raw.as_bytes()),
