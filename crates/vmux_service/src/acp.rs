@@ -4,8 +4,8 @@
 
 #[allow(dead_code, unused_variables, unused_imports)]
 mod api_lock {
-    use agent_client_protocol::schema::v1::*;
     use agent_client_protocol::schema::ProtocolVersion;
+    use agent_client_protocol::schema::v1::*;
     use agent_client_protocol::{Client, ConnectTo};
 
     async fn shape<T: ConnectTo<Client>>(transport: T) -> agent_client_protocol::Result<()> {

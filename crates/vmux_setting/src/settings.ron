@@ -59,5 +59,11 @@
             (provider: "stub", kind: "vibe", models: ["echo"]),
         ],
         follow_files: true,
+        acp: [
+            (id: "claude-code-acp", name: "Claude Code (ACP)", command: "npx",
+             args: ["-y", "@zed-industries/claude-code-acp@latest"]),
+            (id: "gemini", name: "Gemini CLI (ACP)", command: "npx",
+             args: ["-y", "--", "@google/gemini-cli@latest", "--experimental-acp"]),
+        ],
     ),
 )
