@@ -54,10 +54,11 @@ struct OsMenuResource {
     _menu: Menu,
     interactive_mode: Option<InteractiveModeMenuItems>,
     close_window: Option<MenuItem>,
-    /// Native `NSMenuItem`s for Cut/Copy/Paste/Select All, retained so
-    /// [`sync_clipboard_menu_items`] can enable/disable them per focused pane.
+    /// Native `NSMenuItem`s for the Edit menu's standard editing actions
+    /// (Undo/Redo/Cut/Copy/Paste/Select All), retained so [`sync_edit_menu_items`]
+    /// can enable/disable them per focused pane.
     #[cfg(target_os = "macos")]
-    clipboard_items: Vec<Retained<NSMenuItem>>,
+    edit_items: Vec<Retained<NSMenuItem>>,
 }
 
 struct InteractiveModeMenuItems {
@@ -95,7 +96,7 @@ impl Plugin for OsMenuPlugin {
                 ),
             );
         #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_clipboard_menu_items.after(ReadAppCommands));
+        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
     }
 }
 
@@ -109,7 +110,7 @@ fn setup(world: &mut World) {
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
     #[cfg(target_os = "macos")]
-    let clipboard_items = collect_clipboard_menu_items();
+    let edit_items = collect_edit_menu_items();
 
     // Native CEF views hold keyboard focus, so app shortcuts arrive as menu key-equivalents.
     // `forward_menu_events` only drains on a Bevy tick; with the loop idle that's ~1s late. Wake the
@@ -130,7 +131,7 @@ fn setup(world: &mut World) {
         interactive_mode,
         close_window,
         #[cfg(target_os = "macos")]
-        clipboard_items,
+        edit_items,
     });
 }
 
@@ -143,7 +144,7 @@ fn setup(world: &mut World) {
 /// auto-validation keeps the items enabled and `[NSApp.mainMenu performKeyEquivalent:]` consumes
 /// ⌘C/⌘V before the view's `keyDown:`. That is correct for browser pages, but it steals the
 /// keystrokes from terminal panes, whose own handlers (`vmux_terminal::on_term_key` /
-/// `handle_terminal_keyboard`) implement clipboard against the PTY. [`sync_clipboard_menu_items`]
+/// `handle_terminal_keyboard`) implement clipboard against the PTY. [`sync_edit_menu_items`]
 /// disables these items while a terminal is focused so the keys fall through to the page.
 fn append_standard_edit_menu(menu: &Menu) {
     use muda::{PredefinedMenuItem, Submenu};
@@ -165,21 +166,30 @@ fn append_standard_edit_menu(menu: &Menu) {
     let _ = menu.append(&edit);
 }
 
-/// Find the live Cut/Copy/Paste/Select All `NSMenuItem`s in the app's main menu and turn OFF the
-/// containing submenu's `autoenablesItems`, so [`sync_clipboard_menu_items`] can drive their enabled
-/// state directly. Without disabling auto-validation, AppKit would re-enable `copy:`/`paste:`
-/// whenever a CEF view (which answers those selectors) is first responder, defeating the gate.
+/// Find the live Undo/Redo/Cut/Copy/Paste/Select All `NSMenuItem`s in the app's main menu and turn
+/// OFF the containing submenu's `autoenablesItems`, so [`sync_edit_menu_items`] can drive their
+/// enabled state directly. Without disabling auto-validation, AppKit would re-enable these standard
+/// editing selectors whenever a CEF view (which answers them) is first responder, defeating the gate.
+/// Undo/Redo are gated alongside the clipboard items so ⌘Z/⌘⇧Z also fall through to a focused
+/// terminal rather than being swallowed by the now-manually-managed submenu.
 ///
 /// Must run on the main thread, after the menu is installed via `Menu::init_for_nsapp`.
 #[cfg(target_os = "macos")]
-fn collect_clipboard_menu_items() -> Vec<Retained<NSMenuItem>> {
+fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
     let Some(mtm) = MainThreadMarker::new() else {
         return Vec::new();
     };
     let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
         return Vec::new();
     };
-    let actions: [Sel; 4] = [sel!(cut:), sel!(copy:), sel!(paste:), sel!(selectAll:)];
+    let actions: [Sel; 6] = [
+        sel!(undo:),
+        sel!(redo:),
+        sel!(cut:),
+        sel!(copy:),
+        sel!(paste:),
+        sel!(selectAll:),
+    ];
     let mut items = Vec::new();
     for top in 0..main_menu.numberOfItems() {
         let Some(submenu) = main_menu.itemAtIndex(top).and_then(|item| item.submenu()) else {
@@ -205,20 +215,21 @@ fn collect_clipboard_menu_items() -> Vec<Retained<NSMenuItem>> {
     items
 }
 
-/// Whether the standard Edit-menu clipboard items should be enabled for the current focus.
+/// Whether the standard Edit-menu items (Undo/Redo/Cut/Copy/Paste/Select All) should be enabled for
+/// the current focus.
 ///
 /// They are disabled only when a terminal owns focus ([`HostFocusIntent::WinitHost`]) so ⌘C/⌘V/⌘X/⌘A
-/// fall through to the terminal's own key handling. Web pages, the command bar, and the idle state
-/// keep the native items enabled.
+/// (and ⌘Z) fall through to the terminal's own key handling. Web pages, the command bar, and the idle
+/// state keep the native items enabled.
 #[cfg(target_os = "macos")]
-fn clipboard_menu_items_enabled(intent: HostFocusIntent) -> bool {
+fn edit_menu_items_enabled(intent: HostFocusIntent) -> bool {
     !matches!(intent, HostFocusIntent::WinitHost)
 }
 
-/// Drive the Cut/Copy/Paste/Select All items' enabled state from [`HostFocusIntent`] so terminal
-/// panes receive their own ⌘C/⌘V while browser/web inputs keep native clipboard behavior.
+/// Drive the Edit-menu items' enabled state from [`HostFocusIntent`] so terminal panes receive their
+/// own ⌘C/⌘V/⌘Z while browser/web inputs keep native edit behavior.
 #[cfg(target_os = "macos")]
-fn sync_clipboard_menu_items(
+fn sync_edit_menu_items(
     menu: Option<NonSend<OsMenuResource>>,
     intent: Option<Res<HostFocusIntent>>,
 ) {
@@ -231,8 +242,8 @@ fn sync_clipboard_menu_items(
     let Some(menu) = menu else {
         return;
     };
-    let enabled = clipboard_menu_items_enabled(*intent);
-    for item in &menu.clipboard_items {
+    let enabled = edit_menu_items_enabled(*intent);
+    for item in &menu.edit_items {
         item.setEnabled(enabled);
     }
 }
@@ -418,15 +429,15 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn clipboard_items_disabled_only_for_terminal_focus() {
+    fn edit_items_disabled_only_for_terminal_focus() {
         assert!(
-            !clipboard_menu_items_enabled(HostFocusIntent::WinitHost),
+            !edit_menu_items_enabled(HostFocusIntent::WinitHost),
             "terminal focus must release ⌘C/⌘V to the terminal's own handler"
         );
-        assert!(clipboard_menu_items_enabled(HostFocusIntent::Windowed(
+        assert!(edit_menu_items_enabled(HostFocusIntent::Windowed(
             Entity::PLACEHOLDER
         )));
-        assert!(clipboard_menu_items_enabled(HostFocusIntent::Unmanaged));
+        assert!(edit_menu_items_enabled(HostFocusIntent::Unmanaged));
     }
 
     fn test_settings() -> AppSettings {

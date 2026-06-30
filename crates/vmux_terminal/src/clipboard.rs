@@ -20,22 +20,23 @@ pub fn read_blocking() -> Option<String> {
     read_inner()
 }
 
-/// Whether the system clipboard currently holds image data (PNG/TIFF).
+/// Whether the system clipboard currently holds PNG image data.
 ///
 /// On ⌘V in a terminal this decides whether to forward `Ctrl+V` (`0x16`) so the
 /// focused agent CLI grabs the image from the pasteboard itself, instead of a
-/// text paste. Returns `false` where no pasteboard image query is available.
+/// text paste. Scoped to PNG so it stays consistent with [`read_image_png`] (the
+/// Vibe/boot-draft paths extract PNG); returns `false` otherwise.
 pub fn has_image() -> bool {
     has_image_inner()
 }
 
 #[cfg(target_os = "macos")]
 fn has_image_inner() -> bool {
-    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypePNG};
     use objc2_foundation::NSArray;
-    let image_types = unsafe { NSArray::from_slice(&[NSPasteboardTypePNG, NSPasteboardTypeTIFF]) };
+    let png_type = unsafe { NSArray::from_slice(&[NSPasteboardTypePNG]) };
     NSPasteboard::generalPasteboard()
-        .availableTypeFromArray(&image_types)
+        .availableTypeFromArray(&png_type)
         .is_some()
 }
 
