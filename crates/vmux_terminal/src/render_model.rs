@@ -233,4 +233,16 @@ mod tests {
         assert!(!span_classes(&span).contains("bg-ansi-4"));
         assert!(span_background_overlay(&span).is_some());
     }
+
+    #[test]
+    fn inverse_default_background_renders_only_in_overlay() {
+        let span = TermSpan {
+            text: "selected".into(),
+            flags: FLAG_INVERSE,
+            ..TermSpan::default()
+        };
+
+        assert!(!span_classes(&span).contains("bg-term-fg"));
+        assert!(span_background_overlay(&span).is_some());
+    }
 }
