@@ -20,6 +20,8 @@ pub mod component;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod launch;
 #[cfg(not(target_arch = "wasm32"))]
+mod link;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pid;
 
 #[cfg(not(target_arch = "wasm32"))]
