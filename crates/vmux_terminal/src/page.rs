@@ -141,6 +141,9 @@ pub fn Page() -> Element {
     let mut wheel_accum = use_signal(|| 0.0f64);
     // (row, start_col, end_col) of the link highlighted under a cmd-hover.
     let mut hover_link = use_signal(|| None::<(u16, u16, u16)>);
+    // Last grid cell under the pointer; lets key events recompute the hover
+    // without waiting for a mouse move.
+    let mut hover_cell = use_signal(|| None::<(u16, u16)>);
 
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
@@ -220,8 +223,15 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
+                let held = e.modifiers().contains(Modifiers::META);
+                recompute_hover(&rows, held, *hover_cell.peek(), &mut hover_link);
                 e.prevent_default();
                 emit_key(&e);
+            },
+
+            onkeyup: move |e: Event<KeyboardData>| {
+                let held = e.modifiers().contains(Modifiers::META);
+                recompute_hover(&rows, held, *hover_cell.peek(), &mut hover_link);
             },
 
             onmouseup: move |e: Event<MouseData>| {
@@ -232,6 +242,9 @@ pub fn Page() -> Element {
             },
 
             onmouseleave: move |_| {
+                if hover_cell.peek().is_some() {
+                    hover_cell.set(None);
+                }
                 if hover_link.peek().is_some() {
                     hover_link.set(None);
                 }
@@ -240,23 +253,23 @@ pub fn Page() -> Element {
             onmousemove: move |e: Event<MouseData>| {
                 let dims = cell_dims();
                 if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
+                    let mods = modifier_bits(&e);
+                    let held = mods & MOD_SUPER != 0;
+                    // Update hover highlight on every move (not gated by the PTY
+                    // motion throttle), so it stays in sync within a cell too.
+                    if *hover_cell.peek() != Some((col, row)) {
+                        hover_cell.set(Some((col, row)));
+                    }
+                    recompute_hover(&rows, held, Some((col, row)), &mut hover_link);
+                    // Targeting a link: swallow the motion instead of reporting it.
+                    if held && hover_link.peek().is_some() {
+                        return;
+                    }
                     let last = last_mouse_cell();
                     if col as i32 == last.0 && row as i32 == last.1 {
                         return;
                     }
                     last_mouse_cell.set((col as i32, row as i32));
-                    let mods = modifier_bits(&e);
-                    if mods & MOD_SUPER != 0 {
-                        let next = link_at(&rows, col, row).map(|(s, end, _)| (row, s, end));
-                        if *hover_link.peek() != next {
-                            hover_link.set(next);
-                        }
-                        if next.is_some() {
-                            return;
-                        }
-                    } else if hover_link.peek().is_some() {
-                        hover_link.set(None);
-                    }
                     let btn = held_button_id(&e);
                     emit_mouse(btn, col, row, mods, true, true);
                 }
@@ -690,6 +703,25 @@ fn link_at(rows: &Signal<Vec<Signal<TermLine>>>, col: u16, row: u16) -> Option<(
         .iter()
         .find(|l| col >= l.start_col && col <= l.end_col)
         .map(|l| (l.start_col, l.end_col, l.url.clone()))
+}
+
+/// Derive the hover highlight from the current cmd-held state and pointer cell,
+/// updating `hover_link` only when it changes. Driven by both mouse and key
+/// events so the highlight tracks cmd press/release without needing a move.
+fn recompute_hover(
+    rows: &Signal<Vec<Signal<TermLine>>>,
+    cmd_held: bool,
+    cell: Option<(u16, u16)>,
+    hover_link: &mut Signal<Option<(u16, u16, u16)>>,
+) {
+    let next = if cmd_held {
+        cell.and_then(|(col, row)| link_at(rows, col, row).map(|(s, e, _)| (row, s, e)))
+    } else {
+        None
+    };
+    if *hover_link.peek() != next {
+        hover_link.set(next);
+    }
 }
 
 /// Map Dioxus trigger_button to terminal protocol button number.
