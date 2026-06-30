@@ -60,9 +60,11 @@
         ],
         follow_files: true,
         acp: [
-            (id: "claude-code-acp", name: "Claude Code (ACP)", command: "npx",
+            (id: "claude", name: "Claude Code", command: "npx",
              args: ["-y", "@zed-industries/claude-code-acp@latest"]),
-            (id: "gemini", name: "Gemini CLI (ACP)", command: "npx",
+            (id: "codex", name: "Codex", command: "npx",
+             args: ["-y", "@zed-industries/codex-acp@latest"]),
+            (id: "gemini", name: "Gemini CLI", command: "npx",
              args: ["-y", "--", "@google/gemini-cli@latest", "--experimental-acp"]),
         ],
     ),

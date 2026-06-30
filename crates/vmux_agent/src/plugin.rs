@@ -2286,6 +2286,24 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         None => {
+            // ACP agents own the canonical single-segment names (claude/codex/…), shadowing
+            // the legacy CLI path for those ids.
+            if segs.len() == 1
+                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
+            {
+                clear_stack_children(task.stack, children_q, commands);
+                let sid = uuid::Uuid::new_v4().to_string();
+                attach_acp_agent_to_stack(
+                    task.stack,
+                    &cfg.id,
+                    &sid,
+                    default_cwd,
+                    commands,
+                    meshes,
+                    webview_mt,
+                );
+                return Ok(());
+            }
             if segs.len() == 1
                 && let Some(kind) = AgentKind::from_url_segment(segs[0])
             {
@@ -2302,22 +2320,6 @@ fn handle_agent_page_open_task(
                         initial_prompt: None,
                     });
                 }
-                return Ok(());
-            }
-            if segs.len() == 1
-                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
-            {
-                clear_stack_children(task.stack, children_q, commands);
-                let sid = uuid::Uuid::new_v4().to_string();
-                attach_acp_agent_to_stack(
-                    task.stack,
-                    &cfg.id,
-                    &sid,
-                    default_cwd,
-                    commands,
-                    meshes,
-                    webview_mt,
-                );
                 return Ok(());
             }
             if segs.len() == 2 {
@@ -3263,6 +3265,9 @@ mod tests {
     #[test]
     fn missing_claude_or_codex_cli_shows_setup_page() {
         for (kind, segment) in [(AgentKind::Claude, "claude"), (AgentKind::Codex, "codex")] {
+            // Isolate the legacy CLI path: ACP now shadows claude/codex single-segment URLs.
+            let mut settings = test_settings();
+            settings.agent.acp.clear();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
@@ -3270,7 +3275,7 @@ mod tests {
                 .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
                 ])))
-                .insert_resource(test_settings())
+                .insert_resource(settings)
                 .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .add_systems(
@@ -3337,6 +3342,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut settings = test_settings();
+        // Isolate the legacy CLI path: ACP now shadows the `claude` single-segment URL.
+        settings.agent.acp.clear();
         settings.spaces.insert(
             "space-1".into(),
             vmux_setting::SpaceOverrides {

@@ -172,8 +172,8 @@ pub struct AcpAgentConfig {
 fn default_acp_agents() -> Vec<AcpAgentConfig> {
     vec![
         AcpAgentConfig {
-            id: "claude-code-acp".to_string(),
-            name: "Claude Code (ACP)".to_string(),
+            id: "claude".to_string(),
+            name: "Claude Code".to_string(),
             command: "npx".to_string(),
             args: vec![
                 "-y".to_string(),
@@ -183,8 +183,19 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             cwd: None,
         },
         AcpAgentConfig {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@zed-industries/codex-acp@latest".to_string(),
+            ],
+            env: vec![],
+            cwd: None,
+        },
+        AcpAgentConfig {
             id: "gemini".to_string(),
-            name: "Gemini CLI (ACP)".to_string(),
+            name: "Gemini CLI".to_string(),
             command: "npx".to_string(),
             args: vec![
                 "-y".to_string(),
@@ -1137,8 +1148,12 @@ mod tests {
     #[test]
     fn agent_settings_default_seeds_acp_agents() {
         let agent = AgentSettings::default();
-        assert!(agent.acp.iter().any(|c| c.id == "claude-code-acp"));
-        assert!(agent.acp.iter().any(|c| c.id == "gemini"));
+        for id in ["claude", "codex", "gemini"] {
+            assert!(
+                agent.acp.iter().any(|c| c.id == id),
+                "missing acp agent {id}"
+            );
+        }
     }
 
     fn base_settings() -> AppSettings {
