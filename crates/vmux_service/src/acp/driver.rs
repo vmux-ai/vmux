@@ -9,10 +9,11 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, CreateTerminalRequest, InitializeRequest,
-    KillTerminalRequest, McpServer, NewSessionRequest, PromptRequest, ReadTextFileRequest,
-    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SessionNotification, TerminalOutputRequest, TextContent,
-    WaitForTerminalExitRequest, WriteTextFileRequest,
+    KillTerminalRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
+    PromptRequest, ReadTextFileRequest, ReleaseTerminalRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionNotification, TerminalOutputRequest, TextContent, WaitForTerminalExitRequest,
+    WriteTextFileRequest,
 };
 use agent_client_protocol::{Client, Responder};
 use tokio::process::Command;
@@ -108,11 +109,35 @@ pub async fn run(
             async move |req: RequestPermissionRequest,
                         responder: Responder<RequestPermissionResponse>,
                         _cx| {
-                // STUB — real allow/deny round-trip lands in the permission task.
-                let _ = (&perm_shared, req);
-                responder.respond(RequestPermissionResponse::new(
-                    RequestPermissionOutcome::Cancelled,
-                ))
+                let call_id = req.tool_call.tool_call_id.to_string();
+                let name = req.tool_call.fields.title.clone().unwrap_or_default();
+                let args_json = req
+                    .tool_call
+                    .fields
+                    .raw_input
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                perm_shared.emit(ServiceMessage::AgentAwaitingApproval {
+                    sid: perm_shared.sid.clone(),
+                    call_id: call_id.clone(),
+                    name,
+                    args_json,
+                });
+                let (tx, rx) = oneshot::channel();
+                perm_shared
+                    .pending_perms
+                    .lock()
+                    .unwrap()
+                    .insert(call_id, tx);
+                let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
+                let outcome = match pick_permission_option(&req.options, decision) {
+                    Some(id) => {
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
+                    }
+                    None => RequestPermissionOutcome::Cancelled,
+                };
+                responder.respond(RequestPermissionResponse::new(outcome))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -244,5 +269,65 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");
+    }
+}
+
+/// Maps a host decision (the wire `Allow`/`Deny`) onto an ACP permission option, preferring the
+/// one-shot kind, then the always-kind, then the first option offered.
+fn pick_permission_option(
+    options: &[PermissionOption],
+    decision: ApprovalDecision,
+) -> Option<PermissionOptionId> {
+    use agent_client_protocol::schema::v1::PermissionOptionKind as Kind;
+    let preferred: &[Kind] = match decision {
+        ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
+        ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
+    };
+    preferred
+        .iter()
+        .find_map(|kind| options.iter().find(|option| &option.kind == kind))
+        .or_else(|| options.first())
+        .map(|option| option.option_id.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_client_protocol::schema::v1::PermissionOptionKind;
+
+    fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
+        PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[test]
+    fn pick_permission_option_prefers_once_then_first() {
+        let opts = vec![
+            opt("once", PermissionOptionKind::AllowOnce),
+            opt("always", PermissionOptionKind::AllowAlways),
+            opt("rej", PermissionOptionKind::RejectOnce),
+        ];
+        assert_eq!(
+            pick_permission_option(&opts, ApprovalDecision::Allow)
+                .unwrap()
+                .to_string(),
+            "once"
+        );
+        assert_eq!(
+            pick_permission_option(&opts, ApprovalDecision::Deny)
+                .unwrap()
+                .to_string(),
+            "rej"
+        );
+
+        let always_only = vec![
+            opt("aa", PermissionOptionKind::AllowAlways),
+            opt("ra", PermissionOptionKind::RejectAlways),
+        ];
+        assert_eq!(
+            pick_permission_option(&always_only, ApprovalDecision::Allow)
+                .unwrap()
+                .to_string(),
+            "aa"
+        );
     }
 }
