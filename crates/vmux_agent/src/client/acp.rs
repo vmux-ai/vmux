@@ -8,7 +8,8 @@ use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
 use vmux_setting::AppSettings;
 
-use crate::components::PendingUserInput;
+use crate::components::{AgentApprovalPolicy, PendingUserInput};
+use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 
 /// Marks a stack entity as an ACP agent session. vmux is ACP-only, so this is the agent
 /// identity (there is no `AgentVariant`/`AgentKind` for ACP).
@@ -24,7 +25,28 @@ pub struct AcpAgentPlugin;
 impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, (spawn_acp_session_on_add, send_acp_input))
-            .add_observer(close_acp_session_on_remove);
+            .add_observer(close_acp_session_on_remove)
+            .add_observer(auto_allow_acp_approval);
+    }
+}
+
+/// ACP agents re-request permission every time, so "allow always" must be answered by the host:
+/// if the tool name is already in this session's auto-policy, reply `Allow` without prompting.
+fn auto_allow_acp_approval(
+    trigger: On<AgentApprovalRequest>,
+    policies: Query<&AgentApprovalPolicy, With<AcpSession>>,
+    mut commands: Commands,
+) {
+    let request = trigger.event();
+    let Ok(policy) = policies.get(request.session) else {
+        return;
+    };
+    if policy.auto.contains(&request.name) {
+        commands.trigger(AgentApprovalReply {
+            session: request.session,
+            call_id: request.call_id.clone(),
+            decision: ApprovalDecision::Allow,
+        });
     }
 }
 
