@@ -3225,12 +3225,16 @@ pub fn handle_terminal_font_size(
             continue;
         };
         let name = terminal.default_theme.clone();
-        let Some(idx) = terminal.themes.iter().position(|t| t.name == name) else {
-            tracing::warn!(
-                "terminal font size: default theme '{name}' not in themes; cannot persist"
-            );
-            continue;
+        let idx = match terminal.themes.iter().position(|t| t.name == name) {
+            Some(idx) => idx,
+            None => {
+                let resolved = terminal.resolve_theme(&name);
+                let terminal = settings.terminal.as_mut().unwrap();
+                terminal.themes.push(resolved);
+                terminal.themes.len() - 1
+            }
         };
+        let terminal = settings.terminal.as_mut().unwrap();
         let cur = terminal.themes[idx].font_size;
         let new = match cmd {
             TerminalFontSizeCommand::Increase => (cur + 1.0).min(40.0),
@@ -3240,7 +3244,7 @@ pub fn handle_terminal_font_size(
         if new == cur {
             continue;
         }
-        settings.terminal.as_mut().unwrap().themes[idx].font_size = new;
+        terminal.themes[idx].font_size = new;
         saves.write(SettingsSaveRequest);
     }
 }
@@ -4944,6 +4948,46 @@ mod tests {
             .drain()
             .count();
         (size, saves)
+    }
+
+    #[test]
+    fn font_size_materializes_missing_default_theme() {
+        use bevy::ecs::message::Messages;
+        let mut settings = test_settings();
+        settings.terminal = Some(vmux_setting::TerminalSettings {
+            default_theme: "default".to_string(),
+            themes: Vec::new(),
+            ..Default::default()
+        });
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .add_message::<TerminalFontSizeCommand>()
+            .add_message::<SettingsSaveRequest>()
+            .add_systems(Update, handle_terminal_font_size);
+        app.world_mut()
+            .resource_mut::<Messages<TerminalFontSizeCommand>>()
+            .write(TerminalFontSizeCommand::Increase);
+        app.update();
+
+        let terminal = app
+            .world()
+            .resource::<AppSettings>()
+            .terminal
+            .clone()
+            .unwrap();
+        let theme = terminal
+            .themes
+            .iter()
+            .find(|t| t.name == "default")
+            .expect("missing default theme must be materialized so zoom persists");
+        assert_eq!(theme.font_size, 15.0);
+        let saves = app
+            .world_mut()
+            .resource_mut::<Messages<SettingsSaveRequest>>()
+            .drain()
+            .count();
+        assert_eq!(saves, 1);
     }
 
     #[test]
