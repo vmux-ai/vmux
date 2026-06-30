@@ -787,14 +787,28 @@ async fn handle_client(
                 args,
                 env,
                 cwd,
+                anchor: _,
+                mcp_command,
+                mcp_args,
             } => {
+                let mcp_servers = mcp_command
+                    .map(|cmd| {
+                        vec![agent_client_protocol::schema::v1::McpServer::Stdio(
+                            agent_client_protocol::schema::v1::McpServerStdio::new(
+                                "vmux",
+                                std::path::PathBuf::from(cmd),
+                            )
+                            .args(mcp_args),
+                        )]
+                    })
+                    .unwrap_or_default();
                 acp_manager.lock().await.spawn(
                     sid.clone(),
                     command,
                     args,
                     env,
                     std::path::PathBuf::from(cwd),
-                    Vec::new(),
+                    mcp_servers,
                 );
                 // ACP has no separate Attach message; forward this session's stream now.
                 let rx = acp_manager.lock().await.subscribe(&sid);
