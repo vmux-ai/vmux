@@ -53,6 +53,8 @@ pub mod variant;
 pub use vmux_service::{http, message, stream};
 
 #[cfg(not(target_arch = "wasm32"))]
+pub use client::acp::{AcpAgentPlugin, AcpSession};
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::cli::strategy::CliAgentStrategy;
 #[cfg(not(target_arch = "wasm32"))]
 pub use client::page::plugin::PageAgentPlugin;

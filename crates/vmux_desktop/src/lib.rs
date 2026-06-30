@@ -143,6 +143,7 @@ impl Plugin for VmuxPlugin {
             .add_plugins((
                 AgentPlugin,
                 vmux_agent::PageAgentPlugin,
+                vmux_agent::AcpAgentPlugin,
                 PersistencePlugin,
                 LayoutPlugin,
                 updater::VmuxUpdater::builder().build().plugin(),

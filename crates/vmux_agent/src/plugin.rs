@@ -281,6 +281,38 @@ pub fn attach_page_agent_to_stack(
     Some(())
 }
 
+pub fn attach_acp_agent_to_stack(
+    stack: Entity,
+    agent_id: &str,
+    sid: &str,
+    cwd: &std::path::Path,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    commands.entity(stack).insert(PageMetadata {
+        url: format!("vmux://agent/{agent_id}"),
+        title: agent_id.to_string(),
+        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+        ..default()
+    });
+    commands.entity(stack).insert((
+        crate::client::acp::AcpSession {
+            agent_id: agent_id.to_string(),
+            sid: sid.to_string(),
+            cwd: cwd.to_path_buf(),
+        },
+        crate::AgentMessages::default(),
+        crate::AgentApprovalPolicy::default(),
+        crate::AgentRunState::default(),
+    ));
+    let placeholder = page_agent_placeholder_url(agent_id, "acp", sid);
+    commands.spawn((
+        vmux_layout::Browser::new(meshes, webview_mt, &placeholder),
+        ChildOf(stack),
+    ));
+}
+
 pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     let html = format!(
         "<!doctype html><html><head><meta charset='utf-8'><title>Page Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>Page Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the Page agent design.</p></div></body></html>"
@@ -1732,6 +1764,7 @@ fn handle_agent_page_open(
             &mut meshes,
             &mut webview_mt,
             &default_cwd,
+            &settings.agent.acp,
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -1756,6 +1789,7 @@ fn handle_agent_page_open_task(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
+    acp_configs: &[vmux_setting::AcpAgentConfig],
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -1842,6 +1876,22 @@ fn handle_agent_page_open_task(
                         initial_prompt: None,
                     });
                 }
+                return Ok(());
+            }
+            if segs.len() == 1
+                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
+            {
+                clear_stack_children(task.stack, children_q, commands);
+                let sid = uuid::Uuid::new_v4().to_string();
+                attach_acp_agent_to_stack(
+                    task.stack,
+                    &cfg.id,
+                    &sid,
+                    default_cwd,
+                    commands,
+                    meshes,
+                    webview_mt,
+                );
                 return Ok(());
             }
             if segs.len() == 2 {
