@@ -862,12 +862,52 @@ pub struct PendingTerminalInput {
     pub data: Vec<u8>,
 }
 
-/// Marker: the terminal's process has produced output at least once (i.e. the
-/// shell has drawn its prompt). Used to defer flushing [`PendingTerminalInput`]
-/// until the shell is reading input, so a `run` command isn't raw-echoed above
-/// the prompt before the shell renders it.
+/// Marker: the terminal's shell has drawn its prompt and is reading input. Used
+/// to defer flushing [`PendingTerminalInput`] until then, so a `run` command
+/// isn't raw-echoed above the prompt before the shell renders it. Readiness is
+/// decided by [`shell_readiness`], which distinguishes the prompt from earlier
+/// pre-prompt output (e.g. a node-version banner).
 #[derive(Component)]
 struct ShellOutputSeen;
+
+/// Marker: the terminal has produced pre-prompt output (a line whose cursor
+/// rested at column 0, e.g. a banner) but the prompt itself isn't up yet. The
+/// next content then counts as the prompt even at column 0, so a
+/// newline-terminated prompt can't stall [`PendingTerminalInput`] delivery.
+#[derive(Component)]
+struct ShellContentSeen;
+
+/// Readiness implied by a viewport update for gating [`PendingTerminalInput`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShellReadiness {
+    /// No content yet — keep waiting.
+    Pending,
+    /// Content seen, but it looks like pre-prompt output (cursor at column 0).
+    ContentOnly,
+    /// The prompt is up — safe to deliver buffered input.
+    Ready,
+}
+
+/// Decide shell readiness from a viewport update. `has_content` is whether any
+/// updated line carries non-whitespace, `cursor_col` is the cursor column after
+/// the update, and `content_seen` is whether earlier output already arrived.
+///
+/// A shell that prints a banner (e.g. fnm `Using Node vX`) before drawing its
+/// prompt would trip a naive "any output" check on the banner, so a `run`
+/// command gets raw-echoed above the prompt. A drawn prompt leaves the cursor
+/// after the prompt string (`cursor_col > 0`); a banner line ends in a newline
+/// (cursor at column 0). Once any content has been seen, the next content counts
+/// even at column 0 so newline-terminated prompts can't stall delivery.
+fn shell_readiness(has_content: bool, cursor_col: u16, content_seen: bool) -> ShellReadiness {
+    if !has_content {
+        return ShellReadiness::Pending;
+    }
+    if cursor_col > 0 || content_seen {
+        ShellReadiness::Ready
+    } else {
+        ShellReadiness::ContentOnly
+    }
+}
 
 /// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
@@ -1230,8 +1270,15 @@ fn poll_service_messages(
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
     output_seen: Query<(), With<ShellOutputSeen>>,
+    content_seen: Query<(), With<ShellContentSeen>>,
 ) {
     let Some(service) = service else { return };
+
+    // Entities that received pre-prompt content earlier in *this* drain. The
+    // `ShellContentSeen` insert below is deferred until end-of-system, so this
+    // bridges the gap when a banner and a (column-0) prompt arrive in one drain.
+    let mut content_seen_this_tick: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
 
     // Handle pending creates — send CreateProcess, wait for ProcessCreated
     // response which will carry the real process ID. Throttle by in-flight count
@@ -1315,10 +1362,21 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
-                        if !output_seen.contains(entity)
-                            && changed_lines.iter().any(|(_, l)| line_has_content(l))
-                        {
-                            commands.entity(entity).insert(ShellOutputSeen);
+                        if !output_seen.contains(entity) {
+                            let has_content =
+                                changed_lines.iter().any(|(_, l)| line_has_content(l));
+                            let seen = content_seen.contains(entity)
+                                || content_seen_this_tick.contains(&entity);
+                            match shell_readiness(has_content, cursor.col, seen) {
+                                ShellReadiness::Ready => {
+                                    commands.entity(entity).insert(ShellOutputSeen);
+                                }
+                                ShellReadiness::ContentOnly => {
+                                    content_seen_this_tick.insert(entity);
+                                    commands.entity(entity).insert(ShellContentSeen);
+                                }
+                                ShellReadiness::Pending => {}
+                            }
                         }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
@@ -1375,8 +1433,20 @@ fn poll_service_messages(
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
-                        if !output_seen.contains(entity) && lines.iter().any(line_has_content) {
-                            commands.entity(entity).insert(ShellOutputSeen);
+                        if !output_seen.contains(entity) {
+                            let has_content = lines.iter().any(line_has_content);
+                            let seen = content_seen.contains(entity)
+                                || content_seen_this_tick.contains(&entity);
+                            match shell_readiness(has_content, cursor.col, seen) {
+                                ShellReadiness::Ready => {
+                                    commands.entity(entity).insert(ShellOutputSeen);
+                                }
+                                ShellReadiness::ContentOnly => {
+                                    content_seen_this_tick.insert(entity);
+                                    commands.entity(entity).insert(ShellContentSeen);
+                                }
+                                ShellReadiness::Pending => {}
+                            }
                         }
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
@@ -2705,6 +2775,9 @@ fn mouse_terminal_actions(
     let select_mode = is_left && (!mouse_capture || shift);
 
     if !select_mode {
+        if !mouse_capture {
+            return Vec::new();
+        }
         let button = if event.moving {
             event.button + 32
         } else {
@@ -2845,7 +2918,9 @@ fn send_mouse_action(service: &ServiceHandle, process_id: ProcessId, action: Mou
 ///
 /// Selection mode (left-button + (no app mouse-capture OR shift held)) is
 /// intercepted and translated into selection commands sent to the service.
-/// Anything else is forwarded as SGR mouse-report bytes to the PTY.
+/// Anything else is forwarded as SGR mouse-report bytes to the PTY, but only
+/// when the app enabled mouse capture — otherwise a plain shell would echo
+/// hover/motion reports as literal `^[[<..M` text.
 fn on_term_mouse(
     trigger: On<BinReceive<TermMouseEvent>>,
     q: Query<&ProcessId, With<Terminal>>,
@@ -4154,6 +4229,45 @@ mod tests {
                 32, 4, 5, 0, true,
             ))]
         );
+    }
+
+    #[test]
+    fn hover_motion_without_app_capture_is_not_forwarded() {
+        let mut state = MouseSessionState::default();
+        // Bare move with no button held (frontend reports button 3) over a shell
+        // that has not enabled mouse tracking must not be echoed into the PTY.
+        let hover = mouse_event(3, 9, 4, true, true);
+
+        assert_eq!(
+            mouse_terminal_actions(&mut state, &hover, false, std::time::Instant::now()),
+            Vec::<MouseTerminalAction>::new()
+        );
+    }
+
+    #[test]
+    fn hover_motion_with_app_capture_is_forwarded() {
+        let mut state = MouseSessionState::default();
+        let hover = mouse_event(3, 9, 4, true, true);
+
+        assert_eq!(
+            mouse_terminal_actions(&mut state, &hover, true, std::time::Instant::now()),
+            vec![MouseTerminalAction::ForwardInput(sgr_mouse_sequence(
+                35, 9, 4, 0, true,
+            ))]
+        );
+    }
+
+    #[test]
+    fn shell_readiness_waits_for_prompt_past_banner() {
+        // No output yet → keep waiting.
+        assert_eq!(shell_readiness(false, 0, false), ShellReadiness::Pending);
+        // A banner line ends in a newline (cursor at column 0): not the prompt.
+        assert_eq!(shell_readiness(true, 0, false), ShellReadiness::ContentOnly);
+        // A drawn prompt leaves the cursor after the prompt string.
+        assert_eq!(shell_readiness(true, 3, false), ShellReadiness::Ready);
+        // After earlier content, a column-0 (newline-terminated) prompt still
+        // counts so delivery can't stall.
+        assert_eq!(shell_readiness(true, 0, true), ShellReadiness::Ready);
     }
 
     #[test]
