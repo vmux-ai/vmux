@@ -296,20 +296,24 @@ pub fn attach_acp_agent_to_stack(
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         ..default()
     });
+    let anchor = vmux_service::protocol::ProcessId::new();
     commands.entity(stack).insert((
         crate::client::acp::AcpSession {
             agent_id: agent_id.to_string(),
             sid: sid.to_string(),
             cwd: cwd.to_path_buf(),
+            anchor,
         },
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
         crate::AgentRunState::default(),
     ));
     let url = format!("vmux://agent/{agent_id}");
+    // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
         ChildOf(stack),
+        anchor,
     ));
 }
 
@@ -587,15 +591,17 @@ fn clear_agent_done(
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentBrowserResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    // Matches any anchored content (CLI terminal or ACP chat webview) by its unique ProcessId.
     agent_terms: Query<
         'w,
         's,
         (
+            Entity,
             &'static vmux_service::protocol::ProcessId,
-            &'static AgentSession,
             &'static ChildOf,
         ),
     >,
+    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
 }
@@ -624,22 +630,24 @@ impl AgentBrowserResolve<'_, '_> {
         None
     }
 
-    /// The agent's own terminal pane (its stack's parent pane), from its anchor.
+    /// The agent's own pane (its stack's parent pane), from its anchor.
     fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)?;
+            .find(|(_, pid, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    /// `None` for ACP sessions (no `AgentKind`).
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
-        self.agent_terms
+        let (entity, _, _) = self
+            .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)
-            .map(|(_, session, _)| session.kind)
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
     /// Resolve the agent's browser pane from its anchor, and record it as that
@@ -698,11 +706,12 @@ pub(crate) struct AgentFileResolve<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static vmux_service::protocol::ProcessId,
-            &'static AgentSession,
             &'static ChildOf,
         ),
     >,
+    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
 }
@@ -713,16 +722,18 @@ impl AgentFileResolve<'_, '_> {
         let (_, _, term_co) = self
             .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)?;
+            .find(|(_, pid, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    /// `None` for ACP sessions (no `AgentKind`).
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
-        self.agent_terms
+        let (entity, _, _) = self
+            .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)
-            .map(|(_, session, _)| session.kind)
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
     /// The agent's existing `file://` follow-page (the page entity) and its leaf
@@ -1101,7 +1112,7 @@ fn handle_agent_commands(
 
 fn resolve_self_pane(
     anchor: ProcessId,
-    agent_terms: &Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<(Entity, Entity)> {
     use bevy::ecs::relationship::Relationship;
@@ -1216,7 +1227,7 @@ fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&Active
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     launch_q: Query<&TerminalLaunch>,
     ctx: vmux_layout::pane::PlacementCtx,

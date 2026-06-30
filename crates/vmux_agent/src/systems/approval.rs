@@ -115,6 +115,7 @@ mod tests {
                     agent_id: "vibe-acp".into(),
                     sid: "s".into(),
                     cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
                 },
                 AgentApprovalPolicy::default(),
                 AgentRunState::AwaitingApproval {

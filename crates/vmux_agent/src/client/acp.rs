@@ -18,6 +18,9 @@ pub struct AcpSession {
     pub agent_id: String,
     pub sid: String,
     pub cwd: std::path::PathBuf,
+    /// Ties this agent's vmux_mcp tool calls back to its pane (also set as a `ProcessId`
+    /// component on the chat webview, where the tool router resolves it).
+    pub anchor: vmux_core::ProcessId,
 }
 
 pub struct AcpAgentPlugin;
@@ -63,6 +66,9 @@ fn spawn_acp_session_on_add(
             warn!(agent_id = %session.agent_id, "no agent.acp config for ACP session");
             continue;
         };
+        // The vmux_mcp sidecar carries the session anchor (already set as a ProcessId on the
+        // chat webview by attach_acp_agent_to_stack) so tool calls open beside this agent.
+        let mcp = crate::mcp::resolve(&session.cwd, session.anchor).ok();
         service.0.send(ClientMessage::SpawnAcpAgent {
             sid: session.sid.clone(),
             agent_id: cfg.id.clone(),
@@ -70,6 +76,9 @@ fn spawn_acp_session_on_add(
             args: cfg.args.clone(),
             env: cfg.env.clone(),
             cwd: session.cwd.to_string_lossy().into_owned(),
+            anchor: session.anchor,
+            mcp_command: mcp.as_ref().map(|m| m.command.clone()),
+            mcp_args: mcp.map(|m| m.args).unwrap_or_default(),
         });
     }
 }
@@ -120,6 +129,7 @@ mod tests {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
+            anchor: vmux_core::ProcessId::new(),
         });
         app.update();
     }

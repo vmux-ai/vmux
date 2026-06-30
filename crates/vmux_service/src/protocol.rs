@@ -439,6 +439,11 @@ pub enum ClientMessage {
         args: Vec<String>,
         env: Vec<(String, String)>,
         cwd: String,
+        /// Anchor that ties this agent's vmux_mcp tool calls back to its pane.
+        anchor: ProcessId,
+        /// The `vmux mcp --anchor …` sidecar to hand the agent as an MCP server (scope C).
+        mcp_command: Option<String>,
+        mcp_args: Vec<String>,
     },
     Status,
 }
@@ -1139,6 +1144,9 @@ mod tests {
             args: vec!["run".into()],
             env: vec![("K".into(), "V".into())],
             cwd: "/tmp".into(),
+            anchor: ProcessId::new(),
+            mcp_command: Some("vmux".into()),
+            mcp_args: vec!["mcp".into(), "--anchor".into()],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();

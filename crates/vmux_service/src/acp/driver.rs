@@ -228,7 +228,8 @@ pub async fn run(
             let mut init = InitializeRequest::new(ProtocolVersion::V1);
             init.client_capabilities.fs.read_text_file = true;
             init.client_capabilities.fs.write_text_file = true;
-            init.client_capabilities.terminal = true;
+            // Terminals are provided via the vmux_mcp `run` tool (real panes), not ACP-native.
+            init.client_capabilities.terminal = false;
             cx.send_request(init).block_task().await?;
 
             let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
