@@ -273,9 +273,9 @@ pub fn attach_page_agent_to_stack(
             kind,
         },
     ));
-    let placeholder = page_agent_placeholder_url(provider, model, sid);
+    let url = format!("vmux://agent/{provider}");
     commands.spawn((
-        vmux_layout::Browser::new(meshes, webview_mt, &placeholder),
+        vmux_layout::Browser::new(meshes, webview_mt, &url),
         ChildOf(stack),
     ));
     Some(())
@@ -306,13 +306,14 @@ pub fn attach_acp_agent_to_stack(
         crate::AgentApprovalPolicy::default(),
         crate::AgentRunState::default(),
     ));
-    let placeholder = page_agent_placeholder_url(agent_id, "acp", sid);
+    let url = format!("vmux://agent/{agent_id}");
     commands.spawn((
-        vmux_layout::Browser::new(meshes, webview_mt, &placeholder),
+        vmux_layout::Browser::new(meshes, webview_mt, &url),
         ChildOf(stack),
     ));
 }
 
+#[allow(dead_code)]
 pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     let html = format!(
         "<!doctype html><html><head><meta charset='utf-8'><title>Page Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>Page Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the Page agent design.</p></div></body></html>"

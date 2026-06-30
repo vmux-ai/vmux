@@ -63,7 +63,9 @@ impl AcpProjector {
                 blocks: vec![AssistantBlock::Text(text.clone())],
             }),
         }
-        vec![Intent::Delta(text)]
+        // `Delta` is the incremental hint; `Snapshot` keeps `AgentMessages` (what the chat page
+        // renders) in sync, since nothing applies `AgentDelta` to it.
+        vec![Intent::Delta(text), Intent::Snapshot]
     }
 
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
@@ -153,8 +155,14 @@ mod tests {
         let mut p = AcpProjector::new();
         let first = p.apply(chunk("Hel"));
         let second = p.apply(chunk("lo"));
-        assert_eq!(first, vec![Intent::Delta("Hel".to_string())]);
-        assert_eq!(second, vec![Intent::Delta("lo".to_string())]);
+        assert_eq!(
+            first,
+            vec![Intent::Delta("Hel".to_string()), Intent::Snapshot]
+        );
+        assert_eq!(
+            second,
+            vec![Intent::Delta("lo".to_string()), Intent::Snapshot]
+        );
         assert_eq!(p.messages().len(), 1);
         assert_eq!(
             p.messages()[0],
