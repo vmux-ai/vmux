@@ -241,16 +241,22 @@ pub async fn run(
                 match input {
                     AcpInput::User(text) => {
                         main_shared.emit_status(AgentRunStatus::Streaming);
-                        let prompt = PromptRequest::new(
-                            session.session_id.clone(),
-                            vec![ContentBlock::Text(TextContent::new(text))],
-                        );
-                        let status = match cx.send_request(prompt).block_task().await {
-                            Ok(_) => AgentRunStatus::Idle,
-                            Err(err) => AgentRunStatus::Errored(err.to_string()),
-                        };
-                        main_shared.emit(main_shared.snapshot_message());
-                        main_shared.emit_status(status);
+                        let cx_prompt = cx.clone();
+                        let shared = main_shared.clone();
+                        let session_id = session.session_id.clone();
+                        cx.spawn(async move {
+                            let prompt = PromptRequest::new(
+                                session_id,
+                                vec![ContentBlock::Text(TextContent::new(text))],
+                            );
+                            let status = match cx_prompt.send_request(prompt).block_task().await {
+                                Ok(_) => AgentRunStatus::Idle,
+                                Err(err) => AgentRunStatus::Errored(err.to_string()),
+                            };
+                            shared.emit(shared.snapshot_message());
+                            shared.emit_status(status);
+                            Ok(())
+                        })?;
                     }
                     AcpInput::Approve { call_id, decision } => {
                         if let Some(tx) = main_shared.pending_perms.lock().unwrap().remove(&call_id)
