@@ -431,6 +431,15 @@ pub enum ClientMessage {
         content: String,
         is_error: bool,
     },
+    /// Spawn an ACP (Agent Client Protocol) agent subprocess and start a session.
+    SpawnAcpAgent {
+        sid: String,
+        agent_id: String,
+        command: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        cwd: String,
+    },
     Status,
 }
 
@@ -627,6 +636,23 @@ pub enum ServiceMessage {
     AgentMessagesSnapshot {
         sid: String,
         messages_json: String,
+    },
+    /// An ACP agent created a terminal; the GUI spawns a visible pane bound to `process_id`.
+    AcpTerminalCreated {
+        sid: String,
+        terminal_id: String,
+        process_id: ProcessId,
+        command: String,
+        args: Vec<String>,
+        cwd: Option<String>,
+    },
+    /// An ACP tool-call carries a proposed edit; the GUI shows it as a pending diff overlay.
+    AcpProposedDiff {
+        sid: String,
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
     },
     StatusResponse {
         uptime_secs: u64,
@@ -1101,6 +1127,42 @@ mod tests {
         for msg in messages {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
             rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        }
+    }
+
+    #[test]
+    fn acp_protocol_messages_roundtrip() {
+        let client = ClientMessage::SpawnAcpAgent {
+            sid: "s1".into(),
+            agent_id: "vibe-acp".into(),
+            command: "uv".into(),
+            args: vec!["run".into()],
+            env: vec![("K".into(), "V".into())],
+            cwd: "/tmp".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
+        rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+
+        let services = [
+            ServiceMessage::AcpTerminalCreated {
+                sid: "s".into(),
+                terminal_id: "t".into(),
+                process_id: ProcessId::new(),
+                command: "ls".into(),
+                args: vec![],
+                cwd: None,
+            },
+            ServiceMessage::AcpProposedDiff {
+                sid: "s".into(),
+                call_id: "c".into(),
+                path: "/tmp/a.rs".into(),
+                old_text: Some("a".into()),
+                new_text: "b".into(),
+            },
+        ];
+        for msg in services {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+            rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
         }
     }
 

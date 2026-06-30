@@ -757,6 +757,10 @@ async fn handle_client(
             } => {
                 broker.resolve_tool(request_id, content, is_error).await;
             }
+
+            ClientMessage::SpawnAcpAgent { sid, .. } => {
+                tracing::warn!(%sid, "SpawnAcpAgent received before ACP dispatch is wired");
+            }
         }
     }
 
