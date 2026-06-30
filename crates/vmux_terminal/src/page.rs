@@ -141,9 +141,11 @@ pub fn Page() -> Element {
     let mut wheel_accum = use_signal(|| 0.0f64);
     // (row, start_col, end_col) of the link highlighted under a cmd-hover.
     let mut hover_link = use_signal(|| None::<(u16, u16, u16)>);
-    // Last grid cell under the pointer; lets key events recompute the hover
-    // without waiting for a mouse move.
-    let mut hover_cell = use_signal(|| None::<(u16, u16)>);
+    // Link currently under the pointer (row, start_col, end_col, url), found via
+    // a vertical grace band so a one-line target is easy to point at. Tracked
+    // independent of cmd; gated into `hover_link` by the cmd modifier so key
+    // press/release can toggle the highlight without a mouse move.
+    let mut hover_target = use_signal(|| None::<(u16, u16, u16, String)>);
 
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
@@ -209,29 +211,29 @@ pub fn Page() -> Element {
                 e.prevent_default();
                 focus_terminal_container();
                 let dims = cell_dims();
-                if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
-                    let mods = modifier_bits(&e);
-                    if trigger_button_id(&e) == 0
-                        && mods & MOD_SUPER != 0
-                        && let Some((_, _, url)) = link_at(&rows, col, row)
-                    {
+                let mods = modifier_bits(&e);
+                if trigger_button_id(&e) == 0 && mods & MOD_SUPER != 0 {
+                    let client = e.client_coordinates();
+                    if let Some((_, _, _, url)) = link_hit(&rows, padding, dims, client.x, client.y) {
                         let _ = try_cef_bin_emit_rkyv(&TermLinkOpenRequest { url });
                         return;
                     }
+                }
+                if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
                     emit_mouse(trigger_button_id(&e), col, row, mods, true, false);
                 }
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
                 let held = e.modifiers().contains(Modifiers::META);
-                recompute_hover(&rows, held, *hover_cell.peek(), &mut hover_link);
+                recompute_hover(held, &hover_target, &mut hover_link);
                 e.prevent_default();
                 emit_key(&e);
             },
 
             onkeyup: move |e: Event<KeyboardData>| {
                 let held = e.modifiers().contains(Modifiers::META);
-                recompute_hover(&rows, held, *hover_cell.peek(), &mut hover_link);
+                recompute_hover(held, &hover_target, &mut hover_link);
             },
 
             onmouseup: move |e: Event<MouseData>| {
@@ -242,8 +244,8 @@ pub fn Page() -> Element {
             },
 
             onmouseleave: move |_| {
-                if hover_cell.peek().is_some() {
-                    hover_cell.set(None);
+                if hover_target.peek().is_some() {
+                    hover_target.set(None);
                 }
                 if hover_link.peek().is_some() {
                     hover_link.set(None);
@@ -252,19 +254,22 @@ pub fn Page() -> Element {
 
             onmousemove: move |e: Event<MouseData>| {
                 let dims = cell_dims();
+                let client = e.client_coordinates();
+                let mods = modifier_bits(&e);
+                let held = mods & MOD_SUPER != 0;
+                // Track the link under the pointer (with vertical grace) on every
+                // move, then gate the highlight by cmd. Not gated by the PTY
+                // motion throttle, so it stays in sync within a cell too.
+                let hit = link_hit(&rows, padding, dims, client.x, client.y);
+                if *hover_target.peek() != hit {
+                    hover_target.set(hit);
+                }
+                recompute_hover(held, &hover_target, &mut hover_link);
+                // Targeting a link: swallow the motion instead of reporting it.
+                if held && hover_link.peek().is_some() {
+                    return;
+                }
                 if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
-                    let mods = modifier_bits(&e);
-                    let held = mods & MOD_SUPER != 0;
-                    // Update hover highlight on every move (not gated by the PTY
-                    // motion throttle), so it stays in sync within a cell too.
-                    if *hover_cell.peek() != Some((col, row)) {
-                        hover_cell.set(Some((col, row)));
-                    }
-                    recompute_hover(&rows, held, Some((col, row)), &mut hover_link);
-                    // Targeting a link: swallow the motion instead of reporting it.
-                    if held && hover_link.peek().is_some() {
-                        return;
-                    }
                     let last = last_mouse_cell();
                     if col as i32 == last.0 && row as i32 == last.1 {
                         return;
@@ -694,9 +699,13 @@ fn client_to_cell(
     Some((col, row))
 }
 
-/// Find the link covering grid cell `(col, row)`, returning
+/// Find the link covering grid cell `(col, row)` on a specific row, returning
 /// `(start_col, end_col, url)`. Reads the row's pushed [`LinkRange`]s.
-fn link_at(rows: &Signal<Vec<Signal<TermLine>>>, col: u16, row: u16) -> Option<(u16, u16, String)> {
+fn link_range_at(
+    rows: &Signal<Vec<Signal<TermLine>>>,
+    row: u16,
+    col: u16,
+) -> Option<(u16, u16, String)> {
     let row_sig = rows.peek().get(row as usize).copied()?;
     let line = row_sig.peek();
     line.links
@@ -705,17 +714,64 @@ fn link_at(rows: &Signal<Vec<Signal<TermLine>>>, col: u16, row: u16) -> Option<(
         .map(|l| (l.start_col, l.end_col, l.url.clone()))
 }
 
-/// Derive the hover highlight from the current cmd-held state and pointer cell,
-/// updating `hover_link` only when it changes. Driven by both mouse and key
-/// events so the highlight tracks cmd press/release without needing a move.
-fn recompute_hover(
+/// Hit-test the pointer (client px) against the links, with a half-line vertical
+/// grace band so a one-line target is easy to point at. The pointer's own row is
+/// checked first; if it has no link there, the nearer vertical neighbor is tried.
+/// Returns `(row, start_col, end_col, url)`.
+fn link_hit(
     rows: &Signal<Vec<Signal<TermLine>>>,
+    padding: f64,
+    (cw, ch): (f64, f64),
+    client_x: f64,
+    client_y: f64,
+) -> Option<(u16, u16, u16, String)> {
+    if cw <= 0.0 || ch <= 0.0 {
+        return None;
+    }
+    let container = web_sys::window()?
+        .document()?
+        .get_element_by_id(CONTAINER_ID)?;
+    let rect = container.get_bounding_client_rect();
+    let x = client_x - rect.left() - padding;
+    let y = client_y - rect.top() - padding;
+    if x < 0.0 {
+        return None;
+    }
+    let col = (x / cw).floor() as u16;
+    let row_f = y / ch;
+    if row_f < -0.5 {
+        return None;
+    }
+    let row = row_f.max(0.0).floor() as u16;
+    let frac = row_f - f64::from(row);
+    // Extend the target by half a line toward whichever neighbor the pointer
+    // leans to, so the effective hit zone is ~2 lines tall.
+    let neighbor = if frac < 0.5 {
+        row.checked_sub(1)
+    } else {
+        Some(row + 1)
+    };
+    for r in std::iter::once(row).chain(neighbor) {
+        if let Some((s, e, url)) = link_range_at(rows, r, col) {
+            return Some((r, s, e, url));
+        }
+    }
+    None
+}
+
+/// Gate `hover_target` into the rendered `hover_link` by the cmd modifier,
+/// updating only when it changes. Driven by both mouse and key events so the
+/// highlight tracks cmd press/release without needing a move.
+fn recompute_hover(
     cmd_held: bool,
-    cell: Option<(u16, u16)>,
+    hover_target: &Signal<Option<(u16, u16, u16, String)>>,
     hover_link: &mut Signal<Option<(u16, u16, u16)>>,
 ) {
     let next = if cmd_held {
-        cell.and_then(|(col, row)| link_at(rows, col, row).map(|(s, e, _)| (row, s, e)))
+        hover_target
+            .peek()
+            .as_ref()
+            .map(|(r, s, e, _)| (*r, *s, *e))
     } else {
         None
     };
