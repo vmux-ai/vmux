@@ -2,8 +2,18 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::WindowCloseRequested;
 use muda::{Menu, MenuEvent, MenuItem, MenuItemKind};
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2::{runtime::Sel, sel};
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSApplication, NSMenuItem};
+#[cfg(target_os = "macos")]
+use objc2_foundation::MainThreadMarker;
 use parking_lot::Mutex;
 use std::sync::LazyLock;
+#[cfg(target_os = "macos")]
+use vmux_browser::HostFocusIntent;
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands,
     build_native_root_menu, open::OpenCommand,
@@ -44,6 +54,11 @@ struct OsMenuResource {
     _menu: Menu,
     interactive_mode: Option<InteractiveModeMenuItems>,
     close_window: Option<MenuItem>,
+    /// Native `NSMenuItem`s for the Edit menu's standard editing actions
+    /// (Undo/Redo/Cut/Copy/Paste/Select All), retained so [`sync_edit_menu_items`]
+    /// can enable/disable them per focused pane.
+    #[cfg(target_os = "macos")]
+    edit_items: Vec<Retained<NSMenuItem>>,
 }
 
 struct InteractiveModeMenuItems {
@@ -80,6 +95,8 @@ impl Plugin for OsMenuPlugin {
                     sync_close_menu_item.after(hide_window_on_close_request),
                 ),
             );
+        #[cfg(target_os = "macos")]
+        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
     }
 }
 
@@ -92,6 +109,8 @@ fn setup(world: &mut World) {
 
     #[cfg(target_os = "macos")]
     menu.init_for_nsapp();
+    #[cfg(target_os = "macos")]
+    let edit_items = collect_edit_menu_items();
 
     // Native CEF views hold keyboard focus, so app shortcuts arrive as menu key-equivalents.
     // `forward_menu_events` only drains on a Bevy tick; with the loop idle that's ~1s late. Wake the
@@ -111,14 +130,22 @@ fn setup(world: &mut World) {
         _menu: menu,
         interactive_mode,
         close_window,
+        #[cfg(target_os = "macos")]
+        edit_items,
     });
 }
 
 /// CEF/Chromium on macOS routes web-content editing shortcuts (Select All, Cut, Copy, Paste, Undo,
 /// Redo) through the application's standard Edit menu — without it, cmd+A / cmd+C / cmd+V etc. do
-/// nothing in web text inputs. The predefined items use the standard responder-chain selectors and
-/// auto-disable when a non-text view (winit content view for terminals) holds first responder, so
-/// terminal clipboard handling is unaffected.
+/// nothing in web text inputs (browser pages, command bar, editor inputs).
+///
+/// The predefined items use the standard responder-chain selectors (`copy:`/`paste:`/…). A focused
+/// page is always a CEF `NSView`, which *answers* those selectors, so `NSMenu`'s default
+/// auto-validation keeps the items enabled and `[NSApp.mainMenu performKeyEquivalent:]` consumes
+/// ⌘C/⌘V before the view's `keyDown:`. That is correct for browser pages, but it steals the
+/// keystrokes from terminal panes, whose own handlers (`vmux_terminal::on_term_key` /
+/// `handle_terminal_keyboard`) implement clipboard against the PTY. [`sync_edit_menu_items`]
+/// disables these items while a terminal is focused so the keys fall through to the page.
 fn append_standard_edit_menu(menu: &Menu) {
     use muda::{PredefinedMenuItem, Submenu};
 
@@ -137,6 +164,88 @@ fn append_standard_edit_menu(menu: &Menu) {
         return;
     };
     let _ = menu.append(&edit);
+}
+
+/// Find the live Undo/Redo/Cut/Copy/Paste/Select All `NSMenuItem`s in the app's main menu and turn
+/// OFF the containing submenu's `autoenablesItems`, so [`sync_edit_menu_items`] can drive their
+/// enabled state directly. Without disabling auto-validation, AppKit would re-enable these standard
+/// editing selectors whenever a CEF view (which answers them) is first responder, defeating the gate.
+/// Undo/Redo are gated alongside the clipboard items so ⌘Z/⌘⇧Z also fall through to a focused
+/// terminal rather than being swallowed by the now-manually-managed submenu.
+///
+/// Must run on the main thread, after the menu is installed via `Menu::init_for_nsapp`.
+#[cfg(target_os = "macos")]
+fn collect_edit_menu_items() -> Vec<Retained<NSMenuItem>> {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return Vec::new();
+    };
+    let Some(main_menu) = NSApplication::sharedApplication(mtm).mainMenu() else {
+        return Vec::new();
+    };
+    let actions: [Sel; 6] = [
+        sel!(undo:),
+        sel!(redo:),
+        sel!(cut:),
+        sel!(copy:),
+        sel!(paste:),
+        sel!(selectAll:),
+    ];
+    let mut items = Vec::new();
+    for top in 0..main_menu.numberOfItems() {
+        let Some(submenu) = main_menu.itemAtIndex(top).and_then(|item| item.submenu()) else {
+            continue;
+        };
+        let mut found = false;
+        for idx in 0..submenu.numberOfItems() {
+            let Some(item) = submenu.itemAtIndex(idx) else {
+                continue;
+            };
+            if item
+                .action()
+                .is_some_and(|action| actions.contains(&action))
+            {
+                items.push(item);
+                found = true;
+            }
+        }
+        if found {
+            submenu.setAutoenablesItems(false);
+        }
+    }
+    items
+}
+
+/// Whether the standard Edit-menu items (Undo/Redo/Cut/Copy/Paste/Select All) should be enabled for
+/// the current focus.
+///
+/// They are disabled only when a terminal owns focus ([`HostFocusIntent::WinitHost`]) so ⌘C/⌘V/⌘X/⌘A
+/// (and ⌘Z) fall through to the terminal's own key handling. Web pages, the command bar, and the idle
+/// state keep the native items enabled.
+#[cfg(target_os = "macos")]
+fn edit_menu_items_enabled(intent: HostFocusIntent) -> bool {
+    !matches!(intent, HostFocusIntent::WinitHost)
+}
+
+/// Drive the Edit-menu items' enabled state from [`HostFocusIntent`] so terminal panes receive their
+/// own ⌘C/⌘V/⌘Z while browser/web inputs keep native edit behavior.
+#[cfg(target_os = "macos")]
+fn sync_edit_menu_items(
+    menu: Option<NonSend<OsMenuResource>>,
+    intent: Option<Res<HostFocusIntent>>,
+) {
+    let Some(intent) = intent else {
+        return;
+    };
+    if !intent.is_changed() {
+        return;
+    }
+    let Some(menu) = menu else {
+        return;
+    };
+    let enabled = edit_menu_items_enabled(*intent);
+    for item in &menu.edit_items {
+        item.setEnabled(enabled);
+    }
 }
 
 fn interactive_mode_menu_items(menu: &Menu) -> Option<InteractiveModeMenuItems> {
@@ -317,6 +426,19 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AgentSettings, AppSettings, BrowserSettings, ShortcutSettings};
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn edit_items_disabled_only_for_terminal_focus() {
+        assert!(
+            !edit_menu_items_enabled(HostFocusIntent::WinitHost),
+            "terminal focus must release ⌘C/⌘V to the terminal's own handler"
+        );
+        assert!(edit_menu_items_enabled(HostFocusIntent::Windowed(
+            Entity::PLACEHOLDER
+        )));
+        assert!(edit_menu_items_enabled(HostFocusIntent::Unmanaged));
+    }
 
     fn test_settings() -> AppSettings {
         AppSettings {
