@@ -139,6 +139,8 @@ pub fn Page() -> Element {
     let mut last_mouse_cell = use_signal(|| (-1i32, -1i32));
     // Accumulated wheel delta (pixels) not yet converted into scroll notches.
     let mut wheel_accum = use_signal(|| 0.0f64);
+    // (row, start_col, end_col) of the link highlighted under a cmd-hover.
+    let mut hover_link = use_signal(|| None::<(u16, u16, u16)>);
 
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
@@ -187,20 +189,33 @@ pub fn Page() -> Element {
     } else {
         String::new()
     };
+    let cursor_css = if hover_link().is_some() {
+        "cursor:pointer;"
+    } else {
+        ""
+    };
 
     rsx! {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
             class: "relative h-full w-full overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
-            style: "{theme_style}{cell_style}outline:none;",
+            style: "{theme_style}{cell_style}{cursor_css}outline:none;",
 
             onmousedown: move |e: Event<MouseData>| {
                 e.prevent_default();
                 focus_terminal_container();
                 let dims = cell_dims();
                 if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
-                    emit_mouse(trigger_button_id(&e), col, row, modifier_bits(&e), true, false);
+                    let mods = modifier_bits(&e);
+                    if trigger_button_id(&e) == 0
+                        && mods & MOD_SUPER != 0
+                        && let Some((_, _, url)) = link_at(&rows, col, row)
+                    {
+                        let _ = try_cef_bin_emit_rkyv(&TermLinkOpenRequest { url });
+                        return;
+                    }
+                    emit_mouse(trigger_button_id(&e), col, row, mods, true, false);
                 }
             },
 
@@ -216,6 +231,12 @@ pub fn Page() -> Element {
                 }
             },
 
+            onmouseleave: move |_| {
+                if hover_link.peek().is_some() {
+                    hover_link.set(None);
+                }
+            },
+
             onmousemove: move |e: Event<MouseData>| {
                 let dims = cell_dims();
                 if let Some((col, row)) = mouse_to_cell(&e, padding, dims) {
@@ -224,8 +245,20 @@ pub fn Page() -> Element {
                         return;
                     }
                     last_mouse_cell.set((col as i32, row as i32));
+                    let mods = modifier_bits(&e);
+                    if mods & MOD_SUPER != 0 {
+                        let next = link_at(&rows, col, row).map(|(s, end, _)| (row, s, end));
+                        if *hover_link.peek() != next {
+                            hover_link.set(next);
+                        }
+                        if next.is_some() {
+                            return;
+                        }
+                    } else if hover_link.peek().is_some() {
+                        hover_link.set(None);
+                    }
                     let btn = held_button_id(&e);
-                    emit_mouse(btn, col, row, modifier_bits(&e), true, true);
+                    emit_mouse(btn, col, row, mods, true, true);
                 }
             },
 
@@ -386,6 +419,7 @@ pub fn Page() -> Element {
                                         selection,
                                         cols,
                                         theme,
+                                        hover_link,
                                     }
                                 }
                             }
@@ -451,6 +485,7 @@ fn TerminalRow(
     selection: Signal<Option<TermSelectionRange>>,
     cols: Signal<u16>,
     theme: Signal<Option<TermThemeEvent>>,
+    hover_link: Signal<Option<(u16, u16, u16)>>,
 ) -> Element {
     let line = line();
     let cursor = cursor();
@@ -460,6 +495,8 @@ fn TerminalRow(
         .as_ref()
         .map(|theme| theme.cursor_style.as_str())
         .unwrap_or("block");
+    let row_hover = hover_link()
+        .and_then(|(hrow, hstart, hend)| (hrow as usize == row_idx).then_some((hstart, hend)));
 
     rsx! {
         div {
@@ -481,6 +518,12 @@ fn TerminalRow(
                 div {
                     class: "absolute top-0 bottom-0 pointer-events-none",
                     style: "left:calc(var(--cw, 1ch) * {sel_start});width:calc(var(--cw, 1ch) * {sel_end - sel_start});background:rgba(255,255,255,0.25);",
+                }
+            }
+            if let Some((hstart, hend)) = row_hover {
+                div {
+                    class: "absolute pointer-events-none",
+                    style: "left:calc(var(--cw, 1ch) * {hstart});width:calc(var(--cw, 1ch) * {hend - hstart + 1});bottom:0;height:1px;background:currentColor;",
                 }
             }
         }
@@ -636,6 +679,17 @@ fn client_to_cell(
     let col = (x / cw).floor().max(0.0) as u16;
     let row = (y / ch).floor().max(0.0) as u16;
     Some((col, row))
+}
+
+/// Find the link covering grid cell `(col, row)`, returning
+/// `(start_col, end_col, url)`. Reads the row's pushed [`LinkRange`]s.
+fn link_at(rows: &Signal<Vec<Signal<TermLine>>>, col: u16, row: u16) -> Option<(u16, u16, String)> {
+    let row_sig = rows.peek().get(row as usize).copied()?;
+    let line = row_sig.peek();
+    line.links
+        .iter()
+        .find(|l| col >= l.start_col && col <= l.end_col)
+        .map(|l| (l.start_col, l.end_col, l.url.clone()))
 }
 
 /// Map Dioxus trigger_button to terminal protocol button number.
