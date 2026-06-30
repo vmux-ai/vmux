@@ -41,13 +41,15 @@ Both carry `changed_lines: Vec<(u16, TermLine)>`. A new module
 pub fn annotate_links(line: &mut TermLine, cwd: Option<&Path>);
 ```
 
-It reconstructs the line text from `line.spans`, tokenizes on whitespace, tests
-each token with `vmux_command::event::{looks_like_url, looks_like_path}` (reused —
-the host already depends on `vmux_command`), resolves each hit to a final target
-URL, and records the column range:
-- URL → target is the URL as-is (prefix bare domains like `vmux.ai` with
-  `https://`).
-- Path → resolve to absolute, target is `file://<abs>`.
+It reconstructs the line text from `line.spans`, tokenizes on whitespace, trims
+wrapping punctuation, classifies each token, resolves it to a final target URL,
+and records the column range:
+- URL → only tokens with an explicit scheme (`://`) or a `data:` URI; target is
+  the token as-is. Bare domains are **not** autolinked in v1 (avoids reading
+  filenames like `foo.txt` as `https://foo.txt`).
+- Path → tested with `vmux_command::event::looks_like_path` (reused — the host
+  already depends on `vmux_command`); **absolute** paths and `~/…` resolve to a
+  `file://<abs>` target.
 
 Column mapping handles wide (CJK/emoji) cells via each span's `col` plus unicode
 display width, so highlight ranges line up with rendered cells.
@@ -114,10 +116,10 @@ Host observer `on_term_link_open(trigger: On<BinReceive<TermLinkOpenRequest>>, �
 
 - **OSC 8 explicit hyperlinks** — agents print raw URLs; defer. (alacritty exposes
   `cell.hyperlink()` for a later pass.)
-- **Relative-path resolution** is best-effort: only when the terminal entity
-  exposes a working directory. Otherwise v1 covers URLs + absolute paths. cwd
-  availability is confirmed during implementation; if unavailable, relative paths
-  are simply not linkified.
+- **Relative-path resolution** — not in v1. The host passes `cwd = None`, so only
+  absolute paths (and `~/…`) are linkified; relative paths like `crates/foo.rs`
+  are left as plain text until terminal-cwd tracking is plumbed in a follow-up.
+- **Bare-domain autolinking** — not in v1 (URLs require an explicit scheme).
 - No new crates.
 
 ## Testing
@@ -126,10 +128,11 @@ Native tests (per "verify observable behavior" + "finish then test" — one manu
 pass at the very end):
 
 - **Unit (`link.rs`):** `annotate_links` over crafted `TermLine`s →
-  - single URL, single absolute path, multiple links on one line;
-  - bare domain gets `https://` prefix; path gets `file://` + absolute;
+  - single scheme URL, single absolute path, multiple links on one line;
+  - wrapping punctuation trimmed; absolute path gets `file://` + absolute;
+  - relative path skipped when `cwd` is `None`;
   - wide-char column alignment;
-  - no false positives on bare words / prose / spaces.
+  - no false positives on bare words / prose / bare filenames (`foo.txt`).
 - **System (host):** send `TermLinkOpenRequest { url }` → assert
   `AppCommand::Browser(Open(InNewStack { url }))` is written (and the resulting
   `OpenInNewStackRequest`). Register the event + observer in the plugin's
