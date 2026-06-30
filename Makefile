@@ -54,7 +54,7 @@ build-local: ensure-mac-deps ensure-package-deps
 	./scripts/build-mac-release.sh local
 
 local: build-local
-	@sha="$$(git rev-parse --short HEAD)" && \
+	@sha="$$(git rev-parse --short=7 HEAD)" && \
 	open "target/release/Vmux ($$sha).app"
 
 build-release: ensure-mac-deps ensure-package-deps
