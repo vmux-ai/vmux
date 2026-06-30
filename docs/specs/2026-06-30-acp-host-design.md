@@ -2,26 +2,36 @@
 
 - **Date:** 2026-06-30
 - **Status:** Approved (direction); spec under review
-- **Scope:** Milestones B + C (agent-agnostic ACP-native host + vmux_mcp toolset layer)
+- **Scope:** Milestones B + C (build + prove the host), then D (migrate the existing CLI agents to ACP, retire the bespoke path)
 - **Branch/worktree:** `feat/acp-host` / `.worktrees/acp-host`
 
 ## 1. Goal
 
-vmux adopts ACP (Agent Client Protocol) as a general agent↔host protocol. Any ACP agent
-plugs into vmux's native panes. Mistral's local-coding stack (`vibe-acp`) is the **first
-consumer**, not a thing to embed — the host is agent-agnostic.
+vmux adopts ACP (Agent Client Protocol) as the integration protocol for **external coding
+agents** — the model Zed uses. vmux implements the ACP **Client** role (ACP inverts naming:
+the host is the `Client`, the agent is the spawned subprocess); every external agent is an ACP
+agent driven through one host. Mistral's local stack (`vibe-acp`) is the **first consumer**,
+not a thing to embed — the host is agent-agnostic.
 
-vmux implements the ACP **Client** role (ACP inverts naming: the host is the `Client`, the
-agent is the spawned subprocess). A new `AgentVariant::Acp` sits beside the existing `Cli`
-and `Page` strategies in `vmux_agent`.
+This **replaces vmux's current bespoke, per-CLI integration.** Today claude/codex/vibe are
+spawned as raw PTY TUIs whose state vmux recovers by scraping session logs + filesystem hooks +
+an MCP sidecar (`AgentVariant::Cli`). Under the Zed model they instead run as ACP adapters
+(`@zed-industries/claude-code-acp`, `@zed-industries/codex-acp`, `vibe-acp`) driven over a real
+bidirectional protocol, and the bespoke machinery retires (Milestone D, §10).
+
+**Explicitly NOT in scope: the `Page` path** (Anthropic/OpenAI/Mistral provider-direct HTTP/SSE).
+That is vmux acting as its *own* agent — no external subprocess — analogous to Zed's native agent
+thread. It stays as-is; ACP is for external agents.
 
 - **Milestone B** — agent-agnostic ACP-native host: `session/update` streaming,
   `request_permission`, fs read/write with editor diffs, terminal lifecycle → real panes.
 - **Milestone C** — layer the `vmux_mcp` toolset onto the ACP session (browser/editor/history
   tools) via `newSession.mcpServers`.
+- **Milestone D** — migrate claude/codex/vibe onto ACP by default and retire the `Cli` strategy
+  machinery, after B+C prove the host at runtime (§10).
 
-Both milestones are built together (per decision), but the build is sequenced so it
-compiles and runs at every step (§13).
+B + C are built together and sequenced so the tree compiles and runs at every step (§10); D
+follows once the host is proven.
 
 ## 2. Background: ACP 1.0 is a rewrite (the binding constraints)
 
@@ -376,6 +386,29 @@ Each step compiles + runs.
 6. **Scope C.** `--omit-terminal-tools` sidecar flag; `mcp_servers` into `session/new`; confirm
    browser/editor/history tools reach panes.
 7. **Validate.** End-to-end `npx claude-code-acp`, then `vibe-acp`.
+
+### Milestone D — migrate external CLI agents to ACP (follow-on, after B+C proven)
+
+The Zed end-state: claude/codex/vibe are ACP agents, not raw-PTY CLIs.
+
+1. **Default the three agents to ACP adapters.** `claude` → `@zed-industries/claude-code-acp`,
+   `codex` → `@zed-industries/codex-acp`, `vibe` → `vibe-acp` (the built-in `agent.acp` entries
+   from §4 already name these). Point `vmux://agent/claude` (etc.) at the ACP variant.
+2. **Retire the `Cli` path.** Remove `CliAgentStrategy` + `vibe.rs`/`claude.rs`/`codex.rs`
+   strategy impls, session-log discovery (`discover_session`/`detect_end_time`, `~/.vibe/logs`
+   scraping), the filesystem hooks (`hooks.toml`, `vmux notify-file-touch`), and the dead
+   `AgentVariant::Cli` arms. The `vmux mcp --anchor` sidecar **stays** — it is now the ACP tool
+   channel (§9), no longer the CLI's only callback.
+3. **Reconcile `AgentKind`.** `Vibe`/`Claude`/`Codex` remain as identities but resolve to ACP
+   adapter configs rather than raw executables; the `executable()`/`TerminalKind` conversions for
+   the retired PTY path go away.
+4. **UX shift (intended).** These agents move from a raw CLI TUI in a terminal to vmux's native
+   chat + diff + terminal panes — the ACP/Zed agent-panel experience. No raw-PTY escape hatch is
+   kept (full migration, per decision).
+
+Sequencing rationale: B+C ship a working host with the adapters as additive `agent.acp` entries;
+D flips defaults and deletes the old machinery **only after** the ACP path is runtime-proven, so
+no working integration is removed before its replacement is validated.
 
 ## 11. Testing
 
