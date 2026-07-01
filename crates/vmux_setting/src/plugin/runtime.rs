@@ -254,22 +254,58 @@ pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
 }
 
 pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
+    resolve_startup_dir_for_tab(settings, space_id, None)
+}
+
+/// Which level of the `tab → space → global → builtin` chain supplied a resolved startup dir.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirSource {
+    Tab,
+    Space,
+    Global,
+    Default,
+}
+
+/// Resolve the working directory for a tab: `tab_dir → per-space override → global → builtin`.
+///
+/// Each candidate is trimmed and skipped unless it names an existing directory, so an invalid
+/// value cascades to the next level.
+pub fn resolve_startup_dir_for_tab(
+    settings: &AppSettings,
+    space_id: &str,
+    tab_dir: Option<&str>,
+) -> std::path::PathBuf {
+    resolve_startup_dir_for_tab_with_source(settings, space_id, tab_dir).0
+}
+
+/// Like [`resolve_startup_dir_for_tab`], but also reports which level supplied the value.
+pub fn resolve_startup_dir_for_tab_with_source(
+    settings: &AppSettings,
+    space_id: &str,
+    tab_dir: Option<&str>,
+) -> (std::path::PathBuf, DirSource) {
     let pick = |opt: Option<&str>| -> Option<std::path::PathBuf> {
         opt.map(str::trim)
             .filter(|s| !s.is_empty())
             .map(std::path::PathBuf::from)
             .filter(|p| p.is_dir())
     };
-    pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
-        .or_else(|| {
-            pick(
-                settings
-                    .terminal
-                    .as_ref()
-                    .and_then(|t| t.startup_dir.as_deref()),
-            )
-        })
-        .unwrap_or_else(|| vmux_core::profile::space_dir(space_id))
+    if let Some(p) = pick(tab_dir) {
+        return (p, DirSource::Tab);
+    }
+    if let Some(p) = pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
+    {
+        return (p, DirSource::Space);
+    }
+    if let Some(p) = pick(
+        settings
+            .terminal
+            .as_ref()
+            .and_then(|t| t.startup_dir.as_deref()),
+    ) {
+        return (p, DirSource::Global);
+    }
+    (vmux_core::profile::space_dir(space_id), DirSource::Default)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1509,6 +1545,85 @@ mod tests {
         assert_eq!(
             resolve_startup_dir(&s, "work"),
             vmux_core::profile::space_dir("work")
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_prefers_tab_then_space() {
+        let tab = tempfile::tempdir().unwrap();
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+        let tab_dir = tab.path().to_string_lossy().into_owned();
+        assert_eq!(
+            resolve_startup_dir_for_tab(&s, "work", Some(&tab_dir)),
+            tab.path()
+        );
+        assert_eq!(resolve_startup_dir_for_tab(&s, "work", None), per.path());
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_invalid_tab_cascades_to_space() {
+        let per = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+        assert_eq!(
+            resolve_startup_dir_for_tab(&s, "work", Some("/no/such/tab/xyz-vmux")),
+            per.path()
+        );
+    }
+
+    #[test]
+    fn resolve_startup_dir_for_tab_with_source_reports_level() {
+        let tab = tempfile::tempdir().unwrap();
+        let per = tempfile::tempdir().unwrap();
+        let glob = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.terminal = Some(TerminalSettings {
+            startup_dir: Some(glob.path().to_string_lossy().into()),
+            ..Default::default()
+        });
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+        let tab_dir = tab.path().to_string_lossy().into_owned();
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&s, "work", Some(&tab_dir)).1,
+            DirSource::Tab
+        );
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&s, "work", None).1,
+            DirSource::Space
+        );
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&s, "other", None).1,
+            DirSource::Global
+        );
+        s.terminal = None;
+        assert_eq!(
+            resolve_startup_dir_for_tab_with_source(&s, "nospace", None).1,
+            DirSource::Default
         );
     }
 
