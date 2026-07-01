@@ -49,6 +49,19 @@ pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u
     suffix.parse::<u32>().ok()
 }
 
+/// Pick the entity whose recorded cwd matches `dir`, preferring the most-recently
+/// active. Used by the `focus_dir` action to focus an open pane for a work dir.
+pub(crate) fn pick_terminal_for_cwd(
+    candidates: &[(Entity, String, i64)],
+    dir: &str,
+) -> Option<Entity> {
+    candidates
+        .iter()
+        .filter(|(_, cwd, _)| cwd == dir)
+        .max_by_key(|(_, _, ts)| *ts)
+        .map(|(e, _, _)| *e)
+}
+
 #[derive(Component)]
 struct CommandBarReady;
 
@@ -1185,6 +1198,10 @@ fn on_command_bar_action(
     mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
+    terminals_cwd: Query<
+        (Entity, &vmux_core::terminal::TerminalLaunch, Option<&LastActivatedAt>),
+        With<Terminal>,
+    >,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -1363,6 +1380,65 @@ fn on_command_bar_action(
                     }
                 }
             } // end reattach else
+        }
+        "focus_dir" => {
+            let candidates: Vec<(Entity, String, i64)> = terminals_cwd
+                .iter()
+                .map(|(e, l, ts)| (e, l.cwd.clone(), ts.map(|t| t.0).unwrap_or(0)))
+                .collect();
+            if let Some(entity) = pick_terminal_for_cwd(&candidates, &evt.value) {
+                focus_pane_entity(entity, &mut commands, &queries.child_of_q);
+                new_stack_ctx.stack = None;
+                new_stack_ctx.previous_stack = None;
+                custom_keyboard_restore = true;
+                if let Some(stack_e) = empty_stack {
+                    commands.entity(stack_e).despawn();
+                }
+            } else {
+                let cwd = std::path::PathBuf::from(&evt.value);
+                if let Some(stack_e) = empty_stack {
+                    commands.entity(stack_e).insert(PageMetadata {
+                        url: terminal_page_url.clone(),
+                        title: format!("Terminal ({})", cwd.display()),
+                        ..default()
+                    });
+                    writer_params.p3().write(TerminalSpawnRequest {
+                        cwd: Some(cwd),
+                        target_stack: Some(stack_e),
+                    });
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    custom_keyboard_restore = true;
+                } else {
+                    let (_, active_pane_opt, _) = focused_stack(
+                        queries.active_tab_param.get(),
+                        &queries.all_children,
+                        &queries.leaf_panes,
+                        &queries.pane_ts,
+                        &queries.pane_children,
+                        &queries.stack_ts,
+                    );
+                    if let Some(pane_e) = active_pane_opt {
+                        let stack_e = commands
+                            .spawn((
+                                crate::stack::stack_bundle(),
+                                LastActivatedAt::now(),
+                                ChildOf(pane_e),
+                            ))
+                            .id();
+                        commands.entity(stack_e).insert(PageMetadata {
+                            url: terminal_page_url.clone(),
+                            title: format!("Terminal ({})", cwd.display()),
+                            ..default()
+                        });
+                        writer_params.p3().write(TerminalSpawnRequest {
+                            cwd: Some(cwd),
+                            target_stack: Some(stack_e),
+                        });
+                        custom_keyboard_restore = true;
+                    }
+                }
+            }
         }
         "command" => {
             if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
@@ -2552,6 +2628,20 @@ mod tests {
             parse_pid_from_url("vmux://terminal/99999999999999999", TEST_TERMINAL_URL),
             None
         );
+    }
+
+    #[test]
+    fn pick_terminal_prefers_most_recent_for_cwd() {
+        let a = Entity::from_bits(1);
+        let b = Entity::from_bits(2);
+        let c = Entity::from_bits(3);
+        let cands = vec![
+            (a, "/work".to_string(), 10),
+            (b, "/work".to_string(), 30),
+            (c, "/other".to_string(), 99),
+        ];
+        assert_eq!(pick_terminal_for_cwd(&cands, "/work"), Some(b));
+        assert_eq!(pick_terminal_for_cwd(&cands, "/missing"), None);
     }
 
     #[test]
