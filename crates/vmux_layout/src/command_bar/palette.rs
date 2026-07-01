@@ -148,13 +148,25 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let tabs = state_val.tabs.clone();
     let commands = state_val.commands.clone();
     let pages = state_val.pages.clone();
+    let work_dirs = state_val.work_dirs.clone();
+    let recent_files = state_val.recent_files.clone();
     let open_target = state_val.target;
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
 
     let q = query();
     let results = {
         let history = history_suggestions();
-        let r = filter_results(&q, &tabs, &commands, &spaces, &pages, is_new_tab, &history);
+        let r = filter_results(
+            &q,
+            &tabs,
+            &commands,
+            &spaces,
+            &pages,
+            is_new_tab,
+            &history,
+            &work_dirs,
+            &recent_files,
+        );
         let completions = if completion_query(&q).is_some() {
             path_completions()
         } else {
@@ -209,6 +221,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             Some(ResultItem::File { path, .. }) => path.clone(),
+            Some(ResultItem::WorkDir { path, .. }) => path.clone(),
+            Some(ResultItem::RecentFile { title, url }) => {
+                if title.is_empty() {
+                    url.clone()
+                } else {
+                    title.clone()
+                }
+            }
             None => q.clone(),
         }
     } else {
@@ -283,6 +303,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             ResultItem::File { path, .. } => {
                 emit_action_with_target("open", &format!("file://{path}"), open_target);
             }
+            ResultItem::WorkDir { path, .. } => {
+                emit_action("focus_dir", path);
+            }
+            ResultItem::RecentFile { url, .. } => {
+                emit_action_with_target("open", url, open_target);
+            }
         }
     };
 
@@ -323,6 +349,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             }
                             Some(ResultItem::History { .. }) => (false, false, true),
                             Some(ResultItem::File { .. }) => (false, true, false),
+                            Some(ResultItem::WorkDir { .. }) => (false, true, false),
+                            Some(ResultItem::RecentFile { .. }) => (false, true, false),
                             None => (false, false, false),
                         }
                     } else {
@@ -593,6 +621,52 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     } else {
                                         span { class: result_trailing_slot_class(), "\u{21b5}" }
                                     }
+                                }
+                            },
+                            ResultItem::WorkDir { path, kind_label } => {
+                                let name = path
+                                    .trim_end_matches('/')
+                                    .rsplit('/')
+                                    .next()
+                                    .unwrap_or(path.as_str())
+                                    .to_string();
+                                rsx! {
+                                    div { class: result_content_row_class(),
+                                        Icon { class: result_leading_icon_class(),
+                                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                        }
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                            span { class: result_primary_text_class(), "{name}" }
+                                            span { class: result_secondary_text_class(), "{path}" }
+                                        }
+                                    }
+                                    span { class: result_trailing_slot_class(), "{kind_label}" }
+                                }
+                            },
+                            ResultItem::RecentFile { url, title } => {
+                                let display = url.strip_prefix("file://").unwrap_or(url.as_str()).to_string();
+                                let name = if title.is_empty() {
+                                    display
+                                        .trim_end_matches('/')
+                                        .rsplit('/')
+                                        .next()
+                                        .unwrap_or(display.as_str())
+                                        .to_string()
+                                } else {
+                                    title.clone()
+                                };
+                                rsx! {
+                                    div { class: result_content_row_class(),
+                                        Icon { class: result_leading_icon_class(),
+                                            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                        }
+                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                            span { class: result_primary_text_class(), "{name}" }
+                                            span { class: result_secondary_text_class(), "{display}" }
+                                        }
+                                    }
+                                    span { class: result_trailing_slot_class(), "\u{21b5}" }
                                 }
                             },
                         }
