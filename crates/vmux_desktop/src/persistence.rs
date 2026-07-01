@@ -15,7 +15,7 @@ use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
     stack::Stack,
-    tab::Tab,
+    tab::{Tab, TabDirDecided, TabWorktree},
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
@@ -202,6 +202,8 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Name>()
         .allow::<Stack>()
         .allow::<Tab>()
+        .allow::<TabWorktree>()
+        .allow::<TabDirDecided>()
         .allow::<Pane>()
         .allow::<PaneSplit>()
         .allow::<PaneSize>()

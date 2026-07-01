@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 
 use crate::runner::{GitError, git, git_err};
 
-/// A vmux-managed worktree: its checkout path, branch, and the ref it was based on.
+/// A vmux-managed worktree: its checkout path, branch, base ref, and owning repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeInfo {
     pub path: PathBuf,
     pub branch: String,
     pub base_ref: String,
+    pub repo_root: PathBuf,
 }
 
 /// Uncommitted (working-tree) and unpushed (ahead-of-upstream) commit counts.
@@ -64,6 +65,7 @@ pub fn worktree_add(
         path: path.to_path_buf(),
         branch: branch.to_string(),
         base_ref: base.to_string(),
+        repo_root: root.to_path_buf(),
     })
 }
 

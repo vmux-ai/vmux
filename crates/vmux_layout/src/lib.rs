@@ -69,6 +69,8 @@ pub mod target;
 pub mod toggle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod window;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod worktree;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;

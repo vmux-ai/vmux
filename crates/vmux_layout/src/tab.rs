@@ -27,6 +27,8 @@ impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .register_type::<Option<String>>()
+            .register_type::<TabWorktree>()
+            .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
@@ -51,6 +53,25 @@ pub struct Tab {
     pub name: String,
     pub startup_dir: Option<String>,
 }
+
+/// Present iff a tab's `startup_dir` points at a vmux-managed git worktree.
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabWorktree {
+    pub repo_root: String,
+    pub branch: String,
+    pub base_ref: String,
+}
+
+/// Marks that the worktree/work-here decision has been made for a tab, so the isolate offer
+/// never fires again for it.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabDirDecided;
 
 /// Walk up from `entity` to its ancestor [`Tab`] and return that tab's `startup_dir` override.
 ///
