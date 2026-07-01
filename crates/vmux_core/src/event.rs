@@ -1534,6 +1534,15 @@ pub struct FileCompletionCommit {
     pub text: String,
 }
 
+/// Request to record a page/file visit into browser history (the `Visit`/`Url`
+/// ECS store). Sent by the editor when a `file://` view opens so file opens are
+/// persisted like any browser navigation; consumed by `vmux_history`.
+#[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
+pub struct RecordVisitRequest {
+    pub url: String,
+    pub title: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
