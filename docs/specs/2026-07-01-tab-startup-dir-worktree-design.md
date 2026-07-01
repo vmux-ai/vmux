@@ -362,15 +362,21 @@ Implemented on `feat/tab-startup-dir` (stacked on `feat/acp-host`), TDD, all cra
 
 1. `resolve_startup_dir_for_tab[_with_source]` + `DirSource` (`vmux_setting`).
 2. `Tab.startup_dir` + `ancestor_tab[_startup_dir]`; tab-scoped cwd at ACP-session + terminal spawn sites; `STORE_SCHEMA_VERSION` 2→3.
-3. `vmux_git::worktree` engine (add/remove/status/list/repo_root_of/head_ref).
+3. `vmux_git::worktree` engine (add/remove/status/list/repo_root_of/head_ref/**is_linked_worktree**).
 4. `TabWorktree`/`TabDirDecided` + `WorktreePlugin` (off-thread create, slug/branch/exclude), reconcile-on-load.
-5. Isolate-on-agent-start offer (ACP) with buffered deferred attach.
-6. "New Task" (`TabCommand::New` + folder picker).
-7. Side-sheet boundary chip (`TabBoundary` DTO) + Isolate / Remove-worktree actions.
+5. "New Task" (`TabCommand::New` + folder picker).
+
+### Pivot (2026-07-02): agent-managed, not vmux-modal
+
+Superseded the original §5 rfd isolate offer. The agent drives its own isolation:
+
+6. **`create_worktree` MCP tool** (`AgentCommand::CreateWorktree { anchor }`) — the agent calls it at the start; handled synchronously in the GUI (`handle_agent_self_commands`: resolve anchor→tab, `create_worktree_blocking`, set `Tab.startup_dir` + `TabWorktree`, return the path via `AgentCommandResult::Text`). The tool description is the "do it at the start" nudge. The rfd offer + `PendingAcpAttach`/`attach_acp_on_worktree_ready` deferred-attach were **removed**.
+7. **Boundary chip only when worktree** — `TabBoundary` (`push_tab_boundary_emit`) shows the chip only for worktree tabs; `is_worktree`/`branch` are **git-detected** (`is_linked_worktree`, cached by dir) so the chip reflects git reality however the worktree appeared (`TabWorktree` supplies `base_ref`). Merged into the space card; header pinned `shrink-0`. Only a `Remove worktree` action remains (`BoundaryCommandEvent`).
 
 **Deferred (follow-ups, not blocking):**
-- `TabBoundary.sandboxed` badge — needs `vmux_browser`→`vmux_agent` `AcpSession` detection; dropped for now.
-- Side-sheet **change-dir** pickers (tab + space/global) — New Task already covers tab-dir-at-creation; changing an existing dir via the chip is deferred.
-- Tab-close **notify** toast — close keeps the worktree on disk (the safety guarantee); the toast is polish.
-- `ServiceAgentCommand::NewTerminalTab` no-cwd fallback still space-scoped (`AgentLookups` 16-param limit); the common `run_terminal_cwd` path inherits the tab dir.
-- Inline-banner offer instead of `rfd` modal (§5); optional auto-remove-clean-worktree-on-close setting.
+- `sandboxed` badge — needs `vmux_browser`→`vmux_agent` `AcpSession` detection; dropped.
+- Side-sheet **change-dir** pickers — New Task covers dir-at-creation; changing an existing dir via the chip is deferred.
+- Tab-close **notify** toast — close keeps the worktree on disk (the safety guarantee); toast is polish.
+- `ServiceAgentCommand::NewTerminalTab` no-cwd fallback still space-scoped (`AgentLookups` 16-param limit); `run_terminal_cwd` inherits the tab dir.
+- `create_worktree` runs git **synchronously** on the GUI thread → bounded by the 5s `AGENT_COMMAND_TIMEOUT`; a huge-repo checkout could exceed it (worktree still created + tagged; agent sees a timeout). Move to async + deferred response if it bites.
+- System-prompt preamble to reinforce the tool (uncertain under ACP; tool description carries it for now).
