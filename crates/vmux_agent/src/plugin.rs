@@ -65,6 +65,7 @@ pub struct AgentTerminalRegions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RunTerminalCandidate {
     pid: ProcessId,
+    stack: Entity,
     pane: Entity,
     pane_spawn_seq: u64,
 }
@@ -1278,6 +1279,7 @@ fn run_terminal_candidates(
             }
             Some(RunTerminalCandidate {
                 pid: *pid,
+                stack,
                 pane,
                 pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
             })
@@ -1379,6 +1381,23 @@ fn touch_reused_run_pane_spawn_seq(
     commands
         .entity(pane)
         .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
+}
+
+fn focus_reused_run_terminal(
+    candidate: RunTerminalCandidate,
+    commands: &mut Commands,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+) {
+    commands
+        .entity(candidate.stack)
+        .insert(LastActivatedAt::now());
+    commands
+        .entity(candidate.pane)
+        .insert(LastActivatedAt::now());
+    if let Some(tab) = tab_of_run_pane(candidate.pane, child_of_q, tab_q) {
+        commands.entity(tab).insert(LastActivatedAt::now());
+    }
 }
 
 /// Split `pane` and return the new leaf pane. Batches several splits of the same
@@ -1605,6 +1624,14 @@ fn handle_agent_self_commands(
                                 &mut spawn_counter,
                                 &ctx.seq_q,
                             );
+                            if focus {
+                                focus_reused_run_terminal(
+                                    candidate,
+                                    &mut commands,
+                                    &ctx.child_of_q,
+                                    &ctx.tab_q,
+                                );
+                            }
                             service.0.send(ClientMessage::ProcessInput {
                                 process_id: candidate.pid,
                                 data,
@@ -3813,6 +3840,7 @@ mod tests {
         let regions = AgentTerminalRegions::default();
         let candidates = [RunTerminalCandidate {
             pid: terminal,
+            stack: Entity::from_bits(21),
             pane: terminal_pane,
             pane_spawn_seq: 7,
         }];
@@ -3838,11 +3866,13 @@ mod tests {
         let candidates = [
             RunTerminalCandidate {
                 pid: cached,
+                stack: Entity::from_bits(21),
                 pane: cached_pane,
                 pane_spawn_seq: 3,
             },
             RunTerminalCandidate {
                 pid: newer,
+                stack: Entity::from_bits(31),
                 pane: newer_pane,
                 pane_spawn_seq: 9,
             },
@@ -3855,6 +3885,62 @@ mod tests {
         assert_eq!(picked.pane, cached_pane);
     }
 
+    #[derive(Resource)]
+    struct ReusedRunTerminalFocusInput {
+        candidate: RunTerminalCandidate,
+    }
+
+    fn focus_reused_run_terminal_test_system(
+        input: Res<ReusedRunTerminalFocusInput>,
+        mut commands: Commands,
+        child_of_q: Query<&ChildOf>,
+        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
+    ) {
+        focus_reused_run_terminal(input.candidate, &mut commands, &child_of_q, &tab_q);
+    }
+
+    #[test]
+    fn reused_run_terminal_focus_activates_stack_pane_and_tab() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, focus_reused_run_terminal_test_system);
+        let tab = app
+            .world_mut()
+            .spawn((vmux_layout::tab::Tab::default(), LastActivatedAt(1)))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((
+                Pane,
+                vmux_layout::pane::SpawnSeq(7),
+                LastActivatedAt(2),
+                ChildOf(tab),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                LastActivatedAt(3),
+                ChildOf(pane),
+            ))
+            .id();
+        app.insert_resource(ReusedRunTerminalFocusInput {
+            candidate: RunTerminalCandidate {
+                pid: ProcessId::new(),
+                stack,
+                pane,
+                pane_spawn_seq: 7,
+            },
+        });
+
+        app.update();
+
+        assert!(app.world().get::<LastActivatedAt>(tab).unwrap().0 > 1);
+        assert!(app.world().get::<LastActivatedAt>(pane).unwrap().0 > 2);
+        assert!(app.world().get::<LastActivatedAt>(stack).unwrap().0 > 3);
+    }
+
     #[test]
     fn split_run_stacks_into_cached_terminal_bucket_pane() {
         let anchor = ProcessId::new();
@@ -3865,6 +3951,7 @@ mod tests {
         regions.run_panes.insert(anchor, terminal_pane);
         let candidates = [RunTerminalCandidate {
             pid: terminal,
+            stack: Entity::from_bits(21),
             pane: terminal_pane,
             pane_spawn_seq: 7,
         }];
