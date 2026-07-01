@@ -65,9 +65,17 @@ scrollTop        = first_visible * ch
 
 Bijection (any native scroll position ⇄ a `display_offset`):
 
-- Bottom (following): `display_offset = 0` → `first_visible = history_size`.
-- Top (oldest): `display_offset = history_size` → `first_visible = 0`.
-- To serve a requested `top_row`: `display_offset = clamp(history_size - top_row, 0, history_size)`.
+- Bottom (following): `first_visible = history_size` (view bottom of screen).
+- Top (oldest): `first_visible = 0`.
+
+**Row access is by direct grid indexing, `display_offset`-free.** Grounding
+confirmed (alacritty 0.26.0) that `grid[Line(doc_row - history_size)]` reads *any*
+document row (0 = oldest) and never touches `display_offset` — the existing
+`build_line(term, row_idx, offset)` already computes `Line(row_idx - offset)`, so
+calling it with `offset = history_size` and `row_idx = doc_row` serves an arbitrary
+window with **no new indexing code**. `display_offset` therefore **stays 0** for the
+primary screen; it is no longer the scroll source of truth. (It remains in use only
+for copy-mode and alt-screen passthrough, unchanged.)
 
 **Coordinate stability.** New output historizes at the *bottom* (grows
 `total_rows`); document row 0 (oldest) stays fixed, so top-anchored positions do
@@ -97,25 +105,31 @@ not move — no jump while scrolled up. The only shift is **scrollback eviction*
 
 ## Backend service — `vmux_service`
 
-- **New intent:** `ClientMessage::ScrollWindow { process_id, top_row: u32 }`
-  (`server.rs`). Handler sets `display_offset = clamp(history_size - top_row)` and
-  emits a windowed patch. This replaces the primary-screen `MouseWheel` round-trip;
-  `MouseWheel` remains for alt/mouse-mode passthrough.
-- **Windowed serialization.** New `fn window_lines(doc_first, count) -> Vec<(u32, TermLine)>`
-  reads grid rows in document space (0 = oldest), independent of the live
-  `display_offset`, via alacritty grid buffer-line indexing. Serve `visible ±
-  overscan` (see buffering). Key `changed_lines` by **absolute document row**, not
-  screen row.
-- **Kill the per-notch cost.** Do not `line_hashes.clear()` on a window serve; send
-  only the window's rows. Incremental live diffing (normal PTY output) is unchanged.
-- **Live streaming.** The active-screen window keeps flowing as today, now stamped
-  with `first_row` / `total_rows` so the frontend can place rows and size the spacer.
+- **New intent:** `ClientMessage::ScrollWindow { process_id, top_row: u32, follow: bool }`
+  (`server.rs`). Handler stores `view_top`/`following` on the process and re-emits the
+  window. `follow = true` (frontend pinned to bottom) keeps the service serving the
+  bottom window **autonomously on new output** — so the live-following case stays
+  round-trip-free, exactly like today. Replaces the primary-screen `MouseWheel`
+  round-trip; `MouseWheel` remains for alt/mouse-mode/copy passthrough.
+- **Windowed serialization.** `sync_viewport` serves the window around `view_top`
+  (or the bottom when `following`) in document space via direct `Line` indexing
+  (`grid[Line(doc_row - history_size)]`), reusing `build_line`/`hash_grid_row` with
+  `offset = history_size`. Serve `visible ± overscan` (see buffering). Key
+  `changed_lines` by **absolute document row** (`u32`), not screen row.
+- **Incremental diff by document row.** Replace `line_hashes: Vec<u64>` (screen-row
+  keyed) with a document-row-keyed hash cache, pruned to the window. Because a line
+  keeps its document row as it moves screen→history, following emits only genuinely
+  new/changed rows (as fast as today); an edge-prefetch emits the newly-exposed
+  rows once. Drop the `line_hashes.clear()`-on-scroll cost entirely.
+- **Live streaming.** The served window flows on `poll` as today, now stamped with
+  `first_row` / `total_rows` (= `grid.total_lines()`) so the frontend places rows and
+  sizes the spacer. Cursor is stamped in document rows (`history_size + cursor.line`).
 
 ### Wire-type changes — `vmux_core/src/event.rs` (cfg-gated, wasm-safe — `[[reference_vmux_core_event_wasm]]`)
 
 ```rust
 // New: frontend → Bevy scroll intent (CEF IPC), analogous to FileScrollEvent.
-pub struct TermScrollEvent { pub top_row: u32 }
+pub struct TermScrollEvent { pub top_row: u32, pub follow: bool }
 
 // Extend TermViewportPatch (currently: cols, rows, copy_mode, full, changed_lines, cursor, selection).
 pub struct TermViewportPatch {
@@ -123,7 +137,7 @@ pub struct TermViewportPatch {
     pub first_row: u32,        // doc row of first line in changed_lines' window
     pub total_rows: u32,       // history + screen → spacer height
     pub alt: bool,             // alt-screen → frontend uses passthrough mode
-    pub evicted_total: u64,    // monotonic count of lines permanently dropped off the top
+    pub evicted_total: u64,    // RESERVED (always 0 in v1; see Eviction drift)
     // changed_lines: now Vec<(u32 doc_row, TermLine)>
 }
 ```
@@ -170,14 +184,22 @@ per-tick re-projection is needed (today's viewport-coord model projects on every
 scroll — `[[reference_terminal_selection_model]]`). Copy resolves document rows
 back to grid content service-side.
 
-## Eviction drift
+## Eviction drift (v1: deferred, growth-correct)
 
-While scrolled up, a full scrollback ring evicts the oldest line → every document
-row shifts down by the evicted count. Patch carries monotonic `evicted_total`;
-frontend tracks the last value and, when **scrolled up**, compensates on delta `D`:
-`first_row -= D`, `scrollTop -= D * ch` → viewed content stays visually put. When
-pinned to bottom, no action (already anchored to max). Growth at the bottom needs
-no compensation (top-anchored positions are stable).
+Document rows are stable under **growth** (new output historizes at the bottom; row
+0 = oldest stays fixed), so the common cases — following, and scrolling up through a
+non-full scrollback — are always correct. The only gap: once the scrollback ring is
+**full** (default ~10k lines) *and* the user is scrolled up *and* heavy output keeps
+evicting the oldest line, every document row shifts down and the viewed content can
+drift by the evicted count.
+
+Precise compensation needs an eviction counter. Grounding confirmed **alacritty
+0.26.0 exposes none** (no monotonic "lines scrolled off" signal), and deriving one
+reliably at the ring cap is fragile. So v1 **defers** compensation: the wire carries
+a reserved `evicted_total: u64` (always `0`), and the follow-up populates it +
+applies `first_row -= D`, `scrollTop -= D*ch` on the frontend. Until then the drift
+self-heals on the next patch (rows re-emit at their new document rows). This is a
+rare edge; the 99% win (fast scroll) ships without it.
 
 ## Data flow
 
@@ -197,9 +219,10 @@ Rare, amortized by overscan.
   `needs_refetch`, overscan clamping (pure, native `cargo test`).
 - Coordinate bijection — `first_visible = history_size - display_offset` round-trips
   across bottom / mid / top / clamp edges.
-- Service — `ScrollWindow { top_row }` serves the correct document-row window
-  (visible ± overscan); `window_lines` reads history correctly; `evicted_total`
-  increments on ring overflow. Follow existing `vmux_service` process tests.
+- Service — `ScrollWindow { top_row, follow }` serves the correct document-row
+  window (visible ± overscan); doc-row `Line` indexing reads history correctly;
+  `following` streams the bottom window on new output. Follow existing
+  `vmux_service` process tests.
 - Mode gating — alt-screen / copy-mode patches set `alt` / `copy_mode`; primary
   screen does not (assert on emitted patch, per `[[feedback_verify_observable_behavior]]`).
 - Runtime scroll-feel — one manual pass at the end (`[[feedback_finish_then_test]]`):
@@ -210,22 +233,25 @@ Rare, amortized by overscan.
 ## Scope / non-goals
 
 - **In scope:** primary-screen native scroll (the 99% win), viewport-relative
-  buffering for editor + terminal, alt/mouse/copy passthrough, selection doc-coords,
-  eviction compensation.
-- **Non-goals (v1):** velocity-aware prefetch; reflow-on-resize changes beyond what
-  the windowed model needs; touching the unrelated agent-prompt bg-overlay scroll
-  bug (`[[reference_terminal_bg_overlay_drift]]`) except where doc-coord rendering
+  buffering for editor + terminal, alt/mouse/copy passthrough, selection doc-coords.
+- **Non-goals (v1):** eviction-drift compensation (reserved wire field, deferred
+  follow-up); velocity-aware prefetch; reflow-on-resize changes beyond what the
+  windowed model needs; touching the unrelated agent-prompt bg-overlay scroll bug
+  (`[[reference_terminal_bg_overlay_drift]]`) except where doc-coord rendering
   naturally subsumes it.
 
 ## Risks
 
-- **alacritty history indexing.** `window_lines` must read arbitrary history rows in
-  document space. Confirm the grid indexing API (buffer-line access independent of
-  `display_offset`) early; today's `build_line(term, row_idx, offset)` already reads
-  history via `display_offset`, so the capability exists — the task is a clean
-  doc-space accessor.
+- **alacritty history indexing.** RESOLVED (alacritty 0.26.0): `grid[Line(doc_row -
+  history_size)]` gives O(1) random access to any document row, `display_offset`-free;
+  valid range `Line(-history_size)..=Line(screen_lines-1)`. Reuse `build_line`/
+  `hash_grid_row` with `offset = history_size`. No new accessor needed.
 - **Refill latency across the process hop.** Mitigated by the larger terminal
   overscan (`k_over = 2.0`); velocity-aware prefetch is the fallback if needed.
 - **Follow-pin correctness under bursty output.** Must not fight the compositor
   (avoid `scrollTop` thrash). Pin only when already at bottom; never force-scroll
-  while the user is scrolled up.
+  while the user is scrolled up. Frontend sends `follow` so the service streams the
+  bottom window without a per-tick round-trip.
+- **Selection touches a fragile model** (`[[reference_terminal_selection_model]]`).
+  Migrating `TermSelectionRange` rows to document coordinates is mechanical but
+  spans page.rs + plugin.rs + process.rs; verify highlight + copy after scroll.
