@@ -1,5 +1,6 @@
 use vmux_command::event::{
-    CommandBarCommandEntry, CommandBarPage, CommandBarSpace, CommandBarTab, HistoryEntry,
+    CommandBarCommandEntry, CommandBarPage, CommandBarRecentFile, CommandBarSpace, CommandBarTab,
+    CommandBarWorkDir, HistoryEntry,
 };
 use vmux_core::PageIcon;
 
@@ -46,6 +47,14 @@ pub enum CommandBarResultItem {
         favicon_url: String,
         visit_count: u32,
         last_visited_at: i64,
+    },
+    WorkDir {
+        path: String,
+        kind_label: String,
+    },
+    RecentFile {
+        url: String,
+        title: String,
     },
 }
 
@@ -116,6 +125,38 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
+fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
+    dirs.iter()
+        .filter(|d| {
+            search_lower.is_empty()
+                || d.path.to_lowercase().contains(search_lower)
+                || d.kind_label.to_lowercase().contains(search_lower)
+        })
+        .map(|d| CommandBarResultItem::WorkDir {
+            path: d.path.clone(),
+            kind_label: d.kind_label.clone(),
+        })
+        .collect()
+}
+
+fn recent_file_results(
+    files: &[CommandBarRecentFile],
+    search_lower: &str,
+) -> Vec<CommandBarResultItem> {
+    files
+        .iter()
+        .filter(|f| {
+            search_lower.is_empty()
+                || f.title.to_lowercase().contains(search_lower)
+                || f.url.to_lowercase().contains(search_lower)
+        })
+        .map(|f| CommandBarResultItem::RecentFile {
+            url: f.url.clone(),
+            title: f.title.clone(),
+        })
+        .collect()
+}
+
 fn space_list_items(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<CommandBarResultItem> {
     spaces
         .iter()
@@ -145,6 +186,7 @@ fn command_results(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn filter_results(
     query: &str,
     tabs: &[CommandBarTab],
@@ -153,6 +195,8 @@ pub fn filter_results(
     pages: &[CommandBarPage],
     new_tab: bool,
     history: &[HistoryEntry],
+    work_dirs: &[CommandBarWorkDir],
+    recent_files: &[CommandBarRecentFile],
 ) -> Vec<CommandBarResultItem> {
     let q = query.trim();
 
@@ -179,6 +223,8 @@ pub fn filter_results(
             tab_index: t.tab_index as usize,
         }));
         items.extend(page_results(pages, ""));
+        items.extend(work_dir_results(work_dirs, ""));
+        items.extend(recent_file_results(recent_files, ""));
         items.extend(command_results(commands));
         return items;
     }
@@ -221,6 +267,8 @@ pub fn filter_results(
     if !starts_with_cmd && !is_path {
         items.extend(page_results(pages, &search_lower));
         items.extend(space_list_items(spaces, &search_lower));
+        items.extend(work_dir_results(work_dirs, &search_lower));
+        items.extend(recent_file_results(recent_files, &search_lower));
     }
 
     if !starts_with_cmd || !search.is_empty() {
@@ -340,6 +388,8 @@ mod tests {
             &sample_pages(),
             false,
             &[],
+            &[],
+            &[],
         );
 
         assert!(results.contains(&CommandBarResultItem::Page {
@@ -372,6 +422,8 @@ mod tests {
             &sample_pages(),
             false,
             &[],
+            &[],
+            &[],
         );
 
         assert!(results.contains(&CommandBarResultItem::Page {
@@ -395,7 +447,7 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results("spaces", &[], &commands, &[], &sample_pages(), false, &[]);
+        let results = filter_results("spaces", &[], &commands, &[], &sample_pages(), false, &[], &[], &[]);
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -418,7 +470,7 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results("client", &tabs, &[], &spaces, &sample_pages(), false, &[]);
+        let results = filter_results("client", &tabs, &[], &spaces, &sample_pages(), false, &[], &[], &[]);
 
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "client"
@@ -427,7 +479,7 @@ mod tests {
 
     #[test]
     fn page_matched_by_keyword() {
-        let results = filter_results("preferences", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("preferences", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
@@ -438,7 +490,7 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_vmux_prefix_carries_favicon() {
-        let results = filter_results("vmux://", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("vmux://", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { url, icon, .. }
@@ -448,7 +500,7 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_name() {
-        let results = filter_results("vibe", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("vibe", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, icon, .. }
@@ -458,7 +510,7 @@ mod tests {
 
     #[test]
     fn settings_page_reachable_by_name() {
-        let results = filter_results("setti", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("setti", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, .. } if title == "Settings"
@@ -473,7 +525,7 @@ mod tests {
             shortcut: String::new(),
         }];
 
-        let results = filter_results("", &[], &commands, &[], &sample_pages(), false, &[]);
+        let results = filter_results("", &[], &commands, &[], &sample_pages(), false, &[], &[], &[]);
 
         let page_count = results
             .iter()
@@ -494,7 +546,7 @@ mod tests {
 
     #[test]
     fn pages_listed_alphabetically_by_url() {
-        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         let urls: Vec<String> = results
             .iter()
             .filter_map(|r| match r {
@@ -515,7 +567,7 @@ mod tests {
 
     #[test]
     fn page_carries_shortcut() {
-        let results = filter_results("history", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("history", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, shortcut, .. }
@@ -525,11 +577,75 @@ mod tests {
 
     #[test]
     fn command_prefix_excludes_pages() {
-        let results = filter_results("> set", &[], &[], &[], &sample_pages(), false, &[]);
+        let results = filter_results("> set", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
         assert!(
             !results
                 .iter()
                 .any(|r| matches!(r, CommandBarResultItem::Page { .. }))
         );
+    }
+
+    fn sample_work_dirs() -> Vec<CommandBarWorkDir> {
+        vec![CommandBarWorkDir {
+            path: "/work/proj".into(),
+            kind_label: "Terminal".into(),
+        }]
+    }
+
+    fn sample_recent_files() -> Vec<CommandBarRecentFile> {
+        vec![CommandBarRecentFile {
+            url: "file:///work/proj/main.rs".into(),
+            title: "main.rs".into(),
+        }]
+    }
+
+    #[test]
+    fn empty_query_puts_work_after_pages() {
+        let results = filter_results(
+            "",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &sample_work_dirs(),
+            &sample_recent_files(),
+        );
+        let last_page = results
+            .iter()
+            .rposition(|r| matches!(r, CommandBarResultItem::Page { .. }))
+            .expect("pages present");
+        let first_work = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::WorkDir { .. }))
+            .expect("work dir present");
+        let first_recent = results
+            .iter()
+            .position(|r| matches!(r, CommandBarResultItem::RecentFile { .. }))
+            .expect("recent file present");
+        assert!(last_page < first_work, "work dirs come after pages");
+        assert!(first_work < first_recent, "dirs before recent files");
+    }
+
+    #[test]
+    fn work_dir_matched_by_query() {
+        let results = filter_results(
+            "proj",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &sample_work_dirs(),
+            &sample_recent_files(),
+        );
+        assert!(results.iter().any(|r| matches!(
+            r, CommandBarResultItem::WorkDir { path, .. } if path == "/work/proj"
+        )));
+        assert!(results.iter().any(|r| matches!(
+            r, CommandBarResultItem::RecentFile { title, .. } if title == "main.rs"
+        )));
     }
 }
