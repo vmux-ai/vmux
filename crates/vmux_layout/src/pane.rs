@@ -24,7 +24,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
 };
-use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_history::LastActivatedAt;
 
 /// Marker: pane is waiting for close confirmation dialog.
@@ -953,6 +953,7 @@ pub struct ResolverCtx<'w, 's> {
     seq_q: Query<'w, 's, &'static SpawnSeq>,
     node_q: Query<'w, 's, &'static ComputedNode>,
     page_q: Query<'w, 's, &'static vmux_core::PageMetadata, With<Stack>>,
+    open_task_q: Query<'w, 's, &'static PageOpenTask>,
     spaces: Query<'w, 's, (), With<crate::space::Space>>,
     tab_q: Query<'w, 's, Entity, With<Tab>>,
 }
@@ -977,11 +978,20 @@ pub fn handle_open_beside_requests(
         std::collections::HashMap::new();
     let mut pending_leaf_stacks: std::collections::HashMap<Entity, Vec<Entity>> =
         std::collections::HashMap::new();
+    let mut pending_open_stacks: Vec<(String, Entity)> = Vec::new();
     let mut retired_leaf_panes: std::collections::HashSet<Entity> =
         std::collections::HashSet::new();
     for req in reader.read() {
         let reuse = crate::space::space_of(req.pane, &child_of_q, &rc.spaces).and_then(|space| {
-            find_reuse_in_space(&req.url, space, &rc.tab_q, &rc.all_children, &rc.page_q)
+            find_reuse_in_space(
+                &req.url,
+                space,
+                &rc.tab_q,
+                &rc.all_children,
+                &rc.page_q,
+                &rc.open_task_q,
+                &child_of_q,
+            )
         });
         if let Some(hit) = reuse {
             if let Ok(meta) = rc.page_q.get(hit.stack)
@@ -995,6 +1005,23 @@ pub fn handle_open_beside_requests(
             }
             if req.focus {
                 focus_reuse_hit(&mut commands, &child_of_q, hit);
+            }
+            continue;
+        }
+        if req.direction.is_none()
+            && let Some(index) = pending_open_match_index(&req.url, &pending_open_stacks)
+        {
+            let (pending_url, stack) = &mut pending_open_stacks[index];
+            if *pending_url != req.url {
+                page_open_requests.write(PageOpenRequest {
+                    target: PageOpenTarget::Stack(*stack),
+                    url: req.url.clone(),
+                    request_id: None,
+                });
+                *pending_url = req.url.clone();
+            }
+            if req.focus {
+                focus_stack_in_layout(&mut commands, &child_of_q, &rc.tab_q, *stack);
             }
             continue;
         }
@@ -1044,7 +1071,7 @@ pub fn handle_open_beside_requests(
                     (target_pane, pending_size, true)
                 }
             };
-            spawn_beside_stack(
+            let stack = spawn_beside_stack(
                 target_pane,
                 req,
                 &mut commands,
@@ -1058,11 +1085,12 @@ pub fn handle_open_beside_requests(
                 pending_size,
                 refresh_spawn_seq,
             );
+            pending_open_stacks.push((req.url.clone(), stack));
             continue;
         }
 
         let Some(tab) = tab_of_pane(req.pane, &child_of_q, &rc.tab_q) else {
-            spawn_beside_stack(
+            let stack = spawn_beside_stack(
                 req.pane,
                 req,
                 &mut commands,
@@ -1076,6 +1104,7 @@ pub fn handle_open_beside_requests(
                 pane_size(req.pane, &rc.node_q),
                 false,
             );
+            pending_open_stacks.push((req.url.clone(), stack));
             continue;
         };
         let mut leaves = collect_leaf_infos(
@@ -1100,7 +1129,7 @@ pub fn handle_open_beside_requests(
                 );
             }
             crate::placement::Placement::AddTab { pane } => {
-                spawn_beside_stack(
+                let stack = spawn_beside_stack(
                     pane,
                     req,
                     &mut commands,
@@ -1114,6 +1143,7 @@ pub fn handle_open_beside_requests(
                     pane_size(pane, &rc.node_q),
                     false,
                 );
+                pending_open_stacks.push((req.url.clone(), stack));
             }
             crate::placement::Placement::Spiral { anchor, axis } => {
                 let old_leaf_info = leaves.iter().find(|leaf| leaf.pane == anchor).cloned();
@@ -1138,7 +1168,7 @@ pub fn handle_open_beside_requests(
                     &mut retired_leaf_panes,
                 );
                 let pending_size = target_size.unwrap_or_else(|| pane_size(anchor, &rc.node_q));
-                spawn_beside_stack(
+                let stack = spawn_beside_stack(
                     target_pane,
                     req,
                     &mut commands,
@@ -1152,6 +1182,7 @@ pub fn handle_open_beside_requests(
                     pending_size,
                     true,
                 );
+                pending_open_stacks.push((req.url.clone(), stack));
             }
         }
     }
@@ -1215,6 +1246,22 @@ fn focus_reuse_hit(
     commands.entity(hit.tab).insert(LastActivatedAt::now());
 }
 
+fn focus_stack_in_layout(
+    commands: &mut Commands,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<Tab>>,
+    stack: Entity,
+) {
+    if let Ok(co) = child_of_q.get(stack) {
+        let pane = co.get();
+        commands.entity(pane).insert(LastActivatedAt::now());
+        if let Some(tab) = tab_of_pane(pane, child_of_q, tab_q) {
+            commands.entity(tab).insert(LastActivatedAt::now());
+        }
+    }
+    commands.entity(stack).insert(LastActivatedAt::now());
+}
+
 fn touch_pane_spawn_seq(
     target_pane: Entity,
     commands: &mut Commands,
@@ -1258,7 +1305,7 @@ fn spawn_beside_stack(
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
     pending_size: Vec2,
     refresh_spawn_seq: bool,
-) {
+) -> Entity {
     let spawn_seq = if refresh_spawn_seq {
         let seq = touch_pane_spawn_seq(target_pane, commands, spawn_counter, seq_q);
         spawn_seq_overrides.insert(target_pane, seq.0);
@@ -1281,6 +1328,10 @@ fn spawn_beside_stack(
     let new_stack = commands
         .spawn((stack_bundle(), stack_ts, ChildOf(target_pane)))
         .id();
+    commands.entity(new_stack).insert(vmux_core::PageMetadata {
+        url: req.url.clone(),
+        ..default()
+    });
     pending_leaf_stacks
         .entry(target_pane)
         .or_default()
@@ -1291,6 +1342,13 @@ fn spawn_beside_stack(
         new_stack_ctx,
         page_open_requests,
     );
+    new_stack
+}
+
+fn pending_open_match_index(url: &str, pending_open_stacks: &[(String, Entity)]) -> Option<usize> {
+    pending_open_stacks
+        .iter()
+        .position(|(pending_url, _)| crate::placement::reusable_page_match(url, pending_url))
 }
 
 fn pane_size(pane: Entity, node_q: &Query<&ComputedNode>) -> Vec2 {
@@ -1377,13 +1435,14 @@ fn leaf_info_for_pane(
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
     spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
 ) -> Option<crate::placement::LeafInfo> {
-    let kinds = pane_children
-        .get(pane)
-        .ok()?
-        .iter()
-        .filter_map(|child| page_q.get(child).ok())
-        .map(|p| crate::placement::page_kind_for_url(&p.url))
-        .collect();
+    let kinds = unique_page_kinds(
+        pane_children
+            .get(pane)
+            .ok()?
+            .iter()
+            .filter_map(|child| page_q.get(child).ok())
+            .map(|p| p.url.as_str()),
+    );
     Some(crate::placement::LeafInfo {
         pane,
         kinds,
@@ -1429,10 +1488,11 @@ fn collect_leaf_infos(
             let kinds = pane_children
                 .get(pane)
                 .map(|c| {
-                    c.iter()
-                        .filter_map(|child| page_q.get(child).ok())
-                        .map(|p| crate::placement::page_kind_for_url(&p.url))
-                        .collect()
+                    unique_page_kinds(
+                        c.iter()
+                            .filter_map(|child| page_q.get(child).ok())
+                            .map(|p| p.url.as_str()),
+                    )
                 })
                 .unwrap_or_default();
             crate::placement::LeafInfo {
@@ -1449,12 +1509,25 @@ fn collect_leaf_infos(
         .collect()
 }
 
+fn unique_page_kinds<'a>(urls: impl Iterator<Item = &'a str>) -> Vec<crate::placement::PageKind> {
+    let mut kinds = Vec::new();
+    for url in urls {
+        let kind = crate::placement::page_kind_for_url(url);
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    kinds
+}
+
 fn find_reuse_in_space(
     url: &str,
     space: Entity,
     tab_q: &Query<Entity, With<Tab>>,
     all_children: &Query<&Children>,
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
+    open_task_q: &Query<&PageOpenTask>,
+    child_of_q: &Query<&ChildOf>,
 ) -> Option<crate::placement::ReuseHit> {
     let tabs: Vec<Entity> = all_children
         .get(space)
@@ -1472,6 +1545,37 @@ fn find_reuse_in_space(
                 frontier.extend(children.iter());
             }
         }
+    }
+    for task in open_task_q.iter() {
+        if !crate::placement::reusable_page_match(url, &task.url) {
+            continue;
+        }
+        if let Some(tab) = tab_for_stack_in_space(task.stack, space, child_of_q, tab_q) {
+            return Some(crate::placement::ReuseHit {
+                tab,
+                stack: task.stack,
+            });
+        }
+    }
+    None
+}
+
+fn tab_for_stack_in_space(
+    stack: Entity,
+    space: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<Tab>>,
+) -> Option<Entity> {
+    let mut cur = stack;
+    let mut tab = None;
+    for _ in 0..32 {
+        if tab_q.contains(cur) {
+            tab = Some(cur);
+        }
+        if cur == space {
+            return tab;
+        }
+        cur = child_of_q.get(cur).ok()?.get();
     }
     None
 }
@@ -2779,6 +2883,19 @@ mod tests {
         cursor.read(messages).cloned().collect()
     }
 
+    fn materialize_page_metadata(app: &mut App) {
+        for request in page_open_requests(app) {
+            if let PageOpenTarget::Stack(stack) = request.target {
+                app.world_mut()
+                    .entity_mut(stack)
+                    .insert(vmux_core::PageMetadata {
+                        url: request.url,
+                        ..default()
+                    });
+            }
+        }
+    }
+
     fn open_beside_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -3137,6 +3254,204 @@ mod tests {
         assert_eq!(
             files_parent, ci_parent,
             "browser pages after file tab reuse should stack in the newest browser pane"
+        );
+    }
+
+    #[test]
+    fn auto_file_bucket_stays_reusable_after_multiple_file_tabs() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "https://github.com/vmux-ai/vmux/pull/221",
+            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_layout/src/pane.rs",
+            "vmux://terminal/",
+            "file:///repo/crates/vmux_layout/src/placement.rs",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+            app.update();
+            materialize_page_metadata(&mut app);
+        }
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let plugin_parent = parent_for_url("file:///repo/crates/vmux_agent/src/plugin.rs");
+        let pane_parent = parent_for_url("file:///repo/crates/vmux_layout/src/pane.rs");
+        let placement_parent = parent_for_url("file:///repo/crates/vmux_layout/src/placement.rs");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+
+        assert_eq!(pane_parent, plugin_parent);
+        assert_eq!(
+            placement_parent, plugin_parent,
+            "later files should reuse the existing file pane even after it has multiple file tabs"
+        );
+        assert_eq!(
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            app.world().get::<ChildOf>(plugin_parent).unwrap().get(),
+            "terminal should split the file pane"
+        );
+    }
+
+    #[test]
+    fn auto_duplicate_url_reuses_pending_open_in_same_batch() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for i in 0..2 {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: "https://github.com/vmux-ai/vmux/pull/221".into(),
+                    request_id: [i; 16],
+                    focus: false,
+                });
+        }
+        app.update();
+
+        let requests = page_open_requests(&app);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.url == "https://github.com/vmux-ai/vmux/pull/221")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn auto_duplicate_url_reuses_pending_page_open_task() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: None,
+                url: "https://github.com/vmux-ai/vmux/pull/221".into(),
+                request_id: [0; 16],
+                focus: false,
+            });
+        app.update();
+
+        let first_stack = page_open_requests(&app)
+            .iter()
+            .find_map(|request| match request.target {
+                PageOpenTarget::Stack(stack)
+                    if request.url == "https://github.com/vmux-ai/vmux/pull/221" =>
+                {
+                    Some(stack)
+                }
+                _ => None,
+            })
+            .unwrap();
+        app.world_mut().spawn(vmux_core::PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack: first_stack,
+            url: "https://github.com/vmux-ai/vmux/pull/221".into(),
+            request_id: None,
+        });
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: None,
+                url: "https://github.com/vmux-ai/vmux/pull/221".into(),
+                request_id: [1; 16],
+                focus: false,
+            });
+        app.update();
+
+        let requests = page_open_requests(&app);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.url == "https://github.com/vmux-ai/vmux/pull/221")
+                .count(),
+            1
         );
     }
 

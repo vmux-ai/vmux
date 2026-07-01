@@ -238,7 +238,8 @@ impl Plugin for AgentPlugin {
                     forward_history_open_intent,
                     handle_agent_tool_calls,
                     handle_agent_commands,
-                    handle_agent_self_commands,
+                    handle_agent_self_commands
+                        .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
                     handle_agent_file_touch,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
@@ -3479,6 +3480,23 @@ mod tests {
         assert!(agent_may_dispatch_app_command(&AppCommand::Terminal(
             vmux_command::TerminalCommand::Clear,
         )));
+    }
+
+    #[test]
+    fn agent_run_spawns_terminal_before_next_agent_command_frame() {
+        let source = include_str!("plugin.rs");
+        let non_test_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("non-test source");
+        let start = non_test_source
+            .find("handle_agent_self_commands")
+            .expect("handle_agent_self_commands registered");
+        assert!(
+            non_test_source[start..]
+                .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
+            "run terminal spawn requests must materialize before the next agent command frame"
+        );
     }
 
     #[derive(Resource)]
