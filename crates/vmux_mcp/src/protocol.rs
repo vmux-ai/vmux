@@ -11,9 +11,6 @@ use vmux_service::protocol::{
 const RUN_BLOCK_TIMEOUT: Duration = Duration::from_secs(50);
 /// Interval between terminal reads while waiting for the completion marker.
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
-/// Grace period for the terminal to be created before a "process not found"
-/// read is treated as a real error.
-const RUN_CREATE_GRACE: Duration = Duration::from_secs(3);
 
 pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     let mut line = String::new();
@@ -380,6 +377,7 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     line[..idx].encode_utf16().count() as u32
 }
 
+#[cfg(test)]
 fn output_since(baseline: &str, final_text: &str) -> String {
     final_text
         .strip_prefix(baseline)
@@ -387,6 +385,38 @@ fn output_since(baseline: &str, final_text: &str) -> String {
         .trim_matches('\n')
         .trim_end()
         .to_string()
+}
+
+fn run_done_token(request_id: AgentRequestId) -> String {
+    let mut token = String::with_capacity(32);
+    for byte in request_id.0 {
+        use std::fmt::Write;
+        let _ = write!(&mut token, "{byte:02x}");
+    }
+    token
+}
+
+fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -> AgentCommand {
+    if let AgentCommand::Run { done_marker, .. } = &mut run {
+        *done_marker = Some(run_done_token(request_id));
+    }
+    run
+}
+
+fn extract_done_marker_output(token: &str, text: &str) -> Option<(i32, String)> {
+    let start_marker = format!("__VMUX_START_{token}__");
+    let done_prefix = format!("__VMUX_DONE_{token}_");
+    let start_index = text.rfind(&start_marker)?;
+    let after_start = &text[start_index + start_marker.len()..];
+    let done_index = after_start.find(&done_prefix)?;
+    let after_prefix = &after_start[done_index + done_prefix.len()..];
+    let code_end = after_prefix.find("__")?;
+    let exit = after_prefix[..code_end].parse().ok()?;
+    let output = after_start[..done_index]
+        .trim_matches(|c| c == '\n' || c == '\r')
+        .trim_end()
+        .to_string();
+    Some((exit, output))
 }
 
 fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Value {
@@ -412,6 +442,8 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
 
     let request_id = AgentRequestId::new();
+    let token = run_done_token(request_id);
+    let run = blocking_run_with_marker(run, request_id);
     connection
         .send(&ClientMessage::AgentCommand {
             request_id,
@@ -451,36 +483,14 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
         .map_err(|_| format!("run: service returned an invalid terminal id: {pid}"))?;
 
     let start = Instant::now();
-    let baseline_seq = loop {
-        match agent_query(&connection, AgentQuery::CommandExit { process_id }).await? {
-            AgentQueryResult::CommandExit { seq, .. } => break seq,
-            AgentQueryResult::Error(message) => {
-                if start.elapsed() > RUN_CREATE_GRACE {
-                    return Err(message);
-                }
-                tokio::time::sleep(RUN_POLL_INTERVAL).await;
-            }
-            other => return Err(format!("run: unexpected command-exit result: {other:?}")),
-        }
-    };
-    let baseline_text = read_full_text(&connection, process_id).await;
-
     let deadline = start + RUN_BLOCK_TIMEOUT;
     loop {
-        match agent_query(&connection, AgentQuery::CommandExit { process_id }).await? {
-            AgentQueryResult::CommandExit { seq, exit } if seq > baseline_seq => {
-                let final_text = read_full_text(&connection, process_id).await;
-                let output = output_since(&baseline_text, &final_text);
-                return Ok(run_result(&pid, exit, &output, false));
-            }
-            AgentQueryResult::CommandExit { .. } => {}
-            AgentQueryResult::Error(message) => return Err(message),
-            other => return Err(format!("run: unexpected command-exit result: {other:?}")),
+        let text = read_full_text(&connection, process_id).await;
+        if let Some((exit, output)) = extract_done_marker_output(&token, &text) {
+            return Ok(run_result(&pid, Some(exit), &output, false));
         }
         if Instant::now() >= deadline {
-            let final_text = read_full_text(&connection, process_id).await;
-            let output = output_since(&baseline_text, &final_text);
-            return Ok(run_result(&pid, None, &output, true));
+            return Ok(run_result(&pid, None, &text, true));
         }
         tokio::time::sleep(RUN_POLL_INTERVAL).await;
     }
@@ -823,5 +833,39 @@ mod tests {
         let text = timeout["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("still running"));
         assert!(text.contains("read_terminal(pid7)"));
+    }
+
+    #[test]
+    fn blocking_run_sets_done_marker_token() {
+        let request_id = AgentRequestId([7; 16]);
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let run = AgentCommand::Run {
+            anchor,
+            command: "git status".into(),
+            direction: vmux_service::protocol::AgentPaneDirection::Right,
+            focus: false,
+            beside: None,
+            mode: vmux_service::protocol::PlacementMode::Auto,
+            terminal: None,
+            done_marker: None,
+        };
+
+        let marked = blocking_run_with_marker(run, request_id);
+
+        match marked {
+            AgentCommand::Run { done_marker, .. } => {
+                assert_eq!(done_marker, Some(run_done_token(request_id)));
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn done_marker_output_extracts_between_start_and_done() {
+        let text = "old output\n__VMUX_START_tok__\nhello\nworld\n__VMUX_DONE_tok_7__\nprompt";
+
+        let parsed = extract_done_marker_output("tok", text);
+
+        assert_eq!(parsed, Some((7, "hello\nworld".to_string())));
     }
 }

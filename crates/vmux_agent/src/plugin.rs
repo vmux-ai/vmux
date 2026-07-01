@@ -1446,10 +1446,14 @@ fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
         .unwrap_or(shell);
     match base {
         "nu" | "nushell" => format!(
-            "try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+            "print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
         ),
-        "fish" => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' $status"),
-        _ => format!("{command}; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$?\""),
+        "fish" => format!(
+            "printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
+        ),
+        _ => format!(
+            "printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
+        ),
     }
 }
 
@@ -3371,20 +3375,20 @@ mod tests {
         // completion marker.
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
-            "try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+            "print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
         );
         assert_eq!(
             command_with_marker("/usr/local/bin/fish", "ls", "abc"),
-            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' $status"
+            "printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
         );
         assert_eq!(
             command_with_marker("/bin/zsh", "ls", "abc"),
-            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
         // Unknown shells fall back to posix syntax.
         assert_eq!(
             command_with_marker("/bin/bash", "ls", "abc"),
-            "ls; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$?\""
+            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
     }
 

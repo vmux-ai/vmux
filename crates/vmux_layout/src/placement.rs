@@ -73,12 +73,6 @@ fn newest_leaf_with_kind(leaves: &[LeafInfo], kind: PageKind) -> Option<&LeafInf
         .max_by_key(|l| l.spawn_seq)
 }
 
-fn browser_bucket_is_current(bucket: &LeafInfo, leaves: &[LeafInfo]) -> bool {
-    newest_nonagent_leaf(leaves)
-        .map(|latest| latest.pane == bucket.pane || latest.spawn_seq <= bucket.spawn_seq)
-        .unwrap_or(true)
-}
-
 fn file_reuse_key(url: &str) -> &str {
     url.split('#').next().unwrap_or(url)
 }
@@ -126,9 +120,7 @@ pub fn resolve_placement(
         return Placement::AddTab { pane: self_pane };
     }
 
-    if let Some(same) = newest_leaf_with_kind(leaves, kind)
-        && (kind != PageKind::Browser || browser_bucket_is_current(same, leaves))
-    {
+    if let Some(same) = newest_leaf_with_kind(leaves, kind) {
         return Placement::AddTab { pane: same.pane };
     }
 
