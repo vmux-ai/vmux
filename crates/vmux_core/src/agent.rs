@@ -160,6 +160,18 @@ pub fn parse_page_agent_url(url: &str) -> Option<(String, String, Option<String>
     }
 }
 
+/// `vmux://agent/<id>` (single segment) → an ACP agent id. Two or more segments are the
+/// provider-direct page form ([`parse_page_agent_url`]), so ACP claims the single-segment
+/// space without collision.
+pub fn parse_acp_agent_url(url: &str) -> Option<String> {
+    let body = url.strip_prefix("vmux://agent/")?;
+    let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
+    match segs.as_slice() {
+        [id] => Some((*id).to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +227,16 @@ mod tests {
     #[test]
     fn parse_page_agent_url_rejects_single_segment() {
         assert!(parse_page_agent_url("vmux://agent/vibe").is_none());
+    }
+
+    #[test]
+    fn parse_acp_agent_url_single_segment() {
+        assert_eq!(
+            parse_acp_agent_url("vmux://agent/vibe-acp"),
+            Some("vibe-acp".to_string())
+        );
+        assert!(parse_acp_agent_url("vmux://agent/openai/gpt-5.5").is_none());
+        assert!(parse_acp_agent_url("https://google.com").is_none());
     }
 
     #[test]
