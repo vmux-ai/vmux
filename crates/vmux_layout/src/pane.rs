@@ -1005,7 +1005,7 @@ pub fn handle_open_beside_requests(
         }
 
         if let Some(direction) = req.direction {
-            let target_pane = match find_sibling_pane(
+            let (target_pane, pending_size) = match find_sibling_pane(
                 req.pane,
                 &direction,
                 &child_of_q,
@@ -1013,7 +1013,7 @@ pub fn handle_open_beside_requests(
                 &pane_children,
                 &leaf_panes,
             ) {
-                Some(sibling) => sibling,
+                Some(sibling) => (sibling, pane_size(sibling, &rc.node_q)),
                 None => {
                     let existing_tabs = stack_children_for_split(
                         req.pane,
@@ -1032,7 +1032,7 @@ pub fn handle_open_beside_requests(
                     let split_dir = direction_to_split(&direction);
                     let already_split =
                         !split_this_batch.insert(req.pane) || split_dir_q.contains(req.pane);
-                    split_or_extend_for_batch(
+                    let (target_pane, target_size) = split_or_extend_for_batch(
                         &mut commands,
                         req.pane,
                         split_dir,
@@ -1043,8 +1043,10 @@ pub fn handle_open_beside_requests(
                         &mut pending_leaf_infos,
                         &mut pending_leaf_stacks,
                         &mut retired_leaf_panes,
-                    )
-                    .0
+                    );
+                    let pending_size =
+                        target_size.unwrap_or_else(|| pane_size(target_pane, &rc.node_q));
+                    (target_pane, pending_size)
                 }
             };
             spawn_beside_stack(
@@ -1058,7 +1060,7 @@ pub fn handle_open_beside_requests(
                 &mut spawn_seq_overrides,
                 &mut pending_leaf_infos,
                 &mut pending_leaf_stacks,
-                pane_size(target_pane, &rc.node_q),
+                pending_size,
             );
             continue;
         }
@@ -2973,6 +2975,78 @@ mod tests {
         assert_eq!(
             app.world().get::<PaneSplit>(file_split).unwrap().direction,
             PaneSplitDirection::Row
+        );
+    }
+
+    #[test]
+    fn direction_batched_new_type_uses_split_target_size() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: Some(PaneDirection::Right),
+                url: "file:///repo/crates/vmux_agent/src/plugin.rs".into(),
+                request_id: [0u8; 16],
+                focus: false,
+            });
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: None,
+                url: "vmux://terminal/".into(),
+                request_id: [1u8; 16],
+                focus: false,
+            });
+        app.update();
+
+        let requests = page_open_requests(&app);
+        let parent_for = |prefix: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url.starts_with(prefix) => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let file_parent = parent_for("file:");
+        let terminal_parent = parent_for("vmux://terminal/");
+        let file_split = app.world().get::<ChildOf>(file_parent).unwrap().get();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            file_split
+        );
+        assert_eq!(
+            app.world().get::<PaneSplit>(file_split).unwrap().direction,
+            PaneSplitDirection::Column,
+            "the forced-right target is 800x900, so the next pane should split it vertically"
         );
     }
 
