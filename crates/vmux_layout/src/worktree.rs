@@ -59,6 +59,7 @@ impl Plugin for WorktreePlugin {
                     spawn_worktree_create_jobs,
                     apply_worktree_create_outcomes,
                     handle_remove_worktree_requests,
+                    reconcile_tab_worktrees,
                 ),
             );
     }
@@ -214,6 +215,21 @@ fn handle_remove_worktree_requests(
     }
 }
 
+/// After load (or create), drop a [`TabWorktree`] whose checkout directory no longer exists,
+/// so the tab's dir cascades back through the resolver instead of pointing at a dead worktree.
+fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut commands: Commands) {
+    for (entity, tab) in &q {
+        let missing = tab
+            .startup_dir
+            .as_deref()
+            .map(|d| !Path::new(d).is_dir())
+            .unwrap_or(true);
+        if missing {
+            commands.entity(entity).remove::<TabWorktree>();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +324,46 @@ mod tests {
             .drain()
             .count();
         assert_eq!(ready, 1);
+    }
+
+    #[test]
+    fn reconcile_drops_worktree_when_path_missing() {
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let good = tempfile::tempdir().unwrap();
+        let kept = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "k".into(),
+                    startup_dir: Some(good.path().to_string_lossy().into_owned()),
+                },
+                TabWorktree {
+                    repo_root: "r".into(),
+                    branch: "vmux/k".into(),
+                    base_ref: "main".into(),
+                },
+            ))
+            .id();
+        let dropped = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "d".into(),
+                    startup_dir: Some("/no/such/vmux-xyz-dir".into()),
+                },
+                TabWorktree {
+                    repo_root: "r".into(),
+                    branch: "vmux/d".into(),
+                    base_ref: "main".into(),
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<TabWorktree>(kept).is_some());
+        assert!(app.world().get::<TabWorktree>(dropped).is_none());
     }
 
     #[test]
