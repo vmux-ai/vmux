@@ -7,6 +7,7 @@ pub mod event;
 pub mod icon;
 pub mod media;
 pub mod process_id;
+pub mod scroll;
 pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
