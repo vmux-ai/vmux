@@ -101,7 +101,13 @@ pub(crate) fn store_path() -> PathBuf {
 }
 
 fn store_version_path() -> PathBuf {
-    vmux_core::profile::store_dir().join("store.version")
+    store_version_path_for_store(&store_path())
+}
+
+fn store_version_path_for_store(path: &Path) -> PathBuf {
+    path.parent()
+        .map(|parent| parent.join("store.version"))
+        .unwrap_or_else(|| PathBuf::from("store.version"))
 }
 
 fn store_schema_is_current() -> bool {
@@ -112,8 +118,11 @@ fn store_schema_is_current() -> bool {
         .unwrap_or(false)
 }
 
-fn write_store_schema_version() {
-    let _ = std::fs::write(store_version_path(), STORE_SCHEMA_VERSION.to_string());
+fn write_store_schema_version(path: &Path) {
+    let _ = std::fs::write(
+        store_version_path_for_store(path),
+        STORE_SCHEMA_VERSION.to_string(),
+    );
 }
 
 fn mark_dirty_on_change(
@@ -179,7 +188,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    write_store_schema_version();
+    write_store_schema_version(&path);
     // Use an allowlist to only save our model components.
     // ChildOf is the source of truth for hierarchy; Children is derived
     // automatically by Bevy's relationship system on load.
@@ -952,6 +961,42 @@ mod tests {
         assert!(geom.fullscreen);
         assert_eq!(geom.position, Some(IVec2::new(11, 22)));
         assert_eq!(geom.size, Some(Vec2::new(640.0, 480.0)));
+    }
+
+    #[test]
+    fn custom_save_writes_schema_version_next_to_saved_store() {
+        let _home = HomeEnvGuard::use_temp_home("custom-save-schema-version");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("custom-store.ron");
+
+        let mut app_save = App::new();
+        app_save
+            .add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .add_observer(save_on_default_event);
+        app_save.world_mut().spawn((
+            Save,
+            Space,
+            SpaceId("space-1".to_string()),
+            WindowGeometry {
+                fullscreen: false,
+                position: None,
+                size: None,
+            },
+        ));
+
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+
+        assert!(path.exists(), "custom store should be saved");
+        assert!(
+            dir.path().join("store.version").exists(),
+            "schema version should be written next to custom store"
+        );
+        assert!(
+            !store_version_path().exists(),
+            "custom save must not write default store.version"
+        );
     }
 
     #[test]
