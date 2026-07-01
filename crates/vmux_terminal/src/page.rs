@@ -495,9 +495,6 @@ const _TW_SAFELIST: &[&str] = &[
     "border-ansi-1",
 ];
 
-
-
-
 #[component]
 fn TerminalRow(
     row_idx: usize,
