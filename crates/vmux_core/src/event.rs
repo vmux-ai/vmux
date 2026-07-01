@@ -9,6 +9,7 @@ pub const TERM_KEY_EVENT: &str = "term_key";
 pub const TERM_MOUSE_EVENT: &str = "term_mouse";
 pub const TERM_RESIZE_EVENT: &str = "term_resize";
 pub const TERM_LINK_OPEN_EVENT: &str = "term_link_open";
+pub const TERM_SCROLL_EVENT: &str = "term_scroll";
 
 pub const TERM_THEME_EVENT: &str = "term_theme";
 pub const TERM_TITLE_EVENT: &str = "term_title";
@@ -1029,7 +1030,7 @@ pub const FLAG_INVERSE: u16 = 32;
 )]
 pub struct TermCursor {
     pub col: u16,
-    pub row: u16,
+    pub row: u32,
     pub shape: CursorShape,
     pub visible: bool,
     /// The character under the cursor (for block-cursor rendering).
@@ -1073,16 +1074,29 @@ pub enum CursorShape {
     Debug, Clone, Serialize, Deserialize, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
 pub struct TermViewportPatch {
-    /// (row_index, line) pairs for rows that changed since last sync.
-    pub changed_lines: Vec<(u16, TermLine)>,
+    /// (document_row, line) pairs for rows that changed since last sync.
+    /// Document row 0 = oldest retained scrollback line.
+    pub changed_lines: Vec<(u32, TermLine)>,
     pub cursor: TermCursor,
     pub cols: u16,
     pub rows: u16,
     pub selection: Option<TermSelectionRange>,
     #[serde(default)]
     pub copy_mode: bool,
-    /// When true, changed_lines contains every row (full viewport rebuild).
+    /// When true, changed_lines is a full window rebuild (spawn/resize/scroll jump).
     pub full: bool,
+    /// Document row of the first line of the served window.
+    #[serde(default)]
+    pub first_row: u32,
+    /// Total document rows (history + screen) → spacer height.
+    #[serde(default)]
+    pub total_rows: u32,
+    /// Alt-screen active → frontend uses passthrough (non-native) scroll.
+    #[serde(default)]
+    pub alt: bool,
+    /// RESERVED: lines permanently evicted off the top. Always 0 in v1.
+    #[serde(default)]
+    pub evicted_total: u64,
 }
 
 impl TermViewportPatch {
@@ -1090,15 +1104,35 @@ impl TermViewportPatch {
         self.full || self.cols != current_cols || self.rows != current_rows
     }
 
-    pub fn changed_row_indices(&self) -> impl Iterator<Item = u16> + '_ {
+    pub fn changed_row_indices(&self) -> impl Iterator<Item = u32> + '_ {
         self.changed_lines.iter().map(|(row_idx, _)| *row_idx)
     }
 }
 
+/// Frontend → Bevy scroll intent for the terminal (CEF IPC). `follow = true`
+/// means the frontend is pinned to the bottom; the service then streams the
+/// bottom window autonomously (no per-tick round-trip).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TermScrollEvent {
+    pub top_row: u32,
+    pub follow: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CursorRowUpdate {
-    pub clear: Option<u16>,
-    pub set: Option<u16>,
+    pub clear: Option<u32>,
+    pub set: Option<u32>,
 }
 
 pub fn cursor_row_update(previous: Option<&TermCursor>, next: &TermCursor) -> CursorRowUpdate {
@@ -1561,7 +1595,7 @@ mod tests {
         assert_eq!(back, e);
     }
 
-    fn patch(changed_rows: Vec<u16>, cols: u16, rows: u16, full: bool) -> TermViewportPatch {
+    fn patch(changed_rows: Vec<u32>, cols: u16, rows: u16, full: bool) -> TermViewportPatch {
         TermViewportPatch {
             changed_lines: changed_rows
                 .into_iter()
@@ -1573,6 +1607,10 @@ mod tests {
             selection: None,
             copy_mode: false,
             full,
+            first_row: 0,
+            total_rows: rows as u32,
+            alt: false,
+            evicted_total: 0,
         }
     }
 
