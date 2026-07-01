@@ -118,6 +118,30 @@ pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
         .collect())
 }
 
+/// True if `dir` is a *linked* worktree (its git-dir differs from the repo's common git-dir),
+/// i.e. not the repo's main working tree. False for the main worktree or a non-repo.
+pub fn is_linked_worktree(dir: &Path) -> bool {
+    let Ok((stdout, _, ok)) = git(
+        dir,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    ) else {
+        return false;
+    };
+    if !ok {
+        return false;
+    }
+    let mut lines = stdout.lines().map(str::trim).filter(|l| !l.is_empty());
+    match (lines.next(), lines.next()) {
+        (Some(git_dir), Some(common)) => git_dir != common,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +213,15 @@ mod tests {
             repo_root_of(repo.path()).unwrap().canonicalize().unwrap(),
             repo.path().canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn detects_linked_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        assert!(!is_linked_worktree(repo.path()), "main worktree");
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        assert!(is_linked_worktree(&wt), "linked worktree");
     }
 }
