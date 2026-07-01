@@ -1154,11 +1154,10 @@ pub fn Page() -> Element {
                                         {
                                             lsp_hover().map(|h| {
                                                 let (cw, ch) = cell_dims();
-                                                let hrow = lines()
-                                                    .iter()
-                                                    .position(|l| l.line_no == h.line)
-                                                    .map(|i| first_row() + i as u32)
-                                                    .unwrap_or(h.line);
+                                                let Some(i) = lines().iter().position(|l| l.line_no == h.line) else {
+                                                    return rsx! {};
+                                                };
+                                                let hrow = first_row() + i as u32;
                                                 let top = hrow as f64 * ch + ch;
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {

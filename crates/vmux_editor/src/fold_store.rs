@@ -13,7 +13,7 @@ pub struct FoldStore {
 }
 
 fn store_path() -> PathBuf {
-    vmux_core::profile::shared_data_dir().join("folds.ron")
+    vmux_core::profile::profile_dir().join("folds.ron")
 }
 
 fn key(path: &Path) -> String {

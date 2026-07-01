@@ -111,6 +111,15 @@ impl FoldState {
         self.collapsed.clear();
     }
 
+    /// Header line of the innermost collapsed region whose body hides `line`.
+    pub fn hiding_header(&self, line: u32) -> Option<u32> {
+        self.regions
+            .iter()
+            .filter(|r| self.collapsed.contains(&r.start) && r.contains_body(line))
+            .min_by_key(|r| r.end - r.start)
+            .map(|r| r.start)
+    }
+
     /// Expand any collapsed region whose body hides `line`.
     pub fn reveal(&mut self, line: u32) {
         let open: Vec<u32> = self
@@ -375,6 +384,20 @@ mod tests {
         s.close(1);
         s.reveal(3);
         assert!(!s.collapsed.contains(&1));
+    }
+
+    #[test]
+    fn hiding_header_returns_innermost() {
+        let mut s = FoldState::default();
+        s.set_regions(vec![
+            FoldRegion { start: 0, end: 9 },
+            FoldRegion { start: 2, end: 5 },
+        ]);
+        s.close(0);
+        s.close(2);
+        assert_eq!(s.hiding_header(3), Some(2));
+        assert_eq!(s.hiding_header(7), Some(0));
+        assert_eq!(s.hiding_header(0), None);
     }
 
     #[test]

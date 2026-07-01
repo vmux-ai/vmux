@@ -110,7 +110,7 @@ fold open, which is acceptable for v1.
 New `EditCommand` variants, handled at the **plugin level** (no-ops inside
 `EditCore::apply`, like `Save` / `GotoDefinition` today):
 
-```
+```rust
 FoldToggle, FoldOpen, FoldClose, FoldToggleRecursive, FoldAll, UnfoldAll
 ```
 
@@ -138,7 +138,7 @@ same handler keyed by line.
 
 A per-file store, `folds.ron`, in the profile directory:
 
-```
+```rust
 HashMap<PathBuf, Vec<u32>>   // path -> collapsed header lines
 ```
 

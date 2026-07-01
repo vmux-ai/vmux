@@ -657,14 +657,11 @@ fn drain_lsp_requests(
                 }
             }
             ReqKind::Folding { path } => {
-                let regions = parse_folding_ranges(&value);
-                if !regions.is_empty() {
-                    folds_w.write(LspFolds {
-                        entity: f.entity,
-                        path,
-                        regions,
-                    });
-                }
+                folds_w.write(LspFolds {
+                    entity: f.entity,
+                    path,
+                    regions: parse_folding_ranges(&value),
+                });
             }
         }
     }

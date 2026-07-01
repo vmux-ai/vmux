@@ -298,9 +298,8 @@ fn load_file_buffers(
         let mut folds = crate::fold::FoldState::default();
         folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
         if let Some(store) = &store {
-            for s in store.get(&fv.path) {
-                folds.close(s);
-            }
+            folds.collapsed.extend(store.get(&fv.path));
+            folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
         commands
@@ -694,7 +693,12 @@ fn apply_lsp_folds(
         if canon(&fv.path) != canon(&f.path) {
             continue;
         }
-        edit.folds.set_regions(f.regions.clone());
+        let regions = if f.regions.is_empty() {
+            crate::fold::indent_regions(&edit.core.buffer.rope)
+        } else {
+            f.regions.clone()
+        };
+        edit.folds.set_regions(regions);
         sync_fold_view(&mut edit);
         let vpc = *vp;
         emit_window(f.entity, &mut edit, &vpc, &browsers, &mut commands);
@@ -1201,6 +1205,10 @@ fn run_commands(
                 _ => {}
             }
             sync_fold_view(edit);
+            if let Some(header) = edit.folds.hiding_header(line) {
+                let at = edit.core.buffer.line_to_char(header as usize);
+                edit.core.set_caret(at);
+            }
             fold_changed = true;
             continue;
         }
