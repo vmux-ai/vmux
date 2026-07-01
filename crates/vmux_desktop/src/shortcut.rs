@@ -260,7 +260,7 @@ fn is_modifier_key(key: KeyCode) -> bool {
 mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
-    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand, StackCommand};
+    use vmux_command::{CommandPlugin, LayoutCommand, SpaceCommand, StackCommand, TabCommand};
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -368,6 +368,27 @@ mod tests {
                 super_key: false,
             }),
         });
+        settings
+    }
+
+    fn tab_settings_with_leader(key: &str) -> AppSettings {
+        let mut settings = test_settings_with_leader(key);
+        for (command, second) in [
+            ("open_in_new_tab", "c"),
+            ("next_tab", "n"),
+            ("prev_tab", "p"),
+        ] {
+            settings.shortcuts.bindings.push(ShortcutEntry {
+                command: command.into(),
+                binding: ShortcutDef::Leader(KeyComboDef {
+                    key: second.into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    super_key: false,
+                }),
+            });
+        }
         settings
     }
 
@@ -705,6 +726,95 @@ mod tests {
                     mode: PaneOpenMode::NewStack,
                     url: None,
                 }
+            ))]
+        );
+    }
+
+    #[test]
+    fn leader_n_emits_tab_next() {
+        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::KeyN);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Tab(TabCommand::Next))]
+        );
+    }
+
+    #[test]
+    fn leader_p_emits_tab_previous() {
+        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::KeyP);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Layout(LayoutCommand::Tab(TabCommand::Previous))]
+        );
+    }
+
+    #[test]
+    fn leader_c_emits_open_in_new_tab() {
+        let mut app = test_app_with_settings(tab_settings_with_leader("b"));
+
+        press(&mut app, KeyCode::ControlLeft);
+        press(&mut app, KeyCode::KeyB);
+        app.update();
+        clear_input_frame(&mut app);
+
+        release(&mut app, KeyCode::KeyB);
+        release(&mut app, KeyCode::ControlLeft);
+        app.update();
+        clear_input_frame(&mut app);
+
+        press(&mut app, KeyCode::KeyC);
+        app.update();
+
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None }
             ))]
         );
     }

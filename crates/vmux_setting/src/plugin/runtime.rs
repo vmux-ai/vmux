@@ -1474,6 +1474,38 @@ mod tests {
     }
 
     #[test]
+    fn embedded_settings_bind_tab_nav_to_leader() {
+        let s = load_embedded_settings();
+        let leader_key = |cmd: &str| -> Option<String> {
+            s.shortcuts.bindings.iter().find_map(|e| match &e.binding {
+                ShortcutDef::Leader(combo) if e.command == cmd => Some(combo.key.clone()),
+                _ => None,
+            })
+        };
+
+        assert_eq!(
+            leader_key("open_in_new_tab").as_deref(),
+            Some("c"),
+            "leader c must create a new tab"
+        );
+        assert_eq!(
+            leader_key("next_tab").as_deref(),
+            Some("n"),
+            "leader n must select the next tab"
+        );
+        assert_eq!(
+            leader_key("prev_tab").as_deref(),
+            Some("p"),
+            "leader p must select the previous tab"
+        );
+        assert_eq!(
+            leader_key("open_in_new_stack"),
+            None,
+            "leader c is rebound from new stack to new tab"
+        );
+    }
+
+    #[test]
     fn sparse_save_omits_default_equal_theme_fields() {
         let mut s = load_embedded_settings();
         s.terminal
