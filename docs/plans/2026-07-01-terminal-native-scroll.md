@@ -10,6 +10,8 @@
 
 **Reference spec:** `docs/specs/2026-07-01-terminal-native-scroll-design.md`
 
+**Status (2026-07-02):** Tasks 1–6 + workspace checks (T8) DONE on `feat/terminal-native-scroll` — native scroll is complete, workspace green (fmt/clippy/`cargo test --workspace`). **Task 7 (selection doc-coords) is DEFERRED to a follow-up PR**: drag-select calls `EnterCopyMode`, and copy-mode renders screen-relative via `display_offset` (which native scroll keeps at 0), so unifying selection coordinates needs a deliberate copy-mode↔native-scroll design, not a mechanical widen. This PR ships native scroll; selection keeps today's copy-mode behavior (correct when not scrolled). Do NOT delete this plan file until T7 lands.
+
 **Key facts locked by grounding:**
 - `grid[Line(n)]` (alacritty 0.26.0): valid `Line` range `Line(-history_size)..=Line(screen_lines-1)`; never reads `display_offset`. Document row → `Line`: `Line(doc_row as i32 - history_size as i32)`. `build_line(term, row_idx, offset)` and `hash_grid_row(term, row_idx, offset)` already compute `Line(row_idx - offset)`, so call them with `row_idx = doc_row`, `offset = history_size as i32`.
 - `grid.total_lines()` = history + screen (grows with scrollback); `grid.screen_lines()` = visible rows; `grid.history_size() = total_lines - screen_lines`.
