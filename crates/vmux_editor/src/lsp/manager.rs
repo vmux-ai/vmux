@@ -98,6 +98,7 @@ pub enum ReqKind {
     Definition,
     References,
     Completion { line: u32, replace_from_col: u32 },
+    Folding { path: PathBuf },
 }
 
 pub struct InFlight {
@@ -112,6 +113,29 @@ pub struct LspGoto {
     pub path: PathBuf,
     pub line: u32,
     pub utf16_col: u32,
+}
+
+#[derive(Message)]
+pub struct LspFolds {
+    pub entity: Entity,
+    pub path: PathBuf,
+    pub regions: Vec<crate::fold::FoldRegion>,
+}
+
+/// Parse an LSP `textDocument/foldingRange` response into fold regions.
+pub fn parse_folding_ranges(value: &serde_json::Value) -> Vec<crate::fold::FoldRegion> {
+    value
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| {
+                    let s = r.get("startLine")?.as_u64()? as u32;
+                    let e = r.get("endLine")?.as_u64()? as u32;
+                    (e > s).then_some(crate::fold::FoldRegion { start: s, end: e })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -326,6 +350,27 @@ impl LspManager {
             },
         );
     }
+
+    pub fn folding_range(&mut self, entity: Entity, path: &Path) {
+        let Some(doc) = self.open_docs.get(path) else {
+            return;
+        };
+        let Some(uri) = uri_for(path) else {
+            return;
+        };
+        let Some(client) = self.servers.get(&doc.key) else {
+            return;
+        };
+        let params = serde_json::json!({ "textDocument": { "uri": uri } });
+        let (_, rx) = client.send_request("textDocument/foldingRange", params);
+        self.inflight.push(InFlight {
+            entity,
+            kind: ReqKind::Folding {
+                path: path.to_path_buf(),
+            },
+            rx,
+        });
+    }
 }
 
 fn hover_contents_to_string(c: lsp_types::HoverContents) -> String {
@@ -522,6 +567,7 @@ fn lsp_open_documents(
     let overrides = server_overrides(&settings);
     for (entity, fv, _edit) in &q {
         manager.open(&fv.path, &overrides);
+        manager.folding_range(entity, &fv.path);
         commands.entity(entity).insert(LspOpened);
     }
 }
@@ -530,6 +576,7 @@ fn drain_lsp_requests(
     mut manager: NonSendMut<LspManager>,
     browsers: NonSend<Browsers>,
     mut goto_w: MessageWriter<LspGoto>,
+    mut folds_w: MessageWriter<LspFolds>,
     mut commands: Commands,
 ) {
     use vmux_core::event::{
@@ -609,6 +656,13 @@ fn drain_lsp_requests(
                     ));
                 }
             }
+            ReqKind::Folding { path } => {
+                folds_w.write(LspFolds {
+                    entity: f.entity,
+                    path,
+                    regions: parse_folding_ranges(&value),
+                });
+            }
         }
     }
     manager.inflight = still;
@@ -622,6 +676,7 @@ pub fn build(app: &mut App, outbox: LspOutbox) {
     .init_resource::<LintOutbox>()
     .init_resource::<DiagState>()
     .add_message::<LspGoto>()
+    .add_message::<LspFolds>()
     .add_systems(
         Update,
         (
@@ -811,6 +866,7 @@ mod tests {
     fn fline(no: u32, text: &str) -> FileLine {
         FileLine {
             line_no: no,
+            fold: vmux_core::event::FoldGutter::None,
             spans: vec![StyledSpan {
                 text: text.into(),
                 fg: [0, 0, 0],
@@ -852,6 +908,16 @@ mod tests {
         assert_eq!(out[0].start_col, 4);
         assert_eq!(out[0].end_col, 5);
         assert_eq!(out[0].severity, DiagSeverity::Error);
+    }
+
+    #[test]
+    fn parses_folding_ranges() {
+        let v = serde_json::json!([
+            { "startLine": 0, "endLine": 3 },
+            { "startLine": 1, "endLine": 1 },
+        ]);
+        let regs = parse_folding_ranges(&v);
+        assert_eq!(regs, vec![crate::fold::FoldRegion { start: 0, end: 3 }]);
     }
 
     #[test]
@@ -936,8 +1002,14 @@ mod tests {
             EditMode::Insert,
         );
         let hl = HighlightCache::new(&path);
-        app.world_mut()
-            .spawn((FileView { path: path.clone() }, EditState { core, hl }));
+        app.world_mut().spawn((
+            FileView { path: path.clone() },
+            EditState {
+                core,
+                hl,
+                folds: crate::fold::FoldState::default(),
+            },
+        ));
 
         let diag = lsp_types::Diagnostic {
             range: lsp_types::Range {

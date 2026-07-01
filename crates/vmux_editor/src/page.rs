@@ -258,7 +258,9 @@ pub fn Page() -> Element {
     use_theme();
     let mut path = use_signal(String::new);
     let mut total_lines = use_signal(|| 0u32);
-    let mut first_line = use_signal(|| 0u32);
+    let mut total_rows = use_signal(|| 0u32);
+    let mut first_row = use_signal(|| 0u32);
+    let mut gutter_hover = use_signal(|| false);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
@@ -324,7 +326,8 @@ pub fn Page() -> Element {
     });
 
     let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
-        first_line.set(p.first_line);
+        first_row.set(p.first_row);
+        total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
         lines.set(p.lines);
         lsp_hover.set(None);
@@ -337,7 +340,7 @@ pub fn Page() -> Element {
         cursor.set(c.primary);
         sel.set(c.selections);
         if moved {
-            ensure_line_visible(c.primary.line, cell_dims().1);
+            ensure_line_visible(c.primary.row, cell_dims().1);
         }
     });
 
@@ -837,8 +840,8 @@ pub fn Page() -> Element {
                             let (cw, ch) = cell_dims();
                             let gutter = gw as f64 * cw + 36.0;
                             let cx = gutter + cursor().col as f64 * cw;
-                            let cy = cursor().line as f64 * ch;
-                            let spacer = total_lines() as f64 * ch;
+                            let cy = cursor().row as f64 * ch;
+                            let spacer = total_rows() as f64 * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
@@ -847,6 +850,7 @@ pub fn Page() -> Element {
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
+                                        gutter_hover.set(false);
                                     },
                                     onscroll: move |_| {
                                         let (_, ch) = cell_dims();
@@ -858,20 +862,21 @@ pub fn Page() -> Element {
                                         };
                                         let vis_first = (el.scroll_top() as f64 / ch).floor().max(0.0) as u32;
                                         let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
-                                        let rfirst = first_line();
+                                        let rfirst = first_row();
                                         let rend = rfirst + lines.read().len() as u32;
                                         let near_top = vis_first < rfirst.saturating_add(SCROLL_EDGE);
                                         let near_bot = vis_first + vis_rows + SCROLL_EDGE > rend;
                                         if (near_top || near_bot) && last_scroll_req() != vis_first {
                                             last_scroll_req.set(vis_first);
-                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_line: vis_first });
+                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_row: vis_first });
                                         }
                                     },
                                     div { class: "relative", style: "height:{spacer}px;",
-                                        for line in lines().iter() {
+                                        for (i, line) in lines().iter().enumerate() {
                                             {
                                                 let ln = line.line_no;
-                                                let lt = ln as f64 * ch;
+                                                let lt = (first_row() + i as u32) as f64 * ch;
+                                                let fold = line.fold;
                                                 let diags = diagnostics();
                                                 let sev = line_severity(&diags, ln);
                                                 let line_diags: Vec<FileDiagnostic> = diags
@@ -953,6 +958,10 @@ pub fn Page() -> Element {
                                                             {
                                                                 let rect = t.get_bounding_client_rect();
                                                                 let x = raw.client_x() as f64 - rect.left() - g;
+                                                                let in_gutter = x < 0.0;
+                                                                if gutter_hover() != in_gutter {
+                                                                    gutter_hover.set(in_gutter);
+                                                                }
                                                                 if x < 0.0 {
                                                                     return;
                                                                 }
@@ -972,12 +981,40 @@ pub fn Page() -> Element {
                                                             }
                                                         },
                                                         span {
-                                                            class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                                            class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
                                                             style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
                                                             if let Some(s) = sev {
-                                                                span { class: "{severity_color_class(s)}", "●" }
+                                                                span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }
-                                                            "{ln + 1}"
+                                                            span { class: "text-right opacity-40 group-hover:opacity-90", "{ln + 1}" }
+                                                            match fold {
+                                                                FoldGutter::Open => {
+                                                                    let vis = if gutter_hover() { "opacity-100" } else { "opacity-0" };
+                                                                    rsx! {
+                                                                        span {
+                                                                            class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 transition-opacity hover:!text-foreground {vis}",
+                                                                            onmousedown: move |e: Event<MouseData>| {
+                                                                                e.stop_propagation();
+                                                                                e.prevent_default();
+                                                                                let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                            },
+                                                                            "⌄"
+                                                                        }
+                                                                    }
+                                                                }
+                                                                FoldGutter::Collapsed => rsx! {
+                                                                    span {
+                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/70 hover:!text-foreground",
+                                                                        onmousedown: move |e: Event<MouseData>| {
+                                                                            e.stop_propagation();
+                                                                            e.prevent_default();
+                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                        },
+                                                                        "›"
+                                                                    }
+                                                                },
+                                                                FoldGutter::None => rsx! {},
+                                                            }
                                                         }
                                                         span { class: "relative whitespace-pre pr-8",
                                                             for (i, s) in line.spans.iter().enumerate() {
@@ -1002,6 +1039,12 @@ pub fn Page() -> Element {
                                                                     }
                                                                 }
                                                             }
+                                                            if fold == FoldGutter::Collapsed {
+                                                                span {
+                                                                    class: "ml-1 rounded bg-white/10 px-1 text-foreground/40",
+                                                                    "⋯"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -1010,7 +1053,7 @@ pub fn Page() -> Element {
 
                                         for s in sel().iter() {
                                             {
-                                                let top = s.line as f64 * ch;
+                                                let top = s.row as f64 * ch;
                                                 let left = gutter + s.start as f64 * cw;
                                                 let style = if s.end == u32::MAX {
                                                     format!("left:{left}px;top:{top}px;height:{ch}px;right:0;")
@@ -1111,7 +1154,11 @@ pub fn Page() -> Element {
                                         {
                                             lsp_hover().map(|h| {
                                                 let (cw, ch) = cell_dims();
-                                                let top = h.line as f64 * ch + ch;
+                                                let Some(i) = lines().iter().position(|l| l.line_no == h.line) else {
+                                                    return rsx! {};
+                                                };
+                                                let hrow = first_row() + i as u32;
+                                                let top = hrow as f64 * ch + ch;
                                                 let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {

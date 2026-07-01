@@ -53,6 +53,7 @@ impl EditMode {
 )]
 pub struct CursorPos {
     pub line: u32,
+    pub row: u32,
     pub col: u32,
 }
 
@@ -71,6 +72,7 @@ pub struct CursorPos {
 )]
 pub struct SelSpan {
     pub line: u32,
+    pub row: u32,
     pub start: u32,
     pub end: u32,
 }

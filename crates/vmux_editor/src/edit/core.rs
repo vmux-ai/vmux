@@ -34,6 +34,7 @@ pub struct EditCore {
     undo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
     redo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
     last_group: Option<Group>,
+    pub fold_view: crate::fold::FoldView,
 }
 
 impl EditCore {
@@ -50,6 +51,7 @@ impl EditCore {
             undo: Vec::new(),
             redo: Vec::new(),
             last_group: None,
+            fold_view: crate::fold::FoldView::default(),
         }
     }
 
@@ -86,6 +88,7 @@ impl EditCore {
         let line_start = self.buffer.line_to_char(line);
         CursorPos {
             line: line as u32,
+            row: line as u32,
             col: self.vis_col(line_start, col),
         }
     }
@@ -112,6 +115,7 @@ impl EditCore {
             };
             out.push(SelSpan {
                 line: line as u32,
+                row: line as u32,
                 start: self.vis_col(ls, sc),
                 end,
             });
@@ -165,7 +169,7 @@ impl EditCore {
 
     fn vertical(&self, from: usize, delta: i64) -> usize {
         let (l, c) = self.buffer.char_to_coords(from);
-        let target = (l as i64 + delta).max(0) as usize;
+        let target = self.fold_view.step_rows(l as u32, delta) as usize;
         self.buffer.coords_to_char(target, c)
     }
     fn first_non_blank(&self, from: usize) -> usize {
@@ -467,7 +471,13 @@ impl EditCore {
             | EditCommand::GotoDefinition
             | EditCommand::FindReferences
             | EditCommand::Hover
-            | EditCommand::TriggerCompletion => {}
+            | EditCommand::TriggerCompletion
+            | EditCommand::FoldToggle
+            | EditCommand::FoldOpen
+            | EditCommand::FoldClose
+            | EditCommand::FoldToggleRecursive
+            | EditCommand::FoldAll
+            | EditCommand::UnfoldAll => {}
         }
 
         EditOutcome {
@@ -490,6 +500,27 @@ impl EditCore {
             Some(line)
         } else if line >= top + rows as u32 {
             Some(line + 1 - rows as u32)
+        } else {
+            None
+        }
+    }
+
+    pub fn autoscroll_rows(
+        &self,
+        top: u32,
+        rows: u16,
+        folds: &crate::fold::FoldState,
+    ) -> Option<u32> {
+        if rows == 0 {
+            return None;
+        }
+        let total = self.buffer.len_lines() as u32;
+        let (line, _) = self.buffer.char_to_coords(self.primary().head);
+        let row = folds.view(total).buffer_to_row(line as u32);
+        if row < top {
+            Some(row)
+        } else if row >= top + rows as u32 {
+            Some(row + 1 - rows as u32)
         } else {
             None
         }
@@ -560,7 +591,14 @@ mod tests {
     fn cursor_pos_visual_col_for_wide_chars() {
         let mut c = core("あb");
         c.set_caret(1);
-        assert_eq!(c.cursor_pos(), CursorPos { line: 0, col: 2 });
+        assert_eq!(
+            c.cursor_pos(),
+            CursorPos {
+                line: 0,
+                row: 0,
+                col: 2
+            }
+        );
     }
 
     #[test]
@@ -660,5 +698,18 @@ mod tests {
         c.rows = 3;
         c.set_caret(c.buffer.coords_to_char(5, 0));
         assert_eq!(c.autoscroll(0, 3), Some(3));
+    }
+
+    #[test]
+    fn down_skips_collapsed_body() {
+        let mut c = core("a\nb\nc\nd\ne\n");
+        let mut fs = crate::fold::FoldState::default();
+        fs.set_regions(vec![crate::fold::FoldRegion { start: 0, end: 2 }]);
+        fs.close(0);
+        c.fold_view = fs.view(c.buffer.len_lines() as u32);
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::Down));
+        let (line, _) = c.buffer.char_to_coords(c.primary().head);
+        assert_eq!(line, 3);
     }
 }

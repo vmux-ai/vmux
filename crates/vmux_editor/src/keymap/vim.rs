@@ -7,6 +7,7 @@ pub struct VimKeymap {
     count: Option<usize>,
     pending_op: Option<char>,
     g_pending: bool,
+    z_pending: bool,
     ex: Option<String>,
 }
 
@@ -38,6 +39,7 @@ impl VimKeymap {
         self.count = None;
         self.pending_op = None;
         self.g_pending = false;
+        self.z_pending = false;
     }
 
     fn normal(&mut self, k: &KeyInput) -> Vec<EditCommand> {
@@ -100,6 +102,19 @@ impl VimKeymap {
             };
         }
 
+        if self.z_pending {
+            self.z_pending = false;
+            return match key {
+                "a" => vec![FoldToggle],
+                "o" => vec![FoldOpen],
+                "c" => vec![FoldClose],
+                "A" => vec![FoldToggleRecursive],
+                "R" => vec![UnfoldAll],
+                "M" => vec![FoldAll],
+                _ => vec![],
+            };
+        }
+
         if key == "r" && k.mods.ctrl {
             let n = self.take_count();
             return rep(Redo, n);
@@ -113,6 +128,10 @@ impl VimKeymap {
         match key {
             "g" => {
                 self.g_pending = true;
+                vec![]
+            }
+            "z" => {
+                self.z_pending = true;
                 vec![]
             }
             "G" => {
@@ -371,6 +390,20 @@ mod tests {
         let mut km = VimKeymap::default();
         km.handle(&k("d"));
         assert_eq!(km.handle(&k("d")), vec![EditCommand::DeleteLine]);
+    }
+
+    #[test]
+    fn za_toggles_fold() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&k("z")), vec![]);
+        assert_eq!(km.handle(&k("a")), vec![EditCommand::FoldToggle]);
+    }
+
+    #[test]
+    fn zr_unfolds_all() {
+        let mut km = VimKeymap::default();
+        km.handle(&k("z"));
+        assert_eq!(km.handle(&k("R")), vec![EditCommand::UnfoldAll]);
     }
 
     #[test]

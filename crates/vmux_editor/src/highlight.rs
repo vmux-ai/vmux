@@ -71,6 +71,7 @@ pub fn highlight_snippet(code: &str, lang_token: &str) -> Vec<FileLine> {
             let ranges = h.highlight_line(line, ss).unwrap_or_default();
             FileLine {
                 line_no: idx as u32,
+                fold: vmux_core::event::FoldGutter::None,
                 spans: ranges
                     .into_iter()
                     .map(|(style, text)| to_styled_span(style, text))
@@ -124,6 +125,7 @@ impl Highlighter {
                 .collect();
             lines.push(FileLine {
                 line_no: idx as u32,
+                fold: vmux_core::event::FoldGutter::None,
                 spans,
             });
         }

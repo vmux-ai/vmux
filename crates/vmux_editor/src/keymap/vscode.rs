@@ -32,6 +32,15 @@ impl Keymap for VscodeKeymap {
         let gui = m.meta;
         #[cfg(not(target_os = "macos"))]
         let gui = m.meta || m.ctrl;
+        if gui && m.shift && !m.alt {
+            match k.key.as_str() {
+                "[" | "{" => return vec![FoldClose],
+                "]" | "}" => return vec![FoldOpen],
+                "0" | ")" => return vec![FoldAll],
+                "j" | "J" => return vec![UnfoldAll],
+                _ => {}
+            }
+        }
         if gui && !m.alt {
             let cmd = match k.key.to_ascii_lowercase().as_str() {
                 "c" => Some(vec![Yank]),
@@ -160,6 +169,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(km.handle(&key("z", cmd_shift)), vec![EditCommand::Redo]);
+    }
+
+    #[test]
+    fn cmd_shift_bracket_folds() {
+        let mut km = VscodeKeymap;
+        let cs = Mods {
+            meta: true,
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(km.handle(&key("[", cs)), vec![EditCommand::FoldClose]);
+        assert_eq!(km.handle(&key("]", cs)), vec![EditCommand::FoldOpen]);
+        assert_eq!(km.handle(&key("J", cs)), vec![EditCommand::UnfoldAll]);
     }
 
     #[test]

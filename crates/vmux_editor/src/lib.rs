@@ -9,6 +9,10 @@ pub mod highlight;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod edit;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod fold;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fold_store;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod keymap;
 
 #[cfg(not(target_arch = "wasm32"))]

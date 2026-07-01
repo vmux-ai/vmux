@@ -38,7 +38,7 @@ impl FileBuffer {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct FileViewport {
-    pub top_line: u32,
+    pub top_row: u32,
     pub rows: u16,
 }
 
@@ -65,7 +65,11 @@ struct ThumbTask {
 pub struct EditState {
     pub core: EditCore,
     pub hl: HighlightCache,
+    pub folds: crate::fold::FoldState,
 }
+
+#[derive(Component)]
+struct FoldsDirty;
 
 #[derive(Component)]
 pub struct EditorKeymap(pub Box<dyn Keymap>);
@@ -131,7 +135,7 @@ fn new_file_view_bundle(
         (
             FileView { path },
             FileViewport {
-                top_line: 0,
+                top_row: 0,
                 rows: 0,
             },
             Browser,
@@ -230,6 +234,7 @@ fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_co
 fn load_file_buffers(
     q: Query<(Entity, &FileView), UnloadedFileView>,
     settings: Option<Res<vmux_setting::AppSettings>>,
+    store: Option<NonSend<crate::fold_store::FoldStore>>,
     mut commands: Commands,
 ) {
     for (entity, fv) in &q {
@@ -284,15 +289,22 @@ fn load_file_buffers(
         };
         let hl = HighlightCache::new(&fv.path);
         let kind = settings_keymap(&settings);
-        let core = EditCore::new(
+        let mut core = EditCore::new(
             fv.path.clone(),
             hl.language.clone(),
             &text,
             kind.initial_mode(),
         );
+        let mut folds = crate::fold::FoldState::default();
+        folds.set_regions(crate::fold::indent_regions(&core.buffer.rope));
+        if let Some(store) = &store {
+            folds.collapsed.extend(store.get(&fv.path));
+            folds.reconcile();
+        }
+        core.fold_view = folds.view(core.buffer.len_lines() as u32);
         commands
             .entity(entity)
-            .insert((EditState { core, hl }, EditorKeymap(kind.make())));
+            .insert((EditState { core, hl, folds }, EditorKeymap(kind.make())));
     }
 }
 
@@ -389,7 +401,7 @@ fn send_initial_text_meta(
         }
         emit_cursor(
             entity,
-            &edit.core,
+            &edit,
             keymap.0.as_ref(),
             vp,
             &browsers,
@@ -455,14 +467,6 @@ fn send_initial_dir(
     }
 }
 
-fn window_bounds(total: u32, vp: &FileViewport) -> (u32, u32) {
-    let (vis_first, vis_end) = window_range(total, vp.top_line, vp.rows);
-    (
-        vis_first.saturating_sub(SCROLL_OVERSCAN),
-        (vis_end + SCROLL_OVERSCAN).min(total),
-    )
-}
-
 fn emit_window(
     entity: Entity,
     edit: &mut EditState,
@@ -474,15 +478,28 @@ fn emit_window(
         return;
     }
     let total = edit.core.buffer.len_lines() as u32;
-    let (first, end) = window_bounds(total, vp);
-    let lines = edit
-        .hl
-        .line_window(&edit.core.buffer.rope, first as usize, end as usize);
+    let view = edit.folds.view(total);
+    let visible = view.visible_count();
+    let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
+    let first_row = vis_first.saturating_sub(SCROLL_OVERSCAN);
+    let end_row = (vis_end + SCROLL_OVERSCAN).min(visible);
+    let line_nos = view.lines_for_window(first_row, end_row.saturating_sub(first_row));
+    let mut lines = Vec::with_capacity(line_nos.len());
+    for ln in line_nos {
+        let mut fl = edit
+            .hl
+            .line_window(&edit.core.buffer.rope, ln as usize, ln as usize + 1);
+        if let Some(mut l) = fl.pop() {
+            l.fold = edit.folds.gutter(ln);
+            lines.push(l);
+        }
+    }
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_VIEWPORT_EVENT,
         &FileViewportPatch {
-            first_line: first,
+            first_row,
+            total_rows: visible,
             total_lines: total,
             lines,
         },
@@ -491,7 +508,7 @@ fn emit_window(
 
 fn emit_cursor(
     entity: Entity,
-    core: &EditCore,
+    edit: &EditState,
     keymap: &dyn Keymap,
     vp: &FileViewport,
     browsers: &Browsers,
@@ -500,17 +517,29 @@ fn emit_cursor(
     if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
         return;
     }
-    let total = core.buffer.len_lines() as u32;
-    let (first, end) = window_bounds(total, vp);
-    let rows = (end - first).min(u16::MAX as u32) as u16;
+    let _ = vp;
+    let total = edit.core.buffer.len_lines() as u32;
+    let view = edit.folds.view(total);
+    let mut primary = edit.core.cursor_pos();
+    primary.row = view.buffer_to_row(primary.line);
+    let selections = edit
+        .core
+        .sel_spans(0, total as u16)
+        .into_iter()
+        .filter(|s| !view.is_hidden(s.line))
+        .map(|mut s| {
+            s.row = view.buffer_to_row(s.line);
+            s
+        })
+        .collect();
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
         &FileCursorEvent {
             mode: keymap.mode(),
             mode_label: keymap.mode_label(),
-            primary: core.cursor_pos(),
-            selections: core.sel_spans(first, rows),
+            primary,
+            selections,
         },
     ));
 }
@@ -571,7 +600,7 @@ fn on_file_resize(
         if let Some(keymap) = keymap {
             emit_cursor(
                 entity,
-                &edit.core,
+                &edit,
                 keymap.0.as_ref(),
                 &vpc,
                 &browsers,
@@ -593,17 +622,95 @@ fn on_file_scroll(
         return;
     };
     let total = edit.core.buffer.len_lines() as u32;
-    vp.top_line = clamp_top_line(evt.top_line, total, vp.rows);
+    let visible = edit.folds.view(total).visible_count();
+    vp.top_row = clamp_top_line(evt.top_row, visible, vp.rows);
     let vpc = *vp;
     emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
     emit_cursor(
         entity,
-        &edit.core,
+        &edit,
         keymap.0.as_ref(),
         &vpc,
         &browsers,
         &mut commands,
     );
+}
+
+fn on_file_fold_toggle(
+    trigger: On<BinReceive<FileFoldToggle>>,
+    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let line = trigger.event().payload.line;
+    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
+        return;
+    };
+    edit.folds.toggle(line);
+    sync_fold_view(&mut edit);
+    let vpc = *vp;
+    emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
+    emit_cursor(
+        entity,
+        &edit,
+        keymap.0.as_ref(),
+        &vpc,
+        &browsers,
+        &mut commands,
+    );
+    commands.entity(entity).insert(FoldsDirty);
+}
+
+fn persist_folds(
+    q: Query<(Entity, &FileView, &EditState), With<FoldsDirty>>,
+    mut store: NonSendMut<crate::fold_store::FoldStore>,
+    mut commands: Commands,
+) {
+    let mut changed = false;
+    for (entity, fv, edit) in q.iter() {
+        let mut collapsed: Vec<u32> = edit.folds.collapsed.iter().copied().collect();
+        collapsed.sort_unstable();
+        store.set(&fv.path, &collapsed);
+        commands.entity(entity).remove::<FoldsDirty>();
+        changed = true;
+    }
+    if changed {
+        store.save();
+    }
+}
+
+fn apply_lsp_folds(
+    mut msgs: MessageReader<crate::lsp::manager::LspFolds>,
+    mut q: Query<(&mut EditState, &FileView, &EditorKeymap, &FileViewport)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for f in msgs.read() {
+        let Ok((mut edit, fv, keymap, vp)) = q.get_mut(f.entity) else {
+            continue;
+        };
+        if canon(&fv.path) != canon(&f.path) {
+            continue;
+        }
+        let regions = if f.regions.is_empty() {
+            crate::fold::indent_regions(&edit.core.buffer.rope)
+        } else {
+            f.regions.clone()
+        };
+        edit.folds.set_regions(regions);
+        sync_fold_view(&mut edit);
+        let vpc = *vp;
+        emit_window(f.entity, &mut edit, &vpc, &browsers, &mut commands);
+        emit_cursor(
+            f.entity,
+            &edit,
+            keymap.0.as_ref(),
+            &vpc,
+            &browsers,
+            &mut commands,
+        );
+    }
 }
 
 /// Mirror the set of paths the raw-media handler may serve into the CEF allowlist
@@ -830,7 +937,7 @@ fn navigate_file_view(
         .unwrap_or_else(|| path.to_string_lossy().to_string());
     meta.url = url;
     fv.path = path;
-    vp.top_line = top_line;
+    vp.top_row = top_line;
     commands
         .entity(entity)
         .remove::<FileDir>()
@@ -1055,6 +1162,11 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+fn sync_fold_view(edit: &mut EditState) {
+    let total = edit.core.buffer.len_lines() as u32;
+    edit.core.fold_view = edit.folds.view(total);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_commands(
     entity: Entity,
@@ -1071,7 +1183,35 @@ fn run_commands(
     let mut text_changed = false;
     let mut sel_or_mode = false;
     let mut dirty_changed = false;
+    let mut fold_changed = false;
     for cmd in cmds {
+        if matches!(
+            cmd,
+            EditCommand::FoldToggle
+                | EditCommand::FoldOpen
+                | EditCommand::FoldClose
+                | EditCommand::FoldToggleRecursive
+                | EditCommand::FoldAll
+                | EditCommand::UnfoldAll
+        ) {
+            let line = edit.core.cursor_pos().line;
+            match cmd {
+                EditCommand::FoldToggle => edit.folds.toggle(line),
+                EditCommand::FoldOpen => edit.folds.open(line),
+                EditCommand::FoldClose => edit.folds.close(line),
+                EditCommand::FoldToggleRecursive => edit.folds.toggle_recursive(line),
+                EditCommand::FoldAll => edit.folds.fold_all(),
+                EditCommand::UnfoldAll => edit.folds.unfold_all(),
+                _ => {}
+            }
+            sync_fold_view(edit);
+            if let Some(header) = edit.folds.hiding_header(line) {
+                let at = edit.core.buffer.line_to_char(header as usize);
+                edit.core.set_caret(at);
+            }
+            fold_changed = true;
+            continue;
+        }
         match &cmd {
             EditCommand::Hover => {
                 let head = edit.core.primary().head;
@@ -1168,16 +1308,33 @@ fn run_commands(
             let _ = cb.set_text(s);
         }
     }
-    if let Some(top) = edit.core.autoscroll(vp.top_line, vp.rows) {
-        vp.top_line = top;
+    if text_changed {
+        let regions = crate::fold::indent_regions(&edit.core.buffer.rope);
+        edit.folds.set_regions(regions);
+        sync_fold_view(edit);
+    }
+    {
+        let total = edit.core.buffer.len_lines() as u32;
+        let caret_line = edit.core.cursor_pos().line;
+        if edit.folds.view(total).is_hidden(caret_line) {
+            edit.folds.reveal(caret_line);
+            sync_fold_view(edit);
+            fold_changed = true;
+        }
+    }
+    if let Some(top) = edit.core.autoscroll_rows(vp.top_row, vp.rows, &edit.folds) {
+        vp.top_row = top;
         text_changed = true;
     }
     let vpc = *vp;
-    if text_changed {
+    if text_changed || fold_changed {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
-    if text_changed || sel_or_mode {
-        emit_cursor(entity, &edit.core, keymap, &vpc, browsers, commands);
+    if text_changed || sel_or_mode || fold_changed {
+        emit_cursor(entity, edit, keymap, &vpc, browsers, commands);
+    }
+    if fold_changed {
+        commands.entity(entity).insert(FoldsDirty);
     }
     if dirty_changed {
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1455,8 +1612,8 @@ fn goto_caret(edit: &mut EditState, line: u32, utf16_col: u32, vp: &mut FileView
     let ccol = crate::lsp::manager::utf16_to_char_col(&lt, utf16_col);
     let at = edit.core.buffer.coords_to_char(line, ccol as usize);
     edit.core.set_caret(at);
-    if let Some(top) = edit.core.autoscroll(vp.top_line, vp.rows) {
-        vp.top_line = top;
+    if let Some(top) = edit.core.autoscroll_rows(vp.top_row, vp.rows, &edit.folds) {
+        vp.top_row = top;
     }
 }
 
@@ -1484,7 +1641,7 @@ fn apply_goto(
             emit_window(g.entity, &mut edit, &vpc, &browsers, &mut commands);
             emit_cursor(
                 g.entity,
-                &edit.core,
+                &edit,
                 keymap.0.as_ref(),
                 &vpc,
                 &browsers,
@@ -1502,7 +1659,7 @@ fn apply_goto(
                 .unwrap_or_default();
             meta.url = url;
             fv.path = g.path.clone();
-            vp.top_line = 0;
+            vp.top_row = 0;
             commands
                 .entity(g.entity)
                 .remove::<EditState>()
@@ -1554,7 +1711,7 @@ fn apply_pending_goto(
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
         emit_cursor(
             entity,
-            &edit.core,
+            &edit,
             keymap.0.as_ref(),
             &vpc,
             &browsers,
@@ -1587,7 +1744,7 @@ fn on_file_pointer(
     }
     emit_cursor(
         entity,
-        &edit.core,
+        &edit,
         keymap.0.as_ref(),
         vp,
         &browsers,
@@ -1612,6 +1769,7 @@ fn flush_lsp_changes(
     *acc = 0.0;
     for (entity, fv, edit) in &q {
         manager.change_with_text(&fv.path, &edit.core.buffer.text());
+        manager.folding_range(entity, &fv.path);
         commands.entity(entity).remove::<LspEditDirty>();
     }
 }
@@ -1646,6 +1804,7 @@ impl Plugin for EditorPlugin {
         }
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .insert_non_send(SelfWrites::default())
+            .insert_non_send(crate::fold_store::FoldStore::load())
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -1658,6 +1817,7 @@ impl Plugin for EditorPlugin {
                 FileHoverRequest,
                 FileDefinitionRequest,
                 FileReferencesRequest,
+                FileFoldToggle,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 FileCompletionRequest,
@@ -1688,6 +1848,8 @@ impl Plugin for EditorPlugin {
                     apply_goto,
                     apply_pending_goto,
                     reapply_keymap_on_change,
+                    apply_lsp_folds,
+                    persist_folds,
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
@@ -1706,7 +1868,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_references_request)
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
-            .add_observer(on_file_completion_commit);
+            .add_observer(on_file_completion_commit)
+            .add_observer(on_file_fold_toggle);
     }
 }
 
@@ -1865,7 +2028,7 @@ mod page_open_tests {
             .spawn((
                 FileView { path: a.clone() },
                 FileViewport {
-                    top_line: 0,
+                    top_row: 0,
                     rows: 0,
                 },
             ))
@@ -1886,5 +2049,24 @@ mod page_open_tests {
         let dir = app.world().get::<FileDir>(e).unwrap();
         assert!(dir.entries.iter().any(|x| x.name == "f2"));
         assert!(!dir.entries.iter().any(|x| x.name == "f1"));
+    }
+}
+
+#[cfg(test)]
+mod fold_window_tests {
+    use crate::fold::{FoldState, indent_regions};
+    use ropey::Rope;
+
+    #[test]
+    fn collapsed_region_hidden_from_window() {
+        let r = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
+        let mut folds = FoldState::default();
+        folds.set_regions(indent_regions(&r));
+        folds.close(0);
+        let view = folds.view(r.len_lines() as u32);
+        let visible = view.lines_for_window(0, view.visible_count());
+        assert!(visible.contains(&0));
+        assert!(!visible.contains(&1) && !visible.contains(&2));
+        assert!(visible.contains(&3));
     }
 }
