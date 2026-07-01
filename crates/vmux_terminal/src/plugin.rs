@@ -346,6 +346,7 @@ impl Plugin for TerminalPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 TermResizeEvent,
                 TermMouseEvent,
+                TermScrollEvent,
                 TermKeyEvent,
                 TermLinkOpenRequest,
             )>::for_hosts(&["terminal"]))
@@ -377,6 +378,7 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
             .add_observer(on_term_mouse)
+            .add_observer(on_term_scroll)
             .add_observer(on_term_key)
             .add_observer(on_term_link_open)
             .add_observer(on_restart_pty)
@@ -1330,6 +1332,10 @@ fn poll_service_messages(
                 selection,
                 copy_mode,
                 full,
+                first_row,
+                total_rows,
+                alt,
+                evicted_total,
             } => {
                 for (entity, pid, _) in &terminals {
                     if *pid == process_id {
@@ -1355,6 +1361,10 @@ fn poll_service_messages(
                             selection,
                             copy_mode,
                             full,
+                            first_row,
+                            total_rows,
+                            alt,
+                            evicted_total,
                         };
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
@@ -1408,10 +1418,10 @@ fn poll_service_messages(
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
                         }
-                        let mut changed_lines: Vec<(u16, TermLine)> = lines
+                        let mut changed_lines: Vec<(u32, TermLine)> = lines
                             .into_iter()
                             .enumerate()
-                            .map(|(i, l)| (i as u16, l))
+                            .map(|(i, l)| (i as u32, l))
                             .collect();
                         for (_, line) in changed_lines.iter_mut() {
                             crate::link::annotate_links(line, None);
@@ -1424,6 +1434,10 @@ fn poll_service_messages(
                             selection: None,
                             copy_mode: false,
                             full: true,
+                            first_row: 0,
+                            total_rows: rows as u32,
+                            alt: false,
+                            evicted_total: 0,
                         };
                         commands.trigger(BinHostEmitEvent::from_rkyv(
                             entity,
@@ -2917,6 +2931,24 @@ fn on_term_mouse(
         update_local_copy_mode_for_mouse_action(&mut local_copy_mode, process_id, &action);
         send_mouse_action(&service.0, process_id, action);
     }
+}
+
+/// Native-scroll intent from the terminal page: forward the requested window top
+/// (and follow state) to the service, which serves the document-row window.
+fn on_term_scroll(
+    trigger: On<BinReceive<TermScrollEvent>>,
+    q: Query<&ProcessId, With<Terminal>>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let entity = trigger.event_target();
+    let event = &trigger.payload;
+    let Some(service) = service else { return };
+    let Ok(pid) = q.get(entity) else { return };
+    service.0.send(ClientMessage::ScrollWindow {
+        process_id: *pid,
+        top_row: event.top_row,
+        follow: event.follow,
+    });
 }
 
 /// Open a URL or file the user cmd+clicked in the terminal, in a new stack
