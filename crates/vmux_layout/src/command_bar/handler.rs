@@ -1440,6 +1440,16 @@ fn on_command_bar_action(
                             target_stack: Some(stack_e),
                         });
                         custom_keyboard_restore = true;
+                    } else {
+                        let cmd =
+                            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                                url: Some("vmux://terminal/".into()),
+                            }));
+                        issued.write(vmux_command::CommandIssued {
+                            caller,
+                            command: cmd.clone(),
+                        });
+                        writer_params.p0().write(cmd);
                     }
                 }
             }
