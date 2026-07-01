@@ -683,7 +683,7 @@ fn SideSheetView(
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    if let Some(b) = tab_boundary {
+                    if let Some(b) = tab_boundary.filter(|b| b.is_worktree) {
                         TabBoundaryPanel { boundary: b }
                     }
                 }
@@ -712,16 +712,14 @@ fn SideSheetView(
 #[component]
 fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
     let b = boundary;
-    let badge = if b.is_worktree {
-        "worktree".to_string()
-    } else {
-        b.source.clone()
-    };
     rsx! {
         div { class: "flex flex-col gap-1.5 border-t border-foreground/10 px-2.5 py-2",
             div { class: "flex items-center gap-2",
                 Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
-                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    path { d: "M6 3v12" }
+                    path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                    path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                    path { d: "M18 9a9 9 0 0 1-9 9" }
                 }
                 span {
                     class: "min-w-0 flex-1 truncate text-xs text-foreground/90",
@@ -730,17 +728,11 @@ fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
                     bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
                 }
                 span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground",
-                    "{badge}"
+                    "worktree"
                 }
             }
-            if b.is_worktree && !b.branch.is_empty() {
-                div { class: "flex items-center gap-1.5 text-[11px] text-muted-foreground",
-                    Icon { class: "h-3 w-3 shrink-0 opacity-70",
-                        path { d: "M6 3v12" }
-                        path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
-                        path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
-                        path { d: "M18 9a9 9 0 0 1-9 9" }
-                    }
+            if !b.branch.is_empty() {
+                div { class: "flex items-center gap-1.5 pl-5 text-[11px] text-muted-foreground",
                     span { class: "min-w-0 truncate", "{b.branch}" }
                     if !b.base_ref.is_empty() {
                         span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
@@ -750,28 +742,15 @@ fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
             div { class: "flex items-center gap-2 pt-0.5",
                 span { class: "text-[11px] text-muted-foreground", "{b.pane_count} panes" }
                 div { class: "flex-1" }
-                if b.is_worktree {
-                    button {
-                        r#type: "button",
-                        class: "cursor-pointer rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                        onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
-                                command: "remove_worktree".to_string(),
-                            });
-                        },
-                        "Remove worktree"
-                    }
-                } else {
-                    button {
-                        r#type: "button",
-                        class: "cursor-pointer rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                        onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
-                                command: "isolate".to_string(),
-                            });
-                        },
-                        "Isolate as worktree"
-                    }
+                button {
+                    r#type: "button",
+                    class: "cursor-pointer rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
+                            command: "remove_worktree".to_string(),
+                        });
+                    },
+                    "Remove worktree"
                 }
             }
         }
