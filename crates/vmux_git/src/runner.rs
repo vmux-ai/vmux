@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use crate::event::*;
 use crate::parse;
@@ -8,22 +9,73 @@ use crate::parse;
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
-/// Build a `git` [`Command`] rooted at `root` with a scrubbed environment.
+/// Repository-local `GIT_*` variables used when `git rev-parse --local-env-vars`
+/// cannot be queried. Mirrors Git's own list (git 2.54); the live query in
+/// [`local_env_vars`] supersedes it whenever git is runnable.
+const FALLBACK_LOCAL_ENV_VARS: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+];
+
+/// Every repository-local `GIT_*` variable Git recognizes, queried once from the
+/// authoritative `git rev-parse --local-env-vars` and cached (falling back to
+/// [`FALLBACK_LOCAL_ENV_VARS`] if git cannot be run).
 ///
 /// The runner always targets an explicit repository via [`Command::current_dir`],
-/// so ambient `GIT_*` location variables (which a parent process such as a
-/// `git push` pre-push hook exports) must be stripped — otherwise `GIT_DIR` /
-/// `GIT_INDEX_FILE` override `current_dir` and the call silently operates on the
-/// wrong repository.
+/// so these ambient variables — which a parent process such as a `git push`
+/// pre-push hook exports — must be stripped; otherwise `GIT_DIR`, `GIT_INDEX_FILE`,
+/// `GIT_OBJECT_DIRECTORY`, `GIT_CONFIG` and friends override the explicit target and
+/// the call silently reads or writes the wrong repository. Listing the names is a
+/// static print, so it is safe to run under any ambient environment.
+fn local_env_vars() -> &'static [String] {
+    static VARS: OnceLock<Vec<String>> = OnceLock::new();
+    VARS.get_or_init(|| {
+        Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| {
+                String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|vars| !vars.is_empty())
+            .unwrap_or_else(|| {
+                FALLBACK_LOCAL_ENV_VARS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+    })
+}
+
+/// Build a `git` [`Command`] rooted at `root` with a scrubbed environment.
+///
+/// Clears every repository-local `GIT_*` variable (see [`local_env_vars`]) so an
+/// ambient environment cannot redirect the call away from its `current_dir` target.
 fn git_command(root: &Path) -> Command {
     let mut cmd = Command::new("git");
-    cmd.current_dir(root)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_PREFIX");
+    cmd.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
+    for var in local_env_vars() {
+        cmd.env_remove(var);
+    }
     cmd
 }
 
@@ -356,24 +408,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn git_command_scrubs_ambient_location_env() {
+    fn git_command_scrubs_all_local_env_vars() {
         use std::ffi::OsStr;
         let cmd = git_command(Path::new("."));
-        let removed: Vec<&OsStr> = cmd
+        let removed: HashSet<&OsStr> = cmd
             .get_envs()
             .filter(|(_, v)| v.is_none())
             .map(|(k, _)| k)
             .collect();
+        let vars = local_env_vars();
+        assert!(!vars.is_empty(), "local_env_vars must not be empty");
+        for var in vars {
+            assert!(
+                removed.contains(OsStr::new(var.as_str())),
+                "git_command must scrub {var} so ambient GIT_* cannot redirect the runner"
+            );
+        }
         for key in [
             "GIT_DIR",
-            "GIT_WORK_TREE",
             "GIT_INDEX_FILE",
-            "GIT_COMMON_DIR",
-            "GIT_PREFIX",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_CONFIG",
         ] {
             assert!(
-                removed.contains(&OsStr::new(key)),
-                "git_command must scrub {key} so ambient GIT_* cannot redirect the runner"
+                vars.iter().any(|v| v == key),
+                "{key} must appear in git's local-env-vars"
             );
         }
     }
