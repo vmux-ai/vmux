@@ -1140,6 +1140,10 @@ pub fn handle_open_beside_requests(
                 );
             }
             crate::placement::Placement::AddTab { pane } => {
+                let refresh_spawn_seq = matches!(
+                    crate::placement::page_kind_for_url(&req.url),
+                    crate::placement::PageKind::File | crate::placement::PageKind::Terminal
+                );
                 let stack = spawn_beside_stack(
                     pane,
                     req,
@@ -1152,7 +1156,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
                     pane_size(pane, &rc.node_q),
-                    false,
+                    refresh_spawn_seq,
                 );
                 pending_open_stacks.push((req.url.clone(), stack));
             }
@@ -3388,7 +3392,6 @@ mod tests {
         let plugin_parent = parent_for_url("file:///repo/crates/vmux_agent/src/plugin.rs");
         let pane_parent = parent_for_url("file:///repo/crates/vmux_layout/src/pane.rs");
         let placement_parent = parent_for_url("file:///repo/crates/vmux_layout/src/placement.rs");
-        let pr_parent = parent_for_url("https://github.com/vmux-ai/vmux/pull/221");
         let terminal_parent = parent_for_url("vmux://terminal/");
 
         assert_eq!(pane_parent, plugin_parent);
@@ -3398,13 +3401,13 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            app.world().get::<ChildOf>(pr_parent).unwrap().get(),
-            "terminal should split the remaining browser tail"
+            app.world().get::<ChildOf>(plugin_parent).unwrap().get(),
+            "terminal should split the current file tail"
         );
     }
 
     #[test]
-    fn auto_terminal_splits_remaining_browser_tail_after_file_bucket_reuse() {
+    fn auto_terminal_splits_current_file_tail_after_file_bucket_reuse() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3478,12 +3481,12 @@ mod tests {
 
         assert_eq!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            app.world().get::<ChildOf>(pr_parent).unwrap().get(),
-            "terminal should split the remaining browser tail, not the file bucket"
+            app.world().get::<ChildOf>(plugin_parent).unwrap().get(),
+            "terminal should split the current file tail"
         );
         assert_ne!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            app.world().get::<ChildOf>(plugin_parent).unwrap().get()
+            app.world().get::<ChildOf>(pr_parent).unwrap().get()
         );
     }
 
