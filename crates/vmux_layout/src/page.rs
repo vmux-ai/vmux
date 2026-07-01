@@ -67,6 +67,14 @@ pub fn Page() -> Element {
         },
     );
 
+    let mut boundary_state = use_signal(crate::event::TabBoundaryEvent::default);
+    let _boundary_listener = use_bin_event_listener::<crate::event::TabBoundaryEvent, _>(
+        crate::event::TAB_BOUNDARY_EVENT,
+        move |data| {
+            boundary_state.set(data);
+        },
+    );
+
     let mut team_state = use_signal(TeamEvent::default);
     let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
         team_state.set(data);
@@ -116,6 +124,7 @@ pub fn Page() -> Element {
     let tabs = tabs_state();
     let PaneTreeEvent { panes } = pane_tree_state();
     let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
+    let tab_boundary = boundary_state().boundary;
     let layout_error = (layout_listener.error)();
     let stacks_error = (stacks_listener.error)();
     let tabs_error = (tabs_listener.error)();
@@ -197,6 +206,7 @@ pub fn Page() -> Element {
                         SideSheetView {
                             panes,
                             active_space,
+                            tab_boundary,
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -665,6 +675,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
 fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
+    tab_boundary: Option<crate::event::TabBoundary>,
     pane_tree_error: Option<String>,
 ) -> Element {
     rsx! {
@@ -682,6 +693,59 @@ fn SideSheetView(
                                 style: "direction:rtl;",
                                 title: "{space.startup_dir}",
                                 bdi { style: "unicode-bidi:isolate;direction:ltr;", "{space.startup_dir}" }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(b) = tab_boundary {
+                div { class: "glass mb-2 flex flex-col gap-1 overflow-hidden rounded-md px-2 py-1.5",
+                    div { class: "flex items-center gap-1.5 text-muted-foreground",
+                        Icon { class: "h-3.5 w-3.5 shrink-0",
+                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                        }
+                        span {
+                            class: "min-w-0 flex-1 truncate text-xs",
+                            style: "direction:rtl;",
+                            title: "{b.effective_dir}",
+                            bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
+                        }
+                        span { class: "shrink-0 rounded bg-foreground/10 px-1 text-[10px] uppercase tracking-wide",
+                            "{b.source}"
+                        }
+                    }
+                    if b.is_worktree && !b.branch.is_empty() {
+                        div { class: "flex items-center gap-1 text-[11px] text-muted-foreground",
+                            span { class: "truncate", "{b.branch}" }
+                            if !b.base_ref.is_empty() {
+                                span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
+                            }
+                        }
+                    }
+                    div { class: "flex items-center gap-2 text-[11px]",
+                        span { class: "text-muted-foreground", "{b.pane_count} panes" }
+                        div { class: "flex-1" }
+                        if b.is_worktree {
+                            button {
+                                r#type: "button",
+                                class: "cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/10",
+                                onclick: move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
+                                        command: "remove_worktree".to_string(),
+                                    });
+                                },
+                                "Remove worktree"
+                            }
+                        } else {
+                            button {
+                                r#type: "button",
+                                class: "cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/10",
+                                onclick: move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
+                                        command: "isolate".to_string(),
+                                    });
+                                },
+                                "Isolate as worktree"
                             }
                         }
                     }
