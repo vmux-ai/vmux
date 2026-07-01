@@ -2092,14 +2092,17 @@ fn emit_outline_markdown(
 
 fn on_explorer_goto(
     trigger: On<BinReceive<ExplorerGoto>>,
+    views: Query<&FileView>,
     mut goto_w: MessageWriter<crate::lsp::manager::LspGoto>,
 ) {
     let entity = trigger.event().webview;
-    let p = &trigger.event().payload;
+    let Ok(fv) = views.get(entity) else {
+        return;
+    };
     goto_w.write(crate::lsp::manager::LspGoto {
         entity,
-        path: PathBuf::from(&p.path),
-        line: p.line,
+        path: fv.path.clone(),
+        line: trigger.event().payload.line,
         utf16_col: 0,
     });
 }

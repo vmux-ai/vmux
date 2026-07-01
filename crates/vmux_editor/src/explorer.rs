@@ -21,8 +21,11 @@ fn close_editor(path: String) {
     let _ = try_cef_bin_emit_rkyv(&ExplorerCloseEditor { path });
 }
 
-fn goto_line(path: String, line: u32) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerGoto { path, line });
+fn goto_line(line: u32) {
+    let _ = try_cef_bin_emit_rkyv(&ExplorerGoto {
+        path: String::new(),
+        line,
+    });
 }
 
 fn chevron(expanded: bool) -> Element {
@@ -51,7 +54,6 @@ pub fn ExplorerPanel() -> Element {
     let mut rows = use_signal(Vec::<TreeRow>::new);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
-    let mut current_path = use_signal(String::new);
     let mut show_open = use_signal(|| true);
     let mut show_files = use_signal(|| true);
     let mut show_outline = use_signal(|| true);
@@ -66,9 +68,6 @@ pub fn ExplorerPanel() -> Element {
         });
     let _outline = use_bin_event_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
         outline.set(e.items);
-    });
-    let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
-        current_path.set(m.abs_path);
     });
 
     rsx! {
@@ -159,7 +158,7 @@ pub fn ExplorerPanel() -> Element {
                                     key: "{s.line}-{s.name}",
                                     class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 hover:bg-foreground/[0.08]",
                                     style: "padding-left:{pad}px;",
-                                    onclick: move |_| goto_line(current_path(), line),
+                                    onclick: move |_| goto_line(line),
                                     {outline_glyph(s.kind)}
                                     span { class: "truncate", "{s.name}" }
                                 }
