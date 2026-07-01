@@ -447,7 +447,17 @@ mod tests {
             shortcut: "<leader> s".to_string(),
         }];
 
-        let results = filter_results("spaces", &[], &commands, &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "spaces",
+            &[],
+            &commands,
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
 
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
@@ -470,7 +480,17 @@ mod tests {
         ];
         let tabs: Vec<CommandBarTab> = Vec::new();
 
-        let results = filter_results("client", &tabs, &[], &spaces, &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "client",
+            &tabs,
+            &[],
+            &spaces,
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
 
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "client"
@@ -479,7 +499,17 @@ mod tests {
 
     #[test]
     fn page_matched_by_keyword() {
-        let results = filter_results("preferences", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "preferences",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
@@ -490,7 +520,17 @@ mod tests {
 
     #[test]
     fn agent_page_matched_by_vmux_prefix_carries_favicon() {
-        let results = filter_results("vmux://", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "vmux://",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { url, icon, .. }
@@ -510,7 +550,17 @@ mod tests {
 
     #[test]
     fn settings_page_reachable_by_name() {
-        let results = filter_results("setti", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "setti",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, .. } if title == "Settings"
@@ -525,7 +575,17 @@ mod tests {
             shortcut: String::new(),
         }];
 
-        let results = filter_results("", &[], &commands, &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "",
+            &[],
+            &commands,
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
 
         let page_count = results
             .iter()
@@ -567,7 +627,17 @@ mod tests {
 
     #[test]
     fn page_carries_shortcut() {
-        let results = filter_results("history", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "history",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, shortcut, .. }
@@ -577,7 +647,17 @@ mod tests {
 
     #[test]
     fn command_prefix_excludes_pages() {
-        let results = filter_results("> set", &[], &[], &[], &sample_pages(), false, &[], &[], &[]);
+        let results = filter_results(
+            "> set",
+            &[],
+            &[],
+            &[],
+            &sample_pages(),
+            false,
+            &[],
+            &[],
+            &[],
+        );
         assert!(
             !results
                 .iter()
