@@ -1536,7 +1536,10 @@ pub struct FileCompletionCommit {
 
 /// Request to record a page/file visit into browser history (the `Visit`/`Url`
 /// ECS store). Sent by the editor when a `file://` view opens so file opens are
-/// persisted like any browser navigation; consumed by `vmux_history`.
+/// persisted like any browser navigation; consumed by `vmux_history`. Native-only
+/// (Bevy message); `event` is also compiled for the wasm pages, where `bevy` is
+/// not linked.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
 pub struct RecordVisitRequest {
     pub url: String,
