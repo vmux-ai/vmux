@@ -134,6 +134,14 @@ type ReadyUnsentTheme = (
     Without<FileThemeSent>,
     With<vmux_core::page::PageReady>,
 );
+type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
+type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
+type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
+type ChromeUnsentReady = (
+    With<FileView>,
+    Without<ExplorerChromeSent>,
+    With<vmux_core::page::PageReady>,
+);
 
 fn path_from_files_url(url: &str) -> Option<PathBuf> {
     let parsed = url::Url::parse(url).ok()?;
@@ -593,19 +601,25 @@ fn rehighlight_on_color_scheme(
 
 fn reset_file_sent_markers_on_page_ready(
     trigger: On<BinReceive<vmux_core::page::PageReady>>,
-    file_views: Query<(), With<FileView>>,
+    file_views: Query<&FileView>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if file_views.get(entity).is_err() {
+    let Ok(fv) = file_views.get(entity) else {
         return;
-    }
+    };
     commands
         .entity(entity)
         .remove::<FileInitialMetaSent>()
         .remove::<FileThemeSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
-        .remove::<crate::lsp::manager::DiagSent>();
+        .remove::<crate::lsp::manager::DiagSent>()
+        .remove::<ExplorerChromeSent>()
+        .insert(ExplorerTreeDirty)
+        .insert(OpenEditorsDirty);
+    if crate::explorer_model::is_markdown(&fv.path) {
+        commands.entity(entity).insert(OutlineDirty);
+    }
 }
 
 fn on_file_resize(
@@ -1852,7 +1866,7 @@ fn init_explorer_state(
 }
 
 fn emit_explorer_tree(
-    q: Query<(Entity, &ExplorerState), With<ExplorerTreeDirty>>,
+    q: Query<(Entity, &ExplorerState), TreeDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1917,7 +1931,7 @@ fn sync_explorer_chrome(
 }
 
 fn emit_explorer_chrome(
-    q: Query<Entity, (With<FileView>, Without<ExplorerChromeSent>)>,
+    q: Query<Entity, ChromeUnsentReady>,
     chrome: Res<ExplorerChrome>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -2004,7 +2018,7 @@ fn open_editor_name(path: &Path) -> String {
 }
 
 fn emit_open_editors(
-    q: Query<(Entity, &FileView, &ExplorerState, Option<&EditState>), With<OpenEditorsDirty>>,
+    q: Query<(Entity, &FileView, &ExplorerState, Option<&EditState>), OpenEditorsDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -2058,7 +2072,7 @@ fn mark_outline_dirty(q: Query<(Entity, &FileView), Changed<EditState>>, mut com
 }
 
 fn emit_outline_markdown(
-    q: Query<(Entity, &EditState), With<OutlineDirty>>,
+    q: Query<(Entity, &EditState), OutlineDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -2122,7 +2136,7 @@ impl Plugin for EditorPlugin {
             .insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
             .insert_resource(ExplorerChrome {
-                visible: true,
+                visible: false,
                 width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
             })
             .init_resource::<ExplorerChromeSynced>()

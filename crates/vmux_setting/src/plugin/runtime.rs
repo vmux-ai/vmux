@@ -79,7 +79,7 @@ pub struct ExplorerSettings {
 
 impl ExplorerSettings {
     pub fn visible(&self) -> bool {
-        self.visible.unwrap_or(true)
+        self.visible.unwrap_or(false)
     }
     pub fn width(&self) -> u32 {
         self.width.unwrap_or(EXPLORER_DEFAULT_WIDTH)
@@ -1095,7 +1095,7 @@ mod tests {
     #[test]
     fn explorer_settings_default_when_absent() {
         let s = base_settings();
-        assert!(s.editor.explorer.visible());
+        assert!(!s.editor.explorer.visible());
         assert_eq!(s.editor.explorer.width(), EXPLORER_DEFAULT_WIDTH);
     }
 

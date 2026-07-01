@@ -28,9 +28,8 @@ fn goto_line(path: String, line: u32) {
 fn chevron(expanded: bool) -> Element {
     rsx! {
         span {
-            class: "inline-block w-3 shrink-0 text-center text-[10px] text-foreground/50 transition-transform",
-            style: if expanded { "transform:rotate(90deg)" } else { "" },
-            "\u{203A}"
+            class: "inline-block w-3 shrink-0 text-center text-[9px] text-foreground/50",
+            {if expanded { "\u{25BE}" } else { "\u{25B8}" }}
         }
     }
 }

@@ -306,7 +306,7 @@ pub fn Page() -> Element {
     let mut comp_sel = use_signal(|| 0usize);
     let mut comp_anchor = use_signal(|| (0u32, 0u32));
     let mut last_scroll_req = use_signal(|| 0u32);
-    let mut explorer_visible = use_signal(|| true);
+    let mut explorer_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
 
@@ -607,6 +607,7 @@ pub fn Page() -> Element {
                 let key = raw.key();
                 if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
                     e.prevent_default();
+                    explorer_visible.set(!explorer_visible());
                     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
                     return;
                 }
@@ -729,6 +730,7 @@ pub fn Page() -> Element {
                     class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
                     title: "Toggle Explorer",
                     onclick: move |_| {
+                        explorer_visible.set(!explorer_visible());
                         let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
                     },
                     svg {
