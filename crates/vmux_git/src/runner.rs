@@ -8,11 +8,28 @@ use crate::parse;
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
 
-fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
-    let out = Command::new("git")
-        .current_dir(root)
-        .args(args)
+/// Build a `git` [`Command`] rooted at `root` with a scrubbed environment.
+///
+/// The runner always targets an explicit repository via [`Command::current_dir`],
+/// so ambient `GIT_*` location variables (which a parent process such as a
+/// `git push` pre-push hook exports) must be stripped — otherwise `GIT_DIR` /
+/// `GIT_INDEX_FILE` override `current_dir` and the call silently operates on the
+/// wrong repository.
+fn git_command(root: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(root)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_PREFIX");
+    cmd
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+    let out = git_command(root)
+        .args(args)
         .output()
         .map_err(|e| GitError(format!("failed to run git: {e}")))?;
     Ok((
@@ -217,13 +234,11 @@ fn git_apply(root: &Path, patch: &str, reverse: bool) -> Result<(), GitError> {
         args.push("--cached");
     }
     args.push("--unidiff-zero");
-    let mut child = Command::new("git")
-        .current_dir(root)
+    let mut child = git_command(root)
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .env("GIT_TERMINAL_PROMPT", "0")
         .spawn()
         .map_err(|e| GitError(format!("failed to run git apply: {e}")))?;
     child
@@ -310,13 +325,10 @@ pub(crate) mod test_repo {
     use super::*;
 
     pub fn run(dir: &Path, args: &[&str]) {
-        let status = Command::new("git")
-            .current_dir(dir)
+        let status = git_command(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
             .status()
             .unwrap();
         assert!(status.success(), "git {args:?} failed");
@@ -342,6 +354,29 @@ pub(crate) mod test_repo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_command_scrubs_ambient_location_env() {
+        use std::ffi::OsStr;
+        let cmd = git_command(Path::new("."));
+        let removed: Vec<&OsStr> = cmd
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k)
+            .collect();
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_PREFIX",
+        ] {
+            assert!(
+                removed.contains(&OsStr::new(key)),
+                "git_command must scrub {key} so ambient GIT_* cannot redirect the runner"
+            );
+        }
+    }
 
     #[test]
     fn repo_root_resolves_toplevel() {
