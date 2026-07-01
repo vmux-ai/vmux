@@ -546,7 +546,10 @@ pub fn spawn_requested_tab_layouts(
             settings.pane.gap,
         );
         if let Some(name) = request.name.clone() {
-            commands.entity(tab_e).insert(Tab { name });
+            commands.entity(tab_e).insert(Tab {
+                name,
+                startup_dir: None,
+            });
         }
 
         if request.clear_pending_stack

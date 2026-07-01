@@ -148,6 +148,8 @@ Read the active tab via `ActiveTabParam` (`crates/vmux_layout/src/stack.rs:126`,
 
 Because a tab's dir is fixed, the ACP agent and every terminal in the tab receive the **same** cwd → the Unify surface has one workspace. The daemon needs **no change** — `AcpSession.cwd` flows through `SpawnAcpAgent` → `current_dir(cwd)` + `resolve_in_cwd` exactly as today. Restore path (`persistence.rs:547`) still uses saved `TerminalLaunch.cwd`.
 
+Resolution reads the target stack's **ancestor tab** (`ancestor_tab_startup_dir`, `tab.rs`), not the globally-active tab — correct under Unify since content spawns into a specific stack. `run_terminal_cwd` (agent-run terminals) already prefers the agent's own launch cwd, so it inherits the tab dir transitively. **Deferred:** `ServiceAgentCommand::NewTerminalTab`'s no-cwd fallback (`plugin.rs:~928`) still resolves space-scoped — threading it needs an `AgentLookups` lifetime/query change (`handle_agent_commands` is at Bevy's 16-param limit); it only diverges when an agent opens a terminal tab passing an empty cwd.
+
 ### 4. Worktree engine
 
 **Git ops (`vmux_git`, new `crates/vmux_git/src/worktree.rs`).** `vmux_git` already shells out via the private `git(root, args)` helper (`runner.rs:11`). The existing API is file-centric and canonicalizes paths, so it can't create a not-yet-existing worktree dir; add root/path-based functions:
@@ -297,9 +299,9 @@ user opens agent in tab T (undecided, dir in git repo)
 
 ## Persistence
 
-- `Tab.startup_dir` — auto-persists (field on already-saved `Tab`; confirm `serde(default)` so pre-existing `store.ron` loads).
-- `TabWorktree`, `TabDirDecided` — add to allowlist (`persistence.rs:194`).
-- No schema-version bump (additive reflected components/fields deserialize with defaults).
+- `Tab.startup_dir` — auto-persists (field on already-saved `Tab`). Register `Option<String>` in `TabPlugin` (`tab.rs`) so the reflected field serializes.
+- `TabWorktree`, `TabDirDecided` — add to allowlist (`persistence.rs:194`) + `register_type`.
+- **Bump `STORE_SCHEMA_VERSION` 2 → 3** (`persistence.rs:97`). Reflect-scene deserialization can choke on a component whose stored shape lacks the new field, so the bump makes pre-existing `store.ron` (v2) reset cleanly on load instead of failing — the codebase's existing "schema outdated → reset" path handles it.
 
 ## Error handling
 

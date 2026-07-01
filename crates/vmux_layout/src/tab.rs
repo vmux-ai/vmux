@@ -26,6 +26,7 @@ pub struct TabCommandSet;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
+            .register_type::<Option<String>>()
             .init_resource::<LastTabCloseAt>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
@@ -48,6 +49,25 @@ impl Plugin for TabPlugin {
 #[require(Save)]
 pub struct Tab {
     pub name: String,
+    pub startup_dir: Option<String>,
+}
+
+/// Walk up from `entity` to its ancestor [`Tab`] and return that tab's `startup_dir` override.
+///
+/// Everything spawned inside a tab (the ACP agent session and the user's terminals) shares the
+/// tab's working directory; this resolves that override for a given stack/pane entity.
+pub fn ancestor_tab_startup_dir(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<&Tab>,
+) -> Option<String> {
+    let mut cur = entity;
+    loop {
+        if let Ok(tab) = tabs.get(cur) {
+            return tab.startup_dir.clone();
+        }
+        cur = child_of.get(cur).ok()?.parent();
+    }
 }
 
 #[derive(Resource, Default)]
@@ -468,15 +488,33 @@ mod tests {
         let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
-            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "a".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let b = app
             .world_mut()
-            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "b".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "c".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
 
         app.update();
@@ -492,15 +530,33 @@ mod tests {
         let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
-            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "a".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let b = app
             .world_mut()
-            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "b".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "c".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
 
         app.update();
@@ -569,6 +625,7 @@ mod tests {
         app.world_mut().spawn((
             Tab {
                 name: "Tab 1".into(),
+                startup_dir: None,
             },
             LastActivatedAt::now(),
             ChildOf(main),
@@ -690,6 +747,7 @@ mod tests {
             .spawn((
                 Tab {
                     name: "Tab 1".into(),
+                    startup_dir: None,
                 },
                 LastActivatedAt::now(),
                 ChildOf(main),
@@ -700,6 +758,7 @@ mod tests {
             .spawn((
                 Tab {
                     name: "Tab 2".into(),
+                    startup_dir: None,
                 },
                 LastActivatedAt(1),
                 ChildOf(main),

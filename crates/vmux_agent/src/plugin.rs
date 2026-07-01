@@ -2198,15 +2198,23 @@ fn handle_agent_page_open(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: Res<AppSettings>,
     active_space: Option<Res<ActiveSpace>>,
+    tabs: Query<&vmux_layout::tab::Tab>,
 ) {
-    let default_cwd = active_space
-        .as_deref()
-        .map(|s| vmux_setting::resolve_startup_dir(&settings, &s.record.id))
-        .unwrap_or_else(default_space_dir);
     for (entity, task) in &tasks {
         if !task.url.starts_with("vmux://agent/") {
             continue;
         }
+        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
+        let default_cwd = active_space
+            .as_deref()
+            .map(|s| {
+                vmux_setting::resolve_startup_dir_for_tab(
+                    &settings,
+                    &s.record.id,
+                    tab_dir.as_deref(),
+                )
+            })
+            .unwrap_or_else(default_space_dir);
         match handle_agent_page_open_task(
             task,
             &children_q,
@@ -3442,6 +3450,72 @@ mod tests {
         assert_eq!(
             spawns[0].cwd, dir,
             "claude page cwd resolves to space startup_dir"
+        );
+    }
+
+    #[test]
+    fn fresh_claude_page_prefers_ancestor_tab_startup_dir() {
+        let space_dir = std::env::temp_dir().join(format!("vmux-space-dir-{}", std::process::id()));
+        let tab_dir = std::env::temp_dir().join(format!("vmux-tab-dir-{}", std::process::id()));
+        std::fs::create_dir_all(&space_dir).unwrap();
+        std::fs::create_dir_all(&tab_dir).unwrap();
+
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        settings.spaces.insert(
+            "space-1".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(space_dir.to_string_lossy().into()),
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_space::spaces::ActiveSpace {
+                record: vmux_space::model::SpaceRecord {
+                    id: "space-1".into(),
+                    name: "Space 1".into(),
+                    profile: "Personal".into(),
+                },
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "t".into(),
+                startup_dir: Some(tab_dir.to_string_lossy().into()),
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let spawns: Vec<SpawnAgentInStackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        let _ = std::fs::remove_dir_all(&space_dir);
+        let _ = std::fs::remove_dir_all(&tab_dir);
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(
+            spawns[0].cwd, tab_dir,
+            "claude page cwd resolves to ancestor tab startup_dir"
         );
     }
 

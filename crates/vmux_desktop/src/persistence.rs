@@ -94,7 +94,7 @@ struct AutoSave {
     dirty: bool,
 }
 
-const STORE_SCHEMA_VERSION: u32 = 2;
+const STORE_SCHEMA_VERSION: u32 = 3;
 
 pub(crate) fn store_path() -> PathBuf {
     vmux_core::profile::store_dir().join("store.ron")
