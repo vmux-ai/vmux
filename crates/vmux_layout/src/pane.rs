@@ -984,11 +984,6 @@ pub fn handle_open_beside_requests(
             find_reuse_in_space(&req.url, space, &rc.tab_q, &rc.all_children, &rc.page_q)
         });
         if let Some(hit) = reuse {
-            if let Ok(co) = child_of_q.get(hit.stack) {
-                let seq =
-                    touch_pane_spawn_seq(co.get(), &mut commands, &mut spawn_counter, &rc.seq_q);
-                spawn_seq_overrides.insert(co.get(), seq.0);
-            }
             if let Ok(meta) = rc.page_q.get(hit.stack)
                 && meta.url != req.url
             {
@@ -1005,7 +1000,7 @@ pub fn handle_open_beside_requests(
         }
 
         if let Some(direction) = req.direction {
-            let (target_pane, pending_size) = match find_sibling_pane(
+            let (target_pane, pending_size, refresh_spawn_seq) = match find_sibling_pane(
                 req.pane,
                 &direction,
                 &child_of_q,
@@ -1013,7 +1008,7 @@ pub fn handle_open_beside_requests(
                 &pane_children,
                 &leaf_panes,
             ) {
-                Some(sibling) => (sibling, pane_size(sibling, &rc.node_q)),
+                Some(sibling) => (sibling, pane_size(sibling, &rc.node_q), false),
                 None => {
                     let existing_tabs = stack_children_for_split(
                         req.pane,
@@ -1046,7 +1041,7 @@ pub fn handle_open_beside_requests(
                     );
                     let pending_size =
                         target_size.unwrap_or_else(|| pane_size(target_pane, &rc.node_q));
-                    (target_pane, pending_size)
+                    (target_pane, pending_size, true)
                 }
             };
             spawn_beside_stack(
@@ -1061,6 +1056,7 @@ pub fn handle_open_beside_requests(
                 &mut pending_leaf_infos,
                 &mut pending_leaf_stacks,
                 pending_size,
+                refresh_spawn_seq,
             );
             continue;
         }
@@ -1078,6 +1074,7 @@ pub fn handle_open_beside_requests(
                 &mut pending_leaf_infos,
                 &mut pending_leaf_stacks,
                 pane_size(req.pane, &rc.node_q),
+                false,
             );
             continue;
         };
@@ -1115,6 +1112,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
                     pane_size(pane, &rc.node_q),
+                    false,
                 );
             }
             crate::placement::Placement::Spiral { anchor, axis } => {
@@ -1152,6 +1150,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     &mut pending_leaf_stacks,
                     pending_size,
+                    true,
                 );
             }
         }
@@ -1232,6 +1231,20 @@ fn touch_pane_spawn_seq(
     seq
 }
 
+fn current_pane_spawn_seq(
+    pane: Entity,
+    seq_q: &Query<&SpawnSeq>,
+    spawn_seq_overrides: &std::collections::HashMap<Entity, u64>,
+    pending_leaf_infos: &std::collections::HashMap<Entity, crate::placement::LeafInfo>,
+) -> u64 {
+    pending_leaf_infos
+        .get(&pane)
+        .map(|info| info.spawn_seq)
+        .or_else(|| spawn_seq_overrides.get(&pane).copied())
+        .or_else(|| seq_q.get(pane).ok().map(|s| s.0))
+        .unwrap_or(0)
+}
+
 fn spawn_beside_stack(
     target_pane: Entity,
     req: &OpenBesideRequest,
@@ -1244,14 +1257,20 @@ fn spawn_beside_stack(
     pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
     pending_size: Vec2,
+    refresh_spawn_seq: bool,
 ) {
-    let seq = touch_pane_spawn_seq(target_pane, commands, spawn_counter, seq_q);
-    spawn_seq_overrides.insert(target_pane, seq.0);
+    let spawn_seq = if refresh_spawn_seq {
+        let seq = touch_pane_spawn_seq(target_pane, commands, spawn_counter, seq_q);
+        spawn_seq_overrides.insert(target_pane, seq.0);
+        seq.0
+    } else {
+        current_pane_spawn_seq(target_pane, seq_q, spawn_seq_overrides, pending_leaf_infos)
+    };
     record_pending_leaf_info(
         pending_leaf_infos,
         target_pane,
         crate::placement::page_kind_for_url(&req.url),
-        seq.0,
+        spawn_seq,
         pending_size,
     );
     let stack_ts = if req.focus {
@@ -2979,6 +2998,149 @@ mod tests {
     }
 
     #[test]
+    fn auto_batched_new_browser_splits_latest_leaf_after_other_work() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "https://github.com/vmux-ai/vmux/pull/221",
+            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "file:///repo/crates/vmux_layout/src/pane.rs",
+            "vmux://terminal/",
+            "https://github.com/vmux-ai/vmux/actions/runs/28544986467",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+        }
+        app.update();
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let pr_parent = parent_for_url("https://github.com/vmux-ai/vmux/pull/221");
+        let ci_parent = parent_for_url("https://github.com/vmux-ai/vmux/actions/runs/28544986467");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+
+        assert_ne!(
+            ci_parent, pr_parent,
+            "new CI browser page should not tab into the earlier PR browser pane"
+        );
+        assert_eq!(
+            app.world().get::<ChildOf>(ci_parent).unwrap().get(),
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            "new CI browser page should split the latest bottom-right terminal leaf"
+        );
+    }
+
+    #[test]
+    fn auto_batched_new_browser_stacks_after_nonbrowser_tab_reuse() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "https://github.com/vmux-ai/vmux/pull/221",
+            "file:///repo/crates/vmux_agent/src/plugin.rs",
+            "vmux://terminal/",
+            "https://github.com/vmux-ai/vmux/actions/runs/28544986467",
+            "file:///repo/crates/vmux_layout/src/pane.rs",
+            "https://github.com/vmux-ai/vmux/pull/221/files",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+        }
+        app.update();
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let ci_parent = parent_for_url("https://github.com/vmux-ai/vmux/actions/runs/28544986467");
+        let files_parent = parent_for_url("https://github.com/vmux-ai/vmux/pull/221/files");
+
+        assert_eq!(
+            files_parent, ci_parent,
+            "browser pages after file tab reuse should stack in the newest browser pane"
+        );
+    }
+
+    #[test]
     fn direction_batched_new_type_uses_split_target_size() {
         let mut app = open_beside_app();
         let space = app
@@ -3352,7 +3514,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_terminal_splits_last_reused_browser_pane() {
+    fn auto_terminal_splits_last_spawned_browser_pane() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3394,18 +3556,39 @@ mod tests {
             });
         app.update();
 
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let github_parent = parent_for_url("https://github.com/vmux-ai/vmux");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+
         assert!(
-            app.world().get::<PaneSplit>(browser_pane).is_some(),
-            "terminal should split the browser pane that was just reused"
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "older browser pane must not be reused for a new browser URL"
         );
         assert!(
-            app.world().get::<PaneSplit>(file_pane).is_none(),
-            "older file pane must not be split"
+            app.world().get::<PaneSplit>(file_pane).is_some(),
+            "new browser page should split the latest file pane"
+        );
+        assert_eq!(
+            app.world().get::<ChildOf>(github_parent).unwrap().get(),
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            "terminal should split the browser pane that was just spawned"
         );
     }
 
     #[test]
-    fn auto_terminal_splits_pane_touched_earlier_in_same_batch() {
+    fn auto_terminal_splits_browser_pane_spawned_earlier_in_same_batch() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3445,18 +3628,39 @@ mod tests {
             });
         app.update();
 
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let github_parent = parent_for_url("https://github.com/vmux-ai/vmux");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+
         assert!(
-            app.world().get::<PaneSplit>(browser_pane).is_some(),
-            "terminal should split the browser pane touched earlier in the same batch"
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "older browser pane must not be reused for a new browser URL"
         );
         assert!(
-            app.world().get::<PaneSplit>(file_pane).is_none(),
-            "older file pane must not be split"
+            app.world().get::<PaneSplit>(file_pane).is_some(),
+            "new browser page should split the latest file pane"
+        );
+        assert_eq!(
+            app.world().get::<ChildOf>(github_parent).unwrap().get(),
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            "terminal should split the browser pane spawned earlier in the same batch"
         );
     }
 
     #[test]
-    fn forced_split_anchor_follows_last_reused_browser_pane() {
+    fn forced_split_anchor_follows_last_spawned_browser_pane() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3486,6 +3690,25 @@ mod tests {
                 focus: false,
             });
         app.update();
+
+        let requests = page_open_requests(&app);
+        let github_parent = requests
+            .iter()
+            .find_map(|request| match &request.target {
+                PageOpenTarget::Stack(stack)
+                    if request.url == "https://github.com/vmux-ai/vmux" =>
+                {
+                    app.world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_ne!(
+            github_parent, browser_pane,
+            "new browser URL should spawn from the latest leaf, not reuse the older browser pane"
+        );
 
         app.insert_resource(SplitAnchorInput { anchor: file_pane })
             .init_resource::<SplitAnchorOut>()
@@ -3494,12 +3717,12 @@ mod tests {
 
         assert_eq!(
             app.world().resource::<SplitAnchorOut>().0,
-            Some(browser_pane)
+            Some(github_parent)
         );
     }
 
     #[test]
-    fn forced_split_anchor_follows_exact_reused_browser_page() {
+    fn forced_split_anchor_ignores_exact_reused_browser_page() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3540,10 +3763,11 @@ mod tests {
             .add_systems(Update, split_anchor_test_sys);
         app.update();
 
-        assert_eq!(
-            app.world().resource::<SplitAnchorOut>().0,
-            Some(browser_pane)
+        assert!(
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "exact browser reuse must not split the existing browser pane"
         );
+        assert_eq!(app.world().resource::<SplitAnchorOut>().0, Some(file_pane));
     }
 
     #[derive(Resource)]
