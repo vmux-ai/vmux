@@ -46,7 +46,7 @@ pub fn update_work_dirs_snapshot(
             by_cwd.push((launch.cwd.clone(), kind_label(&launch.kind), ts));
         }
     }
-    by_cwd.sort_by(|a, b| b.2.cmp(&a.2));
+    by_cwd.sort_by_key(|b| std::cmp::Reverse(b.2));
     let work_dirs: Vec<CommandBarWorkDir> = by_cwd
         .into_iter()
         .take(WORK_GROUP_CAP)
