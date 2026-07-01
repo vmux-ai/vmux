@@ -148,6 +148,11 @@ pub enum AgentCommand {
         title: Option<String>,
         body: Option<String>,
     },
+    /// Create (or reuse) an isolated git worktree for the calling agent's tab and return its
+    /// path. Resolved to the tab via `anchor`.
+    CreateWorktree {
+        anchor: ProcessId,
+    },
     FileTouched {
         anchor: ProcessId,
         path: String,

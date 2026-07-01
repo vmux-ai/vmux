@@ -105,7 +105,9 @@ fn plan_worktree(repo_root: &Path, slug_hint: &str) -> (PathBuf, String) {
     (path, branch)
 }
 
-fn create_worktree_blocking(base_dir: &Path, slug_hint: &str) -> Result<WorktreeInfo, String> {
+/// Create a worktree under `base_dir`'s repo, synchronously. Used by the async orchestration and
+/// by the agent-facing `create_worktree` MCP command (which needs the path back in one call).
+pub fn create_worktree_blocking(base_dir: &Path, slug_hint: &str) -> Result<WorktreeInfo, String> {
     let repo_root = worktree::repo_root_of(base_dir).map_err(|e| e.0)?;
     let base_ref = worktree::head_ref(&repo_root).map_err(|e| e.0)?;
     let (path, branch) = plan_worktree(&repo_root, slug_hint);

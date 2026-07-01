@@ -1238,7 +1238,9 @@ fn handle_agent_commands(
                     });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::OpenBeside { .. } | ServiceAgentCommand::Run { .. } => {
+            ServiceAgentCommand::OpenBeside { .. }
+            | ServiceAgentCommand::Run { .. }
+            | ServiceAgentCommand::CreateWorktree { .. } => {
                 continue;
             }
         };
@@ -1576,6 +1578,8 @@ fn handle_agent_self_commands(
     settings: Res<AppSettings>,
     mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+    mut tabs: Query<&mut vmux_layout::tab::Tab>,
+    tab_worktrees: Query<&vmux_layout::tab::TabWorktree>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -1795,6 +1799,71 @@ fn handle_agent_self_commands(
                             );
                         }
                         AgentCommandResult::Text(new_pid.to_string())
+                    }
+                }
+            }
+            ServiceAgentCommand::CreateWorktree { anchor } => {
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((_, pane)) => {
+                        let mut cur = pane;
+                        let tab_e = loop {
+                            if tabs.get(cur).is_ok() {
+                                break Some(cur);
+                            }
+                            match ctx.child_of_q.get(cur) {
+                                Ok(co) => cur = co.parent(),
+                                Err(_) => break None,
+                            }
+                        };
+                        match tab_e {
+                            None => AgentCommandResult::Error("no tab for agent".to_string()),
+                            Some(tab_e) if tab_worktrees.get(tab_e).is_ok() => {
+                                let dir = tabs
+                                    .get(tab_e)
+                                    .ok()
+                                    .and_then(|t| t.startup_dir.clone())
+                                    .unwrap_or_default();
+                                AgentCommandResult::Text(dir)
+                            }
+                            Some(tab_e) => {
+                                let tab_dir =
+                                    tabs.get(tab_e).ok().and_then(|t| t.startup_dir.clone());
+                                let name =
+                                    tabs.get(tab_e).map(|t| t.name.clone()).unwrap_or_default();
+                                let space_id = active_space
+                                    .as_deref()
+                                    .map(|s| s.record.id.clone())
+                                    .unwrap_or_default();
+                                let base_dir = vmux_setting::resolve_startup_dir_for_tab(
+                                    &settings,
+                                    &space_id,
+                                    tab_dir.as_deref(),
+                                );
+                                match vmux_layout::worktree::create_worktree_blocking(
+                                    &base_dir, &name,
+                                ) {
+                                    Ok(info) => {
+                                        let path = info.path.to_string_lossy().into_owned();
+                                        if let Ok(mut t) = tabs.get_mut(tab_e) {
+                                            t.startup_dir = Some(path.clone());
+                                        }
+                                        commands.entity(tab_e).insert(
+                                            vmux_layout::tab::TabWorktree {
+                                                repo_root: info
+                                                    .repo_root
+                                                    .to_string_lossy()
+                                                    .into_owned(),
+                                                branch: info.branch.clone(),
+                                                base_ref: info.base_ref.clone(),
+                                            },
+                                        );
+                                        AgentCommandResult::Text(path)
+                                    }
+                                    Err(e) => AgentCommandResult::Error(e),
+                                }
+                            }
+                        }
                     }
                 }
             }
