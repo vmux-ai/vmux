@@ -571,7 +571,7 @@ pub fn Page() -> Element {
                     ExplorerPanel {}
                 }
                 div {
-                    class: "h-full w-1 shrink-0 cursor-col-resize bg-white/[0.06] hover:bg-cyan-400/40",
+                    class: "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] hover:bg-cyan-400/40",
                     onmousedown: move |e: Event<MouseData>| {
                         e.prevent_default();
                         explorer_resizing.set(true);

@@ -73,7 +73,7 @@ pub fn ExplorerPanel() -> Element {
     });
 
     rsx! {
-        div { class: "flex h-full w-full flex-col overflow-hidden bg-black/20 font-sans text-xs text-foreground select-none",
+        div { class: "flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
             div { class: "flex h-9 shrink-0 items-center px-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
                 "Explorer"
             }
@@ -93,7 +93,7 @@ pub fn ExplorerPanel() -> Element {
                                     class: if active {
                                         "group flex items-center gap-1 px-2 py-0.5 cursor-default bg-cyan-400/12 text-foreground"
                                     } else {
-                                        "group flex items-center gap-1 px-2 py-0.5 cursor-default text-foreground/75 hover:bg-white/[0.05]"
+                                        "group flex items-center gap-1 px-2 py-0.5 cursor-default text-foreground/75 hover:bg-foreground/[0.08]"
                                     },
                                     style: "padding-left:20px;",
                                     onclick: move |_| open_file(p_open.clone()),
@@ -126,7 +126,7 @@ pub fn ExplorerPanel() -> Element {
                             rsx! {
                                 div {
                                     key: "{r.path}",
-                                    class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/80 hover:bg-white/[0.06]",
+                                    class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/80 hover:bg-foreground/[0.08]",
                                     style: "padding-left:{pad}px;",
                                     title: "{r.path}",
                                     onclick: move |_| {
@@ -158,7 +158,7 @@ pub fn ExplorerPanel() -> Element {
                             rsx! {
                                 div {
                                     key: "{s.line}-{s.name}",
-                                    class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 hover:bg-white/[0.06]",
+                                    class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 hover:bg-foreground/[0.08]",
                                     style: "padding-left:{pad}px;",
                                     onclick: move |_| goto_line(current_path(), line),
                                     {outline_glyph(s.kind)}
@@ -181,6 +181,6 @@ fn outline_glyph(kind: u8) -> Element {
         _ => "\u{25C6}",
     };
     rsx! {
-        span { class: "inline-block w-6 shrink-0 text-center text-[9px] font-semibold text-cyan-300/80", "{label}" }
+        span { class: "inline-block w-6 shrink-0 text-center text-[9px] font-semibold text-cyan-600 dark:text-cyan-300/80", "{label}" }
     }
 }
