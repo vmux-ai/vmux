@@ -181,7 +181,8 @@ impl ServerClient {
             "rootUri": root_uri,
             "capabilities": {
                 "textDocument": {
-                    "publishDiagnostics": { "relatedInformation": false }
+                    "publishDiagnostics": { "relatedInformation": false },
+                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true }
                 }
             },
             "clientInfo": { "name": "vmux" }

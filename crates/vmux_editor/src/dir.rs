@@ -35,6 +35,28 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
     }
 }
 
+/// Nearest ancestor directory containing a `.git` entry, starting from `start`
+/// (or its parent when `start` is a file). Falls back to the containing
+/// directory when no git root is found.
+pub fn project_root(start: &Path) -> std::path::PathBuf {
+    let base = if start.is_dir() {
+        start
+    } else {
+        start.parent().unwrap_or(start)
+    };
+    let mut dir = base;
+    loop {
+        if dir.join(".git").exists() {
+            return dir.to_path_buf();
+        }
+        match dir.parent() {
+            Some(p) => dir = p,
+            None => break,
+        }
+    }
+    base.to_path_buf()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -49,6 +71,29 @@ mod tests {
         let entries = list_dir(tmp.path());
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["zdir", ".hidden", "a.txt"]);
+    }
+
+    #[test]
+    fn project_root_walks_up_to_git_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir(root.join(".git")).unwrap();
+        let sub = root.join("crates").join("x");
+        fs::create_dir_all(&sub).unwrap();
+        let file = sub.join("lib.rs");
+        fs::write(&file, "x").unwrap();
+        assert_eq!(project_root(&file), root);
+        assert_eq!(project_root(&sub), root);
+    }
+
+    #[test]
+    fn project_root_falls_back_to_containing_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("nogit");
+        fs::create_dir(&sub).unwrap();
+        let file = sub.join("a.txt");
+        fs::write(&file, "x").unwrap();
+        assert_eq!(project_root(&file), sub);
     }
 
     #[test]

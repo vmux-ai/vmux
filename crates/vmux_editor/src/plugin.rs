@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -11,9 +11,10 @@ use vmux_core::event::*;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::Browser;
 
-use crate::dir::{list_dir, parent_listing};
+use crate::dir::{list_dir, parent_listing, project_root};
 use crate::edit::highlight_cache::HighlightCache;
 use crate::edit::{EditCommand, EditCore, Selection};
+use crate::explorer_model::flatten_tree;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
 use crate::viewport::{clamp_top_line, rows_from_viewport, window_range};
@@ -88,6 +89,35 @@ pub struct FileInitialMetaSent;
 #[derive(Component)]
 pub struct FileThemeSent;
 
+#[derive(Component, Default)]
+pub(crate) struct ExplorerState {
+    pub root: PathBuf,
+    pub expanded: HashSet<PathBuf>,
+    pub children: HashMap<PathBuf, Vec<FileDirEntry>>,
+    pub open_editors: Vec<PathBuf>,
+}
+
+#[derive(Component)]
+struct ExplorerTreeDirty;
+
+#[derive(Component)]
+struct OpenEditorsDirty;
+
+#[derive(Component)]
+struct OutlineDirty;
+
+#[derive(Component)]
+struct ExplorerChromeSent;
+
+#[derive(Resource, Clone, Copy)]
+struct ExplorerChrome {
+    visible: bool,
+    width: u32,
+}
+
+#[derive(Resource, Default)]
+struct ExplorerChromeSynced(bool);
+
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -102,6 +132,14 @@ type ReadyUnsentMeta = (
 type ReadyUnsentTheme = (
     With<FileView>,
     Without<FileThemeSent>,
+    With<vmux_core::page::PageReady>,
+);
+type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
+type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
+type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
+type ChromeUnsentReady = (
+    With<FileView>,
+    Without<ExplorerChromeSent>,
     With<vmux_core::page::PageReady>,
 );
 
@@ -138,6 +176,7 @@ fn new_file_view_bundle(
                 top_row: 0,
                 rows: 0,
             },
+            ExplorerState::default(),
             Browser,
             WebviewWindowed,
             WebviewWindowedNativeFocus,
@@ -562,19 +601,25 @@ fn rehighlight_on_color_scheme(
 
 fn reset_file_sent_markers_on_page_ready(
     trigger: On<BinReceive<vmux_core::page::PageReady>>,
-    file_views: Query<(), With<FileView>>,
+    file_views: Query<&FileView>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    if file_views.get(entity).is_err() {
+    let Ok(fv) = file_views.get(entity) else {
         return;
-    }
+    };
     commands
         .entity(entity)
         .remove::<FileInitialMetaSent>()
         .remove::<FileThemeSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
-        .remove::<crate::lsp::manager::DiagSent>();
+        .remove::<crate::lsp::manager::DiagSent>()
+        .remove::<ExplorerChromeSent>()
+        .insert(ExplorerTreeDirty)
+        .insert(OpenEditorsDirty);
+    if crate::explorer_model::is_markdown(&fv.path) {
+        commands.entity(entity).insert(OutlineDirty);
+    }
 }
 
 fn on_file_resize(
@@ -995,16 +1040,23 @@ fn watch_dir_for(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn reconcile_file_watches(q: Query<&FileView>, watch: Option<NonSendMut<FileWatch>>) {
+fn reconcile_file_watches(
+    q: Query<(&FileView, &ExplorerState)>,
+    watch: Option<NonSendMut<FileWatch>>,
+) {
     let Some(mut watch) = watch else {
         return;
     };
-    for fv in &q {
-        let Some(dir) = watch_dir_for(&fv.path) else {
-            continue;
-        };
-        if watch.dirs.insert(dir.clone()) {
+    for (fv, st) in &q {
+        if let Some(dir) = watch_dir_for(&fv.path)
+            && watch.dirs.insert(dir.clone())
+        {
             let _ = watch.watcher.watch(&dir, RecursiveMode::NonRecursive);
+        }
+        for dir in st.expanded.iter() {
+            if watch.dirs.insert(dir.clone()) {
+                let _ = watch.watcher.watch(dir, RecursiveMode::NonRecursive);
+            }
         }
     }
 }
@@ -1012,7 +1064,7 @@ fn reconcile_file_watches(q: Query<&FileView>, watch: Option<NonSendMut<FileWatc
 fn drain_file_changes(
     watch: Option<NonSend<FileWatch>>,
     self_writes: Option<NonSendMut<SelfWrites>>,
-    q: Query<(Entity, &FileView)>,
+    mut q: Query<(Entity, &FileView, &mut ExplorerState)>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -1033,17 +1085,31 @@ fn drain_file_changes(
     if let Some(sw) = sw.as_mut() {
         sw.0.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(2));
     }
-    for (entity, fv) in &q {
+    for (entity, fv, mut st) in &mut q {
         let cp = canon(&fv.path);
-        if !changed.contains(&cp) {
-            continue;
+        let self_written = sw
+            .as_ref()
+            .map(|sw| sw.0.contains_key(&cp))
+            .unwrap_or(false);
+        if changed.contains(&cp) && !self_written {
+            commands.entity(entity).insert(FileReloadRequested);
         }
-        if let Some(sw) = sw.as_ref()
-            && sw.0.contains_key(&cp)
-        {
-            continue;
+        let cached: Vec<PathBuf> = st.children.keys().cloned().collect();
+        let mut tree_changed = false;
+        for d in cached {
+            let dc = canon(&d);
+            if changed
+                .iter()
+                .any(|c| c.parent().map(|p| canon(p) == dc).unwrap_or(false))
+            {
+                let kids = list_dir(&d);
+                st.children.insert(d, kids);
+                tree_changed = true;
+            }
         }
-        commands.entity(entity).insert(FileReloadRequested);
+        if tree_changed {
+            commands.entity(entity).insert(ExplorerTreeDirty);
+        }
     }
 }
 
@@ -1770,8 +1836,294 @@ fn flush_lsp_changes(
     for (entity, fv, edit) in &q {
         manager.change_with_text(&fv.path, &edit.core.buffer.text());
         manager.folding_range(entity, &fv.path);
+        if !crate::explorer_model::is_markdown(&fv.path) {
+            manager.document_symbol(entity, &fv.path);
+        }
         commands.entity(entity).remove::<LspEditDirty>();
     }
+}
+
+fn explorer_root_name(root: &Path) -> String {
+    root.file_name()
+        .map(|n| n.to_string_lossy().to_uppercase())
+        .unwrap_or_else(|| root.to_string_lossy().to_uppercase())
+}
+
+fn init_explorer_state(
+    mut q: Query<(Entity, &FileView, &mut ExplorerState)>,
+    mut commands: Commands,
+) {
+    for (entity, fv, mut st) in &mut q {
+        if !st.root.as_os_str().is_empty() {
+            continue;
+        }
+        let root = project_root(&fv.path);
+        st.children.insert(root.clone(), list_dir(&root));
+        st.expanded.insert(root.clone());
+        st.root = root;
+        commands.entity(entity).insert(ExplorerTreeDirty);
+    }
+}
+
+fn emit_explorer_tree(
+    q: Query<(Entity, &ExplorerState), TreeDirtyReady>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, st) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        let rows = flatten_tree(&st.root, &st.expanded, &st.children);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_TREE_EVENT,
+            &ExplorerTreeEvent {
+                root_name: explorer_root_name(&st.root),
+                rows,
+            },
+        ));
+        commands.entity(entity).remove::<ExplorerTreeDirty>();
+    }
+}
+
+fn on_explorer_tree_toggle(
+    trigger: On<BinReceive<ExplorerTreeToggle>>,
+    mut q: Query<&mut ExplorerState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok(mut st) = q.get_mut(entity) else {
+        return;
+    };
+    if st.expanded.contains(&path) {
+        st.expanded.remove(&path);
+    } else {
+        if !st.children.contains_key(&path) {
+            let kids = list_dir(&path);
+            st.children.insert(path.clone(), kids);
+        }
+        st.expanded.insert(path);
+    }
+    commands.entity(entity).insert(ExplorerTreeDirty);
+}
+
+fn sync_explorer_chrome(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    mut chrome: ResMut<ExplorerChrome>,
+    mut synced: ResMut<ExplorerChromeSynced>,
+    views: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    if synced.0 {
+        return;
+    }
+    let Some(settings) = settings else {
+        return;
+    };
+    chrome.visible = settings.editor.explorer.visible();
+    chrome.width = settings.editor.explorer.width();
+    synced.0 = true;
+    for e in &views {
+        commands.entity(e).remove::<ExplorerChromeSent>();
+    }
+}
+
+fn emit_explorer_chrome(
+    q: Query<Entity, ChromeUnsentReady>,
+    chrome: Res<ExplorerChrome>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for entity in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_CHROME_EVENT,
+            &ExplorerChromeEvent {
+                visible: chrome.visible,
+                width: chrome.width,
+            },
+        ));
+        commands.entity(entity).insert(ExplorerChromeSent);
+    }
+}
+
+fn persist_chrome(
+    chrome: ExplorerChrome,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    settings.editor.explorer.visible = Some(chrome.visible);
+    settings.editor.explorer.width = Some(chrome.width);
+    if let Some(mut saves) = saves {
+        saves.write(vmux_setting::SettingsSaveRequest);
+    }
+}
+
+fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Commands) {
+    for e in views {
+        commands.entity(e).remove::<ExplorerChromeSent>();
+    }
+}
+
+fn on_explorer_panel_toggle(
+    _trigger: On<BinReceive<ExplorerPanelToggle>>,
+    mut chrome: ResMut<ExplorerChrome>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+    views: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    chrome.visible = !chrome.visible;
+    persist_chrome(*chrome, settings, saves);
+    mark_chrome_unsent(&views, &mut commands);
+}
+
+fn on_explorer_panel_width(
+    trigger: On<BinReceive<ExplorerPanelWidth>>,
+    mut chrome: ResMut<ExplorerChrome>,
+    settings: Option<ResMut<vmux_setting::AppSettings>>,
+    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+    views: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    chrome.width = trigger.event().payload.px.clamp(
+        vmux_setting::EXPLORER_MIN_WIDTH,
+        vmux_setting::EXPLORER_MAX_WIDTH,
+    );
+    persist_chrome(*chrome, settings, saves);
+    mark_chrome_unsent(&views, &mut commands);
+}
+
+fn sync_open_editors(
+    mut q: Query<(Entity, &FileView, &mut ExplorerState), Changed<FileView>>,
+    mut commands: Commands,
+) {
+    for (entity, fv, mut st) in &mut q {
+        if !fv.path.is_dir() {
+            crate::explorer_model::note_open(&mut st.open_editors, &fv.path);
+        }
+        commands.entity(entity).insert(OpenEditorsDirty);
+    }
+}
+
+fn open_editor_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn emit_open_editors(
+    q: Query<(Entity, &FileView, &ExplorerState, Option<&EditState>), OpenEditorsDirtyReady>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, fv, st, edit) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        let active_dirty = edit.map(|e| e.core.dirty).unwrap_or(false);
+        let items = st
+            .open_editors
+            .iter()
+            .map(|p| {
+                let active = *p == fv.path;
+                OpenEditorItem {
+                    name: open_editor_name(p),
+                    path: p.to_string_lossy().into_owned(),
+                    active,
+                    dirty: active && active_dirty,
+                }
+            })
+            .collect();
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_OPEN_EDITORS_EVENT,
+            &OpenEditorsEvent { items },
+        ));
+        commands.entity(entity).remove::<OpenEditorsDirty>();
+    }
+}
+
+fn on_explorer_close_editor(
+    trigger: On<BinReceive<ExplorerCloseEditor>>,
+    mut q: Query<&mut ExplorerState>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let path = PathBuf::from(&trigger.event().payload.path);
+    let Ok(mut st) = q.get_mut(entity) else {
+        return;
+    };
+    crate::explorer_model::close(&mut st.open_editors, &path);
+    commands.entity(entity).insert(OpenEditorsDirty);
+}
+
+fn mark_outline_dirty(q: Query<(Entity, &FileView), Changed<EditState>>, mut commands: Commands) {
+    for (entity, fv) in &q {
+        if crate::explorer_model::is_markdown(&fv.path) {
+            commands.entity(entity).insert(OutlineDirty);
+        }
+    }
+}
+
+fn emit_outline_markdown(
+    q: Query<(Entity, &EditState), OutlineDirtyReady>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, edit) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        let items = crate::explorer_model::markdown_outline(&edit.core.buffer.text());
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_OUTLINE_EVENT,
+            &OutlineEvent { items },
+        ));
+        commands.entity(entity).remove::<OutlineDirty>();
+    }
+}
+
+fn clear_outline_on_file_change(
+    q: Query<Entity, (With<FileView>, Changed<FileView>)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for entity in &q {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                EXPLORER_OUTLINE_EVENT,
+                &OutlineEvent { items: Vec::new() },
+            ));
+        }
+    }
+}
+
+fn on_explorer_goto(
+    trigger: On<BinReceive<ExplorerGoto>>,
+    views: Query<&FileView>,
+    mut goto_w: MessageWriter<crate::lsp::manager::LspGoto>,
+) {
+    let entity = trigger.event().webview;
+    let Ok(fv) = views.get(entity) else {
+        return;
+    };
+    goto_w.write(crate::lsp::manager::LspGoto {
+        entity,
+        path: fv.path.clone(),
+        line: trigger.event().payload.line,
+        utf16_col: 0,
+    });
 }
 
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -1805,6 +2157,11 @@ impl Plugin for EditorPlugin {
         app.insert_non_send(ClipboardHandle(arboard::Clipboard::new().ok()))
             .insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
+            .insert_resource(ExplorerChrome {
+                visible: false,
+                width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+            })
+            .init_resource::<ExplorerChromeSynced>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -1825,6 +2182,13 @@ impl Plugin for EditorPlugin {
                 FileCompletionCommit,
                 FileOpenExternalRequest,
                 FileVideoRect,
+            )>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                ExplorerTreeToggle,
+                ExplorerCloseEditor,
+                ExplorerPanelToggle,
+                ExplorerPanelWidth,
+                ExplorerGoto,
             )>::default())
             .add_systems(
                 Update,
@@ -1853,6 +2217,20 @@ impl Plugin for EditorPlugin {
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
+            .add_systems(
+                Update,
+                (
+                    init_explorer_state,
+                    emit_explorer_tree,
+                    sync_explorer_chrome,
+                    emit_explorer_chrome,
+                    sync_open_editors,
+                    emit_open_editors,
+                    mark_outline_dirty,
+                    emit_outline_markdown,
+                    clear_outline_on_file_change,
+                ),
+            )
             .add_observer(reset_file_sent_markers_on_page_ready)
             .add_observer(on_file_resize)
             .add_observer(on_file_scroll)
@@ -1869,7 +2247,12 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
-            .add_observer(on_file_fold_toggle);
+            .add_observer(on_file_fold_toggle)
+            .add_observer(on_explorer_tree_toggle)
+            .add_observer(on_explorer_panel_toggle)
+            .add_observer(on_explorer_panel_width)
+            .add_observer(on_explorer_close_editor)
+            .add_observer(on_explorer_goto);
     }
 }
 
@@ -2068,5 +2451,182 @@ mod fold_window_tests {
         assert!(visible.contains(&0));
         assert!(!visible.contains(&1) && !visible.contains(&2));
         assert!(visible.contains(&3));
+    }
+}
+
+#[cfg(test)]
+mod explorer_tests {
+    use super::*;
+    use std::fs;
+
+    fn git_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("README.md"), "# hi\n").unwrap();
+        fs::write(tmp.path().join("src").join("lib.rs"), "fn main(){}\n").unwrap();
+        tmp
+    }
+
+    fn toggle(app: &mut App, e: Entity, path: &Path) {
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerTreeToggle {
+                path: path.to_string_lossy().to_string(),
+            },
+        });
+    }
+
+    #[test]
+    fn init_builds_root_listing_and_marks_dirty() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, init_explorer_state);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        app.update();
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.root.as_path(), tmp.path());
+        assert!(st.expanded.contains(&tmp.path().to_path_buf()));
+        assert!(
+            st.children
+                .get(tmp.path())
+                .unwrap()
+                .iter()
+                .any(|x| x.name == "src")
+        );
+        assert!(app.world().get::<ExplorerTreeDirty>(e).is_some());
+    }
+
+    #[test]
+    fn toggle_expands_then_collapses_subdir() {
+        let tmp = git_repo();
+        let file = tmp.path().join("README.md");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, init_explorer_state)
+            .add_observer(on_explorer_tree_toggle);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        app.update();
+        let src = tmp.path().join("src");
+        toggle(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(st.expanded.contains(&src));
+        assert!(
+            st.children
+                .get(&src)
+                .unwrap()
+                .iter()
+                .any(|x| x.name == "lib.rs")
+        );
+        toggle(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(!st.expanded.contains(&src));
+    }
+
+    #[test]
+    fn panel_toggle_flips_chrome() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                visible: true,
+                width: 240,
+            })
+            .add_observer(on_explorer_panel_toggle);
+        let e = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/x"),
+            })
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelToggle,
+        });
+        assert!(!app.world().resource::<ExplorerChrome>().visible);
+    }
+
+    #[test]
+    fn panel_width_clamps() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                visible: true,
+                width: 240,
+            })
+            .add_observer(on_explorer_panel_width);
+        let e = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/x"),
+            })
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelWidth { px: 9000 },
+        });
+        assert_eq!(app.world().resource::<ExplorerChrome>().width, 600);
+    }
+
+    #[test]
+    fn open_editors_track_on_navigate_and_close() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_open_editors)
+            .add_observer(on_explorer_close_editor);
+        let a = PathBuf::from("/proj/a.rs");
+        let b = PathBuf::from("/proj/b.rs");
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: a.clone() }, ExplorerState::default()))
+            .id();
+        app.update();
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
+        app.update();
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.open_editors, vec![a.clone(), b.clone()]);
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerCloseEditor {
+                path: a.to_string_lossy().to_string(),
+            },
+        });
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.open_editors, vec![b]);
+    }
+
+    #[test]
+    fn explorer_goto_writes_lsp_goto_message() {
+        use crate::lsp::manager::LspGoto;
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LspGoto>()
+            .add_observer(on_explorer_goto);
+        let e = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/x.rs"),
+            })
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerGoto {
+                path: "/x.rs".to_string(),
+                line: 12,
+            },
+        });
+        let mut msgs = app.world_mut().resource_mut::<Messages<LspGoto>>();
+        let got: Vec<_> = msgs.drain().collect();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].line, 12);
+        assert_eq!(got[0].path, PathBuf::from("/x.rs"));
     }
 }

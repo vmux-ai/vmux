@@ -57,6 +57,15 @@ pub const LSP_UNINSTALL_REQUEST: &str = "lsp_uninstall_request";
 pub const LSP_UPDATE_REQUEST: &str = "lsp_update_request";
 pub const LSP_INSTALL_PROGRESS_EVENT: &str = "lsp_install_progress";
 pub const LSP_PKG_STATUS_EVENT: &str = "lsp_pkg_status";
+pub const EXPLORER_TREE_EVENT: &str = "explorer_tree";
+pub const EXPLORER_OPEN_EDITORS_EVENT: &str = "explorer_open_editors";
+pub const EXPLORER_OUTLINE_EVENT: &str = "explorer_outline";
+pub const EXPLORER_CHROME_EVENT: &str = "explorer_chrome";
+pub const EXPLORER_TREE_TOGGLE_EVENT: &str = "explorer_tree_toggle";
+pub const EXPLORER_CLOSE_EDITOR_EVENT: &str = "explorer_close_editor";
+pub const EXPLORER_PANEL_TOGGLE_EVENT: &str = "explorer_panel_toggle";
+pub const EXPLORER_PANEL_WIDTH_EVENT: &str = "explorer_panel_width";
+pub const EXPLORER_GOTO_EVENT: &str = "explorer_goto";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -671,9 +680,251 @@ pub struct LspPkgStatusEvent {
     pub version: Option<String>,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TreeRow {
+    pub name: String,
+    pub path: String,
+    pub depth: u16,
+    pub is_dir: bool,
+    pub expanded: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct OpenEditorItem {
+    pub name: String,
+    pub path: String,
+    pub active: bool,
+    pub dirty: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct OutlineRow {
+    pub name: String,
+    pub kind: u8,
+    pub line: u32,
+    pub depth: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerTreeEvent {
+    pub root_name: String,
+    pub rows: Vec<TreeRow>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct OpenEditorsEvent {
+    pub items: Vec<OpenEditorItem>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct OutlineEvent {
+    pub items: Vec<OutlineRow>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerChromeEvent {
+    pub visible: bool,
+    pub width: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerTreeToggle {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerCloseEditor {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerPanelToggle;
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerPanelWidth {
+    pub px: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerGoto {
+    pub path: String,
+    pub line: u32,
+}
+
 #[cfg(test)]
 mod file_event_tests {
     use super::*;
+
+    #[test]
+    fn explorer_tree_event_rkyv_roundtrip() {
+        let e = ExplorerTreeEvent {
+            root_name: "VMUX".into(),
+            rows: vec![TreeRow {
+                name: "src".into(),
+                path: "/r/src".into(),
+                depth: 0,
+                is_dir: true,
+                expanded: true,
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).expect("ser");
+        let back = rkyv::from_bytes::<ExplorerTreeEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn explorer_outline_and_open_editors_roundtrip() {
+        let o = OutlineEvent {
+            items: vec![OutlineRow {
+                name: "## Install".into(),
+                kind: 15,
+                line: 12,
+                depth: 0,
+            }],
+        };
+        let b = rkyv::to_bytes::<rkyv::rancor::Error>(&o).unwrap();
+        assert_eq!(
+            rkyv::from_bytes::<OutlineEvent, rkyv::rancor::Error>(&b).unwrap(),
+            o
+        );
+        let oe = OpenEditorsEvent {
+            items: vec![OpenEditorItem {
+                name: "lib.rs".into(),
+                path: "/r/src/lib.rs".into(),
+                active: true,
+                dirty: false,
+            }],
+        };
+        let b = rkyv::to_bytes::<rkyv::rancor::Error>(&oe).unwrap();
+        assert_eq!(
+            rkyv::from_bytes::<OpenEditorsEvent, rkyv::rancor::Error>(&b).unwrap(),
+            oe
+        );
+    }
 
     #[test]
     fn file_viewport_patch_rkyv_roundtrip() {
