@@ -129,6 +129,7 @@ fn mark_dirty_on_change(
     changed_geometry: Query<(), Changed<WindowGeometry>>,
     added_archived: Query<(), Added<ArchivedPage>>,
     mut removed_archived: RemovedComponents<ArchivedPage>,
+    added_visits: Query<(), Added<vmux_history::Visit>>,
 ) {
     if !added_stacks.is_empty()
         || !added_panes.is_empty()
@@ -141,6 +142,7 @@ fn mark_dirty_on_change(
         || !changed_geometry.is_empty()
         || !added_archived.is_empty()
         || removed_archived.read().count() > 0
+        || !added_visits.is_empty()
     {
         auto_save.dirty = true;
         auto_save.debounce.reset();
@@ -663,6 +665,22 @@ mod tests {
         app.update();
         app.world_mut().resource_mut::<AutoSave>().dirty = false;
         app.world_mut().spawn(ArchivedPage::default());
+        app.update();
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
+
+    #[test]
+    fn adding_visit_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut().spawn(vmux_history::Visit);
         app.update();
         assert!(app.world().resource::<AutoSave>().dirty);
     }

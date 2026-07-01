@@ -7,6 +7,7 @@ use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarWorkSnapshot,
 };
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
@@ -162,6 +163,7 @@ fn on_start_spare_revealed(
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
+    work_snapshot: Res<CommandBarWorkSnapshot>,
     mut commands: Commands,
 ) {
     for ev in revealed.read() {
@@ -170,6 +172,7 @@ fn on_start_spare_revealed(
             &spaces_snapshot,
             &agents_snapshot,
             &pages_snapshot,
+            &work_snapshot,
         );
         commands.trigger(BinHostEmitEvent::from_rkyv(
             ev.webview,
@@ -193,6 +196,7 @@ fn on_start_data_request(
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
+    work_snapshot: Res<CommandBarWorkSnapshot>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -204,6 +208,7 @@ fn on_start_data_request(
         &spaces_snapshot,
         &agents_snapshot,
         &pages_snapshot,
+        &work_snapshot,
     );
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
@@ -218,6 +223,7 @@ fn build_start_payload(
     spaces_snapshot: &CommandBarSpacesSnapshot,
     agents_snapshot: &CommandBarAgentsSnapshot,
     pages_snapshot: &CommandBarPagesSnapshot,
+    work_snapshot: &CommandBarWorkSnapshot,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = spaces_snapshot.active_space_name.clone();
@@ -240,6 +246,7 @@ fn build_start_payload(
         spaces_snapshot,
         agents_snapshot,
         pages_snapshot,
+        work_snapshot,
         active_stack_count,
         tabs,
         Some(OpenTarget::InPlace),
