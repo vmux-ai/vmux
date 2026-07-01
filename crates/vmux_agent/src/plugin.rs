@@ -59,6 +59,63 @@ pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool
 #[derive(Resource, Default)]
 pub struct AgentTerminalRegions {
     pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
+    pub run_panes: std::collections::HashMap<ProcessId, Entity>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RunTerminalCandidate {
+    pid: ProcessId,
+    pane: Entity,
+    pane_spawn_seq: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RunTerminalBucketPaneCandidate {
+    pane: Entity,
+    pane_spawn_seq: u64,
+}
+
+fn choose_reusable_run_terminal(
+    anchor: ProcessId,
+    agent_pane: Entity,
+    regions: &AgentTerminalRegions,
+    candidates: &[RunTerminalCandidate],
+) -> Option<RunTerminalCandidate> {
+    if let Some(pid) = regions.run_terminals.get(&anchor)
+        && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
+    {
+        return Some(*candidate);
+    }
+    if let Some(pane) = regions.run_panes.get(&anchor)
+        && let Some(candidate) = candidates
+            .iter()
+            .filter(|c| c.pane == *pane)
+            .max_by_key(|c| c.pane_spawn_seq)
+    {
+        return Some(*candidate);
+    }
+    candidates
+        .iter()
+        .filter(|c| c.pane != agent_pane)
+        .max_by_key(|c| c.pane_spawn_seq)
+        .copied()
+}
+
+fn choose_run_terminal_bucket_pane(
+    anchor: ProcessId,
+    agent_pane: Entity,
+    regions: &AgentTerminalRegions,
+    candidates: &[RunTerminalCandidate],
+) -> Option<Entity> {
+    choose_reusable_run_terminal(anchor, agent_pane, regions, candidates)
+        .map(|c| c.pane)
+        .or_else(|| {
+            regions
+                .run_panes
+                .get(&anchor)
+                .copied()
+                .filter(|pane| *pane != agent_pane)
+        })
 }
 
 fn resolve_agent_executable(
@@ -108,6 +165,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .init_resource::<NavAwaitingSnapshot>()
+            .init_resource::<vmux_layout::pane::SpawnCounter>()
             .add_message::<AgentCommandRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
@@ -310,6 +368,7 @@ struct ProcessStackSpawnRequest {
     args: Vec<String>,
     cwd: PathBuf,
     env: Vec<(String, String)>,
+    activate: bool,
 }
 
 #[derive(Message, Clone)]
@@ -352,6 +411,46 @@ fn handle_rename_profile_requests(
             Err(error) => warn!("rename_profile: failed to persist display name: {error}"),
         }
     }
+}
+
+fn origin_is_agent(origin: &CommandOrigin) -> bool {
+    matches!(origin, CommandOrigin::Agent { .. })
+}
+
+fn requested_focus_for_origin(origin: &CommandOrigin, requested: bool) -> bool {
+    requested && !origin_is_agent(origin)
+}
+
+fn focused_id(kind: vmux_layout::protocol::NodeKind, entity: Option<Entity>) -> Option<String> {
+    entity.map(|entity| vmux_layout::protocol::format_id(kind, entity.to_bits()))
+}
+
+fn preserve_current_focus_in_layout_snapshot(
+    snapshot: &mut vmux_service::protocol::layout::LayoutSnapshot,
+    focus: &FocusedStack,
+) {
+    snapshot.focused = vmux_service::protocol::layout::Focus {
+        tab: focused_id(vmux_layout::protocol::NodeKind::Tab, focus.tab),
+        pane: focused_id(vmux_layout::protocol::NodeKind::Pane, focus.pane),
+        stack: focused_id(vmux_layout::protocol::NodeKind::Stack, focus.stack),
+    };
+    if let Some(tab) = snapshot.focused.tab.as_deref() {
+        for item in &mut snapshot.tabs {
+            item.is_active = item.id.as_deref() == Some(tab);
+        }
+    }
+}
+
+fn agent_may_dispatch_app_command(command: &AppCommand) -> bool {
+    !matches!(
+        command,
+        AppCommand::Layout(_)
+            | AppCommand::Browser(vmux_command::BrowserCommand::Open(_))
+            | AppCommand::Browser(vmux_command::BrowserCommand::Bar(_))
+            | AppCommand::Service(vmux_command::ServiceCommand::Open)
+            | AppCommand::Terminal(vmux_command::TerminalCommand::Next)
+            | AppCommand::Terminal(vmux_command::TerminalCommand::Previous)
+    )
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -564,6 +663,8 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
         ),
     >,
     child_of: Query<'w, 's, &'static ChildOf>,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
 }
 
@@ -575,20 +676,31 @@ impl AgentBrowserResolve<'_, '_> {
         use bevy::ecs::relationship::Relationship;
         let agent_parent = self.child_of.get(agent_pane).ok()?.get();
         for stack_co in self.browser_stacks.iter() {
-            let Ok(pane_co) = self.child_of.get(stack_co.get()) else {
-                continue;
-            };
-            let pane = pane_co.get();
+            let pane = stack_co.get();
             if pane == agent_pane {
                 continue;
             }
             if let Ok(parent_co) = self.child_of.get(pane)
                 && parent_co.get() == agent_parent
+                && self.pane_has_only_browser_stacks(pane)
             {
                 return Some(pane);
             }
         }
         None
+    }
+
+    fn pane_has_only_browser_stacks(&self, pane: Entity) -> bool {
+        self.pane_children
+            .get(pane)
+            .ok()
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|&child| self.stack_q.contains(child))
+                    .all(|child| self.browser_stacks.contains(child))
+            })
+            .unwrap_or(false)
     }
 
     /// The agent's own terminal pane (its stack's parent pane), from its anchor.
@@ -772,7 +884,7 @@ fn handle_agent_file_touch(
             direction: None,
             url: file_touch_url(path, *line, *col, *end_col),
             request_id: request.request_id.0,
-            focus: existing.is_some(),
+            focus: requested_focus_for_origin(&request.origin, existing.is_some()),
         });
         if let Some((_, pane)) = existing {
             let kind = resolve.agent_kind(*anchor);
@@ -842,18 +954,13 @@ fn handle_agent_commands(
                 };
                 match AppCommand::from_mcp_call(id, args) {
                     Some(Ok(command)) => {
-                        if let Some(caller) = caller {
-                            writers.issued.write(vmux_command::CommandIssued {
-                                caller,
-                                command: command.clone(),
-                            });
-                        }
-                        app_commands.write(command);
-                        AgentCommandResult::Ok
-                    }
-                    Some(Err(message)) => AgentCommandResult::Error(message),
-                    None => match AppCommand::from_mcp_id(id) {
-                        Some(command) => {
+                        if origin_is_agent(&request.origin)
+                            && !agent_may_dispatch_app_command(&command)
+                        {
+                            AgentCommandResult::Error(
+                                "focus-changing app command is disabled for agents".to_string(),
+                            )
+                        } else {
                             if let Some(caller) = caller {
                                 writers.issued.write(vmux_command::CommandIssued {
                                     caller,
@@ -862,6 +969,27 @@ fn handle_agent_commands(
                             }
                             app_commands.write(command);
                             AgentCommandResult::Ok
+                        }
+                    }
+                    Some(Err(message)) => AgentCommandResult::Error(message),
+                    None => match AppCommand::from_mcp_id(id) {
+                        Some(command) => {
+                            if origin_is_agent(&request.origin)
+                                && !agent_may_dispatch_app_command(&command)
+                            {
+                                AgentCommandResult::Error(
+                                    "focus-changing app command is disabled for agents".to_string(),
+                                )
+                            } else {
+                                if let Some(caller) = caller {
+                                    writers.issued.write(vmux_command::CommandIssued {
+                                        caller,
+                                        command: command.clone(),
+                                    });
+                                }
+                                app_commands.write(command);
+                                AgentCommandResult::Ok
+                            }
                         }
                         None => AgentCommandResult::Error(format!("unknown app command: {id}")),
                     },
@@ -877,6 +1005,7 @@ fn handle_agent_commands(
                 Some(pane) => match valid_cwd(cwd) {
                     Err(message) => AgentCommandResult::Error(message),
                     Ok(cwd_opt) => {
+                        let activate = !origin_is_agent(&request.origin);
                         let cwd_path = cwd_opt.unwrap_or_else(|| {
                             active_space
                                 .as_ref()
@@ -891,7 +1020,7 @@ fn handle_agent_commands(
                                 cwd: Some(cwd_path),
                                 pending_input: None,
                                 process_id: None,
-                                activate: true,
+                                activate,
                             });
                         } else {
                             process_stack_spawn_writer.write(ProcessStackSpawnRequest {
@@ -900,6 +1029,7 @@ fn handle_agent_commands(
                                 args: args.clone(),
                                 cwd: cwd_path,
                                 env: env.clone(),
+                                activate,
                             });
                         }
                         AgentCommandResult::Ok
@@ -981,10 +1111,14 @@ fn handle_agent_commands(
                 None => AgentCommandResult::Error("notify: caller not found".to_string()),
             },
             ServiceAgentCommand::FocusPane { pane } => {
-                writers
-                    .focus_pane
-                    .write(FocusPaneRequest { pane: pane.clone() });
-                AgentCommandResult::Ok
+                if origin_is_agent(&request.origin) {
+                    AgentCommandResult::Error("focus_pane is disabled for agents".to_string())
+                } else {
+                    writers
+                        .focus_pane
+                        .write(FocusPaneRequest { pane: pane.clone() });
+                    AgentCommandResult::Ok
+                }
             }
             ServiceAgentCommand::RenameProfile { name } => {
                 writers
@@ -1011,11 +1145,15 @@ fn handle_agent_commands(
                 }
             }
             ServiceAgentCommand::UpdateLayout { layout } => {
+                let mut layout = layout.clone();
+                if origin_is_agent(&request.origin) {
+                    preserve_current_focus_in_layout_snapshot(&mut layout, &focus);
+                }
                 writers
                     .layout_apply
                     .write(vmux_layout::reconcile::LayoutApplyRequest {
                         request_id: request.request_id.0,
-                        snapshot: layout.clone(),
+                        snapshot: layout,
                     });
                 continue;
             }
@@ -1090,6 +1228,156 @@ fn resolve_pane_for_pid(
     let stack = child_of_q.get(term).ok()?.get();
     let pane = child_of_q.get(stack).ok()?.get();
     Some(pane)
+}
+
+fn tab_of_run_pane(
+    pane: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+) -> Option<Entity> {
+    use bevy::ecs::relationship::Relationship;
+    let mut cur = pane;
+    for _ in 0..32 {
+        if tab_q.contains(cur) {
+            return Some(cur);
+        }
+        cur = child_of_q.get(cur).ok()?.get();
+    }
+    None
+}
+
+fn run_terminal_candidates(
+    agent_pane: Entity,
+    terminals: &Query<
+        (Entity, &ProcessId),
+        (
+            With<Terminal>,
+            Without<AgentSession>,
+            Without<ProcessExited>,
+        ),
+    >,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+) -> Vec<RunTerminalCandidate> {
+    use bevy::ecs::relationship::Relationship;
+    let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
+        return Vec::new();
+    };
+    terminals
+        .iter()
+        .filter_map(|(terminal, pid)| {
+            let stack = child_of_q.get(terminal).ok()?.get();
+            let pane = child_of_q.get(stack).ok()?.get();
+            if pane == agent_pane {
+                return None;
+            }
+            if tab_of_run_pane(pane, child_of_q, tab_q) != Some(agent_tab) {
+                return None;
+            }
+            Some(RunTerminalCandidate {
+                pid: *pid,
+                pane,
+                pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn run_terminal_bucket_panes(
+    agent_pane: Entity,
+    child_of_q: &Query<&ChildOf>,
+    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    pane_children: &Query<&Children, With<Pane>>,
+    stack_q: &Query<Entity, With<vmux_layout::stack::Stack>>,
+    page_q: &Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
+    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+) -> Vec<RunTerminalBucketPaneCandidate> {
+    let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
+        return Vec::new();
+    };
+    leaf_panes
+        .iter()
+        .filter_map(|pane| {
+            if pane == agent_pane {
+                return None;
+            }
+            if tab_of_run_pane(pane, child_of_q, tab_q) != Some(agent_tab) {
+                return None;
+            }
+            let children = pane_children.get(pane).ok()?;
+            let mut has_stack = false;
+            for stack in children.iter().filter(|&child| stack_q.contains(child)) {
+                has_stack = true;
+                let meta = page_q.get(stack).ok()?;
+                if vmux_layout::placement::page_kind_for_url(&meta.url)
+                    != vmux_layout::placement::PageKind::Terminal
+                {
+                    return None;
+                }
+            }
+            has_stack.then(|| RunTerminalBucketPaneCandidate {
+                pane,
+                pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn newest_run_terminal_bucket_pane(
+    agent_pane: Entity,
+    candidates: &[RunTerminalBucketPaneCandidate],
+) -> Option<Entity> {
+    candidates
+        .iter()
+        .filter(|c| c.pane != agent_pane)
+        .max_by_key(|c| c.pane_spawn_seq)
+        .map(|c| c.pane)
+}
+
+fn is_run_terminal_bucket_pane(
+    pane: Entity,
+    candidates: &[RunTerminalBucketPaneCandidate],
+) -> bool {
+    candidates.iter().any(|c| c.pane == pane)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PendingRunTerminalSpawn {
+    pid: ProcessId,
+    request_index: usize,
+}
+
+fn append_pending_run_terminal_input(
+    anchor: ProcessId,
+    pending_spawns: &std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
+    terminal_spawns: &mut [TerminalStackSpawnRequest],
+    data: &[u8],
+) -> Option<ProcessId> {
+    let pending = pending_spawns.get(&anchor)?;
+    let request = terminal_spawns.get_mut(pending.request_index)?;
+    match &mut request.pending_input {
+        Some(input) => input.extend(data),
+        None => request.pending_input = Some(data.to_vec()),
+    }
+    Some(pending.pid)
+}
+
+fn touch_reused_run_pane_spawn_seq(
+    pane: Entity,
+    commands: &mut Commands,
+    spawn_counter: &mut vmux_layout::pane::SpawnCounter,
+    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+) {
+    let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
+    if spawn_counter.0 <= max_existing {
+        spawn_counter.0 = max_existing;
+    }
+    spawn_counter.0 += 1;
+    commands
+        .entity(pane)
+        .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
 }
 
 /// Split `pane` and return the new leaf pane. Batches several splits of the same
@@ -1185,6 +1473,14 @@ fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
+    run_terms: Query<
+        (Entity, &ProcessId),
+        (
+            With<Terminal>,
+            Without<AgentSession>,
+            Without<ProcessExited>,
+        ),
+    >,
     launch_q: Query<&TerminalLaunch>,
     ctx: vmux_layout::pane::PlacementCtx,
     mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
@@ -1194,6 +1490,7 @@ fn handle_agent_self_commands(
     active_space: Option<Res<ActiveSpace>>,
     settings: Res<AppSettings>,
     mut regions: ResMut<AgentTerminalRegions>,
+    mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -1204,6 +1501,9 @@ fn handle_agent_self_commands(
     // resolve to the same agent pane; the first splits it, the rest must extend
     // that split rather than re-split the leaf (which would orphan empty panes).
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
+    let mut pending_run_spawns: std::collections::HashMap<ProcessId, PendingRunTerminalSpawn> =
+        std::collections::HashMap::new();
     for request in reader.read() {
         let result = match &request.command {
             ServiceAgentCommand::OpenBeside {
@@ -1214,12 +1514,13 @@ fn handle_agent_self_commands(
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("self process not found".to_string()),
                 Some((_, pane)) => {
+                    let focus = requested_focus_for_origin(&request.origin, *focus);
                     open_beside_writer.write(vmux_layout::OpenBesideRequest {
                         pane,
                         direction: direction.as_ref().map(to_pane_direction),
                         url: url.clone(),
                         request_id: request.request_id.0,
-                        focus: *focus,
+                        focus,
                     });
                     AgentCommandResult::Ok
                 }
@@ -1234,6 +1535,7 @@ fn handle_agent_self_commands(
                 terminal,
                 done_marker,
             } => {
+                let focus = requested_focus_for_origin(&request.origin, *focus);
                 let mut data =
                     run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
                 data.push(b'\r');
@@ -1246,17 +1548,6 @@ fn handle_agent_self_commands(
                         AgentCommandResult::Text(pid.to_string())
                     }
                     None => 'spawn: {
-                        if beside.is_none()
-                            && *mode == vmux_service::protocol::PlacementMode::Auto
-                            && let Some(pid) = regions.run_terminals.get(anchor).copied()
-                            && term_pids.iter().any(|(_, p)| *p == pid)
-                        {
-                            service.0.send(ClientMessage::ProcessInput {
-                                process_id: pid,
-                                data,
-                            });
-                            break 'spawn AgentCommandResult::Text(pid.to_string());
-                        }
                         let Some((agent_term, self_pane)) =
                             resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q)
                         else {
@@ -1264,6 +1555,57 @@ fn handle_agent_self_commands(
                                 "self process not found".to_string(),
                             );
                         };
+                        let candidates = run_terminal_candidates(
+                            self_pane,
+                            &run_terms,
+                            &ctx.child_of_q,
+                            &ctx.tab_q,
+                            &ctx.seq_q,
+                        );
+                        let terminal_bucket_panes = run_terminal_bucket_panes(
+                            self_pane,
+                            &ctx.child_of_q,
+                            &ctx.tab_q,
+                            &ctx.leaf_panes,
+                            &ctx.pane_children,
+                            &ctx.tab_filter,
+                            &ctx.page_q,
+                            &ctx.seq_q,
+                        );
+                        if beside.is_none()
+                            && *mode == vmux_service::protocol::PlacementMode::Auto
+                            && let Some(pid) = append_pending_run_terminal_input(
+                                *anchor,
+                                &pending_run_spawns,
+                                &mut terminal_spawns,
+                                &data,
+                            )
+                        {
+                            break 'spawn AgentCommandResult::Text(pid.to_string());
+                        }
+                        if beside.is_none()
+                            && *mode == vmux_service::protocol::PlacementMode::Auto
+                            && let Some(candidate) = choose_reusable_run_terminal(
+                                *anchor,
+                                self_pane,
+                                &regions,
+                                &candidates,
+                            )
+                        {
+                            regions.run_terminals.insert(*anchor, candidate.pid);
+                            regions.run_panes.insert(*anchor, candidate.pane);
+                            touch_reused_run_pane_spawn_seq(
+                                candidate.pane,
+                                &mut commands,
+                                &mut spawn_counter,
+                                &ctx.seq_q,
+                            );
+                            service.0.send(ClientMessage::ProcessInput {
+                                process_id: candidate.pid,
+                                data,
+                            });
+                            break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
+                        }
                         // Resolve an explicit `beside` anchor up front (errors if stale).
                         let beside_pane = match beside {
                             Some(pid) => {
@@ -1280,23 +1622,58 @@ fn handle_agent_self_commands(
                         };
                         use vmux_service::protocol::PlacementMode;
                         let target_pane = match (beside_pane, *mode) {
-                            // Explicit split: a new pane off the given page's pane (or self).
-                            (anchor, PlacementMode::Split) => split_pane_off(
-                                &mut commands,
-                                anchor.unwrap_or(self_pane),
-                                direction,
-                                *focus,
-                                &ctx.pane_children,
-                                &ctx.tab_filter,
-                                &ctx.split_dir_q,
-                                &mut split_this_batch,
-                            ),
+                            (anchor_pane, PlacementMode::Split) => {
+                                let bucket_pane = if anchor_pane.is_none() {
+                                    choose_run_terminal_bucket_pane(
+                                        *anchor,
+                                        self_pane,
+                                        &regions,
+                                        &candidates,
+                                    )
+                                    .filter(|pane| {
+                                        is_run_terminal_bucket_pane(*pane, &terminal_bucket_panes)
+                                    })
+                                    .or_else(|| {
+                                        newest_run_terminal_bucket_pane(
+                                            self_pane,
+                                            &terminal_bucket_panes,
+                                        )
+                                    })
+                                } else {
+                                    None
+                                };
+                                if let Some(pane) = bucket_pane {
+                                    touch_reused_run_pane_spawn_seq(
+                                        pane,
+                                        &mut commands,
+                                        &mut spawn_counter,
+                                        &ctx.seq_q,
+                                    );
+                                    pane
+                                } else {
+                                    let anchor_pane = anchor_pane.unwrap_or_else(|| {
+                                        vmux_layout::pane::resolve_split_anchor_pane(
+                                            self_pane, &ctx,
+                                        )
+                                    });
+                                    split_pane_off(
+                                        &mut commands,
+                                        anchor_pane,
+                                        direction,
+                                        focus,
+                                        &ctx.pane_children,
+                                        &ctx.tab_filter,
+                                        &ctx.split_dir_q,
+                                        &mut split_this_batch,
+                                    )
+                                }
+                            }
                             (Some(pane), _) => pane,
                             (None, _) => vmux_layout::pane::resolve_spiral_pane(
                                 &mut commands,
                                 self_pane,
                                 TERMINAL_PAGE_URL,
-                                *focus,
+                                focus,
                                 &mut split_this_batch,
                                 &ctx,
                             ),
@@ -1304,16 +1681,25 @@ fn handle_agent_self_commands(
                         let new_pid = ProcessId::new();
                         let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
                         let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
-                        terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
+                        let request_index = terminal_spawns.len();
+                        terminal_spawns.push(TerminalStackSpawnRequest {
                             pane: target_pane,
                             cwd: Some(cwd),
                             pending_input: Some(data),
                             process_id: Some(new_pid),
-                            activate: *focus,
+                            activate: focus,
                         });
+                        regions.run_panes.insert(*anchor, target_pane);
                         if beside.is_none() && *mode != vmux_service::protocol::PlacementMode::Split
                         {
                             regions.run_terminals.insert(*anchor, new_pid);
+                            pending_run_spawns.insert(
+                                *anchor,
+                                PendingRunTerminalSpawn {
+                                    pid: new_pid,
+                                    request_index,
+                                },
+                            );
                         }
                         AgentCommandResult::Text(new_pid.to_string())
                     }
@@ -1326,6 +1712,9 @@ fn handle_agent_self_commands(
             result,
         });
     }
+    for spawn in terminal_spawns {
+        terminal_stack_spawn_writer.write(spawn);
+    }
 }
 
 fn respond_process_stack_spawn(
@@ -1336,10 +1725,15 @@ fn respond_process_stack_spawn(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
+        let stack_ts = if request.activate {
+            LastActivatedAt::now()
+        } else {
+            LastActivatedAt(0)
+        };
         let stack = commands
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                LastActivatedAt::now(),
+                stack_ts,
                 ChildOf(request.pane),
             ))
             .id();
@@ -3005,5 +3399,472 @@ mod tests {
         let out = run_command_line("ls -la", Some("tok9"), &settings);
         assert!(out.contains("ls -la"), "got: {out}");
         assert!(out.contains("__VMUX_DONE_tok9_"), "got: {out}");
+    }
+
+    #[test]
+    fn agent_origin_clears_requested_focus() {
+        let origin = CommandOrigin::Agent {
+            sid: Some("s1".into()),
+            anchor: Some(ProcessId::new()),
+        };
+
+        assert!(!requested_focus_for_origin(&origin, true));
+        assert!(!requested_focus_for_origin(&origin, false));
+    }
+
+    #[test]
+    fn user_origin_keeps_requested_focus() {
+        assert!(requested_focus_for_origin(&CommandOrigin::User, true));
+        assert!(!requested_focus_for_origin(&CommandOrigin::User, false));
+    }
+
+    #[test]
+    fn agent_layout_snapshot_keeps_current_focus() {
+        use vmux_service::protocol::layout::{Focus, LayoutNode, LayoutSnapshot, Tab};
+        let mut snapshot = LayoutSnapshot {
+            tabs: vec![
+                Tab {
+                    id: Some("tab:9".into()),
+                    name: "Agent".into(),
+                    is_active: true,
+                    root: LayoutNode::Pane {
+                        id: Some("pane:8".into()),
+                        is_zoomed: false,
+                        stacks: vec![],
+                    },
+                },
+                Tab {
+                    id: Some("tab:1".into()),
+                    name: "User".into(),
+                    is_active: false,
+                    root: LayoutNode::Pane {
+                        id: Some("pane:2".into()),
+                        is_zoomed: false,
+                        stacks: vec![],
+                    },
+                },
+            ],
+            focused: Focus {
+                tab: Some("tab:9".into()),
+                pane: Some("pane:8".into()),
+                stack: None,
+            },
+        };
+        let focus = FocusedStack {
+            tab: Some(Entity::from_bits(1)),
+            pane: Some(Entity::from_bits(2)),
+            stack: Some(Entity::from_bits(3)),
+        };
+
+        preserve_current_focus_in_layout_snapshot(&mut snapshot, &focus);
+
+        assert_eq!(snapshot.focused.tab.as_deref(), Some("tab:1"));
+        assert_eq!(snapshot.focused.pane.as_deref(), Some("pane:2"));
+        assert_eq!(snapshot.focused.stack.as_deref(), Some("stack:3"));
+        assert!(!snapshot.tabs[0].is_active);
+        assert!(snapshot.tabs[1].is_active);
+    }
+
+    #[test]
+    fn agent_app_command_filter_blocks_focus_changers() {
+        assert!(!agent_may_dispatch_app_command(&AppCommand::Browser(
+            vmux_command::BrowserCommand::Open(vmux_command::OpenCommand::InNewStack { url: None }),
+        )));
+        assert!(!agent_may_dispatch_app_command(&AppCommand::Browser(
+            vmux_command::BrowserCommand::Bar(vmux_command::BrowserBarCommand::OpenCommandBar),
+        )));
+        assert!(!agent_may_dispatch_app_command(&AppCommand::Terminal(
+            vmux_command::TerminalCommand::Next,
+        )));
+        assert!(agent_may_dispatch_app_command(&AppCommand::Terminal(
+            vmux_command::TerminalCommand::Clear,
+        )));
+    }
+
+    #[derive(Resource)]
+    struct RunTerminalCandidateInput {
+        agent_pane: Entity,
+    }
+
+    #[derive(Resource, Default)]
+    struct RunTerminalCandidateOutput(Vec<RunTerminalCandidate>);
+
+    fn collect_run_terminal_candidates(
+        input: Res<RunTerminalCandidateInput>,
+        terminals: Query<
+            (Entity, &ProcessId),
+            (
+                With<Terminal>,
+                Without<AgentSession>,
+                Without<ProcessExited>,
+            ),
+        >,
+        child_of_q: Query<&ChildOf>,
+        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
+        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        mut out: ResMut<RunTerminalCandidateOutput>,
+    ) {
+        out.0 = run_terminal_candidates(input.agent_pane, &terminals, &child_of_q, &tab_q, &seq_q);
+    }
+
+    #[test]
+    fn run_terminal_candidates_fail_closed_when_agent_tab_missing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<RunTerminalCandidateOutput>()
+            .add_systems(Update, collect_run_terminal_candidates);
+
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let terminal_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(7), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(terminal_pane)))
+            .id();
+        app.world_mut()
+            .spawn((Terminal, ProcessId::new(), ChildOf(stack)));
+        let agent_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(9)))
+            .id();
+
+        app.insert_resource(RunTerminalCandidateInput { agent_pane });
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<RunTerminalCandidateOutput>()
+                .0
+                .is_empty(),
+            "unresolved agent tab must not match terminals from other tabs"
+        );
+    }
+
+    #[derive(Resource)]
+    struct RunTerminalBucketPaneInput {
+        agent_pane: Entity,
+    }
+
+    #[derive(Resource, Default)]
+    struct RunTerminalBucketPaneOutput(Vec<Entity>);
+
+    fn collect_run_terminal_bucket_panes(
+        input: Res<RunTerminalBucketPaneInput>,
+        child_of_q: Query<&ChildOf>,
+        tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
+        leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+        pane_children: Query<&Children, With<Pane>>,
+        stack_q: Query<Entity, With<vmux_layout::stack::Stack>>,
+        page_q: Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
+        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+        mut out: ResMut<RunTerminalBucketPaneOutput>,
+    ) {
+        out.0 = run_terminal_bucket_panes(
+            input.agent_pane,
+            &child_of_q,
+            &tab_q,
+            &leaf_panes,
+            &pane_children,
+            &stack_q,
+            &page_q,
+            &seq_q,
+        )
+        .into_iter()
+        .map(|candidate| candidate.pane)
+        .collect();
+    }
+
+    #[test]
+    fn run_terminal_bucket_panes_include_pure_terminal_layout_panes() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<RunTerminalBucketPaneOutput>()
+            .add_systems(Update, collect_run_terminal_bucket_panes);
+
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let agent_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .id();
+        let terminal_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(3), ChildOf(tab)))
+            .id();
+        spawn_stack_in_pane(&mut app, terminal_pane, "vmux://terminal/68001");
+        let file_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(9), ChildOf(tab)))
+            .id();
+        spawn_stack_in_pane(&mut app, file_pane, "file:///repo/src/plugin.rs");
+
+        app.insert_resource(RunTerminalBucketPaneInput { agent_pane });
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<RunTerminalBucketPaneOutput>().0,
+            vec![terminal_pane]
+        );
+    }
+
+    #[test]
+    fn pending_run_terminal_spawn_appends_same_frame_input() {
+        let anchor = ProcessId::new();
+        let terminal = ProcessId::new();
+        let pane = Entity::from_bits(20);
+        let mut pending_spawns = std::collections::HashMap::new();
+        pending_spawns.insert(
+            anchor,
+            PendingRunTerminalSpawn {
+                pid: terminal,
+                request_index: 0,
+            },
+        );
+        let mut terminal_spawns = vec![TerminalStackSpawnRequest {
+            pane,
+            cwd: None,
+            pending_input: Some(b"one\r".to_vec()),
+            process_id: Some(terminal),
+            activate: false,
+        }];
+
+        let picked = append_pending_run_terminal_input(
+            anchor,
+            &pending_spawns,
+            &mut terminal_spawns,
+            b"two\r",
+        );
+
+        assert_eq!(picked, Some(terminal));
+        assert_eq!(
+            terminal_spawns[0].pending_input.as_deref(),
+            Some(&b"one\rtwo\r"[..])
+        );
+        assert_eq!(terminal_spawns.len(), 1);
+    }
+
+    #[derive(Resource)]
+    struct ReusedRunPaneTouchInput {
+        pane: Entity,
+    }
+
+    fn touch_reused_run_pane_spawn_seq_test_system(
+        input: Res<ReusedRunPaneTouchInput>,
+        mut commands: Commands,
+        mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+    ) {
+        touch_reused_run_pane_spawn_seq(input.pane, &mut commands, &mut spawn_counter, &seq_q);
+    }
+
+    #[test]
+    fn reusable_run_pane_touch_refreshes_spawn_seq() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_layout::pane::SpawnCounter>()
+            .add_systems(Update, touch_reused_run_pane_spawn_seq_test_system);
+
+        let reused = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(2)))
+            .id();
+        app.world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(10)));
+        app.insert_resource(ReusedRunPaneTouchInput { pane: reused });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::pane::SpawnSeq>(reused)
+                .unwrap()
+                .0,
+            11
+        );
+    }
+
+    #[derive(Resource)]
+    struct BrowserPaneClaimInput {
+        anchor: ProcessId,
+    }
+
+    #[derive(Resource, Default)]
+    struct BrowserPaneClaimOutput(Option<Entity>);
+
+    fn claim_browser_pane_test_system(
+        input: Res<BrowserPaneClaimInput>,
+        mut resolve: AgentBrowserResolve,
+        mut out: ResMut<BrowserPaneClaimOutput>,
+    ) {
+        out.0 = resolve.claim_browser_pane(input.anchor);
+    }
+
+    fn spawn_stack_in_pane(app: &mut App, pane: Entity, url: &str) -> Entity {
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        app.world_mut().entity_mut(stack).insert(PageMetadata {
+            url: url.to_string(),
+            ..default()
+        });
+        stack
+    }
+
+    fn browser_claim_app() -> (App, ProcessId, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .init_resource::<BrowserPaneClaimOutput>()
+            .add_systems(Update, claim_browser_pane_test_system);
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Row,
+                },
+            ))
+            .id();
+        let agent_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let agent_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(agent_pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((
+            Terminal,
+            anchor,
+            AgentSession {
+                kind: AgentKind::Codex,
+            },
+            ChildOf(agent_stack),
+        ));
+        app.insert_resource(BrowserPaneClaimInput { anchor });
+        (app, anchor, split)
+    }
+
+    #[test]
+    fn browser_pane_claim_ignores_mixed_file_browser_pane() {
+        let (mut app, _anchor, split) = browser_claim_app();
+        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
+        let browser_stack = spawn_stack_in_pane(&mut app, mixed_pane, "https://example.com");
+        app.world_mut()
+            .entity_mut(browser_stack)
+            .insert(vmux_layout::Browser);
+
+        app.update();
+
+        assert_eq!(app.world().resource::<BrowserPaneClaimOutput>().0, None);
+    }
+
+    #[test]
+    fn browser_pane_claim_prefers_pure_browser_pane_over_mixed_pane() {
+        let (mut app, _anchor, split) = browser_claim_app();
+        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
+        let mixed_browser = spawn_stack_in_pane(&mut app, mixed_pane, "https://mixed.example");
+        app.world_mut()
+            .entity_mut(mixed_browser)
+            .insert(vmux_layout::Browser);
+        let pure_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let pure_browser = spawn_stack_in_pane(&mut app, pure_pane, "https://pure.example");
+        app.world_mut()
+            .entity_mut(pure_browser)
+            .insert(vmux_layout::Browser);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<BrowserPaneClaimOutput>().0,
+            Some(pure_pane)
+        );
+    }
+
+    #[test]
+    fn run_reuses_existing_terminal_when_region_cache_is_empty() {
+        let anchor = ProcessId::new();
+        let terminal = ProcessId::new();
+        let agent_pane = Entity::from_bits(10);
+        let terminal_pane = Entity::from_bits(20);
+        let regions = AgentTerminalRegions::default();
+        let candidates = [RunTerminalCandidate {
+            pid: terminal,
+            pane: terminal_pane,
+            pane_spawn_seq: 7,
+        }];
+
+        let picked =
+            choose_reusable_run_terminal(anchor, agent_pane, &regions, &candidates).unwrap();
+
+        assert_eq!(picked.pid, terminal);
+        assert_eq!(picked.pane, terminal_pane);
+    }
+
+    #[test]
+    fn run_reuses_cached_terminal_before_newer_terminal_candidates() {
+        let anchor = ProcessId::new();
+        let cached = ProcessId::new();
+        let newer = ProcessId::new();
+        let agent_pane = Entity::from_bits(10);
+        let cached_pane = Entity::from_bits(20);
+        let newer_pane = Entity::from_bits(30);
+        let mut regions = AgentTerminalRegions::default();
+        regions.run_terminals.insert(anchor, cached);
+        regions.run_panes.insert(anchor, cached_pane);
+        let candidates = [
+            RunTerminalCandidate {
+                pid: cached,
+                pane: cached_pane,
+                pane_spawn_seq: 3,
+            },
+            RunTerminalCandidate {
+                pid: newer,
+                pane: newer_pane,
+                pane_spawn_seq: 9,
+            },
+        ];
+
+        let picked =
+            choose_reusable_run_terminal(anchor, agent_pane, &regions, &candidates).unwrap();
+
+        assert_eq!(picked.pid, cached);
+        assert_eq!(picked.pane, cached_pane);
+    }
+
+    #[test]
+    fn split_run_stacks_into_cached_terminal_bucket_pane() {
+        let anchor = ProcessId::new();
+        let terminal = ProcessId::new();
+        let agent_pane = Entity::from_bits(10);
+        let terminal_pane = Entity::from_bits(20);
+        let mut regions = AgentTerminalRegions::default();
+        regions.run_panes.insert(anchor, terminal_pane);
+        let candidates = [RunTerminalCandidate {
+            pid: terminal,
+            pane: terminal_pane,
+            pane_spawn_seq: 7,
+        }];
+
+        assert_eq!(
+            choose_run_terminal_bucket_pane(anchor, agent_pane, &regions, &candidates),
+            Some(terminal_pane)
+        );
+    }
+
+    #[test]
+    fn split_run_keeps_cached_terminal_bucket_after_process_exits() {
+        let anchor = ProcessId::new();
+        let agent_pane = Entity::from_bits(10);
+        let terminal_pane = Entity::from_bits(20);
+        let mut regions = AgentTerminalRegions::default();
+        regions.run_panes.insert(anchor, terminal_pane);
+        let candidates = [];
+
+        assert_eq!(
+            choose_run_terminal_bucket_pane(anchor, agent_pane, &regions, &candidates),
+            Some(terminal_pane)
+        );
     }
 }
