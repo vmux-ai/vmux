@@ -28,7 +28,7 @@ fn goto_line(path: String, line: u32) {
 fn chevron(expanded: bool) -> Element {
     rsx! {
         span {
-            class: "inline-block w-3 shrink-0 text-center text-[9px] text-foreground/50",
+            class: "inline-block w-4 shrink-0 text-center text-sm leading-none text-foreground/60",
             {if expanded { "\u{25BE}" } else { "\u{25B8}" }}
         }
     }

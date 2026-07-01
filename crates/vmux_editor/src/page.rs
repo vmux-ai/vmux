@@ -548,6 +548,12 @@ pub fn Page() -> Element {
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
     let comp_keys = comp_filtered.clone();
 
+    let explorer_panel_style = if explorer_visible() {
+        format!("width:{}px;", explorer_width())
+    } else {
+        "width:0px;".to_string()
+    };
+
     rsx! {
         div {
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
@@ -564,12 +570,12 @@ pub fn Page() -> Element {
                 }
             },
 
+            div {
+                class: "h-full shrink-0 overflow-hidden",
+                style: "{explorer_panel_style}",
+                ExplorerPanel {}
+            }
             if explorer_visible() {
-                div {
-                    class: "h-full shrink-0 overflow-hidden",
-                    style: "width:{explorer_width()}px;",
-                    ExplorerPanel {}
-                }
                 div {
                     class: "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] hover:bg-cyan-400/40",
                     onmousedown: move |e: Event<MouseData>| {
