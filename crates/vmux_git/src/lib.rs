@@ -14,6 +14,8 @@ pub mod job;
 pub mod parse;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod runner;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod worktree;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;

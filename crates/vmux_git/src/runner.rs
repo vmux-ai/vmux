@@ -79,7 +79,7 @@ fn git_command(root: &Path) -> Command {
     cmd
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+pub(crate) fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
     let out = git_command(root)
         .args(args)
         .output()
@@ -91,7 +91,7 @@ fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
     ))
 }
 
-fn git_err(stdout: &str, stderr: &str) -> GitError {
+pub(crate) fn git_err(stdout: &str, stderr: &str) -> GitError {
     let s = stderr.trim();
     GitError(if s.is_empty() {
         stdout.trim().to_string()
