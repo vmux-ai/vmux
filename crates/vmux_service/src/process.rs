@@ -1436,11 +1436,7 @@ impl Process {
         let win = (first_row, total_rows);
         let win_changed = self.last_win != Some(win);
 
-        if changed_lines.is_empty()
-            && !full
-            && !cursor_moved
-            && !selection_changed
-            && !win_changed
+        if changed_lines.is_empty() && !full && !cursor_moved && !selection_changed && !win_changed
         {
             return;
         }
@@ -2126,7 +2122,10 @@ mod tests {
         process.process_output_for_test(&feed);
 
         let total = process.term.grid().total_lines() as u32;
-        assert!(total >= 40, "expected scrollback to accumulate, got {total}");
+        assert!(
+            total >= 40,
+            "expected scrollback to accumulate, got {total}"
+        );
 
         let mut patches = process.subscribe();
         // Scroll to the very top (document row 0), not following.
@@ -2150,7 +2149,10 @@ mod tests {
                 _ => None,
             })
             .expect("scroll must broadcast a viewport patch");
-        assert_eq!(first_row, 0, "top scroll serves the window from document row 0");
+        assert_eq!(
+            first_row, 0,
+            "top scroll serves the window from document row 0"
+        );
         assert_eq!(total_rows, total, "patch carries the full document height");
         assert!(
             changed_lines.iter().any(|(r, _)| *r == 0),
