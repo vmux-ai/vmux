@@ -1,5 +1,6 @@
 pub(crate) use crate::NewStackContext;
 use crate::cef::Browser;
+use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
 use crate::{
     Header,
@@ -23,7 +24,6 @@ use vmux_command::event::{
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
-use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
     CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
@@ -1199,7 +1199,11 @@ fn on_command_bar_action(
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     terminals_cwd: Query<
-        (Entity, &vmux_core::terminal::TerminalLaunch, Option<&LastActivatedAt>),
+        (
+            Entity,
+            &vmux_core::terminal::TerminalLaunch,
+            Option<&LastActivatedAt>,
+        ),
         With<Terminal>,
     >,
     mut commands: Commands,
