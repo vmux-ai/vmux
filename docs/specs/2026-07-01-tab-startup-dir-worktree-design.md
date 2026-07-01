@@ -356,6 +356,21 @@ Each step compiles + tests green before the next:
 
 User runtime-tests once at the end (per "finish then test").
 
-## Open questions
+## Implementation status (2026-07-01)
 
-None blocking. Deferred polish: inline-banner offer instead of `rfd` modal (§5); optional setting to auto-remove clean worktrees on tab close (currently keep-only).
+Implemented on `feat/tab-startup-dir` (stacked on `feat/acp-host`), TDD, all crates compile + unit-tested, wasm page typechecked:
+
+1. `resolve_startup_dir_for_tab[_with_source]` + `DirSource` (`vmux_setting`).
+2. `Tab.startup_dir` + `ancestor_tab[_startup_dir]`; tab-scoped cwd at ACP-session + terminal spawn sites; `STORE_SCHEMA_VERSION` 2→3.
+3. `vmux_git::worktree` engine (add/remove/status/list/repo_root_of/head_ref).
+4. `TabWorktree`/`TabDirDecided` + `WorktreePlugin` (off-thread create, slug/branch/exclude), reconcile-on-load.
+5. Isolate-on-agent-start offer (ACP) with buffered deferred attach.
+6. "New Task" (`TabCommand::New` + folder picker).
+7. Side-sheet boundary chip (`TabBoundary` DTO) + Isolate / Remove-worktree actions.
+
+**Deferred (follow-ups, not blocking):**
+- `TabBoundary.sandboxed` badge — needs `vmux_browser`→`vmux_agent` `AcpSession` detection; dropped for now.
+- Side-sheet **change-dir** pickers (tab + space/global) — New Task already covers tab-dir-at-creation; changing an existing dir via the chip is deferred.
+- Tab-close **notify** toast — close keeps the worktree on disk (the safety guarantee); the toast is polish.
+- `ServiceAgentCommand::NewTerminalTab` no-cwd fallback still space-scoped (`AgentLookups` 16-param limit); the common `run_terminal_cwd` path inherits the tab dir.
+- Inline-banner offer instead of `rfd` modal (§5); optional auto-remove-clean-worktree-on-close setting.
