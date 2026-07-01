@@ -1994,7 +1994,10 @@ fn on_explorer_panel_width(
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    chrome.width = trigger.event().payload.px.clamp(160, 600);
+    chrome.width = trigger.event().payload.px.clamp(
+        vmux_setting::EXPLORER_MIN_WIDTH,
+        vmux_setting::EXPLORER_MAX_WIDTH,
+    );
     persist_chrome(*chrome, settings, saves);
     mark_chrome_unsent(&views, &mut commands);
 }
@@ -2087,6 +2090,22 @@ fn emit_outline_markdown(
             &OutlineEvent { items },
         ));
         commands.entity(entity).remove::<OutlineDirty>();
+    }
+}
+
+fn clear_outline_on_file_change(
+    q: Query<Entity, (With<FileView>, Changed<FileView>)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for entity in &q {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                EXPLORER_OUTLINE_EVENT,
+                &OutlineEvent { items: Vec::new() },
+            ));
+        }
     }
 }
 
@@ -2209,6 +2228,7 @@ impl Plugin for EditorPlugin {
                     emit_open_editors,
                     mark_outline_dirty,
                     emit_outline_markdown,
+                    clear_outline_on_file_change,
                 ),
             )
             .add_observer(reset_file_sent_markers_on_page_ready)

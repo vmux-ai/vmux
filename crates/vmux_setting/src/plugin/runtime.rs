@@ -65,6 +65,9 @@ pub struct EditorSettings {
 
 /// Default Explorer panel width in pixels when unset.
 pub const EXPLORER_DEFAULT_WIDTH: u32 = 240;
+/// Explorer panel width bounds, enforced on both live resize and load.
+pub const EXPLORER_MIN_WIDTH: u32 = 160;
+pub const EXPLORER_MAX_WIDTH: u32 = 600;
 
 /// Persisted Explorer (file tree) panel chrome. Absent fields fall back to
 /// [`ExplorerSettings::visible`]/[`ExplorerSettings::width`] defaults — never
@@ -82,7 +85,9 @@ impl ExplorerSettings {
         self.visible.unwrap_or(false)
     }
     pub fn width(&self) -> u32 {
-        self.width.unwrap_or(EXPLORER_DEFAULT_WIDTH)
+        self.width
+            .unwrap_or(EXPLORER_DEFAULT_WIDTH)
+            .clamp(EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH)
     }
 }
 
@@ -1107,6 +1112,20 @@ mod tests {
         };
         assert!(!e.visible());
         assert_eq!(e.width(), 320);
+    }
+
+    #[test]
+    fn explorer_width_clamps_out_of_range() {
+        let huge = ExplorerSettings {
+            visible: None,
+            width: Some(9000),
+        };
+        assert_eq!(huge.width(), EXPLORER_MAX_WIDTH);
+        let tiny = ExplorerSettings {
+            visible: None,
+            width: Some(1),
+        };
+        assert_eq!(tiny.width(), EXPLORER_MIN_WIDTH);
     }
 
     #[test]

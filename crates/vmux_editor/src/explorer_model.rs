@@ -62,10 +62,9 @@ pub fn close(list: &mut Vec<PathBuf>, path: &Path) {
 /// Whether `path` is a markdown file (outline comes from the heading scanner
 /// rather than LSP `documentSymbol`).
 pub fn is_markdown(path: &std::path::Path) -> bool {
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("md") | Some("markdown")
-    )
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
 /// Parse markdown ATX headings (`#`..`######`) into outline rows, ignoring
