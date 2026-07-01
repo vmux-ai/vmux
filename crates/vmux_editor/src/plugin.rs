@@ -18,8 +18,6 @@ use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
 use crate::viewport::{clamp_top_line, rows_from_viewport, window_range};
 
-const SCROLL_OVERSCAN: u32 = 48;
-
 #[derive(Component, Clone, Debug)]
 pub struct FileView {
     pub path: PathBuf,
@@ -481,8 +479,14 @@ fn emit_window(
     let view = edit.folds.view(total);
     let visible = view.visible_count();
     let (vis_first, vis_end) = window_range(visible, vp.top_row, vp.rows);
-    let first_row = vis_first.saturating_sub(SCROLL_OVERSCAN);
-    let end_row = (vis_end + SCROLL_OVERSCAN).min(visible);
+    let overscan = vmux_core::scroll::overscan_for(
+        vp.rows,
+        vmux_core::scroll::EDITOR_OVERSCAN_K,
+        vmux_core::scroll::OVERSCAN_FLOOR,
+        vmux_core::scroll::OVERSCAN_CAP,
+    );
+    let first_row = vis_first.saturating_sub(overscan);
+    let end_row = (vis_end + overscan).min(visible);
     let line_nos = view.lines_for_window(first_row, end_row.saturating_sub(first_row));
     let mut lines = Vec::with_capacity(line_nos.len());
     for ln in line_nos {
