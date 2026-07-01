@@ -1,4 +1,4 @@
-use crate::event::CommandBarPage;
+use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
@@ -51,6 +51,14 @@ pub struct CommandBarTerminalsSnapshot {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
     pub pages: Vec<CommandBarPage>,
+}
+
+/// Command-bar "current work" data: working dirs of open terminal/agent panes and
+/// recently-opened `file://` entries. Populated by updater systems in `vmux_layout`.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct CommandBarWorkSnapshot {
+    pub work_dirs: Vec<CommandBarWorkDir>,
+    pub recent_files: Vec<CommandBarRecentFile>,
 }
 
 pub fn update_pages_snapshot(

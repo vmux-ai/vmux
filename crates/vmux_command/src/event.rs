@@ -29,6 +29,10 @@ pub struct CommandBarOpenEvent {
     pub commands: Vec<CommandBarCommandEntry>,
     #[serde(default)]
     pub pages: Vec<CommandBarPage>,
+    #[serde(default)]
+    pub work_dirs: Vec<CommandBarWorkDir>,
+    #[serde(default)]
+    pub recent_files: Vec<CommandBarRecentFile>,
     pub target: Option<crate::open_target::OpenTarget>,
 }
 
@@ -88,6 +92,45 @@ pub struct CommandBarTab {
     pub pane_id: u64,
     pub tab_index: u32,
     pub is_active: bool,
+}
+
+/// A working directory of a currently-open terminal/agent pane, surfaced in the
+/// command bar's "current work" section. `kind_label` is the pane kind (Terminal,
+/// Vibe, Claude, Codex).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarWorkDir {
+    pub path: String,
+    pub kind_label: String,
+}
+
+/// A recently-opened `file://` entry (from browser history), surfaced in the
+/// command bar's "current work" section. `url` is the `file://` URL to reopen.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarRecentFile {
+    pub url: String,
+    pub title: String,
 }
 
 #[derive(
@@ -562,5 +605,26 @@ mod tests {
             rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(recovered.pages.len(), 1);
         assert_eq!(recovered.pages[0].title, "Settings");
+    }
+
+    #[test]
+    fn command_bar_open_event_carries_work_and_recent() {
+        let event = CommandBarOpenEvent {
+            work_dirs: vec![CommandBarWorkDir {
+                path: "/work/proj".into(),
+                kind_label: "Terminal".into(),
+            }],
+            recent_files: vec![CommandBarRecentFile {
+                url: "file:///work/proj/main.rs".into(),
+                title: "main.rs".into(),
+            }],
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.work_dirs.len(), 1);
+        assert_eq!(recovered.work_dirs[0].path, "/work/proj");
+        assert_eq!(recovered.recent_files[0].title, "main.rs");
     }
 }

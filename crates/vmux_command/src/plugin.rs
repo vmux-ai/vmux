@@ -4,7 +4,8 @@ use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
 use crate::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot, WriteCommandBarSnapshots, update_pages_snapshot,
+    CommandBarTerminalsSnapshot, CommandBarWorkSnapshot, WriteCommandBarSnapshots,
+    update_pages_snapshot,
 };
 use vmux_core::team::{Profile, User};
 
@@ -20,6 +21,7 @@ impl Plugin for CommandPlugin {
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
+            .init_resource::<CommandBarWorkSnapshot>()
             .configure_sets(
                 Update,
                 (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
