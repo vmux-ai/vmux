@@ -66,6 +66,28 @@ fn newest_nonagent_leaf(leaves: &[LeafInfo]) -> Option<&LeafInfo> {
         .max_by_key(|l| l.spawn_seq)
 }
 
+fn newest_leaf_with_kind(leaves: &[LeafInfo], kind: PageKind) -> Option<&LeafInfo> {
+    leaves
+        .iter()
+        .filter(|l| l.kinds.len() == 1 && l.kinds.contains(&kind))
+        .max_by_key(|l| l.spawn_seq)
+}
+
+fn file_reuse_key(url: &str) -> &str {
+    url.split('#').next().unwrap_or(url)
+}
+
+pub fn reusable_page_match(request_url: &str, existing_url: &str) -> bool {
+    let kind = page_kind_for_url(request_url);
+    if page_kind_for_url(existing_url) != kind {
+        return false;
+    }
+    match kind {
+        PageKind::File => file_reuse_key(request_url) == file_reuse_key(existing_url),
+        _ => request_url == existing_url,
+    }
+}
+
 pub fn resolve_placement(
     url: &str,
     reuse: Option<ReuseHit>,
@@ -86,7 +108,7 @@ pub fn resolve_placement(
     }
 
     if kind == PageKind::Agent {
-        if let Some(agent) = leaves.iter().find(|l| l.kinds.contains(&PageKind::Agent)) {
+        if let Some(agent) = newest_leaf_with_kind(leaves, PageKind::Agent) {
             return Placement::AddTab { pane: agent.pane };
         }
         if let Some(anchor) = newest_nonagent_leaf(leaves) {
@@ -98,7 +120,7 @@ pub fn resolve_placement(
         return Placement::AddTab { pane: self_pane };
     }
 
-    if let Some(same) = leaves.iter().find(|l| l.kinds.contains(&kind)) {
+    if let Some(same) = newest_leaf_with_kind(leaves, kind) {
         return Placement::AddTab { pane: same.pane };
     }
 
@@ -117,6 +139,13 @@ pub fn resolve_placement(
     }
 
     Placement::AddTab { pane: self_pane }
+}
+
+pub fn resolve_split_anchor(leaves: &[LeafInfo], self_pane: Entity) -> Entity {
+    newest_nonagent_leaf(leaves)
+        .or_else(|| leaves.iter().find(|l| l.kinds.contains(&PageKind::Agent)))
+        .map(|l| l.pane)
+        .unwrap_or(self_pane)
 }
 
 #[cfg(test)]
@@ -176,6 +205,71 @@ mod tests {
             e(10),
         );
         assert_eq!(got, Placement::AddTab { pane: e(10) });
+    }
+
+    #[test]
+    fn same_type_uses_newest_matching_bucket() {
+        let got = resolve_placement(
+            "vmux://terminal/",
+            None,
+            &[
+                leaf(10, &[PageKind::Terminal], 1, (800.0, 600.0)),
+                leaf(20, &[PageKind::Terminal], 9, (800.0, 600.0)),
+                leaf(30, &[PageKind::File], 12, (800.0, 600.0)),
+            ],
+            e(1),
+        );
+        assert_eq!(got, Placement::AddTab { pane: e(20) });
+    }
+
+    #[test]
+    fn same_type_prefers_pure_bucket_over_newer_mixed_bucket() {
+        let got = resolve_placement(
+            "file:///b.rs",
+            None,
+            &[
+                leaf(10, &[PageKind::File], 1, (800.0, 600.0)),
+                leaf(20, &[PageKind::File, PageKind::Terminal], 9, (800.0, 600.0)),
+            ],
+            e(1),
+        );
+        assert_eq!(got, Placement::AddTab { pane: e(10) });
+    }
+
+    #[test]
+    fn same_type_does_not_add_to_mixed_bucket_when_no_pure_bucket_exists() {
+        let got = resolve_placement(
+            "https://b.com",
+            None,
+            &[leaf(
+                20,
+                &[PageKind::File, PageKind::Browser],
+                9,
+                (900.0, 400.0),
+            )],
+            e(20),
+        );
+        assert_eq!(
+            got,
+            Placement::Spiral {
+                anchor: e(20),
+                axis: PaneSplitDirection::Row
+            }
+        );
+    }
+
+    #[test]
+    fn forced_split_uses_newest_nonagent_leaf() {
+        let got = resolve_split_anchor(
+            &[
+                leaf(10, &[PageKind::Terminal], 9, (800.0, 600.0)),
+                leaf(20, &[PageKind::Browser], 12, (800.0, 600.0)),
+                leaf(30, &[PageKind::Agent], 50, (800.0, 600.0)),
+            ],
+            e(30),
+        );
+
+        assert_eq!(got, e(20));
     }
 
     #[test]

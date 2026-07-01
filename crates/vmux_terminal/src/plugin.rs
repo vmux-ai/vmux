@@ -753,7 +753,7 @@ pub fn new_terminal_bundle_with_cwd(
     )
 }
 
-fn respond_terminal_stack_spawn(
+pub fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut commands: Commands,

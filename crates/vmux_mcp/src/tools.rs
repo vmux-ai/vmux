@@ -325,11 +325,11 @@ fn list_spaces_definition() -> ToolDefinition {
 fn open_page_definition() -> ToolDefinition {
     ToolDefinition {
         name: "open_page".into(),
-        description: "Open a page in a new pane directly beside YOUR pane (the agent calling this). \
-direction is one of right|left|top|bottom (default right). url uses the same rules as browser_navigate \
-(vmux://terminal/ opens a terminal; anything else loads as a browser). \
-focus (default true): true moves focus to the new pane (use when the human will interact with it); \
-false keeps focus on your own pane."
+        description: "Open a page using vmux auto placement. Omit `direction` so vmux reuses \
+the existing matching bucket first (terminal pages with terminals, browser pages with browsers) \
+and otherwise spirals off the latest non-agent pane. url uses the same rules as browser_navigate \
+(vmux://terminal/ opens a terminal; anything else loads as a browser). direction is an override \
+for a forced adjacent open: right|left|top|bottom. focus defaults false."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -347,11 +347,12 @@ false keeps focus on your own pane."
 fn open_file_definition() -> ToolDefinition {
     ToolDefinition {
         name: "open_file".into(),
-        description: "Open a local file (or directory) in the vmux editor, in a new pane beside \
-YOUR pane (the agent calling this). path is an absolute filesystem path, e.g. \
-/Users/me/project/src/main.rs. Files render with syntax highlighting; directories show a listing. \
-direction is one of right|left|top|bottom (default right). focus (default true) moves focus to the \
-new pane."
+        description: "Open a local file (or directory) in the vmux editor using vmux auto \
+placement. Omit `direction` so vmux focuses an already-open matching file first, then reuses \
+the file pane bucket, and otherwise spirals off the latest non-agent pane. path is an absolute \
+filesystem path, e.g. /Users/me/project/src/main.rs. Files render with syntax highlighting; \
+directories show a listing. direction is an override for a forced adjacent open: \
+right|left|top|bottom. focus defaults false."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -369,8 +370,8 @@ new pane."
 fn read_file_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_file".into(),
-        description: "Read a local file and show it in the vmux editor in a pane beside YOUR pane \
-(the agent calling this). Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
+        description: "Read a local file and show it in the vmux editor through auto placement, \
+preferring an existing file page/bucket. Returns the file's text. USE THIS to read files - do NOT cat/sed/head/tail \
 via run (that dumps into a terminal). path is an absolute filesystem path. offset is the 1-based line \
 to start at; limit is the number of lines (default: the whole file)."
             .into(),
@@ -391,7 +392,7 @@ fn grep_definition() -> ToolDefinition {
     ToolDefinition {
         name: "grep".into(),
         description: "Search files with ripgrep and open each matching file in the vmux editor \
-beside YOUR pane, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
+through auto placement, scrolled to its first match. USE THIS to search code - do NOT run rg/grep/ag via \
 run (that dumps into a terminal). Returns matches grouped by file (path:line: text). query is a \
 regex; path is an absolute directory or file to search (default: the current working directory)."
             .into(),
@@ -425,7 +426,8 @@ Override only when you mean to: \
 (force a new stacked terminal in the anchor's pane). \
 - `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
 pane. With `beside` set, `stack` tabs into that page's pane and `split` splits off it. \
-- `direction`: which side for `split` (right|left|top|bottom, default right). \
+- `direction`: only for `split`; Omit `direction` in auto mode so vmux keeps terminal runs in the \
+terminal bucket and spirals new panes predictably. \
 - `terminal: <id>`: instead of opening anything, run IN that existing terminal (best for dependent / \
 sequential steps that share one shell, in order). \
 \
@@ -646,7 +648,7 @@ pub fn dispatch_with_anchor(
         let focus = arguments
             .get("focus")
             .and_then(Value::as_bool)
-            .unwrap_or(true);
+            .unwrap_or(false);
         return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
             anchor,
             direction,
@@ -675,7 +677,7 @@ pub fn dispatch_with_anchor(
         let focus = arguments
             .get("focus")
             .and_then(Value::as_bool)
-            .unwrap_or(true);
+            .unwrap_or(false);
         return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
             anchor,
             direction,
@@ -1152,6 +1154,18 @@ mod tests {
     }
 
     #[test]
+    fn pane_open_tool_descriptions_prefer_auto_placement() {
+        let defs = tool_definitions();
+        let open_page = defs.iter().find(|tool| tool.name == "open_page").unwrap();
+        let open_file = defs.iter().find(|tool| tool.name == "open_file").unwrap();
+        let run = defs.iter().find(|tool| tool.name == "run").unwrap();
+
+        assert!(open_page.description.contains("Omit `direction`"));
+        assert!(open_file.description.contains("Omit `direction`"));
+        assert!(run.description.contains("Omit `direction`"));
+    }
+
+    #[test]
     fn auto_generated_tool_dispatches_as_app_command() {
         let command = dispatch_command("terminal_clear", serde_json::json!({})).unwrap();
         assert_eq!(
@@ -1468,6 +1482,40 @@ mod tests {
         match target {
             DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
                 assert_eq!(direction, None, "absent direction => auto placement");
+            }
+            other => panic!("expected OpenBeside, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_page_default_does_not_request_focus() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_page",
+            serde_json::json!({"url": "https://x.com"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::OpenBeside { focus, .. }) => {
+                assert!(!focus);
+            }
+            other => panic!("expected OpenBeside, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn open_file_default_does_not_request_focus() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_file",
+            serde_json::json!({"path": "/tmp/example.rs"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match target {
+            DispatchTarget::Command(AgentCommand::OpenBeside { focus, .. }) => {
+                assert!(!focus);
             }
             other => panic!("expected OpenBeside, got {other:?}"),
         }
