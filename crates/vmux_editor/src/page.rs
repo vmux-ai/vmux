@@ -845,7 +845,7 @@ pub fn Page() -> Element {
                             rsx! {
                                 div {
                                     id: "file-scroll",
-                                    class: "relative min-h-0 flex-1 overflow-auto",
+                                    class: "group/editor relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
@@ -984,7 +984,7 @@ pub fn Page() -> Element {
                                                             match fold {
                                                                 FoldGutter::Open => rsx! {
                                                                     span {
-                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 opacity-0 group-hover:opacity-100 hover:!text-foreground",
+                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 opacity-0 group-hover/editor:opacity-100 hover:!text-foreground",
                                                                         onmousedown: move |e: Event<MouseData>| {
                                                                             e.stop_propagation();
                                                                             e.prevent_default();
