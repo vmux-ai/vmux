@@ -23,9 +23,10 @@ use vmux_command::event::{
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
+use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot,
+    CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -120,6 +121,11 @@ impl Plugin for CommandBarInputPlugin {
             .add_systems(
                 Update,
                 retry_pending_command_bar_open.after(handle_open_command_bar),
+            )
+            .add_systems(
+                Update,
+                (update_work_dirs_snapshot, update_recent_files_snapshot)
+                    .in_set(WriteCommandBarSnapshots),
             )
             .add_systems(
                 Update,
@@ -561,6 +567,7 @@ fn handle_open_command_bar(
         Option<Res<crate::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
+        Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
     )>,
     mut commands: Commands,
 ) {
@@ -570,6 +577,7 @@ fn handle_open_command_bar(
     let agents_snap = snapshot_params.p0().clone();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
     let pages_snap = snapshot_params.p5().clone();
+    let work_snap = snapshot_params.p6().clone();
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -873,6 +881,7 @@ fn handle_open_command_bar(
         &spaces_snapshot,
         &agents_snap,
         &pages_snap,
+        &work_snap,
         active_stack_count,
         bar_tabs,
         target,
@@ -919,6 +928,7 @@ fn handle_open_command_bar(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn command_bar_open_payload(
     open_id: u64,
     native_windowed: bool,
@@ -929,6 +939,8 @@ fn command_bar_open_payload(
     commands: Vec<CommandBarCommandEntry>,
     target: Option<vmux_command::open_target::OpenTarget>,
     pages: Vec<CommandBarPage>,
+    work_dirs: Vec<vmux_command::event::CommandBarWorkDir>,
+    recent_files: Vec<vmux_command::event::CommandBarRecentFile>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -939,6 +951,8 @@ fn command_bar_open_payload(
         tabs,
         commands,
         pages,
+        work_dirs,
+        recent_files,
         target,
     }
 }
@@ -1017,6 +1031,7 @@ pub(crate) fn gather_command_bar_tabs(
 
 /// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
 /// bar and the home launcher, from the current snapshots and gathered tabs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_command_bar_open_payload(
     open_id: u64,
     native_windowed: bool,
@@ -1025,6 +1040,7 @@ pub(crate) fn build_command_bar_open_payload(
     spaces_snapshot: &CommandBarSpacesSnapshot,
     agents_snapshot: &CommandBarAgentsSnapshot,
     pages_snapshot: &CommandBarPagesSnapshot,
+    work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
     active_stack_count: usize,
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
@@ -1081,6 +1097,8 @@ pub(crate) fn build_command_bar_open_payload(
         commands,
         target,
         pages,
+        work_snapshot.work_dirs.clone(),
+        work_snapshot.recent_files.clone(),
     )
 }
 
@@ -1832,6 +1850,7 @@ mod tests {
         let pages = CommandBarPagesSnapshot::default();
         let spaces = CommandBarSpacesSnapshot::default();
         let agents = CommandBarAgentsSnapshot::default();
+        let work = vmux_command::snapshot::CommandBarWorkSnapshot::default();
         let payload = build_command_bar_open_payload(
             7,
             false,
@@ -1840,6 +1859,7 @@ mod tests {
             &spaces,
             &agents,
             &pages,
+            &work,
             0,
             Vec::new(),
             Some(OpenTarget::InPlace),
@@ -2189,6 +2209,8 @@ mod tests {
             Vec::new(),
             None,
             Vec::new(),
+            Vec::new(),
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2214,6 +2236,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
         );
 
