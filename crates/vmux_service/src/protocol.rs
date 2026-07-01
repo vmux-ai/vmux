@@ -338,6 +338,11 @@ pub enum ClientMessage {
         row: u16,
         modifiers: u8,
     },
+    ScrollWindow {
+        process_id: ProcessId,
+        top_row: u32,
+        follow: bool,
+    },
     ResizeProcess {
         process_id: ProcessId,
         cols: u16,
@@ -540,13 +545,17 @@ pub enum ServiceMessage {
     },
     ViewportPatch {
         process_id: ProcessId,
-        changed_lines: Vec<(u16, TermLine)>,
+        changed_lines: Vec<(u32, TermLine)>,
         cursor: TermCursor,
         cols: u16,
         rows: u16,
         selection: Option<TermSelectionRange>,
         copy_mode: bool,
         full: bool,
+        first_row: u32,
+        total_rows: u32,
+        alt: bool,
+        evicted_total: u64,
     },
     ProcessExited {
         process_id: ProcessId,
