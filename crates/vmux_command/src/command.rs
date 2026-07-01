@@ -307,6 +307,8 @@ pub enum TabCommand {
     #[default]
     #[menu(id = "close_tab", label = "Close Tab")]
     Close,
+    #[menu(id = "new_task", label = "New Task…")]
+    New,
     #[menu(id = "next_tab", label = "Next Tab", accel = "super+shift+]")]
     #[shortcut(direct = "Super+Shift+L")]
     #[shortcut(direct = "Super+Alt+ArrowRight")]

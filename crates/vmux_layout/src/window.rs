@@ -441,6 +441,7 @@ fn request_default_layout(
         main,
         primary_window: *primary_window,
         name: None,
+        startup_dir: None,
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
@@ -545,10 +546,10 @@ pub fn spawn_requested_tab_layouts(
             request.primary_window,
             settings.pane.gap,
         );
-        if let Some(name) = request.name.clone() {
+        if request.name.is_some() || request.startup_dir.is_some() {
             commands.entity(tab_e).insert(Tab {
-                name,
-                startup_dir: None,
+                name: request.name.clone().unwrap_or_default(),
+                startup_dir: request.startup_dir.clone(),
             });
         }
 

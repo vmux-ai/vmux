@@ -151,6 +151,7 @@ fn handle_tab_commands(
                     main,
                     primary_window: *primary_window,
                     name: Some(name),
+                    startup_dir: None,
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -166,6 +167,7 @@ fn handle_tab_commands(
                             main,
                             primary_window: *primary_window,
                             name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                            startup_dir: None,
                             content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                             clear_pending_stack: true,
                             focus: true,
@@ -174,6 +176,22 @@ fn handle_tab_commands(
                         commands.entity(next).insert(LastActivatedAt::now());
                     }
                     commands.entity(active).despawn();
+                }
+                TabCommand::New => {
+                    let Ok(main) = main_q.single() else { continue };
+                    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+                        continue;
+                    };
+                    let name = format!("Tab {}", tabs.iter().count() + 1);
+                    layout_requests.write(TabLayoutSpawnRequest {
+                        main,
+                        primary_window: *primary_window,
+                        name: Some(name),
+                        startup_dir: Some(dir.to_string_lossy().into_owned()),
+                        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                        clear_pending_stack: true,
+                        focus: true,
+                    });
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
@@ -383,6 +401,7 @@ fn on_tabs_command_emit(
                     main,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                    startup_dir: None,
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -735,6 +754,7 @@ mod tests {
                 main,
                 primary_window: window,
                 name: None,
+                startup_dir: None,
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,
