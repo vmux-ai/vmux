@@ -975,37 +975,37 @@ pub fn Page() -> Element {
                                                             }
                                                         },
                                                         span {
-                                                            class: "sticky left-0 z-[1] flex shrink-0 select-none items-center justify-end gap-1 bg-background pl-4 pr-5 text-right tabular-nums opacity-40 group-hover:opacity-90",
+                                                            class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
                                                             style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
                                                             if let Some(s) = sev {
-                                                                span { class: "{severity_color_class(s)}", "●" }
+                                                                span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }
+                                                            span { class: "text-right opacity-40 group-hover:opacity-90", "{ln + 1}" }
                                                             match fold {
                                                                 FoldGutter::Open => rsx! {
                                                                     span {
-                                                                        class: "cursor-pointer opacity-0 group-hover:opacity-70 hover:!opacity-100",
+                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 opacity-0 group-hover:opacity-100 hover:!text-foreground",
                                                                         onmousedown: move |e: Event<MouseData>| {
                                                                             e.stop_propagation();
                                                                             e.prevent_default();
                                                                             let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
                                                                         },
-                                                                        "▾"
+                                                                        "⌄"
                                                                     }
                                                                 },
                                                                 FoldGutter::Collapsed => rsx! {
                                                                     span {
-                                                                        class: "cursor-pointer opacity-80 hover:!opacity-100",
+                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/70 hover:!text-foreground",
                                                                         onmousedown: move |e: Event<MouseData>| {
                                                                             e.stop_propagation();
                                                                             e.prevent_default();
                                                                             let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
                                                                         },
-                                                                        "▸"
+                                                                        "›"
                                                                     }
                                                                 },
                                                                 FoldGutter::None => rsx! {},
                                                             }
-                                                            "{ln + 1}"
                                                         }
                                                         span { class: "relative whitespace-pre pr-8",
                                                             for (i, s) in line.spans.iter().enumerate() {
