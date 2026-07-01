@@ -260,6 +260,7 @@ pub fn Page() -> Element {
     let mut total_lines = use_signal(|| 0u32);
     let mut total_rows = use_signal(|| 0u32);
     let mut first_row = use_signal(|| 0u32);
+    let mut gutter_hover = use_signal(|| false);
     let mut lines = use_signal(Vec::<FileLine>::new);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
@@ -845,10 +846,11 @@ pub fn Page() -> Element {
                             rsx! {
                                 div {
                                     id: "file-scroll",
-                                    class: "group/editor relative min-h-0 flex-1 overflow-auto",
+                                    class: "relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
+                                        gutter_hover.set(false);
                                     },
                                     onscroll: move |_| {
                                         let (_, ch) = cell_dims();
@@ -956,6 +958,10 @@ pub fn Page() -> Element {
                                                             {
                                                                 let rect = t.get_bounding_client_rect();
                                                                 let x = raw.client_x() as f64 - rect.left() - g;
+                                                                let in_gutter = x < 0.0;
+                                                                if gutter_hover() != in_gutter {
+                                                                    gutter_hover.set(in_gutter);
+                                                                }
                                                                 if x < 0.0 {
                                                                     return;
                                                                 }
@@ -982,17 +988,20 @@ pub fn Page() -> Element {
                                                             }
                                                             span { class: "text-right opacity-40 group-hover:opacity-90", "{ln + 1}" }
                                                             match fold {
-                                                                FoldGutter::Open => rsx! {
-                                                                    span {
-                                                                        class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 opacity-0 group-hover/editor:opacity-100 hover:!text-foreground",
-                                                                        onmousedown: move |e: Event<MouseData>| {
-                                                                            e.stop_propagation();
-                                                                            e.prevent_default();
-                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
-                                                                        },
-                                                                        "⌄"
+                                                                FoldGutter::Open => {
+                                                                    let vis = if gutter_hover() { "opacity-100" } else { "opacity-0" };
+                                                                    rsx! {
+                                                                        span {
+                                                                            class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/50 transition-opacity hover:!text-foreground {vis}",
+                                                                            onmousedown: move |e: Event<MouseData>| {
+                                                                                e.stop_propagation();
+                                                                                e.prevent_default();
+                                                                                let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                            },
+                                                                            "⌄"
+                                                                        }
                                                                     }
-                                                                },
+                                                                }
                                                                 FoldGutter::Collapsed => rsx! {
                                                                     span {
                                                                         class: "absolute right-1 flex h-full cursor-pointer items-center text-base leading-none text-foreground/70 hover:!text-foreground",
