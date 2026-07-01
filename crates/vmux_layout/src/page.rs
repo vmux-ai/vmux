@@ -679,89 +679,99 @@ fn SideSheetView(
     pane_tree_error: Option<String>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
+        div { class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
-                div { class: "glass mb-2 flex flex-col overflow-hidden rounded-md",
+                div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    if !space.startup_dir.is_empty() {
-                        div { class: "flex items-center gap-1.5 border-t border-foreground/5 px-2 py-1.5 text-muted-foreground",
-                            Icon { class: "h-3.5 w-3.5 shrink-0",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            }
-                            span {
-                                class: "min-w-0 flex-1 truncate text-xs",
-                                style: "direction:rtl;",
-                                title: "{space.startup_dir}",
-                                bdi { style: "unicode-bidi:isolate;direction:ltr;", "{space.startup_dir}" }
-                            }
-                        }
+                    if let Some(b) = tab_boundary {
+                        TabBoundaryPanel { boundary: b }
                     }
                 }
             }
-            if let Some(b) = tab_boundary {
-                div { class: "glass mb-2 flex flex-col gap-1 overflow-hidden rounded-md px-2 py-1.5",
-                    div { class: "flex items-center gap-1.5 text-muted-foreground",
-                        Icon { class: "h-3.5 w-3.5 shrink-0",
-                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                        }
-                        span {
-                            class: "min-w-0 flex-1 truncate text-xs",
-                            style: "direction:rtl;",
-                            title: "{b.effective_dir}",
-                            bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
-                        }
-                        span { class: "shrink-0 rounded bg-foreground/10 px-1 text-[10px] uppercase tracking-wide",
-                            "{b.source}"
-                        }
+            div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
+                if let Some(err) = pane_tree_error {
+                    div { class: "flex items-center px-2 py-1",
+                        span { class: "text-ui text-destructive", "{err}" }
                     }
-                    if b.is_worktree && !b.branch.is_empty() {
-                        div { class: "flex items-center gap-1 text-[11px] text-muted-foreground",
-                            span { class: "truncate", "{b.branch}" }
-                            if !b.base_ref.is_empty() {
-                                span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
-                            }
-                        }
+                } else if panes.is_empty() {
+                    div { class: "flex items-center px-2 py-1",
+                        span { class: "text-ui text-muted-foreground", "No stacks" }
                     }
-                    div { class: "flex items-center gap-2 text-[11px]",
-                        span { class: "text-muted-foreground", "{b.pane_count} panes" }
-                        div { class: "flex-1" }
-                        if b.is_worktree {
-                            button {
-                                r#type: "button",
-                                class: "cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/10",
-                                onclick: move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
-                                        command: "remove_worktree".to_string(),
-                                    });
-                                },
-                                "Remove worktree"
-                            }
-                        } else {
-                            button {
-                                r#type: "button",
-                                class: "cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-foreground/10",
-                                onclick: move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
-                                        command: "isolate".to_string(),
-                                    });
-                                },
-                                "Isolate as worktree"
-                            }
-                        }
+                } else {
+                    for (i, pane) in panes.iter().enumerate() {
+                        PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
                     }
                 }
             }
-            if let Some(err) = pane_tree_error {
-                div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-destructive", "{err}" }
+        }
+    }
+}
+
+/// The active tab's working-directory boundary, rendered inside the space card: effective dir +
+/// provenance/worktree badge, optional branch line, pane count, and the isolate/remove action.
+#[component]
+fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
+    let b = boundary;
+    let badge = if b.is_worktree {
+        "worktree".to_string()
+    } else {
+        b.source.clone()
+    };
+    rsx! {
+        div { class: "flex flex-col gap-1.5 border-t border-foreground/10 px-2.5 py-2",
+            div { class: "flex items-center gap-2",
+                Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                 }
-            } else if panes.is_empty() {
-                div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", "No stacks" }
+                span {
+                    class: "min-w-0 flex-1 truncate text-xs text-foreground/90",
+                    style: "direction:rtl;",
+                    title: "{b.effective_dir}",
+                    bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
                 }
-            } else {
-                for (i, pane) in panes.iter().enumerate() {
-                    PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground",
+                    "{badge}"
+                }
+            }
+            if b.is_worktree && !b.branch.is_empty() {
+                div { class: "flex items-center gap-1.5 text-[11px] text-muted-foreground",
+                    Icon { class: "h-3 w-3 shrink-0 opacity-70",
+                        path { d: "M6 3v12" }
+                        path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                        path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                        path { d: "M18 9a9 9 0 0 1-9 9" }
+                    }
+                    span { class: "min-w-0 truncate", "{b.branch}" }
+                    if !b.base_ref.is_empty() {
+                        span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
+                    }
+                }
+            }
+            div { class: "flex items-center gap-2 pt-0.5",
+                span { class: "text-[11px] text-muted-foreground", "{b.pane_count} panes" }
+                div { class: "flex-1" }
+                if b.is_worktree {
+                    button {
+                        r#type: "button",
+                        class: "cursor-pointer rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
+                                command: "remove_worktree".to_string(),
+                            });
+                        },
+                        "Remove worktree"
+                    }
+                } else {
+                    button {
+                        r#type: "button",
+                        class: "cursor-pointer rounded-md border border-foreground/10 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&crate::event::BoundaryCommandEvent {
+                                command: "isolate".to_string(),
+                            });
+                        },
+                        "Isolate as worktree"
+                    }
                 }
             }
         }
