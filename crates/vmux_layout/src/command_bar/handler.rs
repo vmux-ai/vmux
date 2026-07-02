@@ -200,15 +200,42 @@ fn command_shortcut(id: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Launcher entries for the built-in CLI agents: `vmux://agent/<kind>/cli` opens a fresh
+/// terminal-hosted CLI session (distinct from the single-segment ACP entries).
 fn agent_pages() -> Vec<CommandBarPage> {
     AgentKind::all()
         .iter()
         .map(|kind| CommandBarPage {
             host: "agent".to_string(),
-            url: kind.cli_url_prefix(),
-            title: kind.display_name().to_string(),
-            keywords: vec![kind.as_url_segment().to_string(), "agent".to_string()],
+            url: format!("{}cli", kind.cli_url_prefix()),
+            title: format!("{} (CLI)", kind.display_name()),
+            keywords: vec![
+                kind.as_url_segment().to_string(),
+                "cli".to_string(),
+                "agent".to_string(),
+            ],
             icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        })
+        .collect()
+}
+
+/// Launcher entries for configured ACP agents (`settings.agent.acp`), each opening the native
+/// chat at its single-segment `vmux://agent/<id>` url.
+fn acp_agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBarPage> {
+    agents_snapshot
+        .acp
+        .iter()
+        .map(|agent| CommandBarPage {
+            host: "agent".to_string(),
+            url: agent.url.clone(),
+            title: agent.name.clone(),
+            keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
+            icon: if agent.icon.is_empty() {
+                vmux_core::PageIcon::None
+            } else {
+                vmux_core::PageIcon::Favicon(agent.icon.clone())
+            },
             shortcut: String::new(),
         })
         .collect()
@@ -1067,6 +1094,7 @@ pub(crate) fn build_command_bar_open_payload(
         })
         .collect();
     let mut pages = pages_snapshot.pages.clone();
+    pages.extend(acp_agent_pages(agents_snapshot));
     pages.extend(agent_pages());
     let history_shortcut = command_shortcut("browser_open_history");
     if !history_shortcut.is_empty()
@@ -2726,9 +2754,31 @@ mod tests {
         assert!(
             pages
                 .iter()
-                .any(|p| p.url == "vmux://agent/vibe/" && p.title == "Vibe")
+                .any(|p| p.url == "vmux://agent/vibe/cli" && p.title == "Vibe (CLI)")
         );
-        assert!(pages.iter().any(|p| p.url == "vmux://agent/claude/"));
-        assert!(pages.iter().any(|p| p.url == "vmux://agent/codex/"));
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/claude/cli"));
+        assert!(pages.iter().any(|p| p.url == "vmux://agent/codex/cli"));
+    }
+
+    #[test]
+    fn acp_agent_pages_maps_configured_agents() {
+        let snapshot = CommandBarAgentsSnapshot {
+            acp: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "claude".to_string(),
+                name: "Claude Code".to_string(),
+                url: "vmux://agent/claude".to_string(),
+                icon: "https://cdn.example/claude-acp.svg".to_string(),
+            }],
+            ..Default::default()
+        };
+        let pages = acp_agent_pages(&snapshot);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].url, "vmux://agent/claude");
+        assert_eq!(pages[0].title, "Claude Code");
+        assert_eq!(pages[0].host, "agent");
+        assert!(matches!(
+            pages[0].icon,
+            vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
+        ));
     }
 }

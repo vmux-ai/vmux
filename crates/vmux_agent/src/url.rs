@@ -2,6 +2,10 @@ pub use vmux_core::agent::AgentKind;
 
 use crate::AgentVariant;
 
+/// Reserved trailing URL segment: `vmux://agent/<kind>/cli` opens a fresh CLI session for that
+/// agent, as opposed to `vmux://agent/<kind>/<sid>` which resumes the session named by `<sid>`.
+pub const CLI_FRESH_SID: &str = "cli";
+
 pub fn page_url_prefix(provider: &str, model: &str) -> String {
     format!("vmux://agent/{provider}/{model}/")
 }

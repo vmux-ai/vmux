@@ -333,14 +333,52 @@ pub fn attach_page_agent_to_stack(
             kind,
         },
     ));
-    let placeholder = page_agent_placeholder_url(provider, model, sid);
+    let url = format!("vmux://agent/{provider}");
     commands.spawn((
-        vmux_layout::Browser::new(meshes, webview_mt, &placeholder),
+        vmux_layout::Browser::new(meshes, webview_mt, &url),
         ChildOf(stack),
     ));
     Some(())
 }
 
+pub fn attach_acp_agent_to_stack(
+    stack: Entity,
+    agent_id: &str,
+    name: &str,
+    sid: &str,
+    cwd: &std::path::Path,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    commands.entity(stack).insert(PageMetadata {
+        url: format!("vmux://agent/{agent_id}"),
+        title: name.to_string(),
+        bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+        ..default()
+    });
+    let anchor = vmux_service::protocol::ProcessId::new();
+    commands.entity(stack).insert((
+        crate::client::acp::AcpSession {
+            agent_id: agent_id.to_string(),
+            sid: sid.to_string(),
+            cwd: cwd.to_path_buf(),
+            anchor,
+        },
+        crate::AgentMessages::default(),
+        crate::AgentApprovalPolicy::default(),
+        crate::AgentRunState::default(),
+    ));
+    let url = format!("vmux://agent/{agent_id}");
+    // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
+    commands.spawn((
+        vmux_layout::Browser::new(meshes, webview_mt, &url),
+        ChildOf(stack),
+        anchor,
+    ));
+}
+
+#[allow(dead_code)]
 pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     let html = format!(
         "<!doctype html><html><head><meta charset='utf-8'><title>Page Agent</title><style>html,body{{height:100%;margin:0;background:#0c0c10;color:#bbb;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;align-items:center;justify-content:center}}div{{text-align:center;padding:2rem}}h1{{margin:0 0 0.5rem;font-weight:600;color:#eee}}code{{background:#1a1a22;padding:0.15rem 0.4rem;border-radius:4px;color:#e0a050}}</style></head><body><div><h1>Page Agent</h1><p><code>{provider}</code> / <code>{model}</code></p><p>Session <code>{sid}</code></p><p style='opacity:0.6;margin-top:1rem'>Native chat UI ships in step 4 of the Page agent design.</p></div></body></html>"
@@ -655,15 +693,17 @@ fn clear_agent_done(
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentBrowserResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    // Matches any anchored content (CLI terminal or ACP chat webview) by its unique ProcessId.
     agent_terms: Query<
         'w,
         's,
         (
+            Entity,
             &'static vmux_service::protocol::ProcessId,
-            &'static AgentSession,
             &'static ChildOf,
         ),
     >,
+    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
@@ -705,22 +745,24 @@ impl AgentBrowserResolve<'_, '_> {
             .unwrap_or(false)
     }
 
-    /// The agent's own terminal pane (its stack's parent pane), from its anchor.
+    /// The agent's own pane (its stack's parent pane), from its anchor.
     fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
         let (_, _, term_co) = self
             .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)?;
+            .find(|(_, pid, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    /// `None` for ACP sessions (no `AgentKind`).
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
-        self.agent_terms
+        let (entity, _, _) = self
+            .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)
-            .map(|(_, session, _)| session.kind)
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
     /// Resolve the agent's browser pane from its anchor, and record it as that
@@ -779,11 +821,12 @@ pub(crate) struct AgentFileResolve<'w, 's> {
         'w,
         's,
         (
+            Entity,
             &'static vmux_service::protocol::ProcessId,
-            &'static AgentSession,
             &'static ChildOf,
         ),
     >,
+    kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
 }
@@ -794,16 +837,18 @@ impl AgentFileResolve<'_, '_> {
         let (_, _, term_co) = self
             .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)?;
+            .find(|(_, pid, _)| **pid == anchor)?;
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
+    /// `None` for ACP sessions (no `AgentKind`).
     fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
-        self.agent_terms
+        let (entity, _, _) = self
+            .agent_terms
             .iter()
-            .find(|(pid, _, _)| **pid == anchor)
-            .map(|(_, session, _)| session.kind)
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
     /// The agent's existing `file://` follow-page (the page entity) and its leaf
@@ -1208,7 +1253,7 @@ fn handle_agent_commands(
 
 fn resolve_self_pane(
     anchor: ProcessId,
-    agent_terms: &Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
 ) -> Option<(Entity, Entity)> {
     use bevy::ecs::relationship::Relationship;
@@ -1454,6 +1499,10 @@ fn agent_terminal_shell(settings: &AppSettings) -> String {
 /// exit code once the command finishes (success OR failure). `token` is a unique
 /// per-run id; the printed marker is `__VMUX_DONE_<token>_<exit_code>__`.
 ///
+/// The command is prefixed with [`pager_env_prefix`] so an interactive command that would
+/// normally open a pager (e.g. `git log` → `less`) prints straight to the terminal instead of
+/// blocking the marker forever.
+///
 /// posix/fish chain with `;` (which continues after a non-zero command). nushell
 /// aborts the rest of a `;` line when an external command fails, so it needs a
 /// `try`/`catch` wrapper to always print the marker and recover the exit code
@@ -1463,16 +1512,28 @@ fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
+    let pager = pager_env_prefix(base);
     match base {
         "nu" | "nushell" => format!(
-            "print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+            "{pager}print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
         ),
         "fish" => format!(
-            "printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
+            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
         ),
         _ => format!(
-            "printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
+            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
         ),
+    }
+}
+
+/// Shell-specific prelude that neutralizes pagers for a `run`, so an interactive command can't
+/// stall the completion marker waiting on `less` (`git log`, `man`, `git diff`, …). Set as
+/// session-exported env so follow-up runs in the same shell stay covered.
+fn pager_env_prefix(base: &str) -> &'static str {
+    match base {
+        "nu" | "nushell" => "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; ",
+        "fish" => "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; ",
+        _ => "export GIT_PAGER=cat PAGER=cat LESS=FRX; ",
     }
 }
 
@@ -1495,7 +1556,7 @@ fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&Active
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
-    agent_terms: Query<(Entity, &ProcessId, &ChildOf), With<AgentSession>>,
+    agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     run_terms: Query<
         (Entity, &ProcessId),
@@ -2126,6 +2187,7 @@ fn handle_agent_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
+    acp_sessions: Query<&crate::client::acp::AcpSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
@@ -2149,6 +2211,7 @@ fn handle_agent_page_open(
             task,
             &children_q,
             &agents,
+            &acp_sessions,
             &child_of_q,
             agent_to_entity.as_deref(),
             idx.as_deref(),
@@ -2158,6 +2221,7 @@ fn handle_agent_page_open(
             &mut meshes,
             &mut webview_mt,
             &default_cwd,
+            &settings.agent.acp,
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -2173,6 +2237,7 @@ fn handle_agent_page_open_task(
     task: &PageOpenTask,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
+    acp_sessions: &Query<&crate::client::acp::AcpSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
     idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
@@ -2182,6 +2247,7 @@ fn handle_agent_page_open_task(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
+    acp_configs: &[vmux_setting::AcpAgentConfig],
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -2236,6 +2302,18 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         Some(crate::AgentUrl::Cli { kind, sid }) => {
+            if sid == crate::url::CLI_FRESH_SID {
+                if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
+                    spawn_agent.write(SpawnAgentInStackRequest {
+                        kind,
+                        cwd: default_cwd.to_path_buf(),
+                        session_id: None,
+                        stack: task.stack,
+                        initial_prompt: None,
+                    });
+                }
+                return Ok(());
+            }
             if let Some(map) = agent_to_entity
                 && let Some(&entity) = map.0.get(&(kind, sid.clone()))
             {
@@ -2252,6 +2330,31 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         None => {
+            // ACP agents own the canonical single-segment names (claude/codex/…), shadowing
+            // the legacy CLI path for those ids.
+            if segs.len() == 1
+                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
+            {
+                if acp_sessions
+                    .get(task.stack)
+                    .is_ok_and(|session| session.agent_id == cfg.id)
+                {
+                    return Ok(());
+                }
+                clear_stack_children(task.stack, children_q, commands);
+                let sid = uuid::Uuid::new_v4().to_string();
+                attach_acp_agent_to_stack(
+                    task.stack,
+                    &cfg.id,
+                    &cfg.name,
+                    &sid,
+                    default_cwd,
+                    commands,
+                    meshes,
+                    webview_mt,
+                );
+                return Ok(());
+            }
             if segs.len() == 1
                 && let Some(kind) = AgentKind::from_url_segment(segs[0])
             {
@@ -3213,6 +3316,9 @@ mod tests {
     #[test]
     fn missing_claude_or_codex_cli_shows_setup_page() {
         for (kind, segment) in [(AgentKind::Claude, "claude"), (AgentKind::Codex, "codex")] {
+            // Isolate the legacy CLI path: ACP now shadows claude/codex single-segment URLs.
+            let mut settings = test_settings();
+            settings.agent.acp.clear();
             let mut app = App::new();
             app.add_plugins(MinimalPlugins)
                 .add_message::<SpawnAgentInStackRequest>()
@@ -3220,7 +3326,7 @@ mod tests {
                 .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
                     (kind, false),
                 ])))
-                .insert_resource(test_settings())
+                .insert_resource(settings)
                 .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .add_systems(
@@ -3287,6 +3393,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut settings = test_settings();
+        // Isolate the legacy CLI path: ACP now shadows the `claude` single-segment URL.
+        settings.agent.acp.clear();
         settings.spaces.insert(
             "space-1".into(),
             vmux_setting::SpaceOverrides {
@@ -3402,20 +3510,20 @@ mod tests {
         // completion marker.
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
-            "print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+            "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
         );
         assert_eq!(
             command_with_marker("/usr/local/bin/fish", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
+            "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
         );
         assert_eq!(
             command_with_marker("/bin/zsh", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
         // Unknown shells fall back to posix syntax.
         assert_eq!(
             command_with_marker("/bin/bash", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
     }
 

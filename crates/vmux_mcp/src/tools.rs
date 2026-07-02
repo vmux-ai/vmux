@@ -20,7 +20,7 @@ pub enum McpParamTool {
         mode: Option<String>,
     },
     #[mcp(
-        description = "Navigate the active webview to a URL, or open a URL in a target pane. This is your primary tool for the web: do ALL web research here, in the user's visible, logged-in browser, so they can watch and take over - prefer it over any built-in web search/fetch. To search, navigate to a search engine results URL (e.g. https://duckduckgo.com/?q=...), read the snapshot, then open results. When navigating the focused browser page, this returns the page's semantic snapshot once it finishes loading (same shape as browser_snapshot, with viewport + inViewport) - no separate browser_snapshot call needed; use browser_scroll to bring more content into view. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
+        description = "Navigate the active webview to a URL, or open a URL in a target pane. This is your PRIMARY and PREFERRED tool for ALL web access - searching, research, reading docs, fetching pages. ALWAYS use this instead of any built-in web_search / web_fetch / WebSearch / WebFetch tool: vmux IS a browser, and the whole point is that the user watches the research happen in their visible, logged-in browser and can take over at any time. Do NOT answer web questions from a built-in search/fetch tool when this tool is available. To search, navigate to a search engine results URL (e.g. https://duckduckgo.com/?q=...), read the snapshot, then open results. When navigating the focused browser page, this returns the page's semantic snapshot once it finishes loading (same shape as browser_snapshot, with viewport + inViewport) - no separate browser_snapshot call needed; use browser_scroll to bring more content into view. URLs starting with 'vmux://terminal/' open a terminal (use '?cwd=/path' to set working dir), 'vmux://spaces/' opens the spaces view, 'vmux://services/' opens the processes monitor; other 'vmux://' URLs are rejected; everything else opens as a browser. With 'vmux://' URLs, a new tab is always created in the target pane (defaulting to the focused pane)."
     )]
     BrowserNavigate { url: String, pane: Option<String> },
     #[mcp(
@@ -31,10 +31,6 @@ pub enum McpParamTool {
         terminal: Option<String>,
         enter: Option<bool>,
     },
-    #[mcp(
-        description = "Focus a pane by id (from vmux_read_layout, e.g. \"pane:123\"), making it the active pane/stack so subsequent terminal_send and input target it."
-    )]
-    FocusPane { pane: String },
     #[mcp(
         description = "Rename the active profile's display name (the top-right identity pill / facepile). Updates the name only; the profile's storage is untouched."
     )]
@@ -123,12 +119,6 @@ impl McpParamTool {
                     return Err("terminal_send.text is empty".to_string());
                 }
                 Ok(AgentCommand::TerminalSend { text, terminal })
-            }
-            McpParamTool::FocusPane { pane } => {
-                if pane.trim().is_empty() {
-                    return Err("focus_pane.pane is empty".to_string());
-                }
-                Ok(AgentCommand::FocusPane { pane })
             }
             McpParamTool::RenameProfile { name } => {
                 if name.trim().is_empty() {

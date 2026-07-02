@@ -25,8 +25,7 @@ fn main() {
             "../vmux_team/src",
             "../vmux_terminal/src",
             "../vmux_terminal/assets/fonts",
-            "../vmux_agent/src/vibe.rs",
-            "../vmux_agent/src/vibe",
+            "../vmux_agent/src",
         ])
         .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
         .cef_finalize(CefEmbeddedPageFinalize {

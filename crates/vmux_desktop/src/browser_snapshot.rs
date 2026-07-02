@@ -1,3 +1,4 @@
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
 use vmux_agent::{BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot};
@@ -47,13 +48,15 @@ pub(crate) fn start_snapshots(
             Some(s) => parse_pane_target(s, &panes),
             None => active.local().pane.filter(|p| panes.contains(*p)),
         };
-        let webview = target.and_then(|pane| {
-            active_webview_for_tab(
-                active_stack_in_pane(pane, &pane_children, &stack_ts),
-                &browsers,
-                &terminals,
-            )
-        });
+        let webview = target
+            .and_then(|pane| {
+                active_webview_for_tab(
+                    active_stack_in_pane(pane, &pane_children, &stack_ts),
+                    &browsers,
+                    &terminals,
+                )
+            })
+            .or_else(|| most_recent_browser(&browsers, &terminals, &stack_ts));
         let sent = webview
             .map(|webview| cef_browsers.request_snapshot(&webview, &hex(&request.request_id)))
             .unwrap_or(false);
@@ -64,6 +67,28 @@ pub(crate) fn start_snapshots(
             });
         }
     }
+}
+
+/// The browser webview whose stack was activated most recently — a fallback when the requested
+/// pane is missing/stale or holds no browser (e.g. an ACP agent passed a bogus pane id, or its own
+/// anchor pane is a chat/terminal). Keeps `browser_snapshot` from hard-failing while a browser the
+/// user can see is open somewhere.
+pub(crate) fn most_recent_browser(
+    browsers: &Query<(Entity, &ChildOf), With<Browser>>,
+    terminals: &Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
+    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
+) -> Option<Entity> {
+    browsers
+        .iter()
+        .filter_map(|(entity, child_of)| {
+            if terminals.iter().any(|(t, _)| t == entity) {
+                return None;
+            }
+            let (_, ts) = stack_ts.get(child_of.get()).ok()?;
+            Some((entity, ts.0))
+        })
+        .max_by_key(|&(_, ts)| ts)
+        .map(|(entity, _)| entity)
 }
 
 pub(crate) fn drive_pending_nav_snapshots(

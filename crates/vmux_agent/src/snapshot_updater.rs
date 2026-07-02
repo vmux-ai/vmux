@@ -19,6 +19,8 @@ pub fn update_agents_snapshot(
         ),
     >,
     page_idx: Option<Res<PageStrategyIndex>>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
 ) {
     let providers_changed = !changed_q.is_empty();
@@ -26,12 +28,50 @@ pub fn update_agents_snapshot(
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
+    let settings_changed = settings
+        .as_ref()
+        .map(|r| r.is_changed() || r.is_added())
+        .unwrap_or(false);
+    let catalog_changed = catalog
+        .as_ref()
+        .map(|r| r.is_changed() || r.is_added())
+        .unwrap_or(false);
     if !providers_changed
         && !idx_changed
-        && (!snapshot.providers.is_empty() || !snapshot.strategies.is_empty())
+        && !settings_changed
+        && !catalog_changed
+        && (!snapshot.providers.is_empty()
+            || !snapshot.strategies.is_empty()
+            || !snapshot.acp.is_empty())
     {
         return;
     }
+
+    let catalog_agents = catalog
+        .as_ref()
+        .map(|c| c.agents.as_slice())
+        .unwrap_or_default();
+    snapshot.acp = settings
+        .as_ref()
+        .map(|s| {
+            s.agent
+                .acp
+                .iter()
+                .map(|cfg| {
+                    let reg_id = crate::acp_install::registry_id_alias(&cfg.id);
+                    let reg = catalog_agents.iter().find(|a| a.id == reg_id);
+                    AgentProviderSummary {
+                        id: cfg.id.clone(),
+                        name: reg
+                            .map(|a| a.name.clone())
+                            .unwrap_or_else(|| cfg.name.clone()),
+                        url: format!("vmux://agent/{}", cfg.id),
+                        icon: reg.and_then(|a| a.icon.clone()).unwrap_or_default(),
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut providers: Vec<AgentProviderSummary> = providers_q
         .iter()
@@ -39,6 +79,7 @@ pub fn update_agents_snapshot(
             id: kind.0.as_url_segment().to_string(),
             name: name.as_str().to_string(),
             url: kind.0.cli_url_prefix(),
+            icon: String::new(),
         })
         .collect();
     providers.sort_by(|a, b| a.id.cmp(&b.id));

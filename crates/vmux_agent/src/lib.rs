@@ -3,8 +3,14 @@
 //! recordings, browser snapshots, and layout commands.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
+pub mod agents_page;
+pub mod chat_page;
 pub mod vibe;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod acp_install;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod acp_registry;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +58,12 @@ pub mod variant;
 #[cfg(not(target_arch = "wasm32"))]
 pub use vmux_service::{http, message, stream};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use agents_page::AgentsManagerPlugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use chat_page::AgentChatPagePlugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use client::acp::{AcpAgentPlugin, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
 pub use client::cli::strategy::CliAgentStrategy;
 #[cfg(not(target_arch = "wasm32"))]

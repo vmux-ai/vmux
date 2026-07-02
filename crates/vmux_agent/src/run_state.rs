@@ -4,6 +4,11 @@ use bevy::prelude::*;
 pub enum AgentRunState {
     #[default]
     Idle,
+    /// Downloading/installing the agent's runtime or package before first spawn.
+    Installing {
+        pct: Option<u8>,
+        message: String,
+    },
     Streaming,
     AwaitingApproval {
         call_id: String,

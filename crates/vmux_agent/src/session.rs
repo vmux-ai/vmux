@@ -39,14 +39,16 @@ pub fn format_agent_url(
         let prefix = strategy.kind().cli_url_prefix();
         let next = match sid {
             Some(SessionId(id)) => format!("{prefix}{id}"),
-            None => prefix,
+            None => format!("{prefix}{}", crate::url::CLI_FRESH_SID),
         };
         if meta.url != next {
             meta.url = next;
         }
         let title = match sid {
-            Some(SessionId(id)) => format!("{} ({})", agent.kind.display_name(), truncate_sid(id)),
-            None => agent.kind.display_name().to_string(),
+            Some(SessionId(id)) => {
+                format!("{} CLI ({})", agent.kind.display_name(), truncate_sid(id))
+            }
+            None => format!("{} CLI", agent.kind.display_name()),
         };
         if meta.title != title {
             meta.title = title;
@@ -127,7 +129,7 @@ mod url_tests {
     }
 
     #[test]
-    fn format_agent_url_emits_scheme_only_when_no_session_id() {
+    fn format_agent_url_emits_fresh_cli_url_when_no_session_id() {
         let mut app = App::new();
         let mut strategies = AgentStrategies::default();
         strategies.register_cli(Box::new(VibeStrategy));
@@ -145,7 +147,7 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://agent/vibe/");
+        assert_eq!(url, "vmux://agent/vibe/cli");
     }
 
     #[test]
@@ -168,7 +170,7 @@ mod url_tests {
             .id();
         app.update();
         let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
-        assert_eq!(title, "Vibe (abc12345)");
+        assert_eq!(title, "Vibe CLI (abc12345)");
     }
 
     #[test]
@@ -191,7 +193,7 @@ mod url_tests {
             .id();
         app.update();
         let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
-        assert_eq!(title, "Vibe (550e84…0000)");
+        assert_eq!(title, "Vibe CLI (550e84…0000)");
     }
 
     #[test]
@@ -213,7 +215,7 @@ mod url_tests {
             .id();
         app.update();
         let title = &app.world().get::<PageMetadata>(entity).unwrap().title;
-        assert_eq!(title, "Vibe");
+        assert_eq!(title, "Vibe CLI");
     }
 
     #[test]

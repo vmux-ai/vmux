@@ -18,11 +18,34 @@ pub enum Message {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum AssistantBlock {
     Text(String),
+    /// The agent's streamed internal reasoning (ACP `AgentThoughtChunk`), shown as a
+    /// collapsible "Thinking" section.
+    Thinking(String),
     ToolUse {
         call_id: String,
         name: String,
         args: String,
     },
+    /// A proposed file edit (ACP `ToolCallContent::Diff`), rendered as an inline diff in the chat.
+    Diff {
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
+    /// The agent's execution plan / task tree (ACP `SessionUpdate::Plan`). Re-sent in full on each
+    /// update, so the projector replaces the single plan block in place.
+    Plan {
+        steps: Vec<PlanStep>,
+    },
+}
+
+/// One entry in an agent [`AssistantBlock::Plan`]. `status` is `pending` | `in_progress` |
+/// `completed`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PlanStep {
+    pub content: String,
+    pub status: String,
 }
 
 #[cfg(test)]
