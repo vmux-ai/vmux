@@ -16,7 +16,7 @@ use crate::query::{
     on_history_delete_request, on_history_open_request, on_history_query_request,
     on_history_suggestions_request,
 };
-use crate::spawn::spawn_visits;
+use crate::spawn::{record_requested_visits, spawn_visits};
 
 /// Wires the history domain: visit spawning, change broadcasts, timed pruning, and
 /// history query, open, and suggestion bridges.
@@ -25,7 +25,10 @@ pub struct HistoryPlugin;
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        app.add_systems(Update, (spawn_visits, broadcast_history_changed).chain())
+        app.add_systems(
+            Update,
+            (spawn_visits, record_requested_visits, broadcast_history_changed).chain(),
+        )
             .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
             .add_systems(
                 Update,
@@ -48,7 +51,8 @@ impl Plugin for HistoryPlugin {
             .add_observer(on_history_open_request)
             .add_observer(on_history_suggestions_request)
             .add_message::<HistoryOpenIntent>()
-            .add_message::<CefPageAttachRequest>();
+            .add_message::<CefPageAttachRequest>()
+            .add_message::<vmux_core::event::RecordVisitRequest>();
     }
 }
 

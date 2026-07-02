@@ -236,6 +236,7 @@ pub fn handle_file_page_open(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
     for (entity, task) in &tasks {
         if !task.url.starts_with("file:") {
@@ -248,6 +249,18 @@ pub fn handle_file_page_open(
             continue;
         };
         let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
+        // Record only actual files as history/recent-file entries — browsing a
+        // directory (the work-dir dir view) is not a "recent file".
+        if !path.is_dir() {
+            let title = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            record_writer.write(vmux_core::event::RecordVisitRequest {
+                url: clean_url.clone(),
+                title,
+            });
+        }
         let pending = parse_goto_fragment(&task.url);
         clear_stack_children(task.stack, &children_q, &mut commands);
         let view = commands
@@ -2162,6 +2175,7 @@ impl Plugin for EditorPlugin {
                 width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
             })
             .init_resource::<ExplorerChromeSynced>()
+            .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -2345,10 +2359,33 @@ mod page_open_tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::event::RecordVisitRequest>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_file_page_open);
         app
+    }
+
+    #[test]
+    fn file_open_records_history_visit() {
+        use bevy::ecs::message::Messages;
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: "file:///etc/hostname#L3".to_string(),
+            request_id: None,
+        });
+        app.update();
+        let msgs = app
+            .world()
+            .resource::<Messages<vmux_core::event::RecordVisitRequest>>();
+        let mut cursor = msgs.get_cursor();
+        let recorded: Vec<_> = cursor.read(msgs).collect();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].url, "file:///etc/hostname");
+        assert_eq!(recorded[0].title, "hostname");
     }
 
     #[test]

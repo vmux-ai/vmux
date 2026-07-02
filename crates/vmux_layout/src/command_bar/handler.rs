@@ -1,5 +1,6 @@
 pub(crate) use crate::NewStackContext;
 use crate::cef::Browser;
+use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
 use crate::{
     Header,
@@ -25,7 +26,7 @@ use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot,
+    CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -120,6 +121,11 @@ impl Plugin for CommandBarInputPlugin {
             .add_systems(
                 Update,
                 retry_pending_command_bar_open.after(handle_open_command_bar),
+            )
+            .add_systems(
+                Update,
+                (update_work_dirs_snapshot, update_recent_files_snapshot)
+                    .in_set(WriteCommandBarSnapshots),
             )
             .add_systems(
                 Update,
@@ -561,6 +567,7 @@ fn handle_open_command_bar(
         Option<Res<crate::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
+        Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
     )>,
     mut commands: Commands,
 ) {
@@ -570,6 +577,7 @@ fn handle_open_command_bar(
     let agents_snap = snapshot_params.p0().clone();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
     let pages_snap = snapshot_params.p5().clone();
+    let work_snap = snapshot_params.p6().clone();
 
     let request =
         command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
@@ -830,6 +838,7 @@ fn handle_open_command_bar(
         &stack_q,
         &browser_meta,
         &child_of_q,
+        &space_name,
     );
 
     let has_browser = browsers.has_browser(modal_e);
@@ -873,6 +882,7 @@ fn handle_open_command_bar(
         &spaces_snapshot,
         &agents_snap,
         &pages_snap,
+        &work_snap,
         active_stack_count,
         bar_tabs,
         target,
@@ -919,6 +929,7 @@ fn handle_open_command_bar(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn command_bar_open_payload(
     open_id: u64,
     native_windowed: bool,
@@ -929,6 +940,8 @@ fn command_bar_open_payload(
     commands: Vec<CommandBarCommandEntry>,
     target: Option<vmux_command::open_target::OpenTarget>,
     pages: Vec<CommandBarPage>,
+    work_dirs: Vec<vmux_command::event::CommandBarWorkDir>,
+    recent_files: Vec<vmux_command::event::CommandBarRecentFile>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -939,6 +952,8 @@ fn command_bar_open_payload(
         tabs,
         commands,
         pages,
+        work_dirs,
+        recent_files,
         target,
     }
 }
@@ -959,6 +974,7 @@ pub(crate) struct TabGatherParams<'w, 's> {
 
 /// Collect the active tab's open stacks as [`CommandBarTab`] entries, shared by the
 /// command-bar modal and the home launcher.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gather_command_bar_tabs(
     active_tab: Option<Entity>,
     all_children: &Query<&Children>,
@@ -969,6 +985,7 @@ pub(crate) fn gather_command_bar_tabs(
     stack_q: &Query<Entity, With<Stack>>,
     browser_meta: &Query<&PageMetadata, With<Browser>>,
     child_of_q: &Query<&ChildOf>,
+    space_name: &str,
 ) -> Vec<CommandBarTab> {
     let mut bar_tabs = Vec::new();
     let Some(active_tab_e) = active_tab else {
@@ -985,7 +1002,7 @@ pub(crate) fn gather_command_bar_tabs(
     let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
     let mut tab_panes = Vec::new();
     collect_leaf_panes(active_tab_e, all_children, leaf_panes, &mut tab_panes);
-    for &pane_e in &tab_panes {
+    for (pane_pos, &pane_e) in tab_panes.iter().enumerate() {
         let is_active_pane = active_pane == Some(pane_e);
         let Ok(children) = pane_children.get(pane_e) else {
             continue;
@@ -996,6 +1013,15 @@ pub(crate) fn gather_command_bar_tabs(
                 continue;
             }
             let stack_is_active = active_stack == Some(child) && is_active_pane;
+            let location = if space_name.is_empty() {
+                format!("pane {} / stack {}", pane_pos + 1, tab_index + 1)
+            } else {
+                format!(
+                    "{space_name} / pane {} / stack {}",
+                    pane_pos + 1,
+                    tab_index + 1
+                )
+            };
             if let Ok(tab_kids) = all_children.get(child) {
                 for browser_e in tab_kids.iter() {
                     if let Ok(meta) = browser_meta.get(browser_e) {
@@ -1005,6 +1031,7 @@ pub(crate) fn gather_command_bar_tabs(
                             pane_id: pane_e.to_bits(),
                             tab_index: tab_index as u32,
                             is_active: stack_is_active,
+                            location: location.clone(),
                         });
                     }
                 }
@@ -1017,6 +1044,7 @@ pub(crate) fn gather_command_bar_tabs(
 
 /// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
 /// bar and the home launcher, from the current snapshots and gathered tabs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_command_bar_open_payload(
     open_id: u64,
     native_windowed: bool,
@@ -1025,6 +1053,7 @@ pub(crate) fn build_command_bar_open_payload(
     spaces_snapshot: &CommandBarSpacesSnapshot,
     agents_snapshot: &CommandBarAgentsSnapshot,
     pages_snapshot: &CommandBarPagesSnapshot,
+    work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
     active_stack_count: usize,
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
@@ -1081,6 +1110,8 @@ pub(crate) fn build_command_bar_open_payload(
         commands,
         target,
         pages,
+        work_snapshot.work_dirs.clone(),
+        work_snapshot.recent_files.clone(),
     )
 }
 
@@ -1458,14 +1489,26 @@ fn on_command_bar_action(
                 && let Some(target_pane) =
                     queries.leaf_panes.iter().find(|e| e.to_bits() == pane_id)
             {
-                commands.entity(target_pane).insert(LastActivatedAt::now());
-                if let Ok(children) = queries.pane_children.get(target_pane) {
+                let target_stack = {
                     let stack_q = stack_params.p0();
-                    let stacks: Vec<Entity> =
-                        children.iter().filter(|&e| stack_q.contains(e)).collect();
-                    if let Some(&target_stack) = stacks.get(tab_index) {
-                        commands.entity(target_stack).insert(LastActivatedAt::now());
-                    }
+                    queries
+                        .pane_children
+                        .get(target_pane)
+                        .ok()
+                        .and_then(|children| {
+                            children
+                                .iter()
+                                .filter(|&e| stack_q.contains(e))
+                                .nth(tab_index)
+                        })
+                };
+                // Activate the whole chain (stack -> pane -> tab -> space), not just the
+                // pane/stack, so switching to a page in another tab actually moves the
+                // active-tab marker (ensure_active_tab derives Active from LastActivatedAt).
+                if let Some(target_stack) = target_stack {
+                    focus_pane_entity(target_stack, &mut commands, &queries.child_of_q);
+                } else {
+                    focus_pane_entity(target_pane, &mut commands, &queries.child_of_q);
                 }
             }
         }
@@ -1832,6 +1875,7 @@ mod tests {
         let pages = CommandBarPagesSnapshot::default();
         let spaces = CommandBarSpacesSnapshot::default();
         let agents = CommandBarAgentsSnapshot::default();
+        let work = vmux_command::snapshot::CommandBarWorkSnapshot::default();
         let payload = build_command_bar_open_payload(
             7,
             false,
@@ -1840,6 +1884,7 @@ mod tests {
             &spaces,
             &agents,
             &pages,
+            &work,
             0,
             Vec::new(),
             Some(OpenTarget::InPlace),
@@ -2189,6 +2234,8 @@ mod tests {
             Vec::new(),
             None,
             Vec::new(),
+            Vec::new(),
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2214,6 +2261,8 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
         );
 
