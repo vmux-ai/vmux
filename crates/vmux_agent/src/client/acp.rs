@@ -149,11 +149,14 @@ struct AcpInstallStarted;
 fn install_acp_session_when_focused(
     mut commands: Commands,
     mut q: Query<(Entity, &AcpSession, &mut AgentRunState), Without<AcpInstallStarted>>,
-    focused: Res<vmux_layout::stack::FocusedStack>,
+    focused: Option<Res<vmux_layout::stack::FocusedStack>>,
     settings: Option<Res<AppSettings>>,
     installs: Res<AcpInstallChannel>,
 ) {
     let Some(settings) = settings else {
+        return;
+    };
+    let Some(focused) = focused else {
         return;
     };
     for (entity, session, mut state) in &mut q {
@@ -266,7 +269,13 @@ fn drain_acp_installs(
                     continue;
                 };
                 if let Some((session, _)) = q.iter().find(|(s, _)| s.sid == sid) {
-                    let mcp = crate::mcp::resolve(&session.cwd, session.anchor).ok();
+                    let mcp = crate::mcp::resolve(&session.cwd, session.anchor)
+                        .inspect_err(|err| {
+                            bevy::log::warn!(
+                                "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
+                            );
+                        })
+                        .ok();
                     service.0.send(ClientMessage::SpawnAcpAgent {
                         sid,
                         agent_id: session.agent_id.clone(),

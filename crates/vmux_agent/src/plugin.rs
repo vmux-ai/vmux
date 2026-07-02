@@ -344,6 +344,7 @@ pub fn attach_page_agent_to_stack(
 pub fn attach_acp_agent_to_stack(
     stack: Entity,
     agent_id: &str,
+    name: &str,
     sid: &str,
     cwd: &std::path::Path,
     commands: &mut Commands,
@@ -352,7 +353,7 @@ pub fn attach_acp_agent_to_stack(
 ) {
     commands.entity(stack).insert(PageMetadata {
         url: format!("vmux://agent/{agent_id}"),
-        title: agent_id.to_string(),
+        title: name.to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         ..default()
     });
@@ -2186,6 +2187,7 @@ fn handle_agent_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
+    acp_sessions: Query<&crate::client::acp::AcpSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
@@ -2209,6 +2211,7 @@ fn handle_agent_page_open(
             task,
             &children_q,
             &agents,
+            &acp_sessions,
             &child_of_q,
             agent_to_entity.as_deref(),
             idx.as_deref(),
@@ -2234,6 +2237,7 @@ fn handle_agent_page_open_task(
     task: &PageOpenTask,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
+    acp_sessions: &Query<&crate::client::acp::AcpSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
     idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
@@ -2331,11 +2335,18 @@ fn handle_agent_page_open_task(
             if segs.len() == 1
                 && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
             {
+                if acp_sessions
+                    .get(task.stack)
+                    .is_ok_and(|session| session.agent_id == cfg.id)
+                {
+                    return Ok(());
+                }
                 clear_stack_children(task.stack, children_q, commands);
                 let sid = uuid::Uuid::new_v4().to_string();
                 attach_acp_agent_to_stack(
                     task.stack,
                     &cfg.id,
+                    &cfg.name,
                     &sid,
                     default_cwd,
                     commands,

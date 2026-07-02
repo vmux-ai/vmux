@@ -298,7 +298,9 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
 }
 
 /// Maps a host decision (the wire `Allow`/`Deny`) onto an ACP permission option, preferring the
-/// one-shot kind, then the always-kind, then the first option offered.
+/// one-shot kind, then the always-kind. Returns `None` (→ the request is cancelled) when the agent
+/// offers no option matching the decision — never falls back to an option that could approve a
+/// denied call.
 fn pick_permission_option(
     options: &[PermissionOption],
     decision: ApprovalDecision,
@@ -311,7 +313,6 @@ fn pick_permission_option(
     preferred
         .iter()
         .find_map(|kind| options.iter().find(|option| &option.kind == kind))
-        .or_else(|| options.first())
         .map(|option| option.option_id.clone())
 }
 
@@ -329,7 +330,19 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
     } else {
         cwd.join(path)
     };
-    abs.starts_with(cwd).then_some(abs)
+    if !abs.starts_with(cwd) {
+        return None;
+    }
+    // Lexical `starts_with` is not enough: a symlink inside cwd can point outside. When cwd is a
+    // real directory, require the deepest existing ancestor (canonicalized) to stay inside it. The
+    // target itself may not exist yet (writes), so we canonicalize the nearest existing ancestor.
+    if let Ok(real_cwd) = cwd.canonicalize()
+        && let Some(anchor) = abs.ancestors().find_map(|a| a.canonicalize().ok())
+        && !anchor.starts_with(&real_cwd)
+    {
+        return None;
+    }
+    Some(abs)
 }
 
 fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {

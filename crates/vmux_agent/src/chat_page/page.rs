@@ -220,14 +220,14 @@ fn do_submit(
     if text.is_empty() {
         return;
     }
-    // Optimistically append the prompt + show a working state so it appears instantly; the host
-    // snapshot (which includes this same user turn) reconciles it. Sending always jumps to bottom.
+    // Emit first; only reflect the turn optimistically (and clear the draft) if the IPC succeeded,
+    // so a failed emit never silently swallows the user's message.
+    if try_cef_bin_emit_rkyv(&ChatSubmit { text: text.clone() }).is_err() {
+        return;
+    }
     at_bottom.set(true);
-    messages
-        .write()
-        .push(ChatMessage::User { text: text.clone() });
+    messages.write().push(ChatMessage::User { text });
     status.set("streaming".to_string());
-    let _ = try_cef_bin_emit_rkyv(&ChatSubmit { text });
     draft.set(String::new());
 }
 

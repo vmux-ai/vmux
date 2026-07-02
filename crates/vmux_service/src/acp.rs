@@ -20,7 +20,6 @@ use crate::protocol::ServiceMessage;
 struct AcpHandle {
     input_tx: mpsc::UnboundedSender<AcpInput>,
     shared: Arc<AcpShared>,
-    task: tokio::task::JoinHandle<()>,
 }
 
 /// Tracks live ACP sessions by sid. Constructed once in the daemon and shared like
@@ -54,7 +53,7 @@ impl AcpSessionManager {
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
         });
-        let task = tokio::spawn(driver::run(
+        tokio::spawn(driver::run(
             command,
             args,
             env,
@@ -62,14 +61,7 @@ impl AcpSessionManager {
             shared.clone(),
             input_rx,
         ));
-        self.sessions.insert(
-            sid,
-            AcpHandle {
-                input_tx,
-                shared,
-                task,
-            },
-        );
+        self.sessions.insert(sid, AcpHandle { input_tx, shared });
     }
 
     pub fn input(&self, sid: &str, input: AcpInput) -> bool {
@@ -95,10 +87,12 @@ impl AcpSessionManager {
         self.sessions.contains_key(sid)
     }
 
+    /// Ask the session's driver to shut down: it observes `Close`, sends the ACP cancel
+    /// notification, and kills its child on the way out. Dropping the handle (no `abort`) lets the
+    /// task finish that cleanup instead of being killed mid-flight.
     pub fn close(&mut self, sid: &str) {
         if let Some(handle) = self.sessions.remove(sid) {
             let _ = handle.input_tx.send(AcpInput::Close);
-            handle.task.abort();
         }
     }
 }
