@@ -32,10 +32,6 @@ pub enum McpParamTool {
         enter: Option<bool>,
     },
     #[mcp(
-        description = "Focus a pane by id (from vmux_read_layout, e.g. \"pane:123\"), making it the active pane/stack so subsequent terminal_send and input target it."
-    )]
-    FocusPane { pane: String },
-    #[mcp(
         description = "Rename the active profile's display name (the top-right identity pill / facepile). Updates the name only; the profile's storage is untouched."
     )]
     RenameProfile { name: String },
@@ -123,12 +119,6 @@ impl McpParamTool {
                     return Err("terminal_send.text is empty".to_string());
                 }
                 Ok(AgentCommand::TerminalSend { text, terminal })
-            }
-            McpParamTool::FocusPane { pane } => {
-                if pane.trim().is_empty() {
-                    return Err("focus_pane.pane is empty".to_string());
-                }
-                Ok(AgentCommand::FocusPane { pane })
             }
             McpParamTool::RenameProfile { name } => {
                 if name.trim().is_empty() {
