@@ -3491,6 +3491,78 @@ mod tests {
     }
 
     #[test]
+    fn auto_first_file_splits_browser_when_terminal_is_newer() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+        let browser_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            10,
+            Vec2::new(900.0, 400.0),
+            "https://news.ycombinator.com/news",
+        );
+        let terminal_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            20,
+            Vec2::new(900.0, 400.0),
+            "vmux://terminal/",
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: None,
+                url: "file:///repo/README.md".into(),
+                request_id: [9; 16],
+                focus: false,
+            });
+        app.update();
+
+        let requests = page_open_requests(&app);
+        let file_parent = requests
+            .iter()
+            .find_map(|request| match &request.target {
+                PageOpenTarget::Stack(stack) if request.url == "file:///repo/README.md" => app
+                    .world()
+                    .get::<ChildOf>(*stack)
+                    .map(|parent| parent.get()),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(file_parent).unwrap().get(),
+            browser_pane,
+            "first file should split the browser pane, not the newer terminal pane"
+        );
+        assert!(
+            app.world().get::<PaneSplit>(terminal_pane).is_none(),
+            "terminal pane must not split for first file"
+        );
+    }
+
+    #[test]
     fn auto_duplicate_url_reuses_pending_open_in_same_batch() {
         let mut app = open_beside_app();
         let space = app

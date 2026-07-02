@@ -124,6 +124,15 @@ pub fn resolve_placement(
         return Placement::AddTab { pane: same.pane };
     }
 
+    if kind == PageKind::File
+        && let Some(browser) = newest_leaf_with_kind(leaves, PageKind::Browser)
+    {
+        return Placement::Spiral {
+            anchor: browser.pane,
+            axis: longer_axis(browser.size),
+        };
+    }
+
     if let Some(anchor) = newest_nonagent_leaf(leaves) {
         return Placement::Spiral {
             anchor: anchor.pane,
@@ -290,6 +299,23 @@ mod tests {
             leaf(2, &[PageKind::File], 9, (900.0, 400.0)),
         ];
         let got = resolve_placement("https://b.com", None, &leaves, e(1));
+        assert_eq!(
+            got,
+            Placement::Spiral {
+                anchor: e(2),
+                axis: PaneSplitDirection::Row
+            }
+        );
+    }
+
+    #[test]
+    fn first_file_prefers_browser_leaf_over_newer_terminal_leaf() {
+        let leaves = [
+            leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
+            leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
+            leaf(3, &[PageKind::Terminal], 20, (900.0, 400.0)),
+        ];
+        let got = resolve_placement("file:///repo/README.md", None, &leaves, e(1));
         assert_eq!(
             got,
             Placement::Spiral {
