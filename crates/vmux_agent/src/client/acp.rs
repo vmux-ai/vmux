@@ -107,7 +107,7 @@ impl Plugin for AcpAgentPlugin {
             .add_systems(
                 Update,
                 (
-                    spawn_acp_session_on_add,
+                    install_acp_session_when_focused,
                     send_acp_input,
                     drain_acp_installs,
                     receive_catalog,
@@ -138,15 +138,29 @@ fn auto_allow_acp_approval(
     }
 }
 
-fn spawn_acp_session_on_add(
-    mut q: Query<(&AcpSession, &mut AgentRunState), Added<AcpSession>>,
+/// Marks an `AcpSession` whose install has already been kicked off, so
+/// [`install_acp_session_when_focused`] starts it exactly once.
+#[derive(Component)]
+struct AcpInstallStarted;
+
+/// Install (and spawn) an ACP agent only once its stack is actually focused — i.e. the user
+/// opened it. Background or restored agent tabs stay idle until visited, so vmux never installs
+/// an agent the user hasn't looked at.
+fn install_acp_session_when_focused(
+    mut commands: Commands,
+    mut q: Query<(Entity, &AcpSession, &mut AgentRunState), Without<AcpInstallStarted>>,
+    focused: Res<vmux_layout::stack::FocusedStack>,
     settings: Option<Res<AppSettings>>,
     installs: Res<AcpInstallChannel>,
 ) {
     let Some(settings) = settings else {
         return;
     };
-    for (session, mut state) in &mut q {
+    for (entity, session, mut state) in &mut q {
+        if focused.stack != Some(entity) {
+            continue;
+        }
+        commands.entity(entity).insert(AcpInstallStarted);
         // `settings.agent.acp` is the override / escape hatch: a matching entry runs as-is if the
         // agent is absent from the registry (or unresolvable).
         let fallback = settings
