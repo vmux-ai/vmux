@@ -11,13 +11,18 @@ pub struct WriteCommandBarSnapshots;
 pub struct CommandBarAgentsSnapshot {
     pub providers: Vec<AgentProviderSummary>,
     pub strategies: Vec<AgentStrategySummary>,
+    /// Configured ACP agents (`settings.agent.acp`): `id`, display `name`, and the
+    /// single-segment `vmux://agent/<id>` launch url.
+    pub acp: Vec<AgentProviderSummary>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AgentProviderSummary {
     pub id: String,
     pub name: String,
     pub url: String,
+    /// Optional icon URL (e.g. an ACP-registry agent's SVG); empty = fall back to a default icon.
+    pub icon: String,
 }
 
 #[derive(Clone, Debug)]
@@ -88,6 +93,7 @@ mod tests {
         let s = CommandBarAgentsSnapshot::default();
         assert!(s.providers.is_empty());
         assert!(s.strategies.is_empty());
+        assert!(s.acp.is_empty());
     }
 
     #[test]

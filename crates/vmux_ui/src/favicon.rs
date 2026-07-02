@@ -18,11 +18,11 @@ pub fn agent_host(url: &str) -> Option<&'static str> {
         ("vibe", "chat.mistral.ai"),
         ("claude", "claude.ai"),
         ("codex", "chatgpt.com"),
+        ("gemini", "gemini.google.com"),
     ];
     for &(kind, host) in AGENTS {
-        if url.starts_with(&format!("vmux://agent/{kind}/cli/"))
-            || url.starts_with(&format!("vmux://agent/{kind}/"))
-        {
+        let base = format!("vmux://agent/{kind}");
+        if url == base || url.starts_with(&format!("{base}/")) {
             return Some(host);
         }
     }
@@ -208,5 +208,22 @@ mod tests {
     fn favicon_src_none_for_vmux_scheme_without_agent() {
         assert_eq!(favicon_src_for_url("", "vmux://history/"), None);
         assert_eq!(favicon_src_for_url("", ""), None);
+    }
+
+    #[test]
+    fn agent_host_matches_single_segment_acp_url() {
+        assert_eq!(agent_host("vmux://agent/claude"), Some("claude.ai"));
+        assert_eq!(agent_host("vmux://agent/codex"), Some("chatgpt.com"));
+        assert_eq!(agent_host("vmux://agent/claude/cli"), Some("claude.ai"));
+    }
+
+    #[test]
+    fn agent_host_maps_gemini() {
+        assert_eq!(agent_host("vmux://agent/gemini"), Some("gemini.google.com"));
+    }
+
+    #[test]
+    fn agent_host_does_not_over_match_similar_ids() {
+        assert_eq!(agent_host("vmux://agent/claudex"), None);
     }
 }

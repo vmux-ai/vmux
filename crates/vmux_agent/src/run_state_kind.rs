@@ -15,6 +15,7 @@ impl From<&AgentRunState> for AgentRunStateKind {
     fn from(state: &AgentRunState) -> Self {
         match state {
             AgentRunState::Idle => AgentRunStateKind::Idle,
+            AgentRunState::Installing { .. } => AgentRunStateKind::Idle,
             AgentRunState::Streaming => AgentRunStateKind::Streaming,
             AgentRunState::AwaitingApproval { .. } => AgentRunStateKind::AwaitingApproval,
             AgentRunState::Errored(_) => AgentRunStateKind::Errored,

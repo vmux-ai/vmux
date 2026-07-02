@@ -2282,6 +2282,18 @@ fn handle_agent_page_open_task(
             Ok(())
         }
         Some(crate::AgentUrl::Cli { kind, sid }) => {
+            if sid == crate::url::CLI_FRESH_SID {
+                if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
+                    spawn_agent.write(SpawnAgentInStackRequest {
+                        kind,
+                        cwd: default_cwd.to_path_buf(),
+                        session_id: None,
+                        stack: task.stack,
+                        initial_prompt: None,
+                    });
+                }
+                return Ok(());
+            }
             if let Some(map) = agent_to_entity
                 && let Some(&entity) = map.0.get(&(kind, sid.clone()))
             {

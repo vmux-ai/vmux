@@ -133,6 +133,7 @@ impl Plugin for VmuxPlugin {
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
                 vmux_agent::AgentChatPagePlugin,
+                vmux_agent::AgentsManagerPlugin,
                 vmux_layout::start::StartPlugin,
                 LayoutCefPlugin,
                 vmux_browser::ExtensionsPlugin,
