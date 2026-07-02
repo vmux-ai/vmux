@@ -36,11 +36,21 @@ is currently looking at. First run asks for confirmation with an
 
 ### Trigger
 
-Fire on the agent `Streaming → Idle` transition (turn end). Detected with the
-established `LastRunStateKind` edge pattern (`vmux_agent/src/systems/surface_errors.rs:12-27`)
-over `AgentRunState` (`vmux_agent/src/run_state.rs:3-14`), or by piggybacking the
-existing `mark_agent_done` / `AgentAttention` flow (`vmux_agent/src/plugin.rs:562-627`).
-Turn end is the natural rest moment — the user is reading, not mid-action.
+Fire on **`AgentAttention`** (`vmux_core/src/notify.rs:11`) — the app's canonical
+"agent finished a turn" signal, emitted from the terminal bell by
+`agent_bell_to_attention` (`vmux_agent/src/plugin.rs:526`). It carries the agent
+`Entity`, which holds a `ProcessId` — exactly what `AgentFileResolve.agent_pane`
+needs to find the follow-pane. Turn end is the natural rest moment.
+
+Why not `AgentRunState` `Streaming→Idle`: that state lives on the **page-session
+entity keyed by `sid`** (`client/page/plugin.rs:149`), a different hosting model
+from the **`ProcessId`-anchored** follow-pane (populated by the CLI `FileTouched`
+hook). `AgentAttention` is the signal that lines up with the follow-pane's
+identity model. It is also already an edge event, so no `LastRunStateKind`-style
+transition detection is needed — just a `MessageReader<AgentAttention>`.
+
+Assumption: the agent rings the terminal bell at turn end (vibe/claude/codex do).
+An agent that never rings the bell won't trigger tidy — acceptable for v1.
 
 ### Gate (threshold)
 
@@ -58,9 +68,12 @@ When tidying, **keep**:
   Untracked / Deleted / Conflicted all list a path, so all are kept). "Clean" ==
   the path is absent from the porcelain set. No per-file `FileStatus`/`is_dirty`
   lookup is needed — set membership is the whole test.
-- the **focused** preview (active `Stack` in that pane, by `LastActivatedAt` via
-  `active_stack_in_pane`), even if clean — never yank the file under the user's
-  eyes
+- the **active** preview in the follow-pane — the file stack with the max
+  `LastActivatedAt` among the follow-pane's file stacks. Kept even if clean, so we
+  never yank the file under the user's eyes **and** the follow-pane always retains
+  ≥1 stack (this is what guarantees no pane-collapse — see Close mechanism). Note
+  this is the follow-pane's own active stack, not the global `FocusedStack` (the
+  user may be focused on the agent terminal instead).
 
 **Close** everything else (clean && !focused). If nothing is closable (all
 changed, or only the focused one is clean) → no-op, no prompt.
@@ -150,7 +163,7 @@ fields), and readers use runtime fallback.
 ## Data flow
 
 ```
-AgentRunState: Streaming → Idle   (vmux_agent tidy system)
+AgentAttention (bell / turn-end)   (vmux_agent tidy_on_agent_attention)
   └─ agent.tidy_files on?
      └─ follow-pane file previews > tidy_files_max?
         └─ runner::dirty_set() per repo root → changed-path set
@@ -185,9 +198,14 @@ assert ECS state).
 - **Pure retention selector** — given `[(path, dirty, focused)]`, returns the
   correct close set. Table-driven.
 - **Threshold gate** — count ≤ max → empty; count > max → evaluates.
-- **Idle-edge detection** — fires once per `Streaming→Idle`, not on repeats.
-- **Porcelain parse** — repo-wide variant over sample `--porcelain=v2` text →
-  expected dirty set (incl. untracked `?`, renamed `2`, unmerged `u`).
+- **`path_from_file_url`** — `file:///a/b.rs#L3:1-4` → `/a/b.rs`; percent-encoded
+  and non-`file:` → correct/`None`.
+- **`changed_paths` (porcelain parse)** — repo-wide variant over sample
+  `--porcelain=v2` text → expected set (incl. untracked `?`, renamed `2`,
+  unmerged `u`).
+- **`dirty_set`** — `test_repo` fixture: modify one file + add an untracked one →
+  both appear (repo-relative); a committed-clean file does not.
+- **`tidy_choice`** — label strings → `Close` / `AlwaysClose` / `Skip` (default).
 - **Integration** — spawn agent session + follow-pane + N file `Stack`s, set
   `AgentRunState::Idle`, run schedule; with `auto=true` assert clean-non-focused
   stacks despawn while changed + focused survive.
@@ -206,18 +224,29 @@ assert ECS state).
   `tidy_files_auto` to `AgentSettings` + `default_agent_settings()`; embedded
   default in `settings.ron` (`agent:` block).
 - `vmux_layout/src/stack.rs` — `CloseStackRequest { stack: Entity }` message +
-  `handle_close_stack_requests` (plain despawn) registered in `StackPlugin`.
-- `vmux_layout` (near `pane.rs` close-confirm) — `PendingTidy { closable }`
-  marker + exclusive `process_pending_tidy` system popping the `rfd` dialog;
-  pure `tidy_choice(rfd result) -> TidyAction`.
-- `vmux_agent/src/plugin.rs` + `client/page/plugin.rs` — `LastTidyKind` component
-  + attach system; `tidy_on_idle` system (Streaming→Idle edge, gate, resolve
-  follow-pane via `AgentFileResolve`, `dirty_set`, decide). Add `vmux_git` dep to
-  `vmux_agent` (verify no cycle — `vmux_git` depends only on core/cef).
+  `handle_close_stack_requests` (plain despawn, last-in-pane guard) registered in
+  `StackPlugin`. This is the **only** layout change.
+- `vmux_agent/Cargo.toml` — add `vmux_git` and `rfd` deps (agent already deps
+  `vmux_layout`/`vmux_setting`/`vmux_core`; `vmux_git`→`vmux_ui`, no cycle).
+- `vmux_agent` — all tidy orchestration lives here (it already deps layout,
+  setting, git, rfd):
+  - `AgentFileResolve` gains `file_stacks_for(agent_pane) -> Vec<(Entity, String)>`
+    (generalize `file_page_for`, `plugin.rs:809`, to collect all follow-pane file
+    stacks + urls instead of first).
+  - pure `path_from_file_url(&str) -> Option<PathBuf>` (strip `file://`, cut `#`,
+    percent-decode).
+  - `PendingTidy { closable: Vec<Entity> }` component; `TidyAction` enum; pure
+    `tidy_choice(&str) -> TidyAction`.
+  - `tidy_on_agent_attention` — `MessageReader<AgentAttention>` → decide (gate,
+    enumerate, `runner::dirty_set` per repo, keep changed ∪ active-in-pane) →
+    `CloseStackRequest` (auto) or insert `PendingTidy` (confirm).
+  - `process_pending_tidy` — exclusive system: pop `rfd` dialog per `PendingTidy`,
+    map via `tidy_choice`, on close write `CloseStackRequest`; on "Always" set
+    `AppSettings.agent.tidy_files_auto` + `SettingsSaveRequest` (debounced save,
+    whole `agent` section re-serialized → siblings intact).
 
-`CloseStackRequest`/`PendingTidy` live in `vmux_layout` (native). The agent crate
-writes `CloseStackRequest` — register the message in `StackPlugin` (owner) and
-`.init_resource::<Messages<CloseStackRequest>>()` in `AgentPlugin` if load order
+`CloseStackRequest` message is registered in `StackPlugin` (owner). `AgentPlugin`
+writes it and `.init_resource::<Messages<CloseStackRequest>>()` if load order
 needs it (mirrors `OpenBesideRequest`, `plugin.rs:197`).
 
 ## Resolved implementation choices
