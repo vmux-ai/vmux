@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, CefKeyboardTarget,
-    WebviewExtendStandardMaterial,
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
+    WebviewExtendStandardMaterial, WebviewSource,
 };
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
 use vmux_command::open_target::OpenTarget;
@@ -45,6 +45,13 @@ struct WarmStartReady;
 #[derive(Component)]
 struct WarmStartPoolNode;
 
+/// Marks a live `vmux://start/` page that has received the current launcher payload.
+/// Cleared implicitly by re-pushing whenever the work snapshot changes, so a page that
+/// becomes ready after the snapshot was populated still gets the data (fixes the race
+/// where the one-shot mount fetch missed a not-yet-spawned pane).
+#[derive(Component)]
+struct StartWorkSynced;
+
 /// Host-internal signal that a warm spare was just revealed into a stack, so its launcher
 /// data must be refreshed (it captured boot-time tabs/spaces) and its input refocused.
 #[derive(Message)]
@@ -71,8 +78,63 @@ impl Plugin for StartPlugin {
                 handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
                 maintain_warm_start_pool,
                 on_start_spare_revealed.after(PageOpenSet::HandleKnownPages),
+                sync_live_start_pages,
             ),
         );
+    }
+}
+
+/// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs
+/// and recent files auto-appear without a reopen. Pushes to a ready start page when the
+/// work snapshot changed this frame, or when the page is newly ready and not yet synced
+/// (covers panes that spawn before the start page's CEF is ready). Uses `open_id: 0`,
+/// which does not reset the palette's input/selection.
+fn sync_live_start_pages(
+    tab_gather: TabGatherParams,
+    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
+    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    pages_snapshot: Res<CommandBarPagesSnapshot>,
+    work_snapshot: Res<CommandBarWorkSnapshot>,
+    focused: Res<crate::stack::FocusedStack>,
+    starts: Query<(Entity, &WebviewSource, Has<StartWorkSynced>)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    // Refresh on work-snapshot changes and on focus/tab changes (so the tabs list
+    // and active markers stay current), plus first-sync for newly-ready pages.
+    let changed = work_snapshot.is_changed() || focused.is_changed();
+    let targets: Vec<Entity> = starts
+        .iter()
+        .filter_map(|(e, src, synced)| {
+            let WebviewSource::Url(url) = src else {
+                return None;
+            };
+            if !url.starts_with(START_PAGE_URL) {
+                return None;
+            }
+            if !browsers.has_browser(e) || !browsers.host_emit_ready(&e) {
+                return None;
+            }
+            (changed || !synced).then_some(e)
+        })
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    let payload = build_start_payload(
+        &tab_gather,
+        &spaces_snapshot,
+        &agents_snapshot,
+        &pages_snapshot,
+        &work_snapshot,
+    );
+    for e in targets {
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            e,
+            COMMAND_BAR_OPEN_EVENT,
+            &payload,
+        ));
+        commands.entity(e).insert(StartWorkSynced);
     }
 }
 
@@ -237,6 +299,7 @@ fn build_start_payload(
         &tab_gather.stack_q,
         &tab_gather.browser_meta,
         &tab_gather.child_of_q,
+        &space_name,
     );
     build_command_bar_open_payload(
         0,

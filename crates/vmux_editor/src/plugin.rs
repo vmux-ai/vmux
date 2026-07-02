@@ -249,14 +249,18 @@ pub fn handle_file_page_open(
             continue;
         };
         let clean_url = task.url.split('#').next().unwrap_or(&task.url).to_string();
-        let title = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string());
-        record_writer.write(vmux_core::event::RecordVisitRequest {
-            url: clean_url.clone(),
-            title,
-        });
+        // Record only actual files as history/recent-file entries — browsing a
+        // directory (the work-dir dir view) is not a "recent file".
+        if !path.is_dir() {
+            let title = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            record_writer.write(vmux_core::event::RecordVisitRequest {
+                url: clean_url.clone(),
+                title,
+            });
+        }
         let pending = parse_goto_fragment(&task.url);
         clear_stack_children(task.stack, &children_q, &mut commands);
         let view = commands

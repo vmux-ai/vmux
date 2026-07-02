@@ -15,6 +15,7 @@ pub enum CommandBarResultItem {
         icon: PageIcon,
         pane_id: u64,
         tab_index: usize,
+        location: String,
     },
     Space {
         id: String,
@@ -50,7 +51,7 @@ pub enum CommandBarResultItem {
     },
     WorkDir {
         path: String,
-        kind_label: String,
+        is_dir: bool,
     },
     RecentFile {
         url: String,
@@ -127,14 +128,10 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
 
 fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
     dirs.iter()
-        .filter(|d| {
-            search_lower.is_empty()
-                || d.path.to_lowercase().contains(search_lower)
-                || d.kind_label.to_lowercase().contains(search_lower)
-        })
+        .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
         .map(|d| CommandBarResultItem::WorkDir {
             path: d.path.clone(),
-            kind_label: d.kind_label.clone(),
+            is_dir: d.is_dir,
         })
         .collect()
 }
@@ -221,6 +218,7 @@ pub fn filter_results(
             icon: stack_icon_for(pages, &t.url),
             pane_id: t.pane_id,
             tab_index: t.tab_index as usize,
+            location: t.location.clone(),
         }));
         items.extend(page_results(pages, ""));
         items.extend(work_dir_results(work_dirs, ""));
@@ -283,6 +281,7 @@ pub fn filter_results(
                     icon: stack_icon_for(pages, &t.url),
                     pane_id: t.pane_id,
                     tab_index: t.tab_index as usize,
+                    location: t.location.clone(),
                 });
             }
         }
@@ -667,8 +666,8 @@ mod tests {
 
     fn sample_work_dirs() -> Vec<CommandBarWorkDir> {
         vec![CommandBarWorkDir {
-            path: "/work/proj".into(),
-            kind_label: "Terminal".into(),
+            path: "/work/proj/main.rs".into(),
+            is_dir: false,
         }]
     }
 
@@ -722,7 +721,7 @@ mod tests {
             &sample_recent_files(),
         );
         assert!(results.iter().any(|r| matches!(
-            r, CommandBarResultItem::WorkDir { path, .. } if path == "/work/proj"
+            r, CommandBarResultItem::WorkDir { path, .. } if path == "/work/proj/main.rs"
         )));
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::RecentFile { title, .. } if title == "main.rs"

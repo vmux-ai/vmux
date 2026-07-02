@@ -92,11 +92,15 @@ pub struct CommandBarTab {
     pub pane_id: u64,
     pub tab_index: u32,
     pub is_active: bool,
+    /// Human-readable location of this open page, `space / pane N / stack M`,
+    /// shown instead of a generic "Stack" badge.
+    #[serde(default)]
+    pub location: String,
 }
 
-/// A working directory of a currently-open terminal/agent pane, surfaced in the
-/// command bar's "current work" section. `kind_label` is the pane kind (Terminal,
-/// Vibe, Claude, Codex).
+/// A file or directory inside a current work dir (the cwd of an open terminal/agent
+/// pane), surfaced in the command bar's "current work" section so files can be opened
+/// via `file://` fast. `is_dir` selects the icon and open behavior.
 #[derive(
     Clone,
     Debug,
@@ -111,7 +115,7 @@ pub struct CommandBarTab {
 )]
 pub struct CommandBarWorkDir {
     pub path: String,
-    pub kind_label: String,
+    pub is_dir: bool,
 }
 
 /// A recently-opened `file://` entry (from browser history), surfaced in the
@@ -611,8 +615,8 @@ mod tests {
     fn command_bar_open_event_carries_work_and_recent() {
         let event = CommandBarOpenEvent {
             work_dirs: vec![CommandBarWorkDir {
-                path: "/work/proj".into(),
-                kind_label: "Terminal".into(),
+                path: "/work/proj/main.rs".into(),
+                is_dir: false,
             }],
             recent_files: vec![CommandBarRecentFile {
                 url: "file:///work/proj/main.rs".into(),
@@ -624,7 +628,8 @@ mod tests {
         let recovered =
             rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(recovered.work_dirs.len(), 1);
-        assert_eq!(recovered.work_dirs[0].path, "/work/proj");
+        assert_eq!(recovered.work_dirs[0].path, "/work/proj/main.rs");
+        assert!(!recovered.work_dirs[0].is_dir);
         assert_eq!(recovered.recent_files[0].title, "main.rs");
     }
 }

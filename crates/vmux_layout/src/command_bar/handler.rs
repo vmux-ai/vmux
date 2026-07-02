@@ -49,19 +49,6 @@ pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u
     suffix.parse::<u32>().ok()
 }
 
-/// Pick the entity whose recorded cwd matches `dir`, preferring the most-recently
-/// active. Used by the `focus_dir` action to focus an open pane for a work dir.
-pub(crate) fn pick_terminal_for_cwd(
-    candidates: &[(Entity, String, i64)],
-    dir: &str,
-) -> Option<Entity> {
-    candidates
-        .iter()
-        .filter(|(_, cwd, _)| cwd == dir)
-        .max_by_key(|(_, _, ts)| *ts)
-        .map(|(e, _, _)| *e)
-}
-
 #[derive(Component)]
 struct CommandBarReady;
 
@@ -851,6 +838,7 @@ fn handle_open_command_bar(
         &stack_q,
         &browser_meta,
         &child_of_q,
+        &space_name,
     );
 
     let has_browser = browsers.has_browser(modal_e);
@@ -986,6 +974,7 @@ pub(crate) struct TabGatherParams<'w, 's> {
 
 /// Collect the active tab's open stacks as [`CommandBarTab`] entries, shared by the
 /// command-bar modal and the home launcher.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gather_command_bar_tabs(
     active_tab: Option<Entity>,
     all_children: &Query<&Children>,
@@ -996,6 +985,7 @@ pub(crate) fn gather_command_bar_tabs(
     stack_q: &Query<Entity, With<Stack>>,
     browser_meta: &Query<&PageMetadata, With<Browser>>,
     child_of_q: &Query<&ChildOf>,
+    space_name: &str,
 ) -> Vec<CommandBarTab> {
     let mut bar_tabs = Vec::new();
     let Some(active_tab_e) = active_tab else {
@@ -1012,7 +1002,7 @@ pub(crate) fn gather_command_bar_tabs(
     let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
     let mut tab_panes = Vec::new();
     collect_leaf_panes(active_tab_e, all_children, leaf_panes, &mut tab_panes);
-    for &pane_e in &tab_panes {
+    for (pane_pos, &pane_e) in tab_panes.iter().enumerate() {
         let is_active_pane = active_pane == Some(pane_e);
         let Ok(children) = pane_children.get(pane_e) else {
             continue;
@@ -1023,6 +1013,15 @@ pub(crate) fn gather_command_bar_tabs(
                 continue;
             }
             let stack_is_active = active_stack == Some(child) && is_active_pane;
+            let location = if space_name.is_empty() {
+                format!("pane {} / stack {}", pane_pos + 1, tab_index + 1)
+            } else {
+                format!(
+                    "{space_name} / pane {} / stack {}",
+                    pane_pos + 1,
+                    tab_index + 1
+                )
+            };
             if let Ok(tab_kids) = all_children.get(child) {
                 for browser_e in tab_kids.iter() {
                     if let Ok(meta) = browser_meta.get(browser_e) {
@@ -1032,6 +1031,7 @@ pub(crate) fn gather_command_bar_tabs(
                             pane_id: pane_e.to_bits(),
                             tab_index: tab_index as u32,
                             is_active: stack_is_active,
+                            location: location.clone(),
                         });
                     }
                 }
@@ -1198,14 +1198,6 @@ fn on_command_bar_action(
     mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
-    terminals_cwd: Query<
-        (
-            Entity,
-            &vmux_core::terminal::TerminalLaunch,
-            Option<&LastActivatedAt>,
-        ),
-        With<Terminal>,
-    >,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -1385,75 +1377,6 @@ fn on_command_bar_action(
                 }
             } // end reattach else
         }
-        "focus_dir" => {
-            let candidates: Vec<(Entity, String, i64)> = terminals_cwd
-                .iter()
-                .map(|(e, l, ts)| (e, l.cwd.clone(), ts.map(|t| t.0).unwrap_or(0)))
-                .collect();
-            if let Some(entity) = pick_terminal_for_cwd(&candidates, &evt.value) {
-                focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
-                custom_keyboard_restore = true;
-                if let Some(stack_e) = empty_stack {
-                    commands.entity(stack_e).despawn();
-                }
-            } else {
-                let cwd = std::path::PathBuf::from(&evt.value);
-                if let Some(stack_e) = empty_stack {
-                    commands.entity(stack_e).insert(PageMetadata {
-                        url: terminal_page_url.clone(),
-                        title: format!("Terminal ({})", cwd.display()),
-                        ..default()
-                    });
-                    writer_params.p3().write(TerminalSpawnRequest {
-                        cwd: Some(cwd),
-                        target_stack: Some(stack_e),
-                    });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
-                    custom_keyboard_restore = true;
-                } else {
-                    let (_, active_pane_opt, _) = focused_stack(
-                        queries.active_tab_param.get(),
-                        &queries.all_children,
-                        &queries.leaf_panes,
-                        &queries.pane_ts,
-                        &queries.pane_children,
-                        &queries.stack_ts,
-                    );
-                    if let Some(pane_e) = active_pane_opt {
-                        let stack_e = commands
-                            .spawn((
-                                crate::stack::stack_bundle(),
-                                LastActivatedAt::now(),
-                                ChildOf(pane_e),
-                            ))
-                            .id();
-                        commands.entity(stack_e).insert(PageMetadata {
-                            url: terminal_page_url.clone(),
-                            title: format!("Terminal ({})", cwd.display()),
-                            ..default()
-                        });
-                        writer_params.p3().write(TerminalSpawnRequest {
-                            cwd: Some(cwd),
-                            target_stack: Some(stack_e),
-                        });
-                        custom_keyboard_restore = true;
-                    } else {
-                        let cmd =
-                            AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                                url: Some("vmux://terminal/".into()),
-                            }));
-                        issued.write(vmux_command::CommandIssued {
-                            caller,
-                            command: cmd.clone(),
-                        });
-                        writer_params.p0().write(cmd);
-                    }
-                }
-            }
-        }
         "command" => {
             if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
                 let sid = uuid::Uuid::new_v4().to_string();
@@ -1566,14 +1489,26 @@ fn on_command_bar_action(
                 && let Some(target_pane) =
                     queries.leaf_panes.iter().find(|e| e.to_bits() == pane_id)
             {
-                commands.entity(target_pane).insert(LastActivatedAt::now());
-                if let Ok(children) = queries.pane_children.get(target_pane) {
+                let target_stack = {
                     let stack_q = stack_params.p0();
-                    let stacks: Vec<Entity> =
-                        children.iter().filter(|&e| stack_q.contains(e)).collect();
-                    if let Some(&target_stack) = stacks.get(tab_index) {
-                        commands.entity(target_stack).insert(LastActivatedAt::now());
-                    }
+                    queries
+                        .pane_children
+                        .get(target_pane)
+                        .ok()
+                        .and_then(|children| {
+                            children
+                                .iter()
+                                .filter(|&e| stack_q.contains(e))
+                                .nth(tab_index)
+                        })
+                };
+                // Activate the whole chain (stack -> pane -> tab -> space), not just the
+                // pane/stack, so switching to a page in another tab actually moves the
+                // active-tab marker (ensure_active_tab derives Active from LastActivatedAt).
+                if let Some(target_stack) = target_stack {
+                    focus_pane_entity(target_stack, &mut commands, &queries.child_of_q);
+                } else {
+                    focus_pane_entity(target_pane, &mut commands, &queries.child_of_q);
                 }
             }
         }
@@ -2642,20 +2577,6 @@ mod tests {
             parse_pid_from_url("vmux://terminal/99999999999999999", TEST_TERMINAL_URL),
             None
         );
-    }
-
-    #[test]
-    fn pick_terminal_prefers_most_recent_for_cwd() {
-        let a = Entity::from_bits(1);
-        let b = Entity::from_bits(2);
-        let c = Entity::from_bits(3);
-        let cands = vec![
-            (a, "/work".to_string(), 10),
-            (b, "/work".to_string(), 30),
-            (c, "/other".to_string(), 99),
-        ];
-        assert_eq!(pick_terminal_for_cwd(&cands, "/work"), Some(b));
-        assert_eq!(pick_terminal_for_cwd(&cands, "/missing"), None);
     }
 
     #[test]

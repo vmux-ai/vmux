@@ -304,7 +304,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 emit_action_with_target("open", &format!("file://{path}"), open_target);
             }
             ResultItem::WorkDir { path, .. } => {
-                emit_action("focus_dir", path);
+                emit_action_with_target("open", &format!("file://{path}"), open_target);
             }
             ResultItem::RecentFile { url, .. } => {
                 emit_action_with_target("open", url, open_target);
@@ -498,7 +498,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                                 span { class: result_trailing_slot_class() }
                             },
-                            ResultItem::Stack { title, url, icon, .. } => rsx! {
+                            ResultItem::Stack { title, url, icon, location, .. } => rsx! {
                                 div { class: result_content_row_class(),
                                     PageIconView {
                                         icon: icon.clone(),
@@ -511,7 +511,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         span { class: result_secondary_text_class(), "{url}" }
                                     }
                                 }
-                                span { class: result_trailing_slot_class(), "Stack" }
+                                span { class: result_trailing_slot_class(),
+                                    if location.is_empty() { "Stack" } else { "{location}" }
+                                }
                             },
                             ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
                                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
@@ -623,7 +625,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     }
                                 }
                             },
-                            ResultItem::WorkDir { path, kind_label } => {
+                            ResultItem::WorkDir { path, is_dir } => {
                                 let name = path
                                     .trim_end_matches('/')
                                     .rsplit('/')
@@ -632,15 +634,26 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     .to_string();
                                 rsx! {
                                     div { class: result_content_row_class(),
-                                        Icon { class: result_leading_icon_class(),
-                                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                        if *is_dir {
+                                            Icon { class: result_leading_icon_class(),
+                                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                            }
+                                        } else {
+                                            Icon { class: result_leading_icon_class(),
+                                                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                            }
                                         }
                                         div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                             span { class: result_primary_text_class(), "{name}" }
                                             span { class: result_secondary_text_class(), "{path}" }
                                         }
                                     }
-                                    span { class: result_trailing_slot_class(), "{kind_label}" }
+                                    if *is_dir {
+                                        span { class: result_trailing_slot_class() }
+                                    } else {
+                                        span { class: result_trailing_slot_class(), "\u{21b5}" }
+                                    }
                                 }
                             },
                             ResultItem::RecentFile { url, title } => {
