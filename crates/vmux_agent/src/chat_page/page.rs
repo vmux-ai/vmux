@@ -42,20 +42,49 @@ pub fn Page() -> Element {
     });
 
     rsx! {
-        main { class: "flex h-screen flex-col bg-background text-foreground",
-            header { class: "flex items-center gap-2 border-b border-foreground/10 px-4 py-2.5",
-                span { class: "h-2 w-2 rounded-full bg-emerald-500" }
-                span { class: "text-sm font-semibold capitalize", "{agent}" }
+        main {
+            class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
+            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
+            div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
+                div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
             }
-            div { class: "flex-1 overflow-y-auto px-4 py-6",
+            header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
+                span { class: "h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]" }
+                span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
+                    "{agent}"
+                }
+            }
+            div { class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
+                    if messages.read().is_empty() && status() == "idle" {
+                        div { class: "flex flex-col items-center gap-2 py-24 text-center",
+                            h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
+                                "{agent}"
+                            }
+                            p { class: "text-sm text-muted-foreground", "Ready when you are." }
+                        }
+                    }
                     for (i , msg) in messages.read().iter().enumerate() {
                         {render_message(i, msg)}
                     }
                     if status() == "streaming" {
-                        div { class: "flex items-center gap-2 text-sm text-muted-foreground",
-                            span { class: "h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/40 border-t-foreground" }
-                            "Working…"
+                        div { class: "flex items-center gap-2.5 text-sm",
+                            span { class: "flex items-end gap-1",
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
+                            }
+                            span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "Working…" }
+                        }
+                    }
+                    if status() == "installing" {
+                        div { class: "flex items-center gap-2.5 text-sm",
+                            span { class: "flex items-end gap-1",
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
+                            }
+                            span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{error}" }
                         }
                     }
                     if status() == "errored" {
@@ -102,10 +131,10 @@ pub fn Page() -> Element {
                 }
             }
 
-            div { class: "border-t border-foreground/10 px-4 py-3",
+            div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
                 div { class: "mx-auto flex max-w-3xl items-end gap-2",
                     textarea {
-                        class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3 py-2 text-sm ring-1 ring-inset ring-foreground/10 focus:outline-none focus:ring-foreground/20",
+                        class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
                         rows: "1",
                         placeholder: "Message the agent…",
                         value: "{draft}",
@@ -113,13 +142,13 @@ pub fn Page() -> Element {
                         onkeydown: move |e| {
                             if e.key() == Key::Enter && !e.modifiers().shift() {
                                 e.prevent_default();
-                                do_submit(draft);
+                                do_submit(draft, messages, status);
                             }
                         },
                     }
                     button {
                         class: "rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background hover:brightness-110 active:scale-[0.99]",
-                        onclick: move |_| do_submit(draft),
+                        onclick: move |_| do_submit(draft, messages, status),
                         "Send"
                     }
                 }
@@ -128,11 +157,19 @@ pub fn Page() -> Element {
     }
 }
 
-fn do_submit(mut draft: Signal<String>) {
+fn do_submit(
+    mut draft: Signal<String>,
+    mut messages: Signal<Vec<ChatMessage>>,
+    mut status: Signal<String>,
+) {
     let text = draft.peek().trim().to_string();
     if text.is_empty() {
         return;
     }
+    // Optimistically append the prompt + show a working state so it appears instantly; the host
+    // snapshot (which includes this same user turn) reconciles it.
+    messages.write().push(ChatMessage::User { text: text.clone() });
+    status.set("streaming".to_string());
     let _ = try_cef_bin_emit_rkyv(&ChatSubmit { text });
     draft.set(String::new());
 }
@@ -191,5 +228,44 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                 }
             }
         },
+        ChatBlock::Diff {
+            path,
+            old_text,
+            new_text,
+            ..
+        } => {
+            let old = old_text.as_deref().unwrap_or("");
+            let lines: Vec<(String, &'static str)> =
+                similar::TextDiff::from_lines(old, new_text.as_str())
+                    .iter_all_changes()
+                    .filter_map(|c| match c.tag() {
+                        similar::ChangeTag::Delete => Some((
+                            format!("- {}", c.value().trim_end_matches('\n')),
+                            "px-3 bg-red-500/10 text-red-300",
+                        )),
+                        similar::ChangeTag::Insert => Some((
+                            format!("+ {}", c.value().trim_end_matches('\n')),
+                            "px-3 bg-emerald-500/10 text-emerald-300",
+                        )),
+                        similar::ChangeTag::Equal => None,
+                    })
+                    .collect();
+            let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
+            rsx! {
+                div {
+                    key: "{key}",
+                    class: "overflow-hidden rounded-xl ring-1 ring-inset ring-foreground/10",
+                    div { class: "flex items-center gap-2 border-b border-foreground/10 bg-foreground/[0.05] px-3 py-1.5",
+                        span { class: "font-mono text-xs font-medium text-amber-400", "{fname}" }
+                        span { class: "text-[10px] uppercase tracking-wide text-muted-foreground", "proposed edit" }
+                    }
+                    div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
+                        for (i , (line , cls)) in lines.iter().enumerate() {
+                            div { key: "{i}", class: "{cls}", "{line}" }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

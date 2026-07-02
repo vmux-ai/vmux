@@ -109,6 +109,7 @@ pub fn messages_to_chat_completions(messages: &[Message]) -> Vec<Value> {
                             "type":"function",
                             "function": {"name": name, "arguments": args}
                         })),
+                        AssistantBlock::Diff { .. } => {}
                     }
                 }
                 let mut obj = json!({"role":"assistant","content": content});

@@ -59,6 +59,7 @@ fn messages_to_responses_input(messages: &[Message]) -> Vec<Value> {
                         } => out.push(json!({
                             "type":"function_call","call_id":call_id,"name":name,"arguments":args
                         })),
+                        AssistantBlock::Diff { .. } => {}
                     }
                 }
                 if !content_parts.is_empty() {

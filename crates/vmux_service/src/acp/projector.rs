@@ -39,6 +39,13 @@ impl AcpProjector {
         &self.messages
     }
 
+    /// Record the user's prompt as its own turn. ACP never echoes the prompt back as a
+    /// `session/update`, so without this the transcript the chat renders would omit it and
+    /// the optimistic user bubble would vanish on the next snapshot.
+    pub fn push_user(&mut self, text: String) {
+        self.messages.push(Message::User { text });
+    }
+
     /// Feed one update; returns the side effects the driver should emit.
     pub fn apply(&mut self, update: SessionUpdate) -> Vec<Intent> {
         match update {
@@ -74,9 +81,11 @@ impl AcpProjector {
         let mut intents = vec![Intent::Snapshot];
         for content in &tc.content {
             if let ToolCallContent::Diff(diff) = content {
+                let path = diff.path.to_string_lossy().into_owned();
+                self.upsert_diff(&call_id, &path, diff.old_text.clone(), diff.new_text.clone());
                 intents.push(Intent::ProposedDiff {
                     call_id: call_id.clone(),
-                    path: diff.path.to_string_lossy().into_owned(),
+                    path,
                     old_text: diff.old_text.clone(),
                     new_text: diff.new_text.clone(),
                 });
@@ -130,6 +139,39 @@ impl AcpProjector {
             }),
         }
     }
+
+    fn upsert_diff(&mut self, call_id: &str, path: &str, old_text: Option<String>, new_text: String) {
+        for message in self.messages.iter_mut() {
+            if let Message::Assistant { blocks } = message {
+                for block in blocks.iter_mut() {
+                    if let AssistantBlock::Diff {
+                        call_id: existing,
+                        old_text: eo,
+                        new_text: en,
+                        ..
+                    } = block
+                        && existing == call_id
+                    {
+                        *eo = old_text;
+                        *en = new_text;
+                        return;
+                    }
+                }
+            }
+        }
+        let block = AssistantBlock::Diff {
+            call_id: call_id.to_string(),
+            path: path.to_string(),
+            old_text,
+            new_text,
+        };
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+    }
 }
 
 fn raw_input_json(raw: Option<&serde_json::Value>) -> String {
@@ -168,6 +210,26 @@ mod tests {
             p.messages()[0],
             Message::Assistant {
                 blocks: vec![AssistantBlock::Text("Hello".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn push_user_records_a_turn_before_following_assistant_text() {
+        let mut p = AcpProjector::new();
+        p.push_user("hi".to_string());
+        p.apply(chunk("hello"));
+        assert_eq!(p.messages().len(), 2);
+        assert_eq!(
+            p.messages()[0],
+            Message::User {
+                text: "hi".to_string()
+            }
+        );
+        assert_eq!(
+            p.messages()[1],
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Text("hello".to_string())],
             }
         );
     }

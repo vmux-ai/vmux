@@ -240,6 +240,12 @@ pub async fn run(
             while let Some(input) = input_rx.recv().await {
                 match input {
                     AcpInput::User(text) => {
+                        main_shared
+                            .projector
+                            .lock()
+                            .unwrap()
+                            .push_user(text.clone());
+                        main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();

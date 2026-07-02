@@ -62,6 +62,7 @@ fn messages_to_anthropic_blocks(messages: &[Message]) -> Vec<Value> {
                             "name":name,
                             "input": serde_json::from_str::<Value>(args).unwrap_or(json!({}))
                         }),
+                        AssistantBlock::Diff { .. } => json!({"type":"text","text":""}),
                     })
                     .collect();
                 out.push(json!({"role":"assistant","content": content}));

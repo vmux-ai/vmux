@@ -86,6 +86,12 @@ pub enum ChatBlock {
         name: String,
         args: String,
     },
+    Diff {
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

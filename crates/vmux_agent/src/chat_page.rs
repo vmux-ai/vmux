@@ -77,6 +77,13 @@ fn snapshot_of(messages: &AgentMessages, state: &AgentRunState) -> ChatSnapshot 
     let messages_json = serde_json::to_string(&messages.0).unwrap_or_else(|_| "[]".to_string());
     let (status, error, call_id, name) = match state {
         AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
+        AgentRunState::Installing { pct, message } => {
+            let text = match pct {
+                Some(p) => format!("{message} ({p}%)"),
+                None => message.clone(),
+            };
+            ("installing", text, String::new(), String::new())
+        }
         AgentRunState::Streaming => ("streaming", String::new(), String::new(), String::new()),
         AgentRunState::AwaitingApproval { call_id, name, .. } => {
             ("awaiting", String::new(), call_id.clone(), name.clone())

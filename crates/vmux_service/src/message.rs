@@ -23,6 +23,13 @@ pub enum AssistantBlock {
         name: String,
         args: String,
     },
+    /// A proposed file edit (ACP `ToolCallContent::Diff`), rendered as an inline diff in the chat.
+    Diff {
+        call_id: String,
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
 }
 
 #[cfg(test)]
