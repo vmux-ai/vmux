@@ -1046,7 +1046,6 @@ pub fn handle_open_beside_requests(
                     let old_leaf_info = leaf_info_for_pane(
                         req.pane,
                         &pane_children,
-                        &child_of_q,
                         &rc.seq_q,
                         &rc.node_q,
                         &rc.page_q,
@@ -1124,7 +1123,6 @@ pub fn handle_open_beside_requests(
             &rc.all_children,
             &leaf_panes,
             &pane_children,
-            &child_of_q,
             &rc.seq_q,
             &rc.node_q,
             &rc.page_q,
@@ -1164,9 +1162,6 @@ pub fn handle_open_beside_requests(
             }
             crate::placement::Placement::Spiral { anchor, axis } => {
                 let old_leaf_info = leaves.iter().find(|leaf| leaf.pane == anchor).cloned();
-                let keep_holder_as_tail = old_leaf_info
-                    .as_ref()
-                    .is_some_and(|info| !info.kinds.contains(&crate::placement::PageKind::Agent));
                 let existing_tabs = stack_children_for_split(
                     anchor,
                     &pane_children,
@@ -1187,13 +1182,6 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_stacks,
                     &mut retired_leaf_panes,
                 );
-                let keep_holder_as_tail = keep_holder_as_tail
-                    && crate::placement::page_kind_for_url(&req.url)
-                        != crate::placement::PageKind::Browser;
-                let tail = split
-                    .holder
-                    .filter(|_| keep_holder_as_tail)
-                    .unwrap_or(split.target);
                 stamp_split_panes_for_batch(
                     &mut commands,
                     &mut spawn_counter,
@@ -1202,7 +1190,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     split.holder,
                     split.target,
-                    tail,
+                    split.target,
                 );
                 let pending_size = split
                     .target_size
@@ -1454,7 +1442,6 @@ fn record_pending_leaf_info(
         .entry(pane)
         .or_insert_with(|| crate::placement::LeafInfo {
             pane,
-            parent: None,
             kinds: Vec::new(),
             spawn_seq,
             size,
@@ -1512,7 +1499,6 @@ fn stack_children_for_split(
 fn leaf_info_for_pane(
     pane: Entity,
     pane_children: &Query<&Children, With<Pane>>,
-    child_of_q: &Query<&ChildOf>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
@@ -1528,7 +1514,6 @@ fn leaf_info_for_pane(
     );
     Some(crate::placement::LeafInfo {
         pane,
-        parent: child_of_q.get(pane).ok().map(|parent| parent.get()),
         kinds,
         spawn_seq: spawn_seq_overrides
             .get(&pane)
@@ -1559,7 +1544,6 @@ fn collect_leaf_infos(
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: &Query<&Children, With<Pane>>,
-    child_of_q: &Query<&ChildOf>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
@@ -1582,7 +1566,6 @@ fn collect_leaf_infos(
                 .unwrap_or_default();
             crate::placement::LeafInfo {
                 pane,
-                parent: child_of_q.get(pane).ok().map(|parent| parent.get()),
                 kinds,
                 spawn_seq: spawn_seq_overrides
                     .get(&pane)
@@ -1696,7 +1679,6 @@ pub fn resolve_spiral_pane(
         &ctx.all_children,
         &ctx.leaf_panes,
         &ctx.pane_children,
-        &ctx.child_of_q,
         &ctx.seq_q,
         &ctx.node_q,
         &ctx.page_q,
@@ -1726,7 +1708,6 @@ pub fn resolve_split_anchor_pane(anchor_pane: Entity, ctx: &PlacementCtx) -> Ent
         &ctx.all_children,
         &ctx.leaf_panes,
         &ctx.pane_children,
-        &ctx.child_of_q,
         &ctx.seq_q,
         &ctx.node_q,
         &ctx.page_q,
@@ -3108,7 +3089,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_batched_new_types_dwindle_from_remaining_tail() {
+    fn auto_batched_new_types_split_from_newest_target() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3179,11 +3160,11 @@ mod tests {
         let file_split = app.world().get::<ChildOf>(file_parent).unwrap().get();
         assert_eq!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            browser_split
+            file_split
         );
         assert_eq!(
-            app.world().get::<ChildOf>(browser_split).unwrap().get(),
-            file_split
+            app.world().get::<ChildOf>(file_split).unwrap().get(),
+            browser_split
         );
         assert_eq!(
             app.world().get::<PaneSplit>(agent_pane).unwrap().direction,
@@ -3194,11 +3175,11 @@ mod tests {
                 .get::<PaneSplit>(browser_split)
                 .unwrap()
                 .direction,
-            PaneSplitDirection::Row
+            PaneSplitDirection::Column
         );
         assert_eq!(
             app.world().get::<PaneSplit>(file_split).unwrap().direction,
-            PaneSplitDirection::Column
+            PaneSplitDirection::Row
         );
     }
 
@@ -3503,7 +3484,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_first_file_splits_browser_when_terminal_is_newer() {
+    fn auto_first_file_splits_terminal_when_terminal_is_newer() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3565,12 +3546,12 @@ mod tests {
 
         assert_eq!(
             app.world().get::<ChildOf>(file_parent).unwrap().get(),
-            browser_pane,
-            "first file should split the browser pane, not the newer terminal pane"
+            terminal_pane,
+            "first file should split the newest terminal pane"
         );
         assert!(
-            app.world().get::<PaneSplit>(terminal_pane).is_none(),
-            "terminal pane must not split for first file"
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "browser pane must not split for first file"
         );
     }
 
@@ -3651,7 +3632,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_file_after_terminal_ignores_stale_file_bucket_when_browser_is_tail() {
+    fn auto_file_after_terminal_stacks_in_existing_file_bucket() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3711,24 +3692,16 @@ mod tests {
                 .unwrap()
         };
         let stale_file_parent = parent_for_url("file:///repo/.git/refs/heads/main");
-        let browser_parent = parent_for_url("https://news.ycombinator.com/news");
         let terminal_parent = parent_for_url("vmux://terminal/");
         let readme_parent = parent_for_url("file:///repo/README.md");
-        let readme_split = app.world().get::<ChildOf>(readme_parent).unwrap().get();
 
         assert_eq!(
-            readme_split,
-            app.world().get::<ChildOf>(browser_parent).unwrap().get(),
-            "README should split the browser pane"
-        );
-        assert_ne!(
-            readme_split,
-            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            "README must not split the terminal pane"
-        );
-        assert_ne!(
             readme_parent, stale_file_parent,
-            "README must not tab into stale setup files"
+            "README should tab into the existing file pane"
+        );
+        assert_ne!(
+            readme_parent, terminal_parent,
+            "README must not tab into the terminal pane"
         );
     }
 

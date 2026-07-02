@@ -40,7 +40,6 @@ pub enum Placement {
 #[derive(Debug, Clone)]
 pub struct LeafInfo {
     pub pane: Entity,
-    pub parent: Option<Entity>,
     pub kinds: Vec<PageKind>,
     pub spawn_seq: u64,
     pub size: Vec2,
@@ -72,10 +71,6 @@ fn newest_leaf_with_kind(leaves: &[LeafInfo], kind: PageKind) -> Option<&LeafInf
         .iter()
         .filter(|l| l.kinds.len() == 1 && l.kinds.contains(&kind))
         .max_by_key(|l| l.spawn_seq)
-}
-
-fn same_parent(a: &LeafInfo, b: &LeafInfo) -> bool {
-    a.parent.is_some() && a.parent == b.parent
 }
 
 fn file_reuse_key(url: &str) -> &str {
@@ -125,28 +120,7 @@ pub fn resolve_placement(
         return Placement::AddTab { pane: self_pane };
     }
 
-    if kind == PageKind::File {
-        let same_file = newest_leaf_with_kind(leaves, PageKind::File);
-        let browser = newest_leaf_with_kind(leaves, PageKind::Browser);
-        if let Some(file) = same_file {
-            if let Some(browser) = browser
-                && browser.spawn_seq > file.spawn_seq
-                && !same_parent(file, browser)
-            {
-                return Placement::Spiral {
-                    anchor: browser.pane,
-                    axis: longer_axis(browser.size),
-                };
-            }
-            return Placement::AddTab { pane: file.pane };
-        }
-        if let Some(browser) = browser {
-            return Placement::Spiral {
-                anchor: browser.pane,
-                axis: longer_axis(browser.size),
-            };
-        }
-    } else if let Some(same) = newest_leaf_with_kind(leaves, kind) {
+    if let Some(same) = newest_leaf_with_kind(leaves, kind) {
         return Placement::AddTab { pane: same.pane };
     }
 
@@ -195,7 +169,6 @@ mod tests {
     fn leaf(pane: u64, kinds: &[PageKind], seq: u64, size: (f32, f32)) -> LeafInfo {
         LeafInfo {
             pane: e(pane),
-            parent: None,
             kinds: kinds.to_vec(),
             spawn_seq: seq,
             size: Vec2::new(size.0, size.1),
@@ -327,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn first_file_prefers_browser_leaf_over_newer_terminal_leaf() {
+    fn first_file_splits_newest_terminal_when_no_file_bucket_exists() {
         let leaves = [
             leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
             leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
@@ -337,7 +310,7 @@ mod tests {
         assert_eq!(
             got,
             Placement::Spiral {
-                anchor: e(2),
+                anchor: e(3),
                 axis: PaneSplitDirection::Row
             }
         );
