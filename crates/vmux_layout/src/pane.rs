@@ -1046,6 +1046,7 @@ pub fn handle_open_beside_requests(
                     let old_leaf_info = leaf_info_for_pane(
                         req.pane,
                         &pane_children,
+                        &child_of_q,
                         &rc.seq_q,
                         &rc.node_q,
                         &rc.page_q,
@@ -1123,6 +1124,7 @@ pub fn handle_open_beside_requests(
             &rc.all_children,
             &leaf_panes,
             &pane_children,
+            &child_of_q,
             &rc.seq_q,
             &rc.node_q,
             &rc.page_q,
@@ -1185,6 +1187,9 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_stacks,
                     &mut retired_leaf_panes,
                 );
+                let keep_holder_as_tail = keep_holder_as_tail
+                    && crate::placement::page_kind_for_url(&req.url)
+                        != crate::placement::PageKind::Browser;
                 let tail = split
                     .holder
                     .filter(|_| keep_holder_as_tail)
@@ -1449,6 +1454,7 @@ fn record_pending_leaf_info(
         .entry(pane)
         .or_insert_with(|| crate::placement::LeafInfo {
             pane,
+            parent: None,
             kinds: Vec::new(),
             spawn_seq,
             size,
@@ -1506,6 +1512,7 @@ fn stack_children_for_split(
 fn leaf_info_for_pane(
     pane: Entity,
     pane_children: &Query<&Children, With<Pane>>,
+    child_of_q: &Query<&ChildOf>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
@@ -1521,6 +1528,7 @@ fn leaf_info_for_pane(
     );
     Some(crate::placement::LeafInfo {
         pane,
+        parent: child_of_q.get(pane).ok().map(|parent| parent.get()),
         kinds,
         spawn_seq: spawn_seq_overrides
             .get(&pane)
@@ -1551,6 +1559,7 @@ fn collect_leaf_infos(
     all_children: &Query<&Children>,
     leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: &Query<&Children, With<Pane>>,
+    child_of_q: &Query<&ChildOf>,
     seq_q: &Query<&SpawnSeq>,
     node_q: &Query<&ComputedNode>,
     page_q: &Query<&vmux_core::PageMetadata, With<Stack>>,
@@ -1573,6 +1582,7 @@ fn collect_leaf_infos(
                 .unwrap_or_default();
             crate::placement::LeafInfo {
                 pane,
+                parent: child_of_q.get(pane).ok().map(|parent| parent.get()),
                 kinds,
                 spawn_seq: spawn_seq_overrides
                     .get(&pane)
@@ -1686,6 +1696,7 @@ pub fn resolve_spiral_pane(
         &ctx.all_children,
         &ctx.leaf_panes,
         &ctx.pane_children,
+        &ctx.child_of_q,
         &ctx.seq_q,
         &ctx.node_q,
         &ctx.page_q,
@@ -1715,6 +1726,7 @@ pub fn resolve_split_anchor_pane(anchor_pane: Entity, ctx: &PlacementCtx) -> Ent
         &ctx.all_children,
         &ctx.leaf_panes,
         &ctx.pane_children,
+        &ctx.child_of_q,
         &ctx.seq_q,
         &ctx.node_q,
         &ctx.page_q,
@@ -3559,6 +3571,164 @@ mod tests {
         assert!(
             app.world().get::<PaneSplit>(terminal_pane).is_none(),
             "terminal pane must not split for first file"
+        );
+    }
+
+    #[test]
+    fn auto_browser_open_after_files_becomes_anchor_for_terminal() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "file:///repo/.git/HEAD",
+            "file:///repo/.git/refs/heads/main",
+            "https://news.ycombinator.com/news",
+            "vmux://terminal/",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+            app.update();
+            materialize_page_metadata(&mut app);
+        }
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let file_parent = parent_for_url("file:///repo/.git/refs/heads/main");
+        let browser_parent = parent_for_url("https://news.ycombinator.com/news");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+        let terminal_split = app.world().get::<ChildOf>(terminal_parent).unwrap().get();
+
+        assert_eq!(
+            terminal_split,
+            app.world().get::<ChildOf>(browser_parent).unwrap().get(),
+            "terminal should split the browser pane when the browser opened after files"
+        );
+        assert_ne!(
+            terminal_split,
+            app.world().get::<ChildOf>(file_parent).unwrap().get(),
+            "terminal must not split the older file pane"
+        );
+    }
+
+    #[test]
+    fn auto_file_after_terminal_ignores_stale_file_bucket_when_browser_is_tail() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "file:///repo/.git/HEAD",
+            "file:///repo/.git/refs/heads/main",
+            "https://news.ycombinator.com/news",
+            "vmux://terminal/",
+            "file:///repo/README.md",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+            app.update();
+            materialize_page_metadata(&mut app);
+        }
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let stale_file_parent = parent_for_url("file:///repo/.git/refs/heads/main");
+        let browser_parent = parent_for_url("https://news.ycombinator.com/news");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+        let readme_parent = parent_for_url("file:///repo/README.md");
+        let readme_split = app.world().get::<ChildOf>(readme_parent).unwrap().get();
+
+        assert_eq!(
+            readme_split,
+            app.world().get::<ChildOf>(browser_parent).unwrap().get(),
+            "README should split the browser pane"
+        );
+        assert_ne!(
+            readme_split,
+            app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
+            "README must not split the terminal pane"
+        );
+        assert_ne!(
+            readme_parent, stale_file_parent,
+            "README must not tab into stale setup files"
         );
     }
 
