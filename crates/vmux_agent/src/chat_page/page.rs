@@ -24,6 +24,18 @@ pub fn Page() -> Element {
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String)>::None);
     let mut draft = use_signal(String::new);
+    let mut elapsed = use_signal(|| 0u32);
+
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            if matches!(status().as_str(), "streaming" | "installing") {
+                elapsed.set(elapsed() + 1);
+            } else if elapsed() != 0 {
+                elapsed.set(0);
+            }
+        }
+    });
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
         if let Ok(parsed) = serde_json::from_str::<Vec<ChatMessage>>(&snap.messages_json) {
@@ -75,6 +87,7 @@ pub fn Page() -> Element {
                                 span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
                             }
                             span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "Working…" }
+                            span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed())}" }
                         }
                     }
                     if status() == "installing" {
@@ -198,15 +211,20 @@ fn render_message(key: usize, msg: &ChatMessage) -> Element {
             content, is_error, ..
         } => {
             let tone = if *is_error {
-                "bg-red-500/10 text-red-500"
+                "text-red-500"
             } else {
-                "bg-foreground/[0.05] text-muted-foreground"
+                "text-muted-foreground"
             };
+            let label = if *is_error { "Error" } else { "Output" };
             rsx! {
-                div {
+                details {
                     key: "{key}",
-                    class: "max-w-[85%] self-start overflow-x-auto whitespace-pre-wrap rounded-xl px-3 py-2 font-mono text-xs {tone}",
-                    "{content}"
+                    class: "group max-w-[85%] self-start rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs {tone} list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                        span { "{label}" }
+                    }
+                    pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground", "{content}" }
                 }
             }
         }
@@ -218,13 +236,50 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         ChatBlock::Text(text) => rsx! {
             div { key: "{key}", class: "whitespace-pre-wrap text-sm leading-relaxed", "{text}" }
         },
-        ChatBlock::ToolUse { name, args, .. } => rsx! {
-            div {
+        ChatBlock::Thinking(text) => rsx! {
+            details {
                 key: "{key}",
-                class: "rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                div { class: "font-mono text-xs text-amber-500", "{name}" }
+                class: "group rounded-xl bg-foreground/[0.03] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
+                    span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                    span { class: "font-medium", "Thinking" }
+                }
+                div { class: "mt-2 whitespace-pre-wrap border-l-2 border-foreground/10 pl-3 text-xs italic leading-relaxed text-muted-foreground", "{text}" }
+            }
+        },
+        ChatBlock::ToolUse { name, args, .. } => rsx! {
+            details {
+                key: "{key}",
+                class: "group rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                    span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                    span { class: "font-mono text-xs text-amber-500", "{name}" }
+                }
                 if !args.is_empty() && args != "{}" {
-                    pre { class: "mt-1 overflow-x-auto font-mono text-[11px] text-muted-foreground", "{args}" }
+                    pre { class: "mt-1.5 overflow-x-auto font-mono text-[11px] text-muted-foreground", "{args}" }
+                }
+            }
+        },
+        ChatBlock::Plan { steps } => {
+            let n = steps.len();
+            rsx! {
+                details {
+                    key: "{key}",
+                    open: true,
+                    class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                        span { class: "font-medium text-foreground", "Plan" }
+                        span { class: "text-muted-foreground", "· {n} tasks" }
+                    }
+                    ul { class: "mt-2 flex flex-col gap-1.5",
+                        for (i , step) in steps.iter().enumerate() {
+                            li { key: "{i}", class: "flex items-start gap-2 text-xs",
+                                span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
+                                span { class: plan_text_class(&step.status), "{step.content}" }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -267,5 +322,37 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                 }
             }
         }
+    }
+}
+
+fn fmt_elapsed(secs: u32) -> String {
+    if secs >= 60 {
+        format!("{}:{:02}", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+fn plan_glyph(status: &str) -> &'static str {
+    match status {
+        "completed" => "✓",
+        "in_progress" => "◐",
+        _ => "○",
+    }
+}
+
+fn plan_glyph_class(status: &str) -> &'static str {
+    match status {
+        "completed" => "text-emerald-500",
+        "in_progress" => "text-amber-500",
+        _ => "text-muted-foreground",
+    }
+}
+
+fn plan_text_class(status: &str) -> &'static str {
+    match status {
+        "completed" => "text-muted-foreground line-through",
+        "in_progress" => "text-foreground",
+        _ => "text-muted-foreground",
     }
 }

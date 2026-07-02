@@ -81,6 +81,7 @@ pub enum ChatMessage {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatBlock {
     Text(String),
+    Thinking(String),
     ToolUse {
         call_id: String,
         name: String,
@@ -92,6 +93,16 @@ pub enum ChatBlock {
         old_text: Option<String>,
         new_text: String,
     },
+    Plan {
+        steps: Vec<ChatPlanStep>,
+    },
+}
+
+/// Mirror of `vmux_service::message::PlanStep`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ChatPlanStep {
+    pub content: String,
+    pub status: String,
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

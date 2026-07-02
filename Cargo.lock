@@ -10025,6 +10025,7 @@ dependencies = [
  "dioxus",
  "futures-lite",
  "futures-util",
+ "gloo-timers",
  "mockito",
  "notify 6.1.1",
  "reqwest",

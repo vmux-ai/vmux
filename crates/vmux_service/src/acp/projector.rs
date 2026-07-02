@@ -1,9 +1,10 @@
 //! Projects ACP `session/update` notifications into the vmux [`Message`] transcript that
 //! the chat UI already renders (the same shape the provider-direct path produces).
 
-use crate::message::{AssistantBlock, Message};
+use crate::message::{AssistantBlock, Message, PlanStep};
 use agent_client_protocol::schema::v1::{
-    ContentBlock, SessionUpdate, ToolCall, ToolCallContent, ToolCallUpdate,
+    ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus,
+    ToolCallUpdate,
 };
 
 /// A side effect the driver performs after feeding a `SessionUpdate` to the projector.
@@ -50,10 +51,63 @@ impl AcpProjector {
     pub fn apply(&mut self, update: SessionUpdate) -> Vec<Intent> {
         match update {
             SessionUpdate::AgentMessageChunk(chunk) => self.append_assistant_text(chunk.content),
+            SessionUpdate::AgentThoughtChunk(chunk) => self.append_thinking(chunk.content),
             SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
             SessionUpdate::ToolCallUpdate(update) => self.apply_tool_call_update(update),
+            SessionUpdate::Plan(plan) => self.upsert_plan(plan),
             _ => Vec::new(),
         }
+    }
+
+    fn append_thinking(&mut self, content: ContentBlock) -> Vec<Intent> {
+        let ContentBlock::Text(text) = content else {
+            return Vec::new();
+        };
+        let text = text.text;
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => match blocks.last_mut() {
+                Some(AssistantBlock::Thinking(existing)) => existing.push_str(&text),
+                _ => blocks.push(AssistantBlock::Thinking(text)),
+            },
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Thinking(text)],
+            }),
+        }
+        vec![Intent::Snapshot]
+    }
+
+    fn upsert_plan(&mut self, plan: Plan) -> Vec<Intent> {
+        let steps: Vec<PlanStep> = plan
+            .entries
+            .iter()
+            .map(|entry| PlanStep {
+                content: entry.content.clone(),
+                status: match entry.status {
+                    PlanEntryStatus::InProgress => "in_progress",
+                    PlanEntryStatus::Completed => "completed",
+                    _ => "pending",
+                }
+                .to_string(),
+            })
+            .collect();
+        for message in self.messages.iter_mut() {
+            if let Message::Assistant { blocks } = message {
+                for block in blocks.iter_mut() {
+                    if let AssistantBlock::Plan { steps: existing } = block {
+                        *existing = steps;
+                        return vec![Intent::Snapshot];
+                    }
+                }
+            }
+        }
+        let block = AssistantBlock::Plan { steps };
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+        vec![Intent::Snapshot]
     }
 
     fn append_assistant_text(&mut self, content: ContentBlock) -> Vec<Intent> {
@@ -79,18 +133,11 @@ impl AcpProjector {
         let call_id = tc.tool_call_id.to_string();
         self.upsert_tool_use(&call_id, &tc.title, &raw_input_json(tc.raw_input.as_ref()));
         let mut intents = vec![Intent::Snapshot];
-        for content in &tc.content {
-            if let ToolCallContent::Diff(diff) = content {
-                let path = diff.path.to_string_lossy().into_owned();
-                self.upsert_diff(&call_id, &path, diff.old_text.clone(), diff.new_text.clone());
-                intents.push(Intent::ProposedDiff {
-                    call_id: call_id.clone(),
-                    path,
-                    old_text: diff.old_text.clone(),
-                    new_text: diff.new_text.clone(),
-                });
-            }
-        }
+        intents.extend(self.record_tool_content(
+            &call_id,
+            &tc.content,
+            matches!(tc.status, ToolCallStatus::Failed),
+        ));
         intents
     }
 
@@ -102,7 +149,62 @@ impl AcpProjector {
             &title,
             &raw_input_json(update.fields.raw_input.as_ref()),
         );
-        vec![Intent::Snapshot]
+        let mut intents = vec![Intent::Snapshot];
+        if let Some(content) = &update.fields.content {
+            let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
+            intents.extend(self.record_tool_content(&call_id, content, failed));
+        }
+        intents
+    }
+
+    /// Fold a tool call's content into the transcript: proposed diffs become inline diff blocks
+    /// (and a `ProposedDiff` intent), textual output becomes a `ToolResult` message. Returns the
+    /// `ProposedDiff` intents to emit.
+    fn record_tool_content(
+        &mut self,
+        call_id: &str,
+        content: &[ToolCallContent],
+        failed: bool,
+    ) -> Vec<Intent> {
+        let mut intents = Vec::new();
+        for item in content {
+            if let ToolCallContent::Diff(diff) = item {
+                let path = diff.path.to_string_lossy().into_owned();
+                self.upsert_diff(call_id, &path, diff.old_text.clone(), diff.new_text.clone());
+                intents.push(Intent::ProposedDiff {
+                    call_id: call_id.to_string(),
+                    path,
+                    old_text: diff.old_text.clone(),
+                    new_text: diff.new_text.clone(),
+                });
+            }
+        }
+        let output = tool_output_text(content);
+        if !output.is_empty() {
+            self.upsert_tool_result(call_id, output, failed);
+        }
+        intents
+    }
+
+    fn upsert_tool_result(&mut self, call_id: &str, content: String, is_error: bool) {
+        for message in self.messages.iter_mut() {
+            if let Message::ToolResult {
+                call_id: existing,
+                content: existing_content,
+                is_error: existing_error,
+            } = message
+                && existing == call_id
+            {
+                *existing_content = content;
+                *existing_error = is_error;
+                return;
+            }
+        }
+        self.messages.push(Message::ToolResult {
+            call_id: call_id.to_string(),
+            content,
+            is_error,
+        });
     }
 
     fn upsert_tool_use(&mut self, call_id: &str, name: &str, args: &str) {
@@ -177,6 +279,22 @@ impl AcpProjector {
 fn raw_input_json(raw: Option<&serde_json::Value>) -> String {
     raw.map(|v| v.to_string())
         .unwrap_or_else(|| "{}".to_string())
+}
+
+/// Concatenate the textual (non-diff) content of a tool call into a single output string.
+fn tool_output_text(content: &[ToolCallContent]) -> String {
+    let mut out = String::new();
+    for item in content {
+        if let ToolCallContent::Content(inner) = item
+            && let ContentBlock::Text(text) = &inner.content
+        {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&text.text);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -258,5 +376,74 @@ mod tests {
             )),
             other => panic!("expected assistant message, got {other:?}"),
         }
+    }
+
+    fn thought(text: &str) -> SessionUpdate {
+        SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            text,
+        ))))
+    }
+
+    #[test]
+    fn thought_chunks_accumulate_into_a_thinking_block() {
+        let mut p = AcpProjector::new();
+        p.apply(thought("plan"));
+        p.apply(thought("ning"));
+        assert_eq!(p.messages().len(), 1);
+        assert_eq!(
+            p.messages()[0],
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Thinking("planning".to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn plan_update_replaces_the_single_plan_block() {
+        use agent_client_protocol::schema::v1::{Plan, PlanEntry, PlanEntryPriority};
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
+            "step one",
+            PlanEntryPriority::High,
+            PlanEntryStatus::Pending,
+        )])));
+        p.apply(SessionUpdate::Plan(Plan::new(vec![PlanEntry::new(
+            "step one",
+            PlanEntryPriority::High,
+            PlanEntryStatus::Completed,
+        )])));
+        let blocks = match &p.messages()[0] {
+            Message::Assistant { blocks } => blocks,
+            other => panic!("expected assistant, got {other:?}"),
+        };
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            AssistantBlock::Plan { steps } => {
+                assert_eq!(steps.len(), 1);
+                assert_eq!(steps[0].content, "step one");
+                assert_eq!(steps[0].status, "completed");
+            }
+            other => panic!("expected plan, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_update_content_becomes_a_tool_result() {
+        use agent_client_protocol::schema::v1::{Content, ToolCallUpdate, ToolCallUpdateFields};
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(ToolCall::new("c1", "run")));
+        let fields = ToolCallUpdateFields::new()
+            .status(ToolCallStatus::Completed)
+            .content(vec![ToolCallContent::Content(Content::new(
+                ContentBlock::Text(TextContent::new("hello output")),
+            ))]);
+        p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1", fields,
+        )));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, is_error: false }
+                if call_id == "c1" && content == "hello output"
+        )));
     }
 }
