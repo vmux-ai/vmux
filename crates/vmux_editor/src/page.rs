@@ -21,7 +21,6 @@ const MEASURE_ID: &str = "file-measure";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
-const SCROLL_EDGE: u32 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -933,11 +932,12 @@ pub fn Page() -> Element {
                                         };
                                         let vis_first = (el.scroll_top() as f64 / ch).floor().max(0.0) as u32;
                                         let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
+                                        let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
-                                        let rend = rfirst + lines.read().len() as u32;
-                                        let near_top = vis_first < rfirst.saturating_add(SCROLL_EDGE);
-                                        let near_bot = vis_first + vis_rows + SCROLL_EDGE > rend;
-                                        if (near_top || near_bot) && last_scroll_req() != vis_first {
+                                        let loaded_len = lines.read().len() as u32;
+                                        if vmux_core::scroll::needs_refetch(vis_first, vis_rows, rfirst, loaded_len, trigger)
+                                            && last_scroll_req() != vis_first
+                                        {
                                             last_scroll_req.set(vis_first);
                                             let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_row: vis_first });
                                         }

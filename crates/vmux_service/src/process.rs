@@ -91,6 +91,16 @@ pub struct Process {
     /// Broadcasts viewport patches to all attached GUI clients.
     patch_tx: broadcast::Sender<ServiceMessage>,
     line_hashes: Vec<u64>,
+    /// Document-row-keyed hash cache for the native-scroll window path.
+    win_hashes: HashMap<u32, u64>,
+    /// Frontend window top (document row); ignored while `following`.
+    view_top: u32,
+    /// Frontend pinned to the bottom → stream the bottom window autonomously.
+    following: bool,
+    /// Last emitted (first_row, total_rows) for the window path (broadcast dedup).
+    last_win: Option<(u32, u32)>,
+    /// Whether the previous sync used the passthrough (alt/copy) path.
+    last_passthrough: bool,
     /// Last broadcast cursor position (col, row). Used to broadcast a patch
     /// when only the cursor moves (e.g. typing space over already-blank
     /// cells produces no line-content change but the screen cursor must
@@ -343,6 +353,11 @@ impl Process {
             pty_rx,
             patch_tx,
             line_hashes: Vec::new(),
+            win_hashes: HashMap::new(),
+            view_top: 0,
+            following: true,
+            last_win: None,
+            last_passthrough: false,
             last_cursor: None,
             selection: None,
             last_selection: None,
@@ -860,17 +875,6 @@ impl Process {
         actual
     }
 
-    fn scroll_viewport(&mut self, delta: i32) -> i32 {
-        let old_offset = self.term.grid().display_offset() as i32;
-        self.term.scroll_display(Scroll::Delta(delta));
-        let new_offset = self.term.grid().display_offset() as i32;
-        let actual = new_offset - old_offset;
-        if actual != 0 {
-            self.line_hashes.clear();
-        }
-        actual
-    }
-
     pub fn handle_mouse_wheel(&mut self, up: bool, col: u16, row: u16, modifiers: u8) {
         use alacritty_terminal::term::TermMode;
         let delta = if up { 1 } else { -1 };
@@ -887,9 +891,18 @@ impl Process {
         } else if mode.contains(TermMode::ALT_SCREEN) && mode.contains(TermMode::ALTERNATE_SCROLL) {
             let bytes = alternate_scroll_bytes(up, mode.contains(TermMode::APP_CURSOR));
             Self::write_input_to_writer(&self.pty_writer, bytes);
-        } else if self.scroll_viewport(delta) != 0 {
-            self.sync_viewport();
         }
+    }
+
+    /// Native-scroll intent from the frontend: set the window top / follow state
+    /// and re-serve the window. `display_offset` is untouched (window reads use
+    /// direct `Line` indexing).
+    pub fn handle_scroll_window(&mut self, top_row: u32, follow: bool) {
+        self.following = follow;
+        self.view_top = top_row;
+        self.win_hashes.clear();
+        self.last_win = None;
+        self.sync_viewport();
     }
 
     fn last_non_blank_col(&self, row: u16) -> u16 {
@@ -1178,6 +1191,8 @@ impl Process {
         let dims = PtyDimensions { cols, rows };
         self.term.resize(dims);
         self.line_hashes.clear();
+        self.win_hashes.clear();
+        self.last_win = None;
         // Clamp copy-mode cursor + anchor to the new bounds.
         if let Some(cm) = self.copy_mode.as_mut() {
             let max_col = cols.saturating_sub(1);
@@ -1238,10 +1253,34 @@ impl Process {
     }
 
     fn sync_viewport(&mut self) {
+        let mode = self.term.mode();
+        let passthrough = self.copy_mode.is_some()
+            || mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
+            || mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
+        if passthrough != self.last_passthrough {
+            self.line_hashes.clear();
+            self.win_hashes.clear();
+            self.last_win = None;
+            self.last_passthrough = passthrough;
+        }
+        if passthrough {
+            self.sync_screen_relative();
+        } else {
+            self.sync_document_window();
+        }
+    }
+
+    /// Passthrough path (alt-screen / copy-mode): render the visible screen at
+    /// document rows `0..screen_lines` with `first_row = 0` and no native scroll.
+    /// Preserves the pre-native-scroll behavior for TUIs and copy-mode.
+    fn sync_screen_relative(&mut self) {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let num_cols = grid.columns();
         let offset = grid.display_offset() as i32;
+        let mode = self.term.mode();
+        let alt = mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+        let mouse = mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
 
         let full = self.line_hashes.len() != num_lines;
         if self.line_hashes.len() != num_lines {
@@ -1253,21 +1292,19 @@ impl Process {
             let hash = hash_grid_row(&self.term, row_idx, offset);
             if full || hash != self.line_hashes[row_idx] {
                 self.line_hashes[row_idx] = hash;
-                changed_lines.push((row_idx as u16, build_line(&self.term, row_idx, offset)));
+                changed_lines.push((row_idx as u32, build_line(&self.term, row_idx, offset)));
             }
         }
 
         // If the buffer mutated under an active selection, the selection no
-        // longer points at the same characters. Clear it (browser-style:
-        // typing into a textarea drops the selection). Skip on `full` resyncs
-        // (initial population) which mark every row as "changed".
+        // longer points at the same characters. Clear it (browser-style).
         if self.copy_mode.is_none()
             && !full
             && let Some(sel) = self.selection
             && changed_lines.iter().any(|(row, _)| {
                 let r = *row;
-                let lo = sel.start_row.min(sel.end_row);
-                let hi = sel.start_row.max(sel.end_row);
+                let lo = sel.start_row.min(sel.end_row) as u32;
+                let hi = sel.start_row.max(sel.end_row) as u32;
                 r >= lo && r <= hi
             })
         {
@@ -1316,7 +1353,7 @@ impl Process {
             changed_lines,
             cursor: TermCursor {
                 col: cursor_pos.0,
-                row: cursor_pos.1,
+                row: cursor_pos.1 as u32,
                 shape: CursorShape::Block,
                 visible: copy_mode_cursor.is_some() || !scrolled_back,
                 ch: cursor_char,
@@ -1326,6 +1363,98 @@ impl Process {
             selection: self.selection,
             copy_mode,
             full,
+            first_row: 0,
+            total_rows: num_lines as u32,
+            alt,
+            mouse,
+            evicted_total: 0,
+        };
+        let _ = self.patch_tx.send(patch);
+    }
+
+    /// Native-scroll path (primary screen, no copy-mode): serve a document-row
+    /// window around `view_top` (or the bottom when `following`) by direct grid
+    /// `Line` indexing. `display_offset` stays 0.
+    fn sync_document_window(&mut self) {
+        let grid = self.term.grid();
+        let screen = grid.screen_lines();
+        let num_cols = grid.columns();
+        let total_rows = grid.total_lines() as u32;
+        let history = total_rows.saturating_sub(screen as u32);
+        let visible = screen as u16;
+
+        let overscan = vmux_core::scroll::overscan_for(
+            visible,
+            vmux_core::scroll::TERMINAL_OVERSCAN_K,
+            vmux_core::scroll::OVERSCAN_FLOOR,
+            vmux_core::scroll::OVERSCAN_CAP,
+        );
+        let view_top = if self.following {
+            history
+        } else {
+            vmux_core::scroll::clamp_top_line(self.view_top, total_rows, visible)
+        };
+        let first_row = view_top.saturating_sub(overscan);
+        let end_row = (view_top + visible as u32 + overscan).min(total_rows);
+
+        let offset = history as i32;
+
+        let mut changed_lines = Vec::new();
+        let mut live: HashMap<u32, u64> = HashMap::new();
+        for doc_row in first_row..end_row {
+            let hash = hash_grid_row(&self.term, doc_row as usize, offset);
+            live.insert(doc_row, hash);
+            if self.win_hashes.get(&doc_row) != Some(&hash) {
+                changed_lines.push((doc_row, build_line(&self.term, doc_row as usize, offset)));
+            }
+        }
+        let full = self.win_hashes.is_empty();
+        self.win_hashes = live;
+
+        let cursor_point = grid.cursor.point;
+        let cursor_doc_row = history + cursor_point.line.0 as u32;
+        let cursor_col = cursor_point.column.0 as u16;
+        let cursor_in_window = cursor_doc_row >= first_row && cursor_doc_row < end_row;
+        let cursor_char = {
+            let cell = &grid[cursor_point.line][cursor_point.column];
+            cell.c.to_string()
+        };
+
+        let cursor_key = (cursor_col, cursor_doc_row as u16);
+        let cursor_moved = self.last_cursor != Some(cursor_key);
+        let selection_changed = self.selection != self.last_selection;
+        let win = (first_row, total_rows);
+        let win_changed = self.last_win != Some(win);
+
+        if changed_lines.is_empty() && !full && !cursor_moved && !selection_changed && !win_changed
+        {
+            return;
+        }
+        self.last_cursor = Some(cursor_key);
+        self.last_selection = self.selection;
+        self.last_win = Some(win);
+        self.last_viewport_copy_mode = Some(false);
+
+        let patch = ServiceMessage::ViewportPatch {
+            process_id: self.id,
+            changed_lines,
+            cursor: TermCursor {
+                col: cursor_col,
+                row: cursor_doc_row,
+                shape: CursorShape::Block,
+                visible: cursor_in_window,
+                ch: cursor_char,
+            },
+            cols: num_cols as u16,
+            rows: visible,
+            selection: self.selection,
+            copy_mode: false,
+            full,
+            first_row,
+            total_rows,
+            alt: false,
+            mouse: false,
+            evicted_total: 0,
         };
         let _ = self.patch_tx.send(patch);
     }
@@ -1353,7 +1482,7 @@ impl Process {
             lines,
             cursor: TermCursor {
                 col: cursor_point.column.0 as u16,
-                row: cursor_point.line.0 as u16,
+                row: cursor_point.line.0 as u32,
                 shape: CursorShape::Block,
                 visible: !scrolled_back,
                 ch: cursor_char,
@@ -1975,34 +2104,53 @@ mod tests {
     }
 
     #[test]
-    fn mouse_wheel_on_normal_screen_scrolls_into_scrollback() {
+    fn scroll_window_serves_document_row_window() {
         let (mut process, captured) = capturing_process(12, 4);
         let mut feed = Vec::new();
         for i in 0..40 {
             feed.extend_from_slice(format!("line{i}\r\n").as_bytes());
         }
         process.process_output_for_test(&feed);
-        assert_eq!(process.term.grid().display_offset(), 0);
+
+        let total = process.term.grid().total_lines() as u32;
+        assert!(
+            total >= 40,
+            "expected scrollback to accumulate, got {total}"
+        );
 
         let mut patches = process.subscribe();
-        process.handle_mouse_wheel(true, 0, 0, 0);
-        let offset = process.term.grid().display_offset();
-        process.kill();
+        // Scroll to the very top (document row 0), not following.
+        process.handle_scroll_window(0, false);
 
-        assert!(
-            offset >= 1,
-            "wheel up on a normal screen should scroll into scrollback, got offset {offset}"
-        );
+        // Native scroll must not move display_offset or write to the pty.
+        assert_eq!(process.term.grid().display_offset(), 0);
         assert!(
             captured.lock().unwrap().is_empty(),
-            "scrollback scroll must not write to the pty"
+            "native scroll must not write to the pty"
         );
-        let broadcast_patch = std::iter::from_fn(|| patches.try_recv().ok())
-            .any(|msg| matches!(msg, ServiceMessage::ViewportPatch { .. }));
+
+        let (changed_lines, first_row, total_rows) = std::iter::from_fn(|| patches.try_recv().ok())
+            .find_map(|msg| match msg {
+                ServiceMessage::ViewportPatch {
+                    changed_lines,
+                    first_row,
+                    total_rows,
+                    ..
+                } => Some((changed_lines, first_row, total_rows)),
+                _ => None,
+            })
+            .expect("scroll must broadcast a viewport patch");
+        assert_eq!(
+            first_row, 0,
+            "top scroll serves the window from document row 0"
+        );
+        assert_eq!(total_rows, total, "patch carries the full document height");
         assert!(
-            broadcast_patch,
-            "scrollback scroll must broadcast a viewport patch so the frontend re-renders"
+            changed_lines.iter().any(|(r, _)| *r == 0),
+            "top window must include the oldest document row"
         );
+
+        process.kill();
     }
 
     #[test]
