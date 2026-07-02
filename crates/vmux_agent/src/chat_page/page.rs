@@ -26,6 +26,7 @@ pub fn Page() -> Element {
     let mut draft = use_signal(String::new);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
+    let mut last_top = use_signal(|| 0i32);
 
     use_future(move || async move {
         loop {
@@ -92,8 +93,18 @@ pub fn Page() -> Element {
                         .and_then(|w| w.document())
                         .and_then(|d| d.get_element_by_id("chat-scroll"))
                     {
-                        let dist = el.scroll_height() - el.scroll_top() - el.client_height();
-                        at_bottom.set(dist <= 48);
+                        let top = el.scroll_top();
+                        let dist = el.scroll_height() - top - el.client_height();
+                        // Re-pin once the user reaches the bottom; unpin only when they scroll UP
+                        // (scroll_top decreases). Never unpin from our own programmatic
+                        // scroll-to-bottom, which only moves down and would otherwise poison
+                        // `at_bottom` with a stale, mid-stream scroll height.
+                        if dist <= 48 {
+                            at_bottom.set(true);
+                        } else if top < *last_top.peek() - 4 {
+                            at_bottom.set(false);
+                        }
+                        last_top.set(top);
                     }
                 },
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
