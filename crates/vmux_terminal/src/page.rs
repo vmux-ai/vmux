@@ -27,8 +27,13 @@ const MEASURE_ID: &str = "term-measure";
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut rows = use_signal(Vec::<Signal<TermLine>>::new);
-    let mut cursor_rows = use_signal(Vec::<Signal<Option<TermCursor>>>::new);
+    let mut rows = use_signal(std::collections::BTreeMap::<u32, Signal<TermLine>>::new);
+    let mut first_row = use_signal(|| 0u32);
+    let mut total_rows = use_signal(|| 0u32);
+    let mut alt = use_signal(|| false);
+    let mut mouse = use_signal(|| false);
+    let mut following = use_signal(|| true);
+    let mut last_scroll_req = use_signal(|| u32::MAX);
     let mut cols = use_signal(|| 0u16);
     let mut cursor = use_signal(|| None::<TermCursor>);
     let mut selection = use_signal(|| None::<TermSelectionRange>);
@@ -45,64 +50,59 @@ pub fn Page() -> Element {
 
     let _listener =
         use_bin_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
-            let current_cols = *cols.peek();
-            let current_rows = rows.peek().len() as u16;
-            if patch.requires_row_rebuild(current_cols, current_rows) {
-                resize_row_signals(&mut rows, patch.rows as usize);
-                resize_cursor_row_signals(&mut cursor_rows, patch.rows as usize);
+            let first = patch.first_row;
+            first_row.set(first);
+            total_rows.set(patch.total_rows);
+            if *alt.peek() != patch.alt {
+                alt.set(patch.alt);
             }
-
-            let targets = rows.with_peek(|row_signals| {
-                patch
-                    .changed_lines
-                    .iter()
-                    .filter_map(|(row_idx, line)| {
-                        row_signals
-                            .get(*row_idx as usize)
-                            .copied()
-                            .map(|row| (row, line.clone()))
-                    })
-                    .collect::<Vec<_>>()
-            });
-            for (mut row, line) in targets {
-                if *row.peek() != line {
-                    row.set(line);
-                }
-            }
-
-            if cursor.peek().as_ref() != Some(&patch.cursor) {
-                let next_cursor = patch.cursor.clone();
-                let update = cursor_row_update(cursor.peek().as_ref(), &next_cursor);
-                let targets = cursor_rows.with_peek(|row_signals| CursorRowSignalUpdate {
-                    clear: update
-                        .clear
-                        .and_then(|row| row_signals.get(row as usize).copied()),
-                    set: update
-                        .set
-                        .and_then(|row| row_signals.get(row as usize).copied()),
-                });
-                if let Some(mut clear) = targets.clear
-                    && clear.peek().is_some()
-                {
-                    clear.set(None);
-                }
-                if let Some(mut set) = targets.set
-                    && *set.peek() != Some(next_cursor.clone())
-                {
-                    set.set(Some(next_cursor.clone()));
-                }
-                cursor.set(Some(next_cursor));
+            if *mouse.peek() != patch.mouse {
+                mouse.set(patch.mouse);
             }
             if *cols.peek() != patch.cols {
                 cols.set(patch.cols);
             }
+
+            let overscan = vmux_core::scroll::overscan_for(
+                patch.rows,
+                vmux_core::scroll::TERMINAL_OVERSCAN_K,
+                vmux_core::scroll::OVERSCAN_FLOOR,
+                vmux_core::scroll::OVERSCAN_CAP,
+            );
+            let keep_hi = first + patch.rows as u32 + overscan * 2 + 2;
+            rows.with_mut(|map| {
+                if patch.full {
+                    map.clear();
+                }
+                for (doc_row, line) in &patch.changed_lines {
+                    if let Some(mut existing) = map.get(doc_row).copied() {
+                        if *existing.peek() != *line {
+                            existing.set(line.clone());
+                        }
+                    } else {
+                        map.insert(*doc_row, Signal::new(line.clone()));
+                    }
+                }
+                map.retain(|k, _| *k >= first && *k <= keep_hi);
+            });
+
             if *selection.peek() != patch.selection {
                 selection.set(patch.selection);
             }
             if *copy_mode.peek() != patch.copy_mode {
                 copy_mode.set(patch.copy_mode);
             }
+            if cursor.peek().as_ref() != Some(&patch.cursor) {
+                cursor.set(Some(patch.cursor.clone()));
+            }
         });
+
+    use_effect(move || {
+        let _ = total_rows();
+        if following() {
+            pin_scroll_to_bottom();
+        }
+    });
 
     let _theme_listener =
         use_bin_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
@@ -187,11 +187,19 @@ pub fn Page() -> Element {
         String::new()
     };
 
+    let passthrough = alt() || copy_mode() || mouse();
+    let overflow_class = if passthrough {
+        "overflow-hidden"
+    } else {
+        "overflow-auto"
+    };
+    let spacer_h = total_rows() as f64 * ch;
+
     rsx! {
         div {
             id: CONTAINER_ID,
             tabindex: "0",
-            class: "relative h-full w-full overflow-hidden bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
+            class: "relative h-full w-full {overflow_class} bg-term-bg text-term-fg font-mono text-sm leading-tight select-none",
             style: "{theme_style}{cell_style}outline:none;",
 
             onmousedown: move |e: Event<MouseData>| {
@@ -233,6 +241,9 @@ pub fn Page() -> Element {
             },
 
             onwheel: move |e: Event<WheelData>| {
+                if !(alt() || copy_mode() || mouse()) {
+                    return;
+                }
                 e.prevent_default();
                 let dims = cell_dims();
                 let (_, ch) = dims;
@@ -261,6 +272,48 @@ pub fn Page() -> Element {
                     for _ in 0..count.unsigned_abs() {
                         emit_mouse(button, col, row, modifiers, true, false);
                     }
+                }
+            },
+
+            onscroll: move |_| {
+                if alt() || copy_mode() || mouse() {
+                    return;
+                }
+                let (_, ch) = cell_dims();
+                if ch <= 0.0 {
+                    return;
+                }
+                let Some(el) = scroll_el() else {
+                    return;
+                };
+                let vis_first = (((el.scroll_top() as f64 - padding) / ch).floor()).max(0.0) as u32;
+                let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
+                let follow = is_following(ch);
+                if follow != *following.peek() {
+                    following.set(follow);
+                    last_scroll_req.set(if follow { u32::MAX } else { vis_first });
+                    let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
+                        top_row: vis_first,
+                        follow,
+                    });
+                    if follow {
+                        return;
+                    }
+                }
+                if follow {
+                    return;
+                }
+                let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
+                let loaded_first = first_row();
+                let loaded_len = rows.read().len() as u32;
+                if vmux_core::scroll::needs_refetch(vis_first, vis_rows, loaded_first, loaded_len, trigger)
+                    && last_scroll_req() != vis_first
+                {
+                    last_scroll_req.set(vis_first);
+                    let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
+                        top_row: vis_first,
+                        follow: false,
+                    });
                 }
             },
 
@@ -371,22 +424,50 @@ pub fn Page() -> Element {
                 style: "padding:{padding}px;",
                 div {
                     class: "relative",
+                    style: "height:{spacer_h}px;",
                     {
-                        let row_signals = rows();
-                        let cursor_signals = cursor_rows();
+                        let base_rows = rows();
                         rsx! {
-                            for (row_idx, line) in row_signals.iter().copied().enumerate() {
-                                if let Some(row_cursor) = cursor_signals.get(row_idx).copied() {
-                                    TerminalRow {
-                                        key: "{row_idx}",
-                                        row_idx,
-                                        line,
-                                        cursor: row_cursor,
-                                        selection,
-                                        cols,
-                                        theme,
+                            for (doc_row, line) in base_rows.iter() {
+                                {
+                                    let top = *doc_row as f64 * ch;
+                                    rsx! {
+                                        div {
+                                            key: "{doc_row}",
+                                            style: "position:absolute;left:0;right:0;top:{top}px;",
+                                            TerminalRow {
+                                                row_idx: *doc_row as usize,
+                                                line: *line,
+                                                selection,
+                                                cols,
+                                            }
+                                        }
                                     }
                                 }
+                            }
+                            {
+                                cursor().filter(|c| c.visible).map(|c| {
+                                    let cstyle = theme()
+                                        .map(|t| t.cursor_style.clone())
+                                        .unwrap_or_else(|| "block".to_string());
+                                    let top = c.row as f64 * ch;
+                                    let left = c.col as f64 * cw;
+                                    let (w, h, oy, show_ch) = match cstyle.as_str() {
+                                        "beam" | "bar" => (2.0, ch, 0.0, false),
+                                        "underline" => (cw, 2.0, ch - 2.0, false),
+                                        _ => (cw, ch, 0.0, true),
+                                    };
+                                    let ctop = top + oy;
+                                    rsx! {
+                                        div {
+                                            class: "pointer-events-none absolute whitespace-pre",
+                                            style: "left:{left}px;top:{ctop}px;width:{w}px;height:{h}px;background:var(--term-cursor);color:var(--term-bg);overflow:hidden;",
+                                            if show_ch {
+                                                "{c.ch}"
+                                            }
+                                        }
+                                    }
+                                })
                             }
                         }
                     }
@@ -412,53 +493,15 @@ const _TW_SAFELIST: &[&str] = &[
     "border-ansi-1",
 ];
 
-fn resize_row_signals(rows: &mut Signal<Vec<Signal<TermLine>>>, target_len: usize) {
-    rows.with_mut(|row_signals| {
-        let current_len = row_signals.len();
-        if current_len < target_len {
-            row_signals.extend((current_len..target_len).map(|_| Signal::new(TermLine::default())));
-        } else if current_len > target_len {
-            row_signals.truncate(target_len);
-        }
-    });
-}
-
-fn resize_cursor_row_signals(
-    cursor_rows: &mut Signal<Vec<Signal<Option<TermCursor>>>>,
-    target_len: usize,
-) {
-    cursor_rows.with_mut(|row_signals| {
-        let current_len = row_signals.len();
-        if current_len < target_len {
-            row_signals.extend((current_len..target_len).map(|_| Signal::new(None)));
-        } else if current_len > target_len {
-            row_signals.truncate(target_len);
-        }
-    });
-}
-
-struct CursorRowSignalUpdate {
-    clear: Option<Signal<Option<TermCursor>>>,
-    set: Option<Signal<Option<TermCursor>>>,
-}
-
 #[component]
 fn TerminalRow(
     row_idx: usize,
     line: Signal<TermLine>,
-    cursor: Signal<Option<TermCursor>>,
     selection: Signal<Option<TermSelectionRange>>,
     cols: Signal<u16>,
-    theme: Signal<Option<TermThemeEvent>>,
 ) -> Element {
     let line = line();
-    let cursor = cursor();
     let selected_cols = row_selection_cols(&selection(), row_idx, cols());
-    let theme = theme();
-    let cursor_style = theme
-        .as_ref()
-        .map(|theme| theme.cursor_style.as_str())
-        .unwrap_or("block");
 
     rsx! {
         div {
@@ -474,7 +517,7 @@ fn TerminalRow(
                 }
             }
             for (span_idx, span) in line.spans.iter().enumerate() {
-                {render_span(span, span_idx, cursor.as_ref(), cursor_style)}
+                {render_span(span, span_idx, None, "block")}
             }
             if let Some((sel_start, sel_end)) = selected_cols {
                 div {
@@ -784,6 +827,29 @@ fn key_modifier_bits(e: &web_sys::KeyboardEvent) -> u8 {
         m |= MOD_SUPER;
     }
     m
+}
+
+/// The native-scroll container element (also the measurement/mouse origin).
+fn scroll_el() -> Option<web_sys::Element> {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
+}
+
+/// True when the viewport is within ~one row of the bottom (i.e. "following").
+fn is_following(ch: f64) -> bool {
+    let Some(el) = scroll_el() else {
+        return true;
+    };
+    let dist = el.scroll_height() as f64 - el.scroll_top() as f64 - el.client_height() as f64;
+    dist <= ch.max(2.0) + 1.0
+}
+
+/// Pin the viewport to the bottom (used while following as output grows).
+fn pin_scroll_to_bottom() {
+    if let Some(el) = scroll_el() {
+        el.set_scroll_top(el.scroll_height());
+    }
 }
 
 /// Emit a TermMouseEvent to the Bevy host via the CEF bridge.

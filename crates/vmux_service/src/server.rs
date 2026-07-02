@@ -353,6 +353,17 @@ async fn handle_client(
                 .await;
             }
 
+            ClientMessage::ScrollWindow {
+                process_id,
+                top_row,
+                follow,
+            } => {
+                with_process_mut(&manager, process_id, |process| {
+                    process.handle_scroll_window(top_row, follow)
+                })
+                .await;
+            }
+
             ClientMessage::ResizeProcess {
                 process_id,
                 cols,
