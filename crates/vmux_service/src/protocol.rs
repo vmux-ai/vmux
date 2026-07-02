@@ -555,6 +555,7 @@ pub enum ServiceMessage {
         first_row: u32,
         total_rows: u32,
         alt: bool,
+        mouse: bool,
         evicted_total: u64,
     },
     ProcessExited {

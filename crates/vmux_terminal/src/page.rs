@@ -31,6 +31,7 @@ pub fn Page() -> Element {
     let mut first_row = use_signal(|| 0u32);
     let mut total_rows = use_signal(|| 0u32);
     let mut alt = use_signal(|| false);
+    let mut mouse = use_signal(|| false);
     let mut following = use_signal(|| true);
     let mut last_scroll_req = use_signal(|| u32::MAX);
     let mut cols = use_signal(|| 0u16);
@@ -55,11 +56,13 @@ pub fn Page() -> Element {
             if *alt.peek() != patch.alt {
                 alt.set(patch.alt);
             }
+            if *mouse.peek() != patch.mouse {
+                mouse.set(patch.mouse);
+            }
             if *cols.peek() != patch.cols {
                 cols.set(patch.cols);
             }
 
-            // Retain only the served window (visible ± overscan) in the DOM.
             let overscan = vmux_core::scroll::overscan_for(
                 patch.rows,
                 vmux_core::scroll::TERMINAL_OVERSCAN_K,
@@ -94,8 +97,6 @@ pub fn Page() -> Element {
             }
         });
 
-    // Follow-pin: while pinned to the bottom, keep the viewport at the end as new
-    // output grows the spacer. Runs after render (so scrollHeight reflects growth).
     use_effect(move || {
         let _ = total_rows();
         if following() {
@@ -186,9 +187,7 @@ pub fn Page() -> Element {
         String::new()
     };
 
-    // Primary screen scrolls natively; alt-screen / copy-mode use passthrough
-    // (no native scroll, wheel forwarded to the app).
-    let passthrough = alt() || copy_mode();
+    let passthrough = alt() || copy_mode() || mouse();
     let overflow_class = if passthrough {
         "overflow-hidden"
     } else {
@@ -242,8 +241,7 @@ pub fn Page() -> Element {
             },
 
             onwheel: move |e: Event<WheelData>| {
-                // Primary screen scrolls natively; only passthrough (alt/copy) forwards notches.
-                if !(alt() || copy_mode()) {
+                if !(alt() || copy_mode() || mouse()) {
                     return;
                 }
                 e.prevent_default();
@@ -278,8 +276,7 @@ pub fn Page() -> Element {
             },
 
             onscroll: move |_| {
-                // Native scroll: prefetch a new window at the edges; report follow state.
-                if alt() || copy_mode() {
+                if alt() || copy_mode() || mouse() {
                     return;
                 }
                 let (_, ch) = cell_dims();
@@ -292,17 +289,18 @@ pub fn Page() -> Element {
                 let vis_first = (((el.scroll_top() as f64 - padding) / ch).floor()).max(0.0) as u32;
                 let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
                 let follow = is_following(ch);
-                let follow_changed = follow != *following.peek();
-                following.set(follow);
-                if follow {
-                    // Service streams the bottom window while following; only notify on entry.
-                    if follow_changed {
-                        last_scroll_req.set(u32::MAX);
-                        let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
-                            top_row: vis_first,
-                            follow: true,
-                        });
+                if follow != *following.peek() {
+                    following.set(follow);
+                    last_scroll_req.set(if follow { u32::MAX } else { vis_first });
+                    let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
+                        top_row: vis_first,
+                        follow,
+                    });
+                    if follow {
+                        return;
                     }
+                }
+                if follow {
                     return;
                 }
                 let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;

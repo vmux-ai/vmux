@@ -1094,6 +1094,9 @@ pub struct TermViewportPatch {
     /// Alt-screen active → frontend uses passthrough (non-native) scroll.
     #[serde(default)]
     pub alt: bool,
+    /// App has mouse tracking enabled → passthrough (wheel forwarded, not native).
+    #[serde(default)]
+    pub mouse: bool,
     /// RESERVED: lines permanently evicted off the top. Always 0 in v1.
     #[serde(default)]
     pub evicted_total: u64,
@@ -1610,6 +1613,7 @@ mod tests {
             first_row: 0,
             total_rows: rows as u32,
             alt: false,
+            mouse: false,
             evicted_total: 0,
         }
     }

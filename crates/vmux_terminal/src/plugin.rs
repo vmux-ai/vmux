@@ -1335,6 +1335,7 @@ fn poll_service_messages(
                 first_row,
                 total_rows,
                 alt,
+                mouse,
                 evicted_total,
             } => {
                 for (entity, pid, _) in &terminals {
@@ -1364,6 +1365,7 @@ fn poll_service_messages(
                             first_row,
                             total_rows,
                             alt,
+                            mouse,
                             evicted_total,
                         };
                         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -1437,6 +1439,7 @@ fn poll_service_messages(
                             first_row: 0,
                             total_rows: rows as u32,
                             alt: false,
+                            mouse: false,
                             evicted_total: 0,
                         };
                         commands.trigger(BinHostEmitEvent::from_rkyv(
