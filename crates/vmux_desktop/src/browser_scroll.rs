@@ -26,13 +26,17 @@ pub(crate) fn run_scrolls(
             Some(s) => parse_pane_target(s, &panes),
             None => active.local().pane.filter(|p| panes.contains(*p)),
         };
-        let webview = target.and_then(|pane| {
-            active_webview_for_tab(
-                active_stack_in_pane(pane, &pane_children, &stack_ts),
-                &browsers,
-                &terminals,
-            )
-        });
+        let webview = target
+            .and_then(|pane| {
+                active_webview_for_tab(
+                    active_stack_in_pane(pane, &pane_children, &stack_ts),
+                    &browsers,
+                    &terminals,
+                )
+            })
+            .or_else(|| {
+                crate::browser_snapshot::most_recent_browser(&browsers, &terminals, &stack_ts)
+            });
         if let Some(webview) = webview {
             let js = match (request.to.as_deref(), request.delta) {
                 (Some("top"), _) => "window.scrollTo(0,0)".to_string(),
