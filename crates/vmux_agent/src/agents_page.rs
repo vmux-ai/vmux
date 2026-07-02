@@ -155,9 +155,10 @@ fn on_install_request(
     let Some(agent) = catalog.agents.iter().find(|a| a.id == id).cloned() else {
         return;
     };
-    status
-        .0
-        .insert(id.clone(), ("installing".to_string(), "Preparing…".to_string()));
+    status.0.insert(
+        id.clone(),
+        ("installing".to_string(), "Preparing…".to_string()),
+    );
     let tx = installs.tx.clone();
     std::thread::spawn(move || {
         let result = crate::acp_install::ensure_installed(&agent, |_phase, pct, msg| {
@@ -176,7 +177,10 @@ fn on_install_request(
 
 /// Remove an installed agent, then let its status re-derive from disk.
 #[cfg(not(target_arch = "wasm32"))]
-fn on_uninstall_request(trigger: On<BinReceive<AgentsUninstall>>, mut status: ResMut<AgentsStatus>) {
+fn on_uninstall_request(
+    trigger: On<BinReceive<AgentsUninstall>>,
+    mut status: ResMut<AgentsStatus>,
+) {
     let id = trigger.event().payload.id.clone();
     let _ = crate::acp_install::uninstall(&id);
     status.0.remove(&id);

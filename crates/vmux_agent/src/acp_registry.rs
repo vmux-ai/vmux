@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Canonical registry endpoint. Clients fetch this one JSON document and filter locally.
-pub const REGISTRY_URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
+pub const REGISTRY_URL: &str =
+    "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
 /// The registry document: `{ version, agents: [...] }`.
 #[derive(Debug, Clone, Deserialize)]
@@ -191,7 +192,10 @@ mod tests {
 
         let claude = &reg.agents[0];
         assert_eq!(claude.id, "claude-acp");
-        assert_eq!(claude.icon.as_deref(), Some("https://cdn.example/claude-acp.svg"));
+        assert_eq!(
+            claude.icon.as_deref(),
+            Some("https://cdn.example/claude-acp.svg")
+        );
         assert_eq!(
             claude.distribution.npx.as_ref().unwrap().package,
             "@agentclientprotocol/claude-agent-acp"
@@ -199,10 +203,19 @@ mod tests {
         assert!(claude.distribution.binary.is_none());
 
         let vibe = &reg.agents[1];
-        assert!(vibe.distribution.binary.as_ref().unwrap().contains_key("linux-x86_64"));
+        assert!(
+            vibe.distribution
+                .binary
+                .as_ref()
+                .unwrap()
+                .contains_key("linux-x86_64")
+        );
 
         let fast = &reg.agents[2];
-        assert_eq!(fast.distribution.uvx.as_ref().unwrap().package, "fast-agent-acp");
+        assert_eq!(
+            fast.distribution.uvx.as_ref().unwrap().package,
+            "fast-agent-acp"
+        );
     }
 
     #[test]

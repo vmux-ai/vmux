@@ -43,17 +43,24 @@ fn cmd_basename(cmd: &str) -> &str {
 /// Last path segment of a URL (query/fragment stripped), used as the downloaded archive's filename.
 fn archive_filename(url: &str) -> &str {
     let path = url.split(['?', '#']).next().unwrap_or(url);
-    path.rsplit('/').find(|s| !s.is_empty()).unwrap_or("archive")
+    path.rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or("archive")
 }
 
 /// Absolute path of the agent's executable inside its extracted package dir. tar/zip archives
 /// unpack their whole tree (so `cmd` is relative to the root); `.gz`/raw yield a single file
 /// named by the `cmd` basename.
 fn resolved_cmd_path(pkgdir: &Path, target: &BinaryTarget, file: &str) -> PathBuf {
-    let rel = target.cmd.trim_start_matches("./").trim_start_matches(".\\");
+    let rel = target
+        .cmd
+        .trim_start_matches("./")
+        .trim_start_matches(".\\");
     match archive::kind_for(file) {
         archive::ArchiveKind::TarGz | archive::ArchiveKind::Zip => pkgdir.join(rel),
-        archive::ArchiveKind::Gz | archive::ArchiveKind::Raw => pkgdir.join(cmd_basename(&target.cmd)),
+        archive::ArchiveKind::Gz | archive::ArchiveKind::Raw => {
+            pkgdir.join(cmd_basename(&target.cmd))
+        }
     }
 }
 
@@ -82,7 +89,11 @@ pub fn ensure_binary_installed(
     Ok(ResolvedAgent {
         command: cmd_path.to_string_lossy().into_owned(),
         args: target.args.clone(),
-        env: target.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        env: target
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         path_prepend: None,
     })
 }
@@ -119,7 +130,11 @@ fn ensure_node(
     std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
     let dl = staging.join(&file);
 
-    emit(InstallPhase::Downloading, Some(0), "downloading Node runtime");
+    emit(
+        InstallPhase::Downloading,
+        Some(0),
+        "downloading Node runtime",
+    );
     download::download_to(&url, &dl, |d, total| {
         let pct = total.and_then(|t| (t > 0).then(|| ((d * 100) / t) as u8));
         emit(InstallPhase::Downloading, pct, "downloading Node runtime");
@@ -155,7 +170,11 @@ pub fn ensure_npx_installed(
     Ok(ResolvedAgent {
         command: bindir.join("npx").to_string_lossy().into_owned(),
         args,
-        env: dist.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        env: dist
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         path_prepend: Some(bindir.to_string_lossy().into_owned()),
     })
 }
@@ -240,7 +259,11 @@ pub fn ensure_uvx_installed(
     Ok(ResolvedAgent {
         command: bindir.join("uvx").to_string_lossy().into_owned(),
         args,
-        env: dist.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        env: dist
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         path_prepend: Some(bindir.to_string_lossy().into_owned()),
     })
 }
@@ -259,7 +282,11 @@ fn node_bindir(root: &Path) -> Option<PathBuf> {
 /// Managed uv dir path (whether or not it is installed).
 fn uv_bindir(root: &Path) -> Option<PathBuf> {
     let target = uv_target()?;
-    Some(store::packages_dir(root).join("uv").join(format!("uv-{target}")))
+    Some(
+        store::packages_dir(root)
+            .join("uv")
+            .join(format!("uv-{target}")),
+    )
 }
 
 /// Whether the agent is ready to spawn without a download: a native binary receipt, or the
@@ -359,7 +386,12 @@ fn install_binary(
     let _ = std::fs::remove_dir_all(pkgdir);
     std::fs::create_dir_all(pkgdir).map_err(|e| e.to_string())?;
     emit(InstallPhase::Extracting, None, "extracting");
-    archive::extract(&dl, archive::kind_for(file), pkgdir, cmd_basename(&target.cmd))?;
+    archive::extract(
+        &dl,
+        archive::kind_for(file),
+        pkgdir,
+        cmd_basename(&target.cmd),
+    )?;
 
     #[cfg(unix)]
     {

@@ -62,7 +62,9 @@ pub fn update_agents_snapshot(
                     let reg = catalog_agents.iter().find(|a| a.id == reg_id);
                     AgentProviderSummary {
                         id: cfg.id.clone(),
-                        name: reg.map(|a| a.name.clone()).unwrap_or_else(|| cfg.name.clone()),
+                        name: reg
+                            .map(|a| a.name.clone())
+                            .unwrap_or_else(|| cfg.name.clone()),
                         url: format!("vmux://agent/{}", cfg.id),
                         icon: reg.and_then(|a| a.icon.clone()).unwrap_or_default(),
                     }

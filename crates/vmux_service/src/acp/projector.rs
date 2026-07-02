@@ -242,7 +242,13 @@ impl AcpProjector {
         }
     }
 
-    fn upsert_diff(&mut self, call_id: &str, path: &str, old_text: Option<String>, new_text: String) {
+    fn upsert_diff(
+        &mut self,
+        call_id: &str,
+        path: &str,
+        old_text: Option<String>,
+        new_text: String,
+    ) {
         for message in self.messages.iter_mut() {
             if let Message::Assistant { blocks } = message {
                 for block in blocks.iter_mut() {

@@ -35,7 +35,9 @@ pub enum AssistantBlock {
     },
     /// The agent's execution plan / task tree (ACP `SessionUpdate::Plan`). Re-sent in full on each
     /// update, so the projector replaces the single plan block in place.
-    Plan { steps: Vec<PlanStep> },
+    Plan {
+        steps: Vec<PlanStep>,
+    },
 }
 
 /// One entry in an agent [`AssistantBlock::Plan`]. `status` is `pending` | `in_progress` |

@@ -223,7 +223,9 @@ fn do_submit(
     // Optimistically append the prompt + show a working state so it appears instantly; the host
     // snapshot (which includes this same user turn) reconciles it. Sending always jumps to bottom.
     at_bottom.set(true);
-    messages.write().push(ChatMessage::User { text: text.clone() });
+    messages
+        .write()
+        .push(ChatMessage::User { text: text.clone() });
     status.set("streaming".to_string());
     let _ = try_cef_bin_emit_rkyv(&ChatSubmit { text });
     draft.set(String::new());
@@ -328,7 +330,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                     }
                 }
             }
-        },
+        }
         ChatBlock::Diff {
             path,
             old_text,
