@@ -892,7 +892,6 @@ impl Process {
             let bytes = alternate_scroll_bytes(up, mode.contains(TermMode::APP_CURSOR));
             Self::write_input_to_writer(&self.pty_writer, bytes);
         }
-        // Primary-screen scrollback is native (ScrollWindow); no PTY write here.
     }
 
     /// Native-scroll intent from the frontend: set the window top / follow state
@@ -901,8 +900,6 @@ impl Process {
     pub fn handle_scroll_window(&mut self, top_row: u32, follow: bool) {
         self.following = follow;
         self.view_top = top_row;
-        // Force a full window rebuild: the frontend's slot→doc-row mapping shifts
-        // on a scroll, so every row in the new window must be re-sent.
         self.win_hashes.clear();
         self.last_win = None;
         self.sync_viewport();
@@ -1256,13 +1253,11 @@ impl Process {
     }
 
     fn sync_viewport(&mut self) {
+        let mode = self.term.mode();
         let passthrough = self.copy_mode.is_some()
-            || self
-                .term
-                .mode()
-                .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+            || mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
+            || mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
         if passthrough != self.last_passthrough {
-            // Mode switch: force a full rebuild on whichever path runs next.
             self.line_hashes.clear();
             self.win_hashes.clear();
             self.last_win = None;
@@ -1283,10 +1278,9 @@ impl Process {
         let num_lines = grid.screen_lines();
         let num_cols = grid.columns();
         let offset = grid.display_offset() as i32;
-        let alt = self
-            .term
-            .mode()
-            .contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+        let mode = self.term.mode();
+        let alt = mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN);
+        let mouse = mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE);
 
         let full = self.line_hashes.len() != num_lines;
         if self.line_hashes.len() != num_lines {
@@ -1372,6 +1366,7 @@ impl Process {
             first_row: 0,
             total_rows: num_lines as u32,
             alt,
+            mouse,
             evicted_total: 0,
         };
         let _ = self.patch_tx.send(patch);
@@ -1402,7 +1397,6 @@ impl Process {
         let first_row = view_top.saturating_sub(overscan);
         let end_row = (view_top + visible as u32 + overscan).min(total_rows);
 
-        // doc_row -> Line(doc_row - history): reuse the readers with offset = history.
         let offset = history as i32;
 
         let mut changed_lines = Vec::new();
@@ -1416,10 +1410,6 @@ impl Process {
         }
         let full = self.win_hashes.is_empty();
         self.win_hashes = live;
-
-        // NOTE: selection-clear-on-mutation for the primary screen is added in the
-        // selection task, once `TermSelectionRange` rows are document-scoped. Here
-        // `changed_lines` is in document rows while selection is still screen-coord.
 
         let cursor_point = grid.cursor.point;
         let cursor_doc_row = history + cursor_point.line.0 as u32;
@@ -1463,6 +1453,7 @@ impl Process {
             first_row,
             total_rows,
             alt: false,
+            mouse: false,
             evicted_total: 0,
         };
         let _ = self.patch_tx.send(patch);
