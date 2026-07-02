@@ -1498,6 +1498,10 @@ fn agent_terminal_shell(settings: &AppSettings) -> String {
 /// exit code once the command finishes (success OR failure). `token` is a unique
 /// per-run id; the printed marker is `__VMUX_DONE_<token>_<exit_code>__`.
 ///
+/// The command is prefixed with [`pager_env_prefix`] so an interactive command that would
+/// normally open a pager (e.g. `git log` → `less`) prints straight to the terminal instead of
+/// blocking the marker forever.
+///
 /// posix/fish chain with `;` (which continues after a non-zero command). nushell
 /// aborts the rest of a `;` line when an external command fails, so it needs a
 /// `try`/`catch` wrapper to always print the marker and recover the exit code
@@ -1507,16 +1511,28 @@ fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
+    let pager = pager_env_prefix(base);
     match base {
         "nu" | "nushell" => format!(
-            "print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+            "{pager}print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
         ),
         "fish" => format!(
-            "printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
+            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
         ),
         _ => format!(
-            "printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
+            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
         ),
+    }
+}
+
+/// Shell-specific prelude that neutralizes pagers for a `run`, so an interactive command can't
+/// stall the completion marker waiting on `less` (`git log`, `man`, `git diff`, …). Set as
+/// session-exported env so follow-up runs in the same shell stay covered.
+fn pager_env_prefix(base: &str) -> &'static str {
+    match base {
+        "nu" | "nushell" => "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; ",
+        "fish" => "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; ",
+        _ => "export GIT_PAGER=cat PAGER=cat LESS=FRX; ",
     }
 }
 
@@ -3483,20 +3499,20 @@ mod tests {
         // completion marker.
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
-            "print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+            "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
         );
         assert_eq!(
             command_with_marker("/usr/local/bin/fish", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
+            "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
         );
         assert_eq!(
             command_with_marker("/bin/zsh", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
         // Unknown shells fall back to posix syntax.
         assert_eq!(
             command_with_marker("/bin/bash", "ls", "abc"),
-            "printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
         );
     }
 
