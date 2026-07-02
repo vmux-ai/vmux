@@ -22,7 +22,7 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
 
-**Always read the app's own logs in Application Support first** — do not ask the user to capture stderr. vmux writes them to:
+**Always read the app's own logs in Application Support first** — do not ask the user to capture stderr. After the user runs the app, read these files yourself directly; never ask them to paste, relay, or summarize log contents. vmux writes them to:
 
 - `~/Library/Application Support/Vmux/<build-profile>/logs/vmux-<build-profile>.<date>.log` — the Bevy/tracing output (`info!`/`warn!`/`error!`). For the `dev` build that's `…/Vmux/dev/logs/vmux-dev.<date>.log`.
 - `~/Library/Application Support/Vmux/<build-profile>/profiles/<profile>/chrome_debug.log` — CEF/Chromium plus the page JS console (surfaced via `display_handler`).
