@@ -37,6 +37,19 @@ pub fn Page() -> Element {
         }
     });
 
+    use_effect(move || {
+        // Subscribe to any transcript/status change (each snapshot is a fresh `set`), then pin the
+        // scroll container to the bottom so new output stays in view as the turn grows.
+        let _ = messages.read().len();
+        let _ = status.read();
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("chat-scroll"))
+        {
+            el.set_scroll_top(el.scroll_height());
+        }
+    });
+
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
         if let Ok(parsed) = serde_json::from_str::<Vec<ChatMessage>>(&snap.messages_json) {
             messages.set(parsed);
@@ -66,7 +79,9 @@ pub fn Page() -> Element {
                     "{agent}"
                 }
             }
-            div { class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
+            div {
+                id: "chat-scroll",
+                class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
                     if messages.read().is_empty() && status() == "idle" {
                         div { class: "flex flex-col items-center gap-2 py-24 text-center",

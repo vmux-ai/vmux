@@ -45,7 +45,7 @@ dioxus = { workspace = true }
 gloo-timers = { version = "0.3", features = ["futures"] }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
-web-sys = { version = "0.3", features = ["Window"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element"] }
 
 [dev-dependencies]
 mockito = "1"
