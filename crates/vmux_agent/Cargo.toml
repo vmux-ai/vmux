@@ -21,6 +21,7 @@ bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
 chrono = { workspace = true }
 notify = { workspace = true }
+rfd = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }
 crossbeam-channel = "0.5"
 futures-lite = "2"
@@ -32,6 +33,7 @@ url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_editor = { path = "../vmux_editor" }
+vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../vmux_mcp" }

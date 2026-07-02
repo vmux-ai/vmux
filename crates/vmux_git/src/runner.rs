@@ -157,6 +157,17 @@ pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
     })
 }
 
+/// Repo root plus the set of repo-relative paths `git status --porcelain=v2`
+/// reports as changed (modified/staged/untracked/renamed/deleted/conflicted).
+pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
+    let root = repo_root(file)?;
+    let (stdout, stderr, ok) = git(&root, &["status", "--porcelain=v2"])?;
+    if !ok {
+        return Err(GitError(stderr.trim().to_string()));
+    }
+    Ok((root, parse::changed_paths(&stdout)))
+}
+
 fn diff_text(root: &Path, target: &str, cached: bool, ctx: u32) -> Result<String, GitError> {
     let uarg = format!("--unified={ctx}");
     let mut args: Vec<&str> = vec!["diff"];
@@ -453,6 +464,26 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
         assert!(repo_root(&file).is_err());
+    }
+
+    #[test]
+    fn dirty_set_lists_modified_and_untracked_not_clean() {
+        let repo = test_repo::init();
+        let _clean = test_repo::write(repo.path(), "clean.txt", "x\n");
+        let modified = test_repo::write(repo.path(), "mod.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        test_repo::write(repo.path(), "mod.txt", "two\n");
+        test_repo::write(repo.path(), "new.txt", "n\n");
+
+        let (root, set) = dirty_set(&modified).unwrap();
+        assert_eq!(
+            root.canonicalize().unwrap(),
+            repo.path().canonicalize().unwrap()
+        );
+        assert!(set.contains("mod.txt"));
+        assert!(set.contains("new.txt"));
+        assert!(!set.contains("clean.txt"));
     }
 
     #[test]

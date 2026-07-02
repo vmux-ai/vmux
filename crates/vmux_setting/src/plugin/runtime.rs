@@ -131,6 +131,16 @@ pub struct AgentSettings {
     /// `file://` follow-pane beside that agent.
     #[serde(default = "default_true")]
     pub follow_files: bool,
+    /// When true (default), an agent finishing a turn tidies clean file previews
+    /// in its follow-pane, keeping changed files and the pane's active preview.
+    #[serde(default = "default_true")]
+    pub tidy_files: bool,
+    /// Only tidy when the follow-pane holds more than this many file previews.
+    #[serde(default = "default_tidy_files_max")]
+    pub tidy_files_max: usize,
+    /// When true, tidy without the confirm dialog. Set by the "Always tidy" button.
+    #[serde(default)]
+    pub tidy_files_auto: bool,
     /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
     #[serde(default = "default_acp_agents")]
     pub acp: Vec<AcpAgentConfig>,
@@ -150,8 +160,15 @@ fn default_agent_settings() -> AgentSettings {
             models: vec!["echo".to_string()],
         }],
         follow_files: true,
+        tidy_files: true,
+        tidy_files_max: 5,
+        tidy_files_auto: false,
         acp: default_acp_agents(),
     }
+}
+
+fn default_tidy_files_max() -> usize {
+    5
 }
 
 /// One external ACP agent the host can spawn. Identity is `id`; the binary is
@@ -1154,6 +1171,25 @@ mod tests {
                 "missing acp agent {id}"
             );
         }
+    }
+
+    #[test]
+    fn agent_defaults_enable_tidy() {
+        let s = default_agent_settings();
+        assert!(s.tidy_files);
+        assert_eq!(s.tidy_files_max, 5);
+        assert!(!s.tidy_files_auto);
+    }
+
+    #[test]
+    fn apply_update_sets_tidy_auto_without_clobbering_siblings() {
+        let mut s = base_settings();
+        assert!(s.agent.follow_files);
+        let ron = apply_settings_update(&mut s, "agent.tidy_files_auto", serde_json::json!(true))
+            .expect("update ok");
+        assert!(s.agent.tidy_files_auto);
+        assert!(s.agent.follow_files, "sibling preserved");
+        assert!(ron.contains("tidy_files_auto"));
     }
 
     fn base_settings() -> AppSettings {

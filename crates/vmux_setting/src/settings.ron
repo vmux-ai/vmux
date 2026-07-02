@@ -59,6 +59,8 @@
             (provider: "stub", kind: "vibe", models: ["echo"]),
         ],
         follow_files: true,
+        tidy_files: true,
+        tidy_files_max: 5,
         acp: [
             (id: "claude", name: "Claude Code", command: "npx",
              args: ["-y", "@zed-industries/claude-code-acp@latest"]),
