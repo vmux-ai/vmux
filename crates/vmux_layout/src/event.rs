@@ -27,7 +27,6 @@ pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
 pub const TAB_BOUNDARY_EVENT: &str = "tab-boundary";
-pub const BOUNDARY_COMMAND_EVENT: &str = "boundary-command";
 
 #[derive(
     Clone,
@@ -492,21 +491,6 @@ pub struct TabBoundary {
 )]
 pub struct TabBoundaryEvent {
     pub boundary: Option<TabBoundary>,
-}
-
-/// A boundary action from the side sheet, applied to the active tab: `isolate` or
-/// `remove_worktree`.
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BoundaryCommandEvent {
-    pub command: String,
 }
 
 #[derive(
