@@ -300,6 +300,23 @@ mod tests {
     }
 
     #[test]
+    fn first_file_splits_newest_terminal_when_no_file_bucket_exists() {
+        let leaves = [
+            leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
+            leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
+            leaf(3, &[PageKind::Terminal], 20, (900.0, 400.0)),
+        ];
+        let got = resolve_placement("file:///repo/README.md", None, &leaves, e(1));
+        assert_eq!(
+            got,
+            Placement::Spiral {
+                anchor: e(3),
+                axis: PaneSplitDirection::Row
+            }
+        );
+    }
+
+    #[test]
     fn new_type_splits_tall_leaf_into_column() {
         let leaves = [leaf(2, &[PageKind::File], 9, (400.0, 900.0))];
         let got = resolve_placement("https://b.com", None, &leaves, e(2));

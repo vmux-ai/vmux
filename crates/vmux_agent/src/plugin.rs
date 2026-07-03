@@ -1736,12 +1736,6 @@ fn handle_agent_self_commands(
                                     None
                                 };
                                 if let Some(pane) = bucket_pane {
-                                    touch_reused_run_pane_spawn_seq(
-                                        pane,
-                                        &mut commands,
-                                        &mut spawn_counter,
-                                        &ctx.seq_q,
-                                    );
                                     pane
                                 } else {
                                     let anchor_pane = anchor_pane.unwrap_or_else(|| {
@@ -1771,6 +1765,12 @@ fn handle_agent_self_commands(
                                 &ctx,
                             ),
                         };
+                        touch_reused_run_pane_spawn_seq(
+                            target_pane,
+                            &mut commands,
+                            &mut spawn_counter,
+                            &ctx.seq_q,
+                        );
                         let new_pid = ProcessId::new();
                         let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
                         let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
@@ -3838,6 +3838,78 @@ mod tests {
                 .0,
             11
         );
+    }
+
+    #[derive(Resource)]
+    struct SplitRunPaneInput {
+        pane: Entity,
+    }
+
+    #[derive(Resource, Default)]
+    struct SplitRunPaneOutput(Option<Entity>);
+
+    fn split_run_pane_test_system(
+        input: Res<SplitRunPaneInput>,
+        mut out: ResMut<SplitRunPaneOutput>,
+        mut commands: Commands,
+        mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
+        pane_children: Query<&Children, With<Pane>>,
+        tab_filter: Query<Entity, With<vmux_layout::stack::Stack>>,
+        split_dir_q: Query<&PaneSplit>,
+        seq_q: Query<&vmux_layout::pane::SpawnSeq>,
+    ) {
+        let mut split_batch = std::collections::HashSet::new();
+        let target = split_pane_off(
+            &mut commands,
+            input.pane,
+            &vmux_service::protocol::AgentPaneDirection::Bottom,
+            false,
+            &pane_children,
+            &tab_filter,
+            &split_dir_q,
+            &mut split_batch,
+        );
+        touch_reused_run_pane_spawn_seq(target, &mut commands, &mut spawn_counter, &seq_q);
+        out.0 = Some(target);
+    }
+
+    #[test]
+    fn split_run_pane_becomes_newest_for_followup_placement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<vmux_layout::pane::SpawnCounter>()
+            .init_resource::<SplitRunPaneOutput>()
+            .add_systems(Update, split_run_pane_test_system);
+
+        let tab = app
+            .world_mut()
+            .spawn((vmux_layout::tab::Tab::default(), LastActivatedAt(1)))
+            .id();
+        let browser_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(10), ChildOf(tab)))
+            .id();
+        let browser_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(browser_pane)))
+            .id();
+        app.world_mut()
+            .entity_mut(browser_stack)
+            .insert(PageMetadata {
+                url: "https://news.ycombinator.com".into(),
+                ..default()
+            });
+        app.insert_resource(SplitRunPaneInput { pane: browser_pane });
+
+        app.update();
+
+        let terminal_pane = app.world().resource::<SplitRunPaneOutput>().0.unwrap();
+        let seq = app
+            .world()
+            .get::<vmux_layout::pane::SpawnSeq>(terminal_pane)
+            .expect("split run target gets fresh spawn seq")
+            .0;
+        assert!(seq > 10, "split run target must become newest");
     }
 
     #[derive(Resource)]

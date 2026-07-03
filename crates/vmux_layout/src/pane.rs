@@ -1074,7 +1074,6 @@ pub fn handle_open_beside_requests(
                         &mut pending_leaf_infos,
                         split.holder,
                         split.target,
-                        split.target,
                     );
                     let pending_size = split
                         .target_size
@@ -1162,9 +1161,6 @@ pub fn handle_open_beside_requests(
             }
             crate::placement::Placement::Spiral { anchor, axis } => {
                 let old_leaf_info = leaves.iter().find(|leaf| leaf.pane == anchor).cloned();
-                let keep_holder_as_tail = old_leaf_info
-                    .as_ref()
-                    .is_some_and(|info| !info.kinds.contains(&crate::placement::PageKind::Agent));
                 let existing_tabs = stack_children_for_split(
                     anchor,
                     &pane_children,
@@ -1185,10 +1181,6 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_stacks,
                     &mut retired_leaf_panes,
                 );
-                let tail = split
-                    .holder
-                    .filter(|_| keep_holder_as_tail)
-                    .unwrap_or(split.target);
                 stamp_split_panes_for_batch(
                     &mut commands,
                     &mut spawn_counter,
@@ -1197,7 +1189,6 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     split.holder,
                     split.target,
-                    tail,
                 );
                 let pending_size = split
                     .target_size
@@ -1288,7 +1279,6 @@ fn stamp_split_panes_for_batch(
     pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
     holder: Option<Entity>,
     target: Entity,
-    tail: Entity,
 ) {
     let mut stamp = |pane| {
         let seq = touch_pane_spawn_seq(pane, commands, spawn_counter, seq_q);
@@ -1298,13 +1288,8 @@ fn stamp_split_panes_for_batch(
         }
     };
     if let Some(holder) = holder {
-        if tail == holder {
-            stamp(target);
-            stamp(holder);
-        } else {
-            stamp(holder);
-            stamp(target);
-        }
+        stamp(holder);
+        stamp(target);
     } else {
         stamp(target);
     }
@@ -3096,7 +3081,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_batched_new_types_dwindle_from_remaining_tail() {
+    fn auto_batched_new_types_split_from_newest_target() {
         let mut app = open_beside_app();
         let space = app
             .world_mut()
@@ -3167,11 +3152,11 @@ mod tests {
         let file_split = app.world().get::<ChildOf>(file_parent).unwrap().get();
         assert_eq!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
-            browser_split
+            file_split
         );
         assert_eq!(
-            app.world().get::<ChildOf>(browser_split).unwrap().get(),
-            file_split
+            app.world().get::<ChildOf>(file_split).unwrap().get(),
+            browser_split
         );
         assert_eq!(
             app.world().get::<PaneSplit>(agent_pane).unwrap().direction,
@@ -3182,11 +3167,11 @@ mod tests {
                 .get::<PaneSplit>(browser_split)
                 .unwrap()
                 .direction,
-            PaneSplitDirection::Row
+            PaneSplitDirection::Column
         );
         assert_eq!(
             app.world().get::<PaneSplit>(file_split).unwrap().direction,
-            PaneSplitDirection::Column
+            PaneSplitDirection::Row
         );
     }
 
@@ -3487,6 +3472,228 @@ mod tests {
         assert_ne!(
             app.world().get::<ChildOf>(terminal_parent).unwrap().get(),
             app.world().get::<ChildOf>(pr_parent).unwrap().get()
+        );
+    }
+
+    #[test]
+    fn auto_first_file_splits_terminal_when_terminal_is_newer() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+        let browser_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            10,
+            Vec2::new(900.0, 400.0),
+            "https://news.ycombinator.com/news",
+        );
+        let terminal_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            20,
+            Vec2::new(900.0, 400.0),
+            "vmux://terminal/",
+        );
+
+        app.world_mut()
+            .resource_mut::<Messages<OpenBesideRequest>>()
+            .write(OpenBesideRequest {
+                pane: agent_pane,
+                direction: None,
+                url: "file:///repo/README.md".into(),
+                request_id: [9; 16],
+                focus: false,
+            });
+        app.update();
+
+        let requests = page_open_requests(&app);
+        let file_parent = requests
+            .iter()
+            .find_map(|request| match &request.target {
+                PageOpenTarget::Stack(stack) if request.url == "file:///repo/README.md" => app
+                    .world()
+                    .get::<ChildOf>(*stack)
+                    .map(|parent| parent.get()),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(file_parent).unwrap().get(),
+            terminal_pane,
+            "first file should split the newest terminal pane"
+        );
+        assert!(
+            app.world().get::<PaneSplit>(browser_pane).is_none(),
+            "browser pane must not split for first file"
+        );
+    }
+
+    #[test]
+    fn auto_browser_open_after_files_becomes_anchor_for_terminal() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "file:///repo/.git/HEAD",
+            "file:///repo/.git/refs/heads/main",
+            "https://news.ycombinator.com/news",
+            "vmux://terminal/",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+            app.update();
+            materialize_page_metadata(&mut app);
+        }
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let file_parent = parent_for_url("file:///repo/.git/refs/heads/main");
+        let browser_parent = parent_for_url("https://news.ycombinator.com/news");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+        let terminal_split = app.world().get::<ChildOf>(terminal_parent).unwrap().get();
+
+        assert_eq!(
+            terminal_split,
+            app.world().get::<ChildOf>(browser_parent).unwrap().get(),
+            "terminal should split the browser pane when the browser opened after files"
+        );
+        assert_ne!(
+            terminal_split,
+            app.world().get::<ChildOf>(file_parent).unwrap().get(),
+            "terminal must not split the older file pane"
+        );
+    }
+
+    #[test]
+    fn auto_file_after_terminal_stacks_in_existing_file_bucket() {
+        let mut app = open_beside_app();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
+            .id();
+        let agent_pane = place_pane_with_url(
+            &mut app,
+            tab,
+            1,
+            Vec2::new(1600.0, 900.0),
+            "vmux://agent/claude/session",
+        );
+
+        for (i, url) in [
+            "file:///repo/.git/HEAD",
+            "file:///repo/.git/refs/heads/main",
+            "https://news.ycombinator.com/news",
+            "vmux://terminal/",
+            "file:///repo/README.md",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.world_mut()
+                .resource_mut::<Messages<OpenBesideRequest>>()
+                .write(OpenBesideRequest {
+                    pane: agent_pane,
+                    direction: None,
+                    url: url.into(),
+                    request_id: [i as u8; 16],
+                    focus: false,
+                });
+            app.update();
+            materialize_page_metadata(&mut app);
+        }
+
+        let requests = page_open_requests(&app);
+        let parent_for_url = |url: &str| -> Entity {
+            requests
+                .iter()
+                .find_map(|request| match &request.target {
+                    PageOpenTarget::Stack(stack) if request.url == url => app
+                        .world()
+                        .get::<ChildOf>(*stack)
+                        .map(|parent| parent.get()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let stale_file_parent = parent_for_url("file:///repo/.git/refs/heads/main");
+        let terminal_parent = parent_for_url("vmux://terminal/");
+        let readme_parent = parent_for_url("file:///repo/README.md");
+
+        assert_eq!(
+            readme_parent, stale_file_parent,
+            "README should tab into the existing file pane"
+        );
+        assert_ne!(
+            readme_parent, terminal_parent,
+            "README must not tab into the terminal pane"
         );
     }
 
