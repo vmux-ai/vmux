@@ -26,6 +26,10 @@ pub struct ChatSnapshot {
     /// Populated when `status == "awaiting"`.
     pub approval_call_id: String,
     pub approval_name: String,
+    /// Prompts queued behind the running turn (FIFO), oldest first. View-only on the page.
+    pub queued: Vec<String>,
+    /// True after an interrupt: the queue is held (not auto-advancing) until resume/clear/submit.
+    pub paused: bool,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -59,6 +63,45 @@ pub struct ChatApproval {
     pub call_id: String,
     pub decision: u8,
 }
+
+/// Page → native: interrupt the in-flight turn (Esc / Ctrl+C / Stop).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatCancel;
+
+/// Page → native: resume a queue paused by a prior interrupt.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatResume;
+
+/// Page → native: drop all queued prompts.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatClearQueue;
 
 /// Page-side mirror of `vmux_service::message::Message` (which is native-only). The JSON
 /// representation is identical, so the page deserializes `messages_json` into this.
@@ -114,11 +157,15 @@ mod tests {
         let v = ChatSnapshot {
             messages_json: "[]".to_string(),
             status: "streaming".to_string(),
+            queued: vec!["a".into(), "b".into()],
+            paused: true,
             ..Default::default()
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
+        assert_eq!(back.queued, vec!["a".to_string(), "b".to_string()]);
+        assert!(back.paused);
     }
 
     #[test]
