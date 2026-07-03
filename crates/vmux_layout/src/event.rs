@@ -457,8 +457,8 @@ pub struct SideSheetCommandEvent {
     pub stack_index: u32,
 }
 
-/// The active tab's working-directory "boundary": the effective dir, where it came from, and
-/// its worktree/branch state. Rendered as the side-sheet boundary chip.
+/// The active tab's working directory + live git status, auto-detected from git. Rendered as the
+/// git-integration section of the side-sheet's first card.
 #[derive(
     Clone,
     Debug,
@@ -473,9 +473,15 @@ pub struct SideSheetCommandEvent {
 pub struct TabBoundary {
     pub effective_dir: String,
     pub source: String,
+    /// The effective dir is inside a git repository.
+    pub is_git_repo: bool,
     pub is_worktree: bool,
     pub branch: String,
     pub base_ref: String,
+    /// Uncommitted working-tree changes.
+    pub uncommitted: u32,
+    /// Commits ahead of upstream.
+    pub ahead: u32,
     pub pane_count: u32,
 }
 

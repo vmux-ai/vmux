@@ -118,6 +118,28 @@ pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
         .collect())
 }
 
+/// Live git status of a directory, for the side-sheet git-integration card.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepoInfo {
+    pub branch: String,
+    pub is_worktree: bool,
+    pub uncommitted: u32,
+    pub ahead: u32,
+}
+
+/// Detect git info for `dir`: `None` if it isn't inside a git repo, else the current branch,
+/// whether it's a linked worktree, and uncommitted/ahead counts. Auto-detected from git alone.
+pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
+    repo_root_of(dir).ok()?;
+    let status = worktree_status(dir).unwrap_or_default();
+    Some(RepoInfo {
+        branch: head_ref(dir).unwrap_or_default(),
+        is_worktree: is_linked_worktree(dir),
+        uncommitted: status.uncommitted,
+        ahead: status.ahead,
+    })
+}
+
 /// True if `dir` is a *linked* worktree (its git-dir differs from the repo's common git-dir),
 /// i.e. not the repo's main working tree. False for the main worktree or a non-repo.
 pub fn is_linked_worktree(dir: &Path) -> bool {
@@ -223,5 +245,25 @@ mod tests {
         let wt = repo.path().join(".worktrees/feat");
         worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
         assert!(is_linked_worktree(&wt), "linked worktree");
+    }
+
+    #[test]
+    fn repo_info_reports_branch_and_dirtiness() {
+        let not_repo = tempfile::tempdir().unwrap();
+        assert!(repo_info(not_repo.path()).is_none(), "non-repo dir");
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let info = repo_info(repo.path()).expect("is a repo");
+        assert_eq!(info.branch, "main");
+        assert!(!info.is_worktree);
+        assert_eq!(info.uncommitted, 0);
+        test_repo::write(repo.path(), "dirty.txt", "x\n");
+        assert_eq!(repo_info(repo.path()).unwrap().uncommitted, 1);
+
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        let wt_info = repo_info(&wt).expect("worktree is a repo");
+        assert!(wt_info.is_worktree);
+        assert_eq!(wt_info.branch, "vmux/feat");
     }
 }

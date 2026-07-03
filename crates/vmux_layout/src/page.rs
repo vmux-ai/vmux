@@ -683,7 +683,7 @@ fn SideSheetView(
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    if let Some(b) = tab_boundary.filter(|b| b.is_worktree) {
+                    if let Some(b) = tab_boundary {
                         TabBoundaryPanel { boundary: b }
                     } else if !space.startup_dir.is_empty() {
                         div { class: "flex items-center gap-1.5 border-t border-foreground/10 px-2.5 py-2 text-muted-foreground",
@@ -719,40 +719,51 @@ fn SideSheetView(
     }
 }
 
-/// The active tab's worktree, rendered inside the space card: worktree dir + branch line +
-/// pane count. Read-only — worktree lifecycle is agent-driven (no UI actions).
+/// The active tab's working directory + live git status, rendered inside the space card. Shows the
+/// dir always; when it's a git repo, adds an auto-detected git row (branch, worktree, dirty/ahead).
+/// Read-only — worktree lifecycle is agent-driven (no UI actions).
 #[component]
 fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
     let b = boundary;
     rsx! {
         div { class: "flex flex-col gap-1.5 border-t border-foreground/10 px-2.5 py-2",
-            div { class: "flex items-center gap-2",
-                Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
-                    path { d: "M6 3v12" }
-                    path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
-                    path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
-                    path { d: "M18 9a9 9 0 0 1-9 9" }
+            div { class: "flex items-center gap-1.5 text-muted-foreground",
+                Icon { class: "h-3.5 w-3.5 shrink-0",
+                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                 }
                 span {
-                    class: "min-w-0 flex-1 truncate text-xs text-foreground/90",
+                    class: "min-w-0 flex-1 truncate text-xs",
                     style: "direction:rtl;",
                     title: "{b.effective_dir}",
                     bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
                 }
-                span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground",
-                    "worktree"
-                }
             }
-            if !b.branch.is_empty() {
-                div { class: "flex items-center gap-1.5 pl-5 text-[11px] text-muted-foreground",
-                    span { class: "min-w-0 truncate", "{b.branch}" }
-                    if !b.base_ref.is_empty() {
+            if b.is_git_repo {
+                div { class: "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground",
+                    span { class: "flex min-w-0 items-center gap-1",
+                        Icon { class: "h-3 w-3 shrink-0 opacity-80",
+                            path { d: "M6 3v12" }
+                            path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                            path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                            path { d: "M18 9a9 9 0 0 1-9 9" }
+                        }
+                        span { class: "min-w-0 truncate text-foreground/90", "{b.branch}" }
+                    }
+                    if b.is_worktree {
+                        span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                            "worktree"
+                        }
+                    }
+                    if b.uncommitted > 0 {
+                        span { class: "shrink-0 text-amber-400/90", "● {b.uncommitted}" }
+                    }
+                    if b.ahead > 0 {
+                        span { class: "shrink-0", "↑ {b.ahead}" }
+                    }
+                    if b.is_worktree && !b.base_ref.is_empty() {
                         span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
                     }
                 }
-            }
-            div { class: "flex items-center gap-2 pt-0.5",
-                span { class: "text-[11px] text-muted-foreground", "{b.pane_count} panes" }
             }
         }
     }

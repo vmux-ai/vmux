@@ -2770,7 +2770,8 @@ fn push_tab_boundary_emit(
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last: Local<String>,
-    mut wt_cache: Local<(String, bool, String)>,
+    mut git_cache: Local<(String, f32, Option<vmux_git::worktree::RepoInfo>)>,
+    time: Res<Time>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
@@ -2787,33 +2788,28 @@ fn push_tab_boundary_emit(
             .unwrap_or_default();
         let (path, source) =
             resolve_startup_dir_for_tab_with_source(&settings, &space_id, tab_dir.as_deref());
-        // Git-detect worktree status, cached by dir so git runs only when the active dir changes.
+        // Auto-detect git status for the tab dir, cached by dir + refreshed every ~3s. This only
+        // runs when the loop wakes (Reactive mode), so it never polls git while idle.
         let dir_key = path.to_string_lossy().to_string();
-        if wt_cache.0 != dir_key {
-            let detected = vmux_git::worktree::is_linked_worktree(&path);
-            let branch = if detected {
-                vmux_git::worktree::head_ref(&path).unwrap_or_default()
-            } else {
-                String::new()
-            };
-            *wt_cache = (dir_key, detected, branch);
+        let now = time.elapsed_secs();
+        if git_cache.0 != dir_key || now - git_cache.1 > 3.0 {
+            *git_cache = (dir_key, now, vmux_git::worktree::repo_info(&path));
         }
-        let is_worktree = wt_cache.1;
-        let detected_branch = wt_cache.2.clone();
+        let info = git_cache.2.clone();
         let wt = worktrees.get(tab_e).ok();
-        let branch = wt
-            .map(|w| w.branch.clone())
-            .filter(|b| !b.is_empty())
-            .unwrap_or(detected_branch);
+        let branch = info.as_ref().map(|i| i.branch.clone()).unwrap_or_default();
         let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
         let mut leaves = Vec::new();
         collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
         TabBoundary {
             effective_dir: abbreviate_home(&path),
             source: dir_source_label(source).to_string(),
-            is_worktree,
+            is_git_repo: info.is_some(),
+            is_worktree: info.as_ref().is_some_and(|i| i.is_worktree),
             branch,
             base_ref,
+            uncommitted: info.as_ref().map(|i| i.uncommitted).unwrap_or(0),
+            ahead: info.as_ref().map(|i| i.ahead).unwrap_or(0),
             pane_count: leaves.len() as u32,
         }
     });
