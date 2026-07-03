@@ -1074,7 +1074,6 @@ pub fn handle_open_beside_requests(
                         &mut pending_leaf_infos,
                         split.holder,
                         split.target,
-                        split.target,
                     );
                     let pending_size = split
                         .target_size
@@ -1190,7 +1189,6 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_infos,
                     split.holder,
                     split.target,
-                    split.target,
                 );
                 let pending_size = split
                     .target_size
@@ -1281,7 +1279,6 @@ fn stamp_split_panes_for_batch(
     pending_leaf_infos: &mut std::collections::HashMap<Entity, crate::placement::LeafInfo>,
     holder: Option<Entity>,
     target: Entity,
-    tail: Entity,
 ) {
     let mut stamp = |pane| {
         let seq = touch_pane_spawn_seq(pane, commands, spawn_counter, seq_q);
@@ -1291,13 +1288,8 @@ fn stamp_split_panes_for_batch(
         }
     };
     if let Some(holder) = holder {
-        if tail == holder {
-            stamp(target);
-            stamp(holder);
-        } else {
-            stamp(holder);
-            stamp(target);
-        }
+        stamp(holder);
+        stamp(target);
     } else {
         stamp(target);
     }
