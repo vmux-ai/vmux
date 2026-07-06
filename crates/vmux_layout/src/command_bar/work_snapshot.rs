@@ -59,22 +59,29 @@ fn list_dir_entries(dir: &str) -> Vec<CommandBarWorkDir> {
 /// or restart), not every frame.
 pub fn update_work_dirs_snapshot(
     terminals: Query<(&TerminalLaunch, Option<&LastActivatedAt>), With<Terminal>>,
+    agent_dirs: Query<(&vmux_core::AgentWorkingDir, Option<&LastActivatedAt>)>,
     mut last_cwds: Local<Vec<String>>,
     mut snapshot: ResMut<CommandBarWorkSnapshot>,
 ) {
     let mut by_cwd: Vec<(String, i64)> = Vec::new();
-    for (launch, last) in &terminals {
-        // Skip empty cwds and vmux's own data dir (e.g. ~/.vmux/spaces/<id>) — those
-        // are internal defaults, not user work dirs.
-        if launch.cwd.is_empty() || launch.cwd.contains("/.vmux/") {
-            continue;
+    // Skip empty cwds and vmux's own data dir (e.g. ~/.vmux/spaces/<id>) — those
+    // are internal defaults, not user work dirs.
+    let merge = |cwd: &str, ts: i64, acc: &mut Vec<(String, i64)>| {
+        if cwd.is_empty() || cwd.contains("/.vmux/") {
+            return;
         }
-        let ts = last.map(|l| l.0).unwrap_or(0);
-        if let Some(existing) = by_cwd.iter_mut().find(|(p, _)| *p == launch.cwd) {
+        if let Some(existing) = acc.iter_mut().find(|(p, _)| p == cwd) {
             existing.1 = existing.1.max(ts);
         } else {
-            by_cwd.push((launch.cwd.clone(), ts));
+            acc.push((cwd.to_string(), ts));
         }
+    };
+    for (launch, last) in &terminals {
+        merge(&launch.cwd, last.map(|l| l.0).unwrap_or(0), &mut by_cwd);
+    }
+    // ACP (and other PTY-less agent) panes carry their cwd on `AgentWorkingDir`.
+    for (dir, last) in &agent_dirs {
+        merge(&dir.0, last.map(|l| l.0).unwrap_or(0), &mut by_cwd);
     }
     by_cwd.sort_by_key(|(_, ts)| std::cmp::Reverse(*ts));
     let cwds: Vec<String> = by_cwd.into_iter().map(|(p, _)| p).collect();
@@ -200,6 +207,31 @@ mod tests {
         app.update();
         let snap = app.world().resource::<CommandBarWorkSnapshot>();
         assert!(snap.work_dirs.is_empty(), "excludes ~/.vmux internal dirs");
+    }
+
+    #[test]
+    fn work_dirs_list_acp_agent_cwd_contents() {
+        use std::fs;
+        let root = std::env::temp_dir().join(format!("vmux-acp-work-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("notes.md"), "").unwrap();
+        let cwd = root.to_string_lossy().to_string();
+
+        let mut app = App::new();
+        app.init_resource::<CommandBarWorkSnapshot>()
+            .add_systems(Update, update_work_dirs_snapshot);
+        app.world_mut().spawn(vmux_core::AgentWorkingDir(cwd.clone()));
+        app.update();
+
+        let snap = app.world().resource::<CommandBarWorkSnapshot>();
+        assert!(
+            snap.work_dirs
+                .iter()
+                .any(|e| e.path.ends_with("/notes.md") && !e.is_dir),
+            "lists files in the ACP agent's cwd"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

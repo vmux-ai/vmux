@@ -384,6 +384,7 @@ pub fn attach_acp_agent_to_stack(
             sid: sid.to_string(),
             kind: None,
         },
+        vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
     ));
     let url = format!("vmux://agent/{agent_id}");
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.

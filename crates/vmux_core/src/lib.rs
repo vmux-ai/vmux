@@ -107,6 +107,13 @@ pub struct PageMetadata {
 #[derive(Component, Clone, Debug)]
 pub struct OscTitle(pub String);
 
+/// The working directory of a non-terminal agent pane (e.g. an ACP session), so the command
+/// bar's "current work" can list its cwd contents the same way it lists open terminals' cwds.
+/// Terminals carry their cwd on `TerminalLaunch`; this covers agents that have no PTY.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug)]
+pub struct AgentWorkingDir(pub String);
+
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
