@@ -3,7 +3,7 @@ use bevy_cef::prelude::BinEventEmitterPlugin;
 
 use crate::AgentVariant;
 use crate::client::acp::AcpSession;
-use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
+use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::message::Message;
 use crate::run_state::AgentRunState;
@@ -40,6 +40,7 @@ impl Plugin for PageAgentPlugin {
             .add_systems(
                 Update,
                 (
+                    ensure_prompt_queue,
                     spawn_page_session_on_add,
                     send_page_agent_input,
                     consume_page_agent_stream,
@@ -104,22 +105,42 @@ fn spawn_page_session_on_add(
 }
 
 fn send_page_agent_input(
-    mut commands: Commands,
-    q: Query<(Entity, &AgentSession, &PendingUserInput)>,
+    mut q: Query<(&AgentSession, &mut AgentRunState, &mut PromptQueue)>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    for (entity, session, pending) in &q {
+    for (session, mut state, mut queue) in &mut q {
         if session.variant != AgentVariant::Page {
             continue;
         }
+        if !queue.ready(matches!(*state, AgentRunState::Idle)) {
+            continue;
+        }
+        let Some(text) = queue.items.pop_front() else {
+            continue;
+        };
         service.0.send(ClientMessage::AgentInput {
             sid: session.sid.clone(),
-            text: pending.0.clone(),
+            text,
         });
-        commands.entity(entity).remove::<PendingUserInput>();
+        *state = AgentRunState::Streaming;
+    }
+}
+
+fn ensure_prompt_queue(
+    mut commands: Commands,
+    q: Query<
+        Entity,
+        (
+            Or<(Added<AcpSession>, Added<AgentSession>)>,
+            Without<PromptQueue>,
+        ),
+    >,
+) {
+    for entity in &q {
+        commands.entity(entity).insert(PromptQueue::default());
     }
 }
 
@@ -155,6 +176,7 @@ fn consume_page_agent_stream(
         Entity,
         &mut AgentMessages,
         &mut AgentRunState,
+        &mut PromptQueue,
         Option<&AgentSession>,
         Option<&AcpSession>,
     )>,
@@ -162,7 +184,7 @@ fn consume_page_agent_stream(
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
         .iter()
-        .filter_map(|(e, _, _, page, acp)| {
+        .filter_map(|(e, _, _, _, page, acp)| {
             let sid = page
                 .map(|s| s.sid.clone())
                 .or_else(|| acp.map(|s| s.sid.clone()))?;
@@ -180,7 +202,7 @@ fn consume_page_agent_stream(
     }
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
-            && let Ok((_, mut messages, _, _, _)) = q.get_mut(entity)
+            && let Ok((_, mut messages, _, _, _, _)) = q.get_mut(entity)
             && let Ok(parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
             messages.0 = parsed;
@@ -188,13 +210,19 @@ fn consume_page_agent_stream(
     }
     for status in statuses.read() {
         if let Some(&entity) = by_sid.get(&status.sid)
-            && let Ok((_, _, mut state, _, _)) = q.get_mut(entity)
+            && let Ok((_, _, mut state, mut queue, _, _)) = q.get_mut(entity)
         {
-            *state = match &status.status {
-                AgentRunStatus::Idle => AgentRunState::Idle,
-                AgentRunStatus::Streaming => AgentRunState::Streaming,
-                AgentRunStatus::Errored(message) => AgentRunState::Errored(message.clone()),
-            };
+            match &status.status {
+                AgentRunStatus::Idle => *state = AgentRunState::Idle,
+                AgentRunStatus::Streaming => *state = AgentRunState::Streaming,
+                AgentRunStatus::Interrupted => {
+                    *state = AgentRunState::Idle;
+                    queue.paused = true;
+                }
+                AgentRunStatus::Errored(message) => {
+                    *state = AgentRunState::Errored(message.clone())
+                }
+            }
         }
     }
     for approval in approvals.read() {
@@ -203,7 +231,7 @@ fn consume_page_agent_stream(
         };
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
-        if let Ok((_, _, mut state, _, _)) = q.get_mut(entity) {
+        if let Ok((_, _, mut state, _, _, _)) = q.get_mut(entity) {
             *state = AgentRunState::AwaitingApproval {
                 call_id: approval.call_id.clone(),
                 name: approval.name.clone(),
@@ -231,5 +259,54 @@ mod tests {
             .init_resource::<BinIpcEventRawBuffer>()
             .add_plugins(PageAgentPlugin);
         app.update();
+    }
+
+    #[test]
+    fn interrupted_status_pauses_queue_and_idles() {
+        use crate::client::acp::AcpSession;
+        use crate::components::PromptQueue;
+        use vmux_service::agent_events::{
+            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+        };
+        use vmux_service::protocol::AgentRunStatus;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_systems(Update, consume_page_agent_stream);
+
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("next".into());
+        let e = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "a".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                },
+                AgentMessages::default(),
+                AgentRunState::Streaming,
+                queue,
+            ))
+            .id();
+        app.world_mut().write_message(PageAgentRunStatus {
+            sid: "s1".into(),
+            status: AgentRunStatus::Interrupted,
+        });
+        app.update();
+
+        let world = app.world();
+        assert!(matches!(
+            world.get::<AgentRunState>(e),
+            Some(AgentRunState::Idle)
+        ));
+        let q = world.get::<PromptQueue>(e).unwrap();
+        assert!(q.paused, "queue must pause after interrupt");
+        assert_eq!(q.items.len(), 1, "held item must not auto-advance");
     }
 }

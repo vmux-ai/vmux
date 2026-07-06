@@ -9,7 +9,7 @@ use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
 use vmux_setting::AppSettings;
 
-use crate::components::{AgentApprovalPolicy, PendingUserInput};
+use crate::components::{AgentApprovalPolicy, PromptQueue};
 use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::run_state::AgentRunState;
 
@@ -294,19 +294,24 @@ fn drain_acp_installs(
 }
 
 fn send_acp_input(
-    mut commands: Commands,
-    q: Query<(Entity, &AcpSession, &PendingUserInput)>,
+    mut q: Query<(&AcpSession, &mut AgentRunState, &mut PromptQueue)>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    for (entity, session, pending) in &q {
+    for (session, mut state, mut queue) in &mut q {
+        if !queue.ready(matches!(*state, AgentRunState::Idle)) {
+            continue;
+        }
+        let Some(text) = queue.items.pop_front() else {
+            continue;
+        };
         service.0.send(ClientMessage::AgentInput {
             sid: session.sid.clone(),
-            text: pending.0.clone(),
+            text,
         });
-        commands.entity(entity).remove::<PendingUserInput>();
+        *state = AgentRunState::Streaming;
     }
 }
 

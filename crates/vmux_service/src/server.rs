@@ -754,6 +754,20 @@ async fn handle_client(
                 }
             }
 
+            ClientMessage::AgentCancel { sid } => {
+                if acp_manager.lock().await.contains(&sid) {
+                    acp_manager
+                        .lock()
+                        .await
+                        .input(&sid, crate::acp::AcpInput::Cancel);
+                } else {
+                    agent_manager
+                        .lock()
+                        .await
+                        .input(&sid, crate::agent::SessionInput::Cancel);
+                }
+            }
+
             ClientMessage::AgentApprove {
                 sid,
                 call_id,

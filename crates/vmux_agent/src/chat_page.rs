@@ -13,13 +13,22 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::chat_page::event::{CHAT_SNAPSHOT_EVENT, ChatApproval, ChatSnapshot, ChatSubmit};
+use crate::chat_page::event::{
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatResume, ChatSnapshot,
+    ChatSubmit,
+};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::components::{AgentMessages, PendingUserInput};
+use crate::client::acp::AcpSession;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_service::client::ServiceClient;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_service::protocol::ClientMessage;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -37,9 +46,18 @@ pub struct AgentChatPagePlugin;
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(ChatSubmit, ChatApproval)>::for_hosts(&["agent"]))
+        app.add_plugins(BinEventEmitterPlugin::<(
+            ChatSubmit,
+            ChatApproval,
+            ChatCancel,
+            ChatResume,
+            ChatClearQueue,
+        )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
+            .add_observer(on_chat_cancel)
+            .add_observer(on_chat_resume)
+            .add_observer(on_chat_clear_queue)
             .add_systems(Update, (push_chat_to_page, push_chat_on_ready));
     }
 }
@@ -50,7 +68,7 @@ impl Plugin for AgentChatPagePlugin {
 fn push_chat_on_ready(
     newly_ready: Query<Entity, bevy::ecs::query::Added<vmux_core::page::PageReady>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<(&AgentMessages, &AgentRunState)>,
+    sessions: Query<(&AgentMessages, &AgentRunState, &PromptQueue)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -58,7 +76,7 @@ fn push_chat_on_ready(
         let Ok(parent) = child_of.get(webview) else {
             continue;
         };
-        let Ok((messages, state)) = sessions.get(parent.parent()) else {
+        let Ok((messages, state, queue)) = sessions.get(parent.parent()) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -67,13 +85,17 @@ fn push_chat_on_ready(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state),
+            &snapshot_of(messages, state, queue),
         ));
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn snapshot_of(messages: &AgentMessages, state: &AgentRunState) -> ChatSnapshot {
+fn snapshot_of(
+    messages: &AgentMessages,
+    state: &AgentRunState,
+    queue: &PromptQueue,
+) -> ChatSnapshot {
     let messages_json = serde_json::to_string(&messages.0).unwrap_or_else(|_| "[]".to_string());
     let (status, error, call_id, name) = match state {
         AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
@@ -98,6 +120,8 @@ fn snapshot_of(messages: &AgentMessages, state: &AgentRunState) -> ChatSnapshot 
         error,
         approval_call_id: call_id,
         approval_name: name,
+        queued: queue.items.iter().cloned().collect(),
+        paused: queue.paused,
     }
 }
 
@@ -106,15 +130,19 @@ fn snapshot_of(messages: &AgentMessages, state: &AgentRunState) -> ChatSnapshot 
 #[cfg(not(target_arch = "wasm32"))]
 fn push_chat_to_page(
     sessions: Query<
-        (Entity, &AgentMessages, &AgentRunState),
-        Or<(Changed<AgentMessages>, Changed<AgentRunState>)>,
+        (Entity, &AgentMessages, &AgentRunState, &PromptQueue),
+        Or<(
+            Changed<AgentMessages>,
+            Changed<AgentRunState>,
+            Changed<PromptQueue>,
+        )>,
     >,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state) in &sessions {
+    for (stack, messages, state, queue) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -127,7 +155,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state),
+            &snapshot_of(messages, state, queue),
         ));
     }
 }
@@ -136,16 +164,71 @@ fn push_chat_to_page(
 fn on_chat_submit(
     trigger: On<BinReceive<ChatSubmit>>,
     child_of: Query<&ChildOf>,
-    mut commands: Commands,
+    mut queues: Query<&mut PromptQueue>,
 ) {
     let webview = trigger.event().webview;
     let text = trigger.event().payload.text.clone();
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    commands
-        .entity(parent.parent())
-        .insert(PendingUserInput(text));
+    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
+        queue.items.push_back(text);
+        queue.paused = false;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_cancel(
+    trigger: On<BinReceive<ChatCancel>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<(Option<&AcpSession>, Option<&AgentSession>)>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((acp, page)) = sessions.get(parent.parent()) else {
+        return;
+    };
+    let Some(sid) = acp
+        .map(|s| s.sid.clone())
+        .or_else(|| page.map(|s| s.sid.clone()))
+    else {
+        return;
+    };
+    service.0.send(ClientMessage::AgentCancel { sid });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_resume(
+    trigger: On<BinReceive<ChatResume>>,
+    child_of: Query<&ChildOf>,
+    mut queues: Query<&mut PromptQueue>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
+        queue.paused = false;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_clear_queue(
+    trigger: On<BinReceive<ChatClearQueue>>,
+    child_of: Query<&ChildOf>,
+    mut queues: Query<&mut PromptQueue>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
+        queue.items.clear();
+        queue.paused = false;
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

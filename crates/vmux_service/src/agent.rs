@@ -42,6 +42,7 @@ pub enum SessionInput {
         call_id: String,
         decision: ApprovalDecision,
     },
+    Cancel,
     Close,
 }
 
@@ -131,7 +132,13 @@ async fn snapshot_message(sid: &str, messages: &Arc<Mutex<Vec<Message>>>) -> Ser
     }
 }
 
-fn spawn_sse(request: reqwest::Request, parse: ParseSse) -> mpsc::UnboundedReceiver<StreamEvent> {
+fn spawn_sse(
+    request: reqwest::Request,
+    parse: ParseSse,
+) -> (
+    mpsc::UnboundedReceiver<StreamEvent>,
+    tokio::task::JoinHandle<()>,
+) {
     let (cb_tx, cb_rx) = crossbeam_channel::unbounded::<StreamEvent>();
     let (ev_tx, ev_rx) = mpsc::unbounded_channel::<StreamEvent>();
     tokio::task::spawn_blocking(move || {
@@ -141,10 +148,10 @@ fn spawn_sse(request: reqwest::Request, parse: ParseSse) -> mpsc::UnboundedRecei
             }
         }
     });
-    tokio::spawn(async move {
+    let http = tokio::spawn(async move {
         crate::http::drive_sse(request, parse, cb_tx).await;
     });
-    ev_rx
+    (ev_rx, http)
 }
 
 fn append_text(blocks: &mut Vec<AssistantBlock>, text: &str) {
@@ -155,11 +162,18 @@ fn append_text(blocks: &mut Vec<AssistantBlock>, text: &str) {
     }
 }
 
+enum Decision {
+    Allow,
+    Deny,
+    Cancelled,
+    Closed,
+}
+
 async fn recv_user(input_rx: &mut mpsc::UnboundedReceiver<SessionInput>) -> Option<String> {
     loop {
         match input_rx.recv().await {
             Some(SessionInput::User(text)) => return Some(text),
-            Some(SessionInput::Approve { .. }) => continue,
+            Some(SessionInput::Approve { .. }) | Some(SessionInput::Cancel) => continue,
             Some(SessionInput::Close) | None => return None,
         }
     }
@@ -168,15 +182,21 @@ async fn recv_user(input_rx: &mut mpsc::UnboundedReceiver<SessionInput>) -> Opti
 async fn await_decision(
     input_rx: &mut mpsc::UnboundedReceiver<SessionInput>,
     call_id: &str,
-) -> Option<ApprovalDecision> {
+) -> Decision {
     loop {
         match input_rx.recv().await {
             Some(SessionInput::Approve {
                 call_id: cid,
                 decision,
-            }) if cid == call_id => return Some(decision),
+            }) if cid == call_id => {
+                return match decision {
+                    ApprovalDecision::Allow => Decision::Allow,
+                    ApprovalDecision::Deny => Decision::Deny,
+                };
+            }
+            Some(SessionInput::Cancel) => return Decision::Cancelled,
             Some(SessionInput::Approve { .. }) | Some(SessionInput::User(_)) => continue,
-            Some(SessionInput::Close) | None => return None,
+            Some(SessionInput::Close) | None => return Decision::Closed,
         }
     }
 }
@@ -223,55 +243,88 @@ async fn run_session(
                 status: AgentRunStatus::Streaming,
             });
 
-            let mut ev_rx = spawn_sse(request, provider.parse_sse);
+            let (mut ev_rx, http) = spawn_sse(request, provider.parse_sse);
             let mut blocks: Vec<AssistantBlock> = Vec::new();
             let mut partial: Option<(String, String, String)> = None;
             let mut pending_tool: Option<(String, String, String)> = None;
             let mut errored: Option<String> = None;
+            let mut cancelled = false;
 
-            while let Some(event) = ev_rx.recv().await {
-                match event {
-                    StreamEvent::TextDelta(text) => {
-                        append_text(&mut blocks, &text);
-                        let _ = stream_tx.send(ServiceMessage::AgentDelta {
-                            sid: sid.clone(),
-                            text,
-                        });
-                    }
-                    StreamEvent::ToolUseStart { call_id, name } => {
-                        partial = Some((call_id, name, String::new()));
-                    }
-                    StreamEvent::ToolUseArgsDelta {
-                        call_id,
-                        json_chunk,
-                    } => {
-                        if let Some(p) = &mut partial {
-                            if p.0.is_empty() && !call_id.is_empty() {
-                                p.0 = call_id;
+            loop {
+                tokio::select! {
+                    biased;
+                    signal = input_rx.recv() => {
+                        match signal {
+                            Some(SessionInput::Cancel) => {
+                                cancelled = true;
+                                break;
                             }
-                            p.2.push_str(&json_chunk);
+                            Some(SessionInput::Close) | None => {
+                                http.abort();
+                                return;
+                            }
+                            Some(SessionInput::User(_)) | Some(SessionInput::Approve { .. }) => {}
                         }
                     }
-                    StreamEvent::ToolUseEnd { call_id } => {
-                        if let Some((mut cid, name, args)) = partial.take() {
-                            if cid.is_empty() && !call_id.is_empty() {
-                                cid = call_id;
+                    event = ev_rx.recv() => {
+                        let Some(event) = event else {
+                            break;
+                        };
+                        match event {
+                            StreamEvent::TextDelta(text) => {
+                                append_text(&mut blocks, &text);
+                                let _ = stream_tx.send(ServiceMessage::AgentDelta {
+                                    sid: sid.clone(),
+                                    text,
+                                });
                             }
-                            blocks.push(AssistantBlock::ToolUse {
-                                call_id: cid.clone(),
-                                name: name.clone(),
-                                args: args.clone(),
-                            });
-                            pending_tool = Some((cid, name, args));
+                            StreamEvent::ToolUseStart { call_id, name } => {
+                                partial = Some((call_id, name, String::new()));
+                            }
+                            StreamEvent::ToolUseArgsDelta {
+                                call_id,
+                                json_chunk,
+                            } => {
+                                if let Some(p) = &mut partial {
+                                    if p.0.is_empty() && !call_id.is_empty() {
+                                        p.0 = call_id;
+                                    }
+                                    p.2.push_str(&json_chunk);
+                                }
+                            }
+                            StreamEvent::ToolUseEnd { call_id } => {
+                                if let Some((mut cid, name, args)) = partial.take() {
+                                    if cid.is_empty() && !call_id.is_empty() {
+                                        cid = call_id;
+                                    }
+                                    blocks.push(AssistantBlock::ToolUse {
+                                        call_id: cid.clone(),
+                                        name: name.clone(),
+                                        args: args.clone(),
+                                    });
+                                    pending_tool = Some((cid, name, args));
+                                }
+                            }
+                            StreamEvent::StopTurn { .. } => {}
+                            StreamEvent::Error(msg) => errored = Some(msg),
                         }
                     }
-                    StreamEvent::StopTurn { .. } => {}
-                    StreamEvent::Error(msg) => errored = Some(msg),
                 }
             }
 
+            if cancelled {
+                http.abort();
+            }
             if !blocks.is_empty() {
                 messages.lock().await.push(Message::Assistant { blocks });
+            }
+            if cancelled {
+                let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
+                let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
+                    sid: sid.clone(),
+                    status: AgentRunStatus::Interrupted,
+                });
+                break;
             }
 
             if let Some(msg) = errored {
@@ -306,8 +359,15 @@ async fn run_session(
                     args_json: args_json.clone(),
                 });
                 match await_decision(&mut input_rx, &call_id).await {
-                    None => return,
-                    Some(ApprovalDecision::Deny) => {
+                    Decision::Closed => return,
+                    Decision::Cancelled => {
+                        let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
+                            sid: sid.clone(),
+                            status: AgentRunStatus::Interrupted,
+                        });
+                        break;
+                    }
+                    Decision::Deny => {
                         messages.lock().await.push(Message::ToolResult {
                             call_id,
                             content: "Tool call denied by user.".to_string(),
@@ -315,7 +375,7 @@ async fn run_session(
                         });
                         continue;
                     }
-                    Some(ApprovalDecision::Allow) => {}
+                    Decision::Allow => {}
                 }
             }
 

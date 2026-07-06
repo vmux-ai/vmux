@@ -1,10 +1,19 @@
 #![allow(non_snake_case)]
 
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatMessage, ChatSnapshot, ChatSubmit,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
+    ChatResume, ChatSnapshot, ChatSubmit,
 };
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+
+/// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
+fn has_text_selection() -> bool {
+    web_sys::window()
+        .and_then(|w| w.get_selection().ok().flatten())
+        .map(|s| !s.is_collapsed())
+        .unwrap_or(false)
+}
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
 /// across agents and only the id differs.
@@ -27,6 +36,8 @@ pub fn Page() -> Element {
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
+    let mut queued = use_signal(Vec::<String>::new);
+    let mut paused = use_signal(|| false);
 
     use_future(move || async move {
         loop {
@@ -61,6 +72,8 @@ pub fn Page() -> Element {
         }
         status.set(snap.status.clone());
         error.set(snap.error.clone());
+        queued.set(snap.queued.clone());
+        paused.set(snap.paused);
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -145,6 +158,13 @@ pub fn Page() -> Element {
                             "{error}"
                         }
                     }
+                    if paused() {
+                        div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
+                            span { class: "h-px flex-1 bg-foreground/10" }
+                            span { class: "shrink-0", "interrupted" }
+                            span { class: "h-px flex-1 bg-foreground/10" }
+                        }
+                    }
                 }
             }
 
@@ -185,24 +205,114 @@ pub fn Page() -> Element {
             }
 
             div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
-                div { class: "mx-auto flex max-w-3xl items-end gap-2",
-                    textarea {
-                        class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
-                        rows: "1",
-                        placeholder: "Message the agent…",
-                        value: "{draft}",
-                        oninput: move |e| draft.set(e.value()),
-                        onkeydown: move |e| {
-                            if e.key() == Key::Enter && !e.modifiers().shift() {
-                                e.prevent_default();
-                                do_submit(draft, messages, status, at_bottom);
+                div { class: "mx-auto flex max-w-3xl flex-col gap-2",
+                    if !queued.read().is_empty() {
+                        div { class: "flex flex-col items-end gap-1.5",
+                            for (qi , qtext) in queued.read().iter().enumerate() {
+                                div {
+                                    key: "q{qi}",
+                                    class: "flex max-w-[80%] items-baseline gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] px-3.5 py-2 text-sm text-muted-foreground",
+                                    span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
+                                    span { class: "whitespace-pre-wrap break-words", "{qtext}" }
+                                }
                             }
-                        },
+                            if paused() {
+                                div { class: "flex items-center gap-1",
+                                    button {
+                                        class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Resume queued prompts",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ChatResume);
+                                        },
+                                        svg {
+                                            class: "h-3.5 w-3.5",
+                                            view_box: "0 0 24 24",
+                                            fill: "currentColor",
+                                            path { d: "M8 5v14l11-7z" }
+                                        }
+                                        span { class: "tabular-nums", "{queued.read().len()}" }
+                                    }
+                                    button {
+                                        class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Clear queue",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ChatClearQueue);
+                                        },
+                                        svg {
+                                            class: "h-3.5 w-3.5",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    button {
-                        class: "rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background hover:brightness-110 active:scale-[0.99]",
-                        onclick: move |_| do_submit(draft, messages, status, at_bottom),
-                        "Send"
+                    div { class: "flex items-end gap-2",
+                        textarea {
+                            class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
+                            rows: "1",
+                            placeholder: "Message the agent…",
+                            value: "{draft}",
+                            oninput: move |e| draft.set(e.value()),
+                            onkeydown: move |e| {
+                                let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+                                if e.key() == Key::Enter && !e.modifiers().shift() {
+                                    e.prevent_default();
+                                    do_submit(draft, at_bottom);
+                                } else if e.key() == Key::Escape {
+                                    if streaming {
+                                        e.prevent_default();
+                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                    } else if !draft.peek().is_empty() {
+                                        draft.set(String::new());
+                                    }
+                                } else if e.modifiers().ctrl()
+                                    && matches!(e.key(), Key::Character(c) if c == "c")
+                                    && streaming
+                                    && !has_text_selection()
+                                {
+                                    e.prevent_default();
+                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                }
+                            },
+                        }
+                        if matches!(status().as_str(), "streaming" | "awaiting") {
+                            button {
+                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                title: "Interrupt (Esc)",
+                                onclick: move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                },
+                                svg {
+                                    class: "h-4 w-4",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                                }
+                            }
+                        } else {
+                            button {
+                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                title: "Send (Enter)",
+                                onclick: move |_| do_submit(draft, at_bottom),
+                                svg {
+                                    class: "h-4 w-4",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M12 19V5" }
+                                    path { d: "M5 12l7-7 7 7" }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -210,24 +320,17 @@ pub fn Page() -> Element {
     }
 }
 
-fn do_submit(
-    mut draft: Signal<String>,
-    mut messages: Signal<Vec<ChatMessage>>,
-    mut status: Signal<String>,
-    mut at_bottom: Signal<bool>,
-) {
+/// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed
+/// emit never silently swallows the user's message. The queued/sent turn arrives via snapshot.
+fn do_submit(mut draft: Signal<String>, mut at_bottom: Signal<bool>) {
     let text = draft.peek().trim().to_string();
     if text.is_empty() {
         return;
     }
-    // Emit first; only reflect the turn optimistically (and clear the draft) if the IPC succeeded,
-    // so a failed emit never silently swallows the user's message.
-    if try_cef_bin_emit_rkyv(&ChatSubmit { text: text.clone() }).is_err() {
+    if try_cef_bin_emit_rkyv(&ChatSubmit { text }).is_err() {
         return;
     }
     at_bottom.set(true);
-    messages.write().push(ChatMessage::User { text });
-    status.set("streaming".to_string());
     draft.set(String::new());
 }
 

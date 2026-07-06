@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -33,6 +34,8 @@ pub enum AcpInput {
         call_id: String,
         decision: ApprovalDecision,
     },
+    /// Interrupt the in-flight prompt (ACP `session/cancel`); keep the session alive.
+    Cancel,
     Close,
 }
 
@@ -45,6 +48,9 @@ pub struct AcpShared {
     pub projector: Mutex<AcpProjector>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, ProcessId>>,
+    /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
+    /// reports `Interrupted` rather than `Idle`.
+    pub cancel_requested: AtomicBool,
 }
 
 impl AcpShared {
@@ -256,6 +262,7 @@ pub async fn run(
             while let Some(input) = input_rx.recv().await {
                 match input {
                     AcpInput::User(text) => {
+                        main_shared.cancel_requested.store(false, Ordering::SeqCst);
                         main_shared
                             .projector
                             .lock()
@@ -271,12 +278,13 @@ pub async fn run(
                                 session_id,
                                 vec![ContentBlock::Text(TextContent::new(text))],
                             );
-                            let status = match cx_prompt.send_request(prompt).block_task().await {
-                                Ok(_) => AgentRunStatus::Idle,
-                                Err(err) => AgentRunStatus::Errored(err.to_string()),
+                            let errored = match cx_prompt.send_request(prompt).block_task().await {
+                                Ok(_) => None,
+                                Err(err) => Some(err.to_string()),
                             };
+                            let cancelled = shared.cancel_requested.swap(false, Ordering::SeqCst);
                             shared.emit(shared.snapshot_message());
-                            shared.emit_status(status);
+                            shared.emit_status(status_after_prompt(cancelled, errored));
                             Ok(())
                         })?;
                     }
@@ -285,6 +293,14 @@ pub async fn run(
                         {
                             let _ = tx.send(decision);
                         }
+                    }
+                    AcpInput::Cancel => {
+                        main_shared.cancel_requested.store(true, Ordering::SeqCst);
+                        for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
+                            let _ = tx.send(ApprovalDecision::Deny);
+                        }
+                        let _ = cx
+                            .send_notification(CancelNotification::new(session.session_id.clone()));
                     }
                     AcpInput::Close => {
                         let _ = cx
@@ -388,6 +404,18 @@ fn write_text_file(cwd: &std::path::Path, req: &WriteTextFileRequest) -> Result<
     std::fs::write(&path, &req.content).map_err(|e| format!("write {}: {e}", path.display()))
 }
 
+/// Decide the run status to emit after a prompt future resolves. A cancel in flight wins over
+/// both success and error so the UI shows `Interrupted`.
+fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStatus {
+    if cancelled {
+        AgentRunStatus::Interrupted
+    } else if let Some(err) = errored {
+        AgentRunStatus::Errored(err)
+    } else {
+        AgentRunStatus::Idle
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,6 +423,20 @@ mod tests {
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[test]
+    fn status_after_prompt_cancel_wins() {
+        assert_eq!(status_after_prompt(false, None), AgentRunStatus::Idle);
+        assert_eq!(
+            status_after_prompt(false, Some("boom".into())),
+            AgentRunStatus::Errored("boom".into())
+        );
+        assert_eq!(status_after_prompt(true, None), AgentRunStatus::Interrupted);
+        assert_eq!(
+            status_after_prompt(true, Some("boom".into())),
+            AgentRunStatus::Interrupted
+        );
     }
 
     #[test]

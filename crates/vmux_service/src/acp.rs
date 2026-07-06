@@ -54,6 +54,7 @@ impl AcpSessionManager {
             projector: Mutex::new(projector::AcpProjector::new()),
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
+            cancel_requested: std::sync::atomic::AtomicBool::new(false),
         });
         tokio::spawn(driver::run(
             command,

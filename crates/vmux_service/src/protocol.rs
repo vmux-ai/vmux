@@ -265,6 +265,9 @@ pub enum ApprovalDecision {
 pub enum AgentRunStatus {
     Streaming,
     Idle,
+    /// The user interrupted the in-flight turn (Esc / Ctrl+C / Stop). Distinct from `Idle`
+    /// so the UI can mark the stopped turn and pause the queue instead of auto-advancing.
+    Interrupted,
     Errored(String),
 }
 
@@ -429,6 +432,10 @@ pub enum ClientMessage {
     AgentInput {
         sid: String,
         text: String,
+    },
+    /// Interrupt the session's in-flight turn without tearing the session down.
+    AgentCancel {
+        sid: String,
     },
     AgentApprove {
         sid: String,
@@ -705,6 +712,19 @@ mod tests {
         let decoded = rkyv::from_bytes::<AgentRequestId, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert_eq!(decoded, request_id);
+    }
+
+    #[test]
+    fn agent_cancel_and_interrupted_roundtrip() {
+        let msg = ClientMessage::AgentCancel { sid: "s1".into() };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
+        let back = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        assert!(matches!(back, ClientMessage::AgentCancel { sid } if sid == "s1"));
+
+        let st = AgentRunStatus::Interrupted;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&st).unwrap();
+        let back = rkyv::from_bytes::<AgentRunStatus, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, AgentRunStatus::Interrupted);
     }
 
     #[test]

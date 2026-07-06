@@ -71,7 +71,7 @@ pub use client::cli::strategy::CliAgentStrategy;
 #[cfg(not(target_arch = "wasm32"))]
 pub use client::page::plugin::PageAgentPlugin;
 #[cfg(not(target_arch = "wasm32"))]
-pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PendingUserInput};
+pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::{
     BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
