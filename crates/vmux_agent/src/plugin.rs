@@ -207,7 +207,16 @@ impl Plugin for AgentPlugin {
                     .chain()
                     .after(vmux_layout::stack::ComputeFocusSet),
             )
-            .add_systems(Update, process_pending_tidy.after(tidy_on_agent_attention))
+            .add_systems(
+                Update,
+                tidy_acp_on_idle.after(vmux_layout::stack::ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
+                process_pending_tidy
+                    .after(tidy_on_agent_attention)
+                    .after(tidy_acp_on_idle),
+            )
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
@@ -986,10 +995,57 @@ fn handle_agent_file_touch(
     }
 }
 
-/// On an agent turn end (`AgentAttention`), when its follow-pane holds more than
-/// `tidy_files_max` file previews, decide which clean ones to close (keeping
-/// changed files and the pane's active preview). With `tidy_files_auto`, close
-/// them immediately; otherwise tag the pane so the confirm dialog runs.
+/// Tidy one agent's `file://` follow-pane, anchored by its `ProcessId`: when the pane
+/// holds more than `tidy_files_max` previews, keep changed files + the active one and
+/// close the rest (silently if `tidy_files_auto`, else tag the pane for the confirm
+/// dialog). Shared by the CLI (`AgentAttention`) and ACP (`AgentRunState` → `Idle`) triggers.
+#[allow(clippy::too_many_arguments)]
+fn tidy_follow_pane(
+    anchor: vmux_service::protocol::ProcessId,
+    settings: &AppSettings,
+    resolve: &AgentFileResolve,
+    last_activated: &Query<&vmux_core::LastActivatedAt>,
+    pending: &Query<(), With<crate::tidy::PendingTidy>>,
+    close: &mut MessageWriter<vmux_layout::CloseStackRequest>,
+    commands: &mut Commands,
+) {
+    let Some(agent_pane) = resolve.agent_pane(anchor) else {
+        return;
+    };
+    let Some((follow_pane, stacks)) = resolve.file_stacks_for(agent_pane) else {
+        return;
+    };
+    if pending.get(follow_pane).is_ok() {
+        return;
+    }
+    let mut repos: Vec<(std::path::PathBuf, std::collections::HashSet<String>)> = Vec::new();
+    let rows: Vec<(Entity, i64, bool)> = stacks
+        .iter()
+        .map(|(stack, url)| {
+            let ts = last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN);
+            let changed = crate::tidy::path_from_file_url(url)
+                .map(|abs| crate::tidy::is_changed(&abs, &mut repos))
+                .unwrap_or(false);
+            (*stack, ts, changed)
+        })
+        .collect();
+    let closable = crate::tidy::decide_closable(&rows, settings.agent.tidy_files_max);
+    if closable.is_empty() {
+        return;
+    }
+    if settings.agent.tidy_files_auto {
+        for stack in closable {
+            close.write(vmux_layout::CloseStackRequest { stack });
+        }
+    } else {
+        commands
+            .entity(follow_pane)
+            .insert(crate::tidy::PendingTidy { closable });
+    }
+}
+
+/// CLI agents: tidy on turn-end `AgentAttention` (the terminal bell), anchored by the
+/// agent terminal's `ProcessId`.
 fn tidy_on_agent_attention(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     settings: Res<AppSettings>,
@@ -1008,39 +1064,48 @@ fn tidy_on_agent_attention(
         let Ok(pid) = agents.get(att.entity) else {
             continue;
         };
-        let Some(agent_pane) = resolve.agent_pane(*pid) else {
-            continue;
-        };
-        let Some((follow_pane, stacks)) = resolve.file_stacks_for(agent_pane) else {
-            continue;
-        };
-        if pending.get(follow_pane).is_ok() {
+        tidy_follow_pane(
+            *pid,
+            &settings,
+            &resolve,
+            &last_activated,
+            &pending,
+            &mut close,
+            &mut commands,
+        );
+    }
+}
+
+/// ACP agents have no terminal bell; their turn-end is `AgentRunState` → `Idle`. Tidy the
+/// ACP follow-pane on that transition, anchored by the `AcpSession`.
+fn tidy_acp_on_idle(
+    settings: Res<AppSettings>,
+    sessions: Query<
+        (&crate::client::acp::AcpSession, &crate::AgentRunState),
+        Changed<crate::AgentRunState>,
+    >,
+    resolve: AgentFileResolve,
+    last_activated: Query<&vmux_core::LastActivatedAt>,
+    pending: Query<(), With<crate::tidy::PendingTidy>>,
+    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut commands: Commands,
+) {
+    if !settings.agent.tidy_files {
+        return;
+    }
+    for (acp, state) in &sessions {
+        if !matches!(state, crate::AgentRunState::Idle) {
             continue;
         }
-        let mut repos: Vec<(std::path::PathBuf, std::collections::HashSet<String>)> = Vec::new();
-        let rows: Vec<(Entity, i64, bool)> = stacks
-            .iter()
-            .map(|(stack, url)| {
-                let ts = last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN);
-                let changed = crate::tidy::path_from_file_url(url)
-                    .map(|abs| crate::tidy::is_changed(&abs, &mut repos))
-                    .unwrap_or(false);
-                (*stack, ts, changed)
-            })
-            .collect();
-        let closable = crate::tidy::decide_closable(&rows, settings.agent.tidy_files_max);
-        if closable.is_empty() {
-            continue;
-        }
-        if settings.agent.tidy_files_auto {
-            for stack in closable {
-                close.write(vmux_layout::CloseStackRequest { stack });
-            }
-        } else {
-            commands
-                .entity(follow_pane)
-                .insert(crate::tidy::PendingTidy { closable });
-        }
+        tidy_follow_pane(
+            acp.anchor,
+            &settings,
+            &resolve,
+            &last_activated,
+            &pending,
+            &mut close,
+            &mut commands,
+        );
     }
 }
 

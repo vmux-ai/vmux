@@ -30,6 +30,7 @@ pub struct AcpSessionManager {
 }
 
 impl AcpSessionManager {
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         &mut self,
         sid: String,
@@ -37,6 +38,7 @@ impl AcpSessionManager {
         args: Vec<String>,
         env: Vec<(String, String)>,
         cwd: PathBuf,
+        anchor: ProcessId,
         mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
     ) {
         if self.sessions.contains_key(&sid) {
@@ -47,7 +49,7 @@ impl AcpSessionManager {
         let shared = Arc::new(AcpShared {
             sid: sid.clone(),
             cwd,
-            anchor: ProcessId::new(),
+            anchor,
             stream_tx,
             projector: Mutex::new(projector::AcpProjector::new()),
             pending_perms: Mutex::new(HashMap::new()),

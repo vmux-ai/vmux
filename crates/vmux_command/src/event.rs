@@ -229,6 +229,14 @@ pub fn command_bar_open_should_ack(open_id: u64) -> bool {
     open_id != 0
 }
 
+/// Whether the palette should (re)focus and select-all its input. Only on a fresh
+/// (re)open — i.e. when `open_id` changed. Live data refreshes (e.g. the start
+/// page's current-work snapshot) reuse the same `open_id` and MUST NOT re-select,
+/// or they clobber the user's in-progress typing.
+pub fn command_bar_should_refocus(last_focus_open_id: u64, incoming_open_id: u64) -> bool {
+    last_focus_open_id != incoming_open_id
+}
+
 pub fn should_open_typed_query_on_enter(
     open_target: Option<crate::open_target::OpenTarget>,
     nav_mode: bool,
@@ -496,6 +504,17 @@ mod tests {
         assert!(command_bar_open_should_reset_input(7, 8));
         assert!(command_bar_open_should_reset_input(0, 8));
         assert!(command_bar_open_should_reset_input(0, 0));
+    }
+
+    #[test]
+    fn command_bar_refocus_only_on_open_id_change() {
+        // Fresh open (open_id changed) → focus + select-all.
+        assert!(command_bar_should_refocus(u64::MAX, 0));
+        assert!(command_bar_should_refocus(7, 8));
+        // Live refresh reuses the same open_id → must NOT refocus (else it
+        // select-alls and clobbers in-progress typing on vmux://start).
+        assert!(!command_bar_should_refocus(0, 0));
+        assert!(!command_bar_should_refocus(7, 7));
     }
 
     #[test]

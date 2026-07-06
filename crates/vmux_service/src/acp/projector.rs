@@ -3,8 +3,8 @@
 
 use crate::message::{AssistantBlock, Message, PlanStep};
 use agent_client_protocol::schema::v1::{
-    ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent, ToolCallStatus,
-    ToolCallUpdate,
+    ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
+    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 
 /// A side effect the driver performs after feeding a `SessionUpdate` to the projector.
@@ -21,6 +21,39 @@ pub enum Intent {
         old_text: Option<String>,
         new_text: String,
     },
+    /// A tool call read or edited a file (from its ACP `locations`) → open that file in the
+    /// agent's `file://` follow-pane, mirroring the vibe CLI `vmux-file-follow` hook.
+    FileTouched {
+        path: String,
+        line: Option<u32>,
+        kind: crate::protocol::FileTouchKind,
+    },
+}
+
+/// Map an ACP `ToolKind` to a follow-pane touch kind. Only file-affecting kinds open a
+/// preview; search/execute/think/etc. are ignored.
+fn file_touch_kind(kind: ToolKind) -> Option<crate::protocol::FileTouchKind> {
+    use crate::protocol::FileTouchKind;
+    match kind {
+        ToolKind::Read => Some(FileTouchKind::Read),
+        ToolKind::Edit | ToolKind::Delete | ToolKind::Move => Some(FileTouchKind::Edit),
+        _ => None,
+    }
+}
+
+/// Build `FileTouched` intents for each file location of a file-affecting tool call.
+fn file_touch_intents(kind: ToolKind, locations: &[ToolCallLocation]) -> Vec<Intent> {
+    let Some(kind) = file_touch_kind(kind) else {
+        return Vec::new();
+    };
+    locations
+        .iter()
+        .map(|loc| Intent::FileTouched {
+            path: loc.path.to_string_lossy().into_owned(),
+            line: loc.line,
+            kind,
+        })
+        .collect()
 }
 
 /// Accumulates ACP updates into a `Vec<Message>`. Pure and synchronous so it is fully
@@ -133,6 +166,7 @@ impl AcpProjector {
         let call_id = tc.tool_call_id.to_string();
         self.upsert_tool_use(&call_id, &tc.title, &raw_input_json(tc.raw_input.as_ref()));
         let mut intents = vec![Intent::Snapshot];
+        intents.extend(file_touch_intents(tc.kind, &tc.locations));
         intents.extend(self.record_tool_content(
             &call_id,
             &tc.content,
@@ -150,6 +184,9 @@ impl AcpProjector {
             &raw_input_json(update.fields.raw_input.as_ref()),
         );
         let mut intents = vec![Intent::Snapshot];
+        if let (Some(kind), Some(locations)) = (update.fields.kind, &update.fields.locations) {
+            intents.extend(file_touch_intents(kind, locations));
+        }
         if let Some(content) = &update.fields.content {
             let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
             intents.extend(self.record_tool_content(&call_id, content, failed));
@@ -382,6 +419,34 @@ mod tests {
             )),
             other => panic!("expected assistant message, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn read_tool_call_locations_emit_file_touched() {
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("c1", "Read file")
+            .kind(ToolKind::Read)
+            .locations(vec![ToolCallLocation::new("/repo/src/main.rs")]);
+        let intents = p.apply(SessionUpdate::ToolCall(tc));
+        assert!(intents.iter().any(|i| matches!(
+            i,
+            Intent::FileTouched { path, line: None, kind }
+                if path == "/repo/src/main.rs" && *kind == crate::protocol::FileTouchKind::Read
+        )));
+    }
+
+    #[test]
+    fn non_file_tool_call_emits_no_file_touched() {
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("c1", "run a command")
+            .kind(ToolKind::Execute)
+            .locations(vec![ToolCallLocation::new("/repo/x")]);
+        let intents = p.apply(SessionUpdate::ToolCall(tc));
+        assert!(
+            !intents
+                .iter()
+                .any(|i| matches!(i, Intent::FileTouched { .. }))
+        );
     }
 
     fn thought(text: &str) -> SessionUpdate {

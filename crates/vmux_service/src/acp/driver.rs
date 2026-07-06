@@ -22,7 +22,9 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 
 use super::projector::{AcpProjector, Intent};
-use crate::protocol::{AgentRunStatus, ApprovalDecision, ServiceMessage};
+use crate::protocol::{
+    AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
+};
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -218,6 +220,20 @@ pub async fn run(
                             old_text,
                             new_text,
                         }),
+                        Intent::FileTouched { path, line, kind } => {
+                            update_shared.emit(ServiceMessage::AgentCommand {
+                                request_id: AgentRequestId::new(),
+                                anchor: Some(update_shared.anchor),
+                                command: AgentCommand::FileTouched {
+                                    anchor: update_shared.anchor,
+                                    path,
+                                    line,
+                                    col: None,
+                                    end_col: None,
+                                    kind,
+                                },
+                            });
+                        }
                     }
                 }
                 Ok(())
