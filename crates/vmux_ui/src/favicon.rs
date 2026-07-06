@@ -30,13 +30,17 @@ pub fn agent_host(url: &str) -> Option<&'static str> {
 }
 
 pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
-    if !favicon_url.is_empty() {
-        return Some(favicon_url.to_string());
-    }
+    // Agent pages: prefer the recognizable brand favicon (claude.ai / chatgpt.com / …) over any
+    // passed icon, so an agent reads the same across tab, chat, roster, facepile, and launcher.
+    // Only `vmux://agent/<known>` urls match here; the passed icon (e.g. a registry icon) still
+    // serves unknown agents and real web pages below.
     if let Some(host) = agent_host(url) {
         return Some(format!(
             "https://www.google.com/s2/favicons?domain={host}&sz=64"
         ));
+    }
+    if !favicon_url.is_empty() {
+        return Some(favicon_url.to_string());
     }
     host_for_favicon_fallback(url)
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=64"))
@@ -177,6 +181,16 @@ mod tests {
         assert_eq!(
             favicon_src_for_url("https://cdn.example.com/icon.png", "https://example.com/"),
             Some("https://cdn.example.com/icon.png".to_string())
+        );
+    }
+
+    #[test]
+    fn favicon_src_prefers_agent_host_over_passed_icon() {
+        // A registry icon is passed, but a known agent url still resolves to the brand favicon
+        // so the agent reads consistently across every surface.
+        assert_eq!(
+            favicon_src_for_url("https://cdn.example/claude-acp.svg", "vmux://agent/claude"),
+            Some("https://www.google.com/s2/favicons?domain=claude.ai&sz=64".to_string())
         );
     }
 

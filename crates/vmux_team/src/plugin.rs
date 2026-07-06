@@ -170,7 +170,15 @@ fn build_team_members(
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
-                let url = agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_default();
+                // CLI/Page agents resolve their favicon via the kind's url prefix; ACP (no kind)
+                // uses its `vmux://agent/<id>` page url so `favicon_src_for_url` maps it to the
+                // brand favicon (agent_host) — same as the tab and chat header.
+                let url = agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_else(|| {
+                    meta_q
+                        .get(entity)
+                        .map(|m| m.url.clone())
+                        .unwrap_or_default()
+                });
                 let sid = session
                     .map(|s| s.0.clone())
                     .filter(|s| !s.is_empty())
@@ -589,6 +597,7 @@ mod tests {
             .expect("acp agent in roster");
         assert_eq!(agent.name, "Mistral Vibe");
         assert_eq!(agent.icon, "https://cdn.example/vibe.svg");
-        assert_eq!(agent.url, "");
+        // ACP rows carry their page url so the frontend resolves the brand favicon.
+        assert_eq!(agent.url, "vmux://agent/mistral-vibe");
     }
 }

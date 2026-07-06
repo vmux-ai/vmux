@@ -91,6 +91,25 @@ pub fn Page() -> Element {
         }
     });
 
+    // Drive the document (→ tab) title from the agent + its live run-state, so the user can see
+    // what each agent is doing without opening the pane.
+    use_effect(move || {
+        let name = {
+            let n = agent_name();
+            if n.is_empty() { current_agent() } else { n }
+        };
+        let title = match status().as_str() {
+            "streaming" => format!("● {name}"),
+            "installing" => format!("{name} — Installing…"),
+            "awaiting" => format!("{name} — Approve?"),
+            "errored" => format!("{name} — Error"),
+            _ => name,
+        };
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            doc.set_title(&title);
+        }
+    });
+
     let header_name = {
         let n = agent_name();
         if n.is_empty() { agent.clone() } else { n }
