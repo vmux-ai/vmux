@@ -320,13 +320,13 @@ pub fn Page() -> Element {
     }
 }
 
+/// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed
+/// emit never silently swallows the user's message. The queued/sent turn arrives via snapshot.
 fn do_submit(mut draft: Signal<String>, mut at_bottom: Signal<bool>) {
     let text = draft.peek().trim().to_string();
     if text.is_empty() {
         return;
     }
-    // Emit first; only clear the draft if the IPC succeeded, so a failed emit never silently
-    // swallows the user's message. The queued/sent turn is reflected by the next snapshot.
     if try_cef_bin_emit_rkyv(&ChatSubmit { text }).is_err() {
         return;
     }

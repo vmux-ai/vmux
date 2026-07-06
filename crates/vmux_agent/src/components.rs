@@ -55,11 +55,11 @@ mod tests {
     #[test]
     fn prompt_queue_ready_gate() {
         let mut q = PromptQueue::default();
-        assert!(!q.ready(true)); // empty
+        assert!(!q.ready(true));
         q.items.push_back("a".into());
-        assert!(q.ready(true)); // idle + queued
-        assert!(!q.ready(false)); // busy
+        assert!(q.ready(true));
+        assert!(!q.ready(false));
         q.paused = true;
-        assert!(!q.ready(true)); // paused
+        assert!(!q.ready(true));
     }
 }

@@ -263,7 +263,6 @@ async fn run_session(
                                 http.abort();
                                 return;
                             }
-                            // User is held host-side; Approve only after streaming. Ignore mid-turn.
                             Some(SessionInput::User(_)) | Some(SessionInput::Approve { .. }) => {}
                         }
                     }
