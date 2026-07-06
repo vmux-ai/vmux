@@ -340,7 +340,7 @@ pub fn attach_page_agent_to_stack(
         vmux_core::team::Profile::agent(kind),
         vmux_core::team::Agent {
             sid: sid.to_string(),
-            kind,
+            kind: Some(kind),
         },
     ));
     let url = format!("vmux://agent/{provider}");
@@ -357,6 +357,7 @@ pub fn attach_acp_agent_to_stack(
     name: &str,
     sid: &str,
     cwd: &std::path::Path,
+    icon: Option<&str>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -365,6 +366,7 @@ pub fn attach_acp_agent_to_stack(
         url: format!("vmux://agent/{agent_id}"),
         title: name.to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+        icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
         ..default()
     });
     let anchor = vmux_service::protocol::ProcessId::new();
@@ -378,6 +380,11 @@ pub fn attach_acp_agent_to_stack(
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
         crate::AgentRunState::default(),
+        vmux_core::team::Profile::registry(name, agent_id),
+        vmux_core::team::Agent {
+            sid: sid.to_string(),
+            kind: None,
+        },
     ));
     let url = format!("vmux://agent/{agent_id}");
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
@@ -386,6 +393,15 @@ pub fn attach_acp_agent_to_stack(
         ChildOf(stack),
         anchor,
     ));
+}
+
+/// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
+fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -> Option<String> {
+    catalog?
+        .agents
+        .iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.icon.clone())
 }
 
 #[allow(dead_code)]
@@ -2488,6 +2504,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     active_space: Option<Res<ActiveSpace>>,
     tabs: Query<&vmux_layout::tab::Tab>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
 ) {
     for (entity, task) in &tasks {
         if !task.url.starts_with("vmux://agent/") {
@@ -2519,6 +2536,7 @@ fn handle_agent_page_open(
             &mut webview_mt,
             &default_cwd,
             &settings.agent.acp,
+            catalog.as_deref(),
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -2545,6 +2563,7 @@ fn handle_agent_page_open_task(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
+    catalog: Option<&crate::client::acp::AcpCatalog>,
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -2640,12 +2659,14 @@ fn handle_agent_page_open_task(
                 }
                 clear_stack_children(task.stack, children_q, commands);
                 let sid = uuid::Uuid::new_v4().to_string();
+                let icon = acp_icon_for_id(catalog, &cfg.id);
                 attach_acp_agent_to_stack(
                     task.stack,
                     &cfg.id,
                     &cfg.name,
                     &sid,
                     default_cwd,
+                    icon.as_deref(),
                     commands,
                     meshes,
                     webview_mt,
@@ -2869,7 +2890,7 @@ fn handle_spawn_agent_requests(
                     vmux_core::team::Profile::agent(req.kind),
                     vmux_core::team::Agent {
                         sid: req.session_id.clone().unwrap_or_default(),
-                        kind: req.kind,
+                        kind: Some(req.kind),
                     },
                 ));
                 if let Some(id) = req.session_id.clone() {
@@ -3147,6 +3168,69 @@ fn handle_restart_agent_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_attach_gives_profile_agent_and_icon() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let stack = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut mt: ResMut<Assets<WebviewExtendStandardMaterial>>| {
+                    attach_acp_agent_to_stack(
+                        stack,
+                        "mistral-vibe",
+                        "Mistral Vibe",
+                        "sid-1",
+                        std::path::Path::new("/tmp"),
+                        Some("https://cdn.example/vibe.svg"),
+                        &mut commands,
+                        &mut meshes,
+                        &mut mt,
+                    );
+                },
+            )
+            .unwrap();
+
+        let world = app.world();
+        let profile = world
+            .get::<vmux_core::team::Profile>(stack)
+            .expect("profile");
+        assert_eq!(profile.name, "Mistral Vibe");
+        let agent = world.get::<vmux_core::team::Agent>(stack).expect("agent");
+        assert_eq!(agent.sid, "sid-1");
+        assert_eq!(agent.kind, None);
+        let meta = world.get::<PageMetadata>(stack).expect("meta");
+        assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
+    }
+
+    #[test]
+    fn acp_icon_for_id_reads_catalog() {
+        use crate::acp_registry::{Distribution, RegistryAgent};
+        let catalog = crate::client::acp::AcpCatalog {
+            agents: vec![RegistryAgent {
+                id: "mistral-vibe".to_string(),
+                name: "Mistral Vibe".to_string(),
+                version: None,
+                description: None,
+                icon: Some("https://cdn.example/vibe.svg".to_string()),
+                repository: None,
+                distribution: Distribution::default(),
+            }],
+        };
+        assert_eq!(
+            acp_icon_for_id(Some(&catalog), "mistral-vibe").as_deref(),
+            Some("https://cdn.example/vibe.svg")
+        );
+        assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
+        assert_eq!(acp_icon_for_id(None, "mistral-vibe"), None);
+    }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -3183,7 +3267,7 @@ mod tests {
             .spawn((
                 vmux_core::team::Agent {
                     sid: "s".to_string(),
-                    kind: vmux_core::agent::AgentKind::Claude,
+                    kind: Some(vmux_core::agent::AgentKind::Claude),
                 },
                 pid,
             ))
