@@ -1446,28 +1446,6 @@ pub fn Page() -> Element {
                 })
             }
 
-            {
-                lsp_status().map(|s| {
-                    let (dot, label) = match s.state {
-                        LspServerState::Ready => ("text-ansi-2", s.server.clone()),
-                        LspServerState::Starting => {
-                            ("text-ansi-3", format!("{} starting\u{2026}", s.server))
-                        }
-                        LspServerState::Missing => {
-                            ("text-ansi-1", format!("{} \u{2014} not installed", s.server))
-                        }
-                    };
-                    rsx! {
-                        div {
-                            class: "flex shrink-0 items-center justify-end gap-1.5 px-3 py-0.5 text-[11px]",
-                            title: "LSP",
-                            span { class: "{dot}", "\u{25CF}" }
-                            span { class: "text-foreground/70", "{label}" }
-                        }
-                    }
-                })
-            }
-
             GitFooter {
                 path: git_path,
                 branch: git_branch,
@@ -1475,6 +1453,27 @@ pub fn Page() -> Element {
                 behind: git_behind,
                 staged_count: git_staged,
                 message: git_message,
+                {
+                    lsp_status().map(|s| {
+                        let (dot, label) = match s.state {
+                            LspServerState::Ready => ("text-ansi-2", s.server.clone()),
+                            LspServerState::Starting => {
+                                ("text-ansi-3", format!("{} starting\u{2026}", s.server))
+                            }
+                            LspServerState::Missing => {
+                                ("text-ansi-1", format!("{} \u{2014} not installed", s.server))
+                            }
+                        };
+                        rsx! {
+                            span {
+                                class: "flex shrink-0 items-center gap-1.5",
+                                title: "LSP",
+                                span { class: "{dot}", "\u{25CF}" }
+                                span { "{label}" }
+                            }
+                        }
+                    })
+                }
             }
         }
         }
