@@ -72,12 +72,37 @@ fn set_intent(intent: &mut ResMut<HostFocusIntent>, next: HostFocusIntent) {
     }
 }
 
-pub(crate) fn apply_windowed_host_focus(intent: Res<HostFocusIntent>, browsers: NonSend<Browsers>) {
-    // Runs every frame so a page that becomes active before its browser exists still gets focused
-    // once the browser is created. `set_windowed_focus` is a no-op until then.
-    if let HostFocusIntent::Windowed(webview) = *intent
-        && browsers.has_browser(webview)
-    {
+fn windowed_focus_action(
+    intent: HostFocusIntent,
+    has_browser: bool,
+    focused: &mut Option<Entity>,
+) -> Option<Entity> {
+    match intent {
+        HostFocusIntent::Windowed(webview) if has_browser => {
+            if *focused != Some(webview) {
+                *focused = Some(webview);
+                Some(webview)
+            } else {
+                None
+            }
+        }
+        _ => {
+            *focused = None;
+            None
+        }
+    }
+}
+
+pub(crate) fn apply_windowed_host_focus(
+    intent: Res<HostFocusIntent>,
+    browsers: NonSend<Browsers>,
+    mut focused: Local<Option<Entity>>,
+) {
+    let has_browser = match *intent {
+        HostFocusIntent::Windowed(webview) => browsers.has_browser(webview),
+        _ => false,
+    };
+    if let Some(webview) = windowed_focus_action(*intent, has_browser, &mut focused) {
         browsers.set_windowed_focus(&webview, true);
     }
 }
@@ -131,6 +156,43 @@ mod tests {
         let mut app = app();
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn windowed_focus_action_focuses_available_target_once() {
+        let webview = Entity::from_bits(1);
+        let mut focused = None;
+
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            Some(webview)
+        );
+        assert_eq!(focused, Some(webview));
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            None
+        );
+        assert_eq!(focused, Some(webview));
+    }
+
+    #[test]
+    fn windowed_focus_action_refocuses_after_browser_reappears() {
+        let webview = Entity::from_bits(1);
+        let mut focused = None;
+
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            Some(webview)
+        );
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Windowed(webview), false, &mut focused),
+            None
+        );
+        assert_eq!(focused, None);
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            Some(webview)
+        );
     }
 
     #[test]
