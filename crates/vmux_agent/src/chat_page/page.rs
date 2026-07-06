@@ -5,6 +5,7 @@ use crate::chat_page::event::{
     ChatResume, ChatSnapshot, ChatSubmit,
 };
 use dioxus::prelude::*;
+use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
@@ -32,6 +33,9 @@ pub fn Page() -> Element {
     let mut status = use_signal(|| "idle".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String)>::None);
+    let mut agent_name = use_signal(String::new);
+    let mut agent_icon = use_signal(String::new);
+    let mut accent = use_signal(String::new);
     let mut draft = use_signal(String::new);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -74,6 +78,9 @@ pub fn Page() -> Element {
         error.set(snap.error.clone());
         queued.set(snap.queued.clone());
         paused.set(snap.paused);
+        agent_name.set(snap.agent_name.clone());
+        agent_icon.set(snap.agent_icon.clone());
+        accent.set(snap.accent_color.clone());
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -84,6 +91,16 @@ pub fn Page() -> Element {
         }
     });
 
+    let header_name = {
+        let n = agent_name();
+        if n.is_empty() { agent.clone() } else { n }
+    };
+    let dot_style = if accent().is_empty() {
+        String::new()
+    } else {
+        format!("background:{}", accent())
+    };
+
     rsx! {
         main {
             class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
@@ -93,9 +110,10 @@ pub fn Page() -> Element {
                 div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
             }
             header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
-                span { class: "h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]" }
+                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
+                span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
-                    "{agent}"
+                    "{header_name}"
                 }
             }
             div {
@@ -122,9 +140,10 @@ pub fn Page() -> Element {
                 },
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
                     if messages.read().is_empty() && status() == "idle" {
-                        div { class: "flex flex-col items-center gap-2 py-24 text-center",
+                        div { class: "flex flex-col items-center gap-3 py-24 text-center",
+                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
-                                "{agent}"
+                                "{header_name}"
                             }
                             p { class: "text-sm text-muted-foreground", "Ready when you are." }
                         }
@@ -135,9 +154,9 @@ pub fn Page() -> Element {
                     if status() == "streaming" {
                         div { class: "flex items-center gap-2.5 text-sm",
                             span { class: "flex items-end gap-1",
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]", style: "{dot_style}" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]", style: "{dot_style}" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70", style: "{dot_style}" }
                             }
                             span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "Working…" }
                             span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed())}" }
@@ -146,9 +165,9 @@ pub fn Page() -> Element {
                     if status() == "installing" {
                         div { class: "flex items-center gap-2.5 text-sm",
                             span { class: "flex items-end gap-1",
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]", style: "{dot_style}" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]", style: "{dot_style}" }
+                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70", style: "{dot_style}" }
                             }
                             span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{error}" }
                         }
@@ -471,6 +490,44 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+fn status_dot_class(status: &str) -> &'static str {
+    match status {
+        "streaming" => "bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.65)]",
+        "installing" => "bg-sky-400 animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.65)]",
+        "awaiting" => "bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.65)]",
+        "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
+        _ => "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]",
+    }
+}
+
+/// The agent avatar: its favicon if resolvable, else an accent-filled circle with the initial.
+fn avatar_node(icon: &str, accent: &str, agent: &str, name: &str, size_class: &str) -> Element {
+    let url = format!("vmux://agent/{agent}");
+    let src = favicon_src_for_url(icon, &url);
+    let initial: String = name
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_uppercase().to_string())
+        .unwrap_or_default();
+    let fallback = if accent.is_empty() { "#6366f1" } else { accent };
+    let style = if src.is_some() {
+        String::new()
+    } else {
+        format!("background:{fallback}")
+    };
+    rsx! {
+        div {
+            class: "flex shrink-0 items-center justify-center overflow-hidden rounded-full font-semibold text-white {size_class}",
+            style: "{style}",
+            if let Some(src) = src.as_ref() {
+                img { class: "h-full w-full object-cover", src: "{src}" }
+            } else {
+                "{initial}"
             }
         }
     }
