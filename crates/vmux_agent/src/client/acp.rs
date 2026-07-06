@@ -302,19 +302,36 @@ fn drain_acp_installs(
 /// When the daemon reports the agent-assigned ACP session id, redirect the pane url to
 /// `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle) and record it on the session
 /// so a later reopen resumes via `session/load`.
+#[allow(clippy::type_complexity)]
 fn apply_acp_session_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentSessionCreated>,
-    mut q: Query<(&mut AcpSession, &mut vmux_core::PageMetadata)>,
+    mut sessions: Query<
+        (Entity, &mut AcpSession, &mut vmux_core::PageMetadata),
+        Without<vmux_layout::Browser>,
+    >,
+    children: Query<&Children>,
+    mut browser_meta: Query<&mut vmux_core::PageMetadata, With<vmux_layout::Browser>>,
 ) {
     for ev in reader.read() {
-        for (mut session, mut meta) in &mut q {
+        for (stack, mut session, mut stack_meta) in &mut sessions {
             if session.sid != ev.sid {
                 continue;
             }
             session.resume = Some(ev.acp_session_id.clone());
             let url = format!("vmux://agent/{}/{}", session.agent_id, ev.acp_session_id);
-            if meta.url != url {
-                meta.url = url;
+            // The stack's PageMetadata is what persists (space.ron) so a restart can resume.
+            if stack_meta.url != url {
+                stack_meta.url = url.clone();
+            }
+            // The child Browser's PageMetadata is what the tab strip + address bar read.
+            if let Ok(kids) = children.get(stack) {
+                for kid in kids.iter() {
+                    if let Ok(mut meta) = browser_meta.get_mut(kid)
+                        && meta.url != url
+                    {
+                        meta.url = url.clone();
+                    }
+                }
             }
         }
     }
