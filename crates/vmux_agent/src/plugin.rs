@@ -196,6 +196,10 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
+            .add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
+                vmux_core::event::FileTidyActionEvent,
+            )>::default())
+            .add_observer(on_tidy_action)
             .add_systems(
                 Update,
                 (
@@ -210,12 +214,6 @@ impl Plugin for AgentPlugin {
             .add_systems(
                 Update,
                 tidy_acp_on_idle.after(vmux_layout::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                process_pending_tidy
-                    .after(tidy_on_agent_attention)
-                    .after(tidy_acp_on_idle),
             )
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
@@ -896,12 +894,16 @@ impl AgentFileResolve<'_, '_> {
     /// The agent's follow-pane and every `file://` preview stack in it, with each
     /// stack's URL. Generalizes `file_page_for` (which returns only the first).
     /// `None` when the agent has no file follow-pane yet.
-    fn file_stacks_for(&self, agent_pane: Entity) -> Option<(Entity, Vec<(Entity, String)>)> {
+    #[allow(clippy::type_complexity)]
+    fn file_stacks_for(
+        &self,
+        agent_pane: Entity,
+    ) -> Option<(Entity, Vec<(Entity, Entity, String)>)> {
         use bevy::ecs::relationship::Relationship;
         let agent_parent = self.child_of.get(agent_pane).ok()?.get();
         let mut follow_pane = None;
         let mut stacks = Vec::new();
-        for (_page, page_co, meta) in self.file_pages.iter() {
+        for (page, page_co, meta) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
                 continue;
             }
@@ -917,7 +919,7 @@ impl AgentFileResolve<'_, '_> {
                 continue;
             }
             follow_pane = Some(pane);
-            stacks.push((stack, meta.url.clone()));
+            stacks.push((stack, page, meta.url.clone()));
         }
         follow_pane.map(|p| (p, stacks))
     }
@@ -1021,7 +1023,7 @@ fn tidy_follow_pane(
     let mut repos: Vec<(std::path::PathBuf, std::collections::HashSet<String>)> = Vec::new();
     let rows: Vec<(Entity, i64, bool)> = stacks
         .iter()
-        .map(|(stack, url)| {
+        .map(|(stack, _page, url)| {
             let ts = last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN);
             let changed = crate::tidy::path_from_file_url(url)
                 .map(|abs| crate::tidy::is_changed(&abs, &mut repos))
@@ -1037,7 +1039,21 @@ fn tidy_follow_pane(
         for stack in closable {
             close.write(vmux_layout::CloseStackRequest { stack });
         }
-    } else {
+        return;
+    }
+    // Show the in-UI banner on the follow-pane's active (kept) preview and remember the
+    // closable set on the pane until the user answers (`on_tidy_action`).
+    let count = closable.len() as u32;
+    let active_page = stacks
+        .iter()
+        .max_by_key(|(stack, _, _)| last_activated.get(*stack).map(|t| t.0).unwrap_or(i64::MIN))
+        .map(|(_, page, _)| *page);
+    if let Some(page) = active_page {
+        commands.trigger(bevy_cef::prelude::BinHostEmitEvent::from_rkyv(
+            page,
+            vmux_core::event::FILE_TIDY_PROMPT_EVENT,
+            &vmux_core::event::FileTidyPromptEvent { count },
+        ));
         commands
             .entity(follow_pane)
             .insert(crate::tidy::PendingTidy { closable });
@@ -1109,61 +1125,44 @@ fn tidy_acp_on_idle(
     }
 }
 
-fn show_tidy_dialog(count: usize) -> String {
-    let result = rfd::MessageDialog::new()
-        .set_title("Tidy previews?")
-        .set_description(format!(
-            "Close {count} unchanged file previews in this agent pane?"
-        ))
-        .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-            crate::tidy::TIDY_LABEL.to_string(),
-            crate::tidy::ALWAYS_LABEL.to_string(),
-            crate::tidy::NOTNOW_LABEL.to_string(),
-        ))
-        .show();
-    match result {
-        rfd::MessageDialogResult::Custom(label) => label,
-        rfd::MessageDialogResult::Yes => crate::tidy::TIDY_LABEL.to_string(),
-        rfd::MessageDialogResult::No => crate::tidy::ALWAYS_LABEL.to_string(),
-        _ => crate::tidy::NOTNOW_LABEL.to_string(),
-    }
-}
-
-/// Exclusive system: for each follow-pane tagged `PendingTidy`, pop the native
-/// confirm dialog and act on the choice — close the clean previews, and on
-/// "Always tidy" also persist `agent.tidy_files_auto`.
-fn process_pending_tidy(world: &mut World) {
-    let jobs: Vec<(Entity, Vec<Entity>)> = world
-        .query::<(Entity, &crate::tidy::PendingTidy)>()
-        .iter(world)
-        .map(|(e, p)| (e, p.closable.clone()))
-        .collect();
-    if jobs.is_empty() {
+/// The user answered the follow-pane tidy banner (`FileTidyActionEvent` from the active
+/// file page): close the remembered previews, and on "Always" persist
+/// `agent.tidy_files_auto`; "Dismiss" just drops the pending set.
+fn on_tidy_action(
+    trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyActionEvent>>,
+    child_of: Query<&ChildOf>,
+    pending: Query<&crate::tidy::PendingTidy>,
+    mut settings: ResMut<AppSettings>,
+    mut save: MessageWriter<vmux_setting::SettingsSaveRequest>,
+    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut commands: Commands,
+) {
+    use bevy::ecs::relationship::Relationship;
+    // The event comes from a file page webview: webview → stack → follow-pane (holds PendingTidy).
+    let webview = trigger.event().webview;
+    let Ok(stack) = child_of.get(webview).map(Relationship::get) else {
         return;
-    }
-    for (pane, closable) in jobs {
-        if let Ok(mut entity) = world.get_entity_mut(pane) {
-            entity.remove::<crate::tidy::PendingTidy>();
-        }
-        let action = crate::tidy::tidy_choice(&show_tidy_dialog(closable.len()));
-        if action == crate::tidy::TidyAction::Skip {
-            continue;
-        }
-        if action == crate::tidy::TidyAction::AlwaysClose {
-            if let Some(mut settings) = world.get_resource_mut::<AppSettings>() {
-                settings.agent.tidy_files_auto = true;
-            }
-            if let Some(mut save) = world
-                .get_resource_mut::<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>()
-            {
-                save.write(vmux_setting::SettingsSaveRequest);
-            }
-        }
-        if let Some(mut msgs) =
-            world.get_resource_mut::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
-        {
+    };
+    let Ok(pane) = child_of.get(stack).map(Relationship::get) else {
+        return;
+    };
+    let Ok(pending_tidy) = pending.get(pane) else {
+        return;
+    };
+    let closable = pending_tidy.closable.clone();
+    commands.entity(pane).remove::<crate::tidy::PendingTidy>();
+    match trigger.event().payload.choice {
+        vmux_core::event::TidyChoice::Dismiss => {}
+        vmux_core::event::TidyChoice::Always => {
+            settings.agent.tidy_files_auto = true;
+            save.write(vmux_setting::SettingsSaveRequest);
             for stack in closable {
-                msgs.write(vmux_layout::CloseStackRequest { stack });
+                close.write(vmux_layout::CloseStackRequest { stack });
+            }
+        }
+        vmux_core::event::TidyChoice::Tidy => {
+            for stack in closable {
+                close.write(vmux_layout::CloseStackRequest { stack });
             }
         }
     }

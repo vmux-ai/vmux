@@ -1,27 +1,8 @@
 use bevy::prelude::*;
 use std::path::PathBuf;
 
-pub(crate) const TIDY_LABEL: &str = "Tidy";
-pub(crate) const ALWAYS_LABEL: &str = "Always tidy";
-pub(crate) const NOTNOW_LABEL: &str = "Not now";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TidyAction {
-    Close,
-    AlwaysClose,
-    Skip,
-}
-
-/// Map a clicked dialog button label to the action to take.
-pub(crate) fn tidy_choice(label: &str) -> TidyAction {
-    match label {
-        ALWAYS_LABEL => TidyAction::AlwaysClose,
-        TIDY_LABEL => TidyAction::Close,
-        _ => TidyAction::Skip,
-    }
-}
-
-/// Marker on a follow-pane: clean previews awaiting the tidy confirm dialog.
+/// Marker on a follow-pane: the clean previews awaiting the user's answer to the in-UI
+/// tidy banner (`FileTidyPromptEvent` shown, `FileTidyActionEvent` pending).
 #[derive(Component)]
 pub(crate) struct PendingTidy {
     pub closable: Vec<Entity>,
@@ -177,13 +158,5 @@ mod tests {
             .map(|(i, &e)| (e, i as i64, true))
             .collect();
         assert!(decide_closable(&stacks, 5).is_empty());
-    }
-
-    #[test]
-    fn tidy_choice_maps_labels() {
-        assert_eq!(tidy_choice(ALWAYS_LABEL), TidyAction::AlwaysClose);
-        assert_eq!(tidy_choice(TIDY_LABEL), TidyAction::Close);
-        assert_eq!(tidy_choice(NOTNOW_LABEL), TidyAction::Skip);
-        assert_eq!(tidy_choice("anything else"), TidyAction::Skip);
     }
 }

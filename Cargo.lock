@@ -10048,7 +10048,6 @@ dependencies = [
  "notify 6.1.1",
  "pulldown-cmark",
  "reqwest",
- "rfd",
  "rkyv",
  "serde",
  "serde_json",

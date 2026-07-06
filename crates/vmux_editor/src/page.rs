@@ -308,11 +308,17 @@ pub fn Page() -> Element {
     let mut explorer_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
+    let mut tidy_prompt = use_signal(|| Option::<u32>::None);
 
     let _chrome =
         use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
             explorer_visible.set(c.visible);
             explorer_width.set(c.width);
+        });
+
+    let _tidy =
+        use_bin_event_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
+            tidy_prompt.set(Some(e.count));
         });
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
@@ -553,6 +559,40 @@ pub fn Page() -> Element {
         "width:0px;".to_string()
     };
 
+    let tidy_banner = tidy_prompt().map(|count| {
+        let noun = if count == 1 { "preview" } else { "previews" };
+        rsx! {
+            div {
+                class: "pointer-events-auto fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-black/60 px-4 py-1.5 text-sm text-white shadow-2xl backdrop-blur-xl",
+                span { class: "select-none text-white/80", "✦ Tidy {count} unchanged {noun}?" }
+                button {
+                    class: "rounded-full bg-white/15 px-3 py-1 font-medium hover:bg-white/25",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Tidy });
+                        tidy_prompt.set(None);
+                    },
+                    "Tidy"
+                }
+                button {
+                    class: "rounded-full px-3 py-1 text-white/70 hover:bg-white/10",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Always });
+                        tidy_prompt.set(None);
+                    },
+                    "Always"
+                }
+                button {
+                    class: "rounded-full px-2 py-1 text-white/50 hover:bg-white/10",
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
+                        tidy_prompt.set(None);
+                    },
+                    "✕"
+                }
+            }
+        }
+    });
+
     rsx! {
         div {
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
@@ -568,6 +608,8 @@ pub fn Page() -> Element {
                     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
                 }
             },
+
+            {tidy_banner}
 
             div {
                 class: "h-full shrink-0 overflow-hidden",
