@@ -118,6 +118,40 @@ pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
         .collect())
 }
 
+/// Local branch names (`git branch --format=%(refname:short)`).
+pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
+    let (stdout, stderr, ok) = git(root, &["branch", "--format=%(refname:short)"])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(stdout
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
+/// Absolute path to the repo's `info/exclude` (the local, untracked ignore list). Resolved via
+/// git so it works for both the main worktree and a linked worktree, where `.git` is a file
+/// pointer rather than a directory and the exclude lives in the shared common dir.
+pub fn info_exclude_path(dir: &Path) -> Option<PathBuf> {
+    let (stdout, _, ok) = git(
+        dir,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/exclude",
+        ],
+    )
+    .ok()?;
+    if !ok {
+        return None;
+    }
+    let p = stdout.trim();
+    (!p.is_empty()).then(|| PathBuf::from(p))
+}
+
 /// Live git status of a directory, for the side-sheet git-integration card.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RepoInfo {
@@ -265,5 +299,41 @@ mod tests {
         let wt_info = repo_info(&wt).expect("worktree is a repo");
         assert!(wt_info.is_worktree);
         assert_eq!(wt_info.branch, "vmux/feat");
+    }
+
+    #[test]
+    fn local_branches_lists_main_and_worktree_branches() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        assert!(
+            local_branches(repo.path())
+                .unwrap()
+                .iter()
+                .any(|b| b == "main")
+        );
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        assert!(
+            local_branches(repo.path())
+                .unwrap()
+                .iter()
+                .any(|b| b == "vmux/feat"),
+            "worktree branch is listed"
+        );
+    }
+
+    #[test]
+    fn info_exclude_path_shared_across_main_and_linked_worktree() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let main_excl = info_exclude_path(repo.path()).expect("main exclude");
+        assert!(main_excl.ends_with("info/exclude"), "{main_excl:?}");
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        let wt_excl = info_exclude_path(&wt).expect("worktree exclude");
+        assert_eq!(
+            wt_excl, main_excl,
+            "exclude resolves to the shared common dir"
+        );
     }
 }

@@ -1590,6 +1590,8 @@ fn handle_agent_self_commands(
     // resolve to the same agent pane; the first splits it, the rest must extend
     // that split rather than re-split the leaf (which would orphan empty panes).
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
+    let mut worktree_created_this_batch: std::collections::HashSet<Entity> =
+        std::collections::HashSet::new();
     let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
     let mut pending_run_spawns: std::collections::HashMap<ProcessId, PendingRunTerminalSpawn> =
         std::collections::HashMap::new();
@@ -1818,7 +1820,10 @@ fn handle_agent_self_commands(
                         };
                         match tab_e {
                             None => AgentCommandResult::Error("no tab for agent".to_string()),
-                            Some(tab_e) if tab_worktrees.get(tab_e).is_ok() => {
+                            Some(tab_e)
+                                if tab_worktrees.get(tab_e).is_ok()
+                                    || worktree_created_this_batch.contains(&tab_e) =>
+                            {
                                 let dir = tabs
                                     .get(tab_e)
                                     .ok()
@@ -1858,6 +1863,7 @@ fn handle_agent_self_commands(
                                                 base_ref: info.base_ref.clone(),
                                             },
                                         );
+                                        worktree_created_this_batch.insert(tab_e);
                                         AgentCommandResult::Text(path)
                                     }
                                     Err(e) => AgentCommandResult::Error(e),
