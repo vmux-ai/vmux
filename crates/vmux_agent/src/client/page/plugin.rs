@@ -309,6 +309,7 @@ mod tests {
                     sid: "s1".into(),
                     cwd: std::path::PathBuf::from("/tmp"),
                     anchor: vmux_core::ProcessId::new(),
+                    resume: None,
                 },
                 AgentMessages::default(),
                 AgentRunState::Streaming,

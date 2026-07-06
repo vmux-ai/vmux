@@ -322,8 +322,7 @@ pub async fn run(
                         for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
                             let _ = tx.send(ApprovalDecision::Deny);
                         }
-                        let _ = cx
-                            .send_notification(CancelNotification::new(session.session_id.clone()));
+                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
                     }
                     AcpInput::Close => {
                         let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
