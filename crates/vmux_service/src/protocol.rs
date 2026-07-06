@@ -148,11 +148,6 @@ pub enum AgentCommand {
         title: Option<String>,
         body: Option<String>,
     },
-    /// Create (or reuse) an isolated git worktree for the calling agent's tab and return its
-    /// path. Resolved to the tab via `anchor`.
-    CreateWorktree {
-        anchor: ProcessId,
-    },
     FileTouched {
         anchor: ProcessId,
         path: String,
@@ -162,6 +157,13 @@ pub enum AgentCommand {
         col: Option<u32>,
         end_col: Option<u32>,
         kind: FileTouchKind,
+    },
+    /// Create (or reuse) an isolated git worktree for the calling agent's tab and return its
+    /// path. Resolved to the tab via `anchor`. Appended at the end so rkyv's positional enum
+    /// discriminants stay stable for existing variants (the daemon is long-lived across GUI
+    /// updates, so shifting a discriminant would break wire compat mid-upgrade).
+    CreateWorktree {
+        anchor: ProcessId,
     },
 }
 
