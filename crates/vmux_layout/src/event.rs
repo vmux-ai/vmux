@@ -26,6 +26,7 @@ pub const TABS_EVENT: &str = "tabs";
 pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
+pub const TAB_BOUNDARY_EVENT: &str = "tab-boundary";
 
 #[derive(
     Clone,
@@ -454,6 +455,48 @@ pub struct SideSheetCommandEvent {
     pub pane_id: String,
     #[serde(default)]
     pub stack_index: u32,
+}
+
+/// The active tab's working directory + live git status, auto-detected from git. Rendered as the
+/// git-integration section of the side-sheet's first card.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TabBoundary {
+    pub effective_dir: String,
+    pub source: String,
+    /// The effective dir is inside a git repository.
+    pub is_git_repo: bool,
+    pub is_worktree: bool,
+    pub branch: String,
+    pub base_ref: String,
+    /// Uncommitted working-tree changes.
+    pub uncommitted: u32,
+    /// Commits ahead of upstream.
+    pub ahead: u32,
+    pub pane_count: u32,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct TabBoundaryEvent {
+    pub boundary: Option<TabBoundary>,
 }
 
 #[derive(

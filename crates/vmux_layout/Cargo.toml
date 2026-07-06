@@ -38,6 +38,7 @@ rfd = { workspace = true }
 ron = { workspace = true }
 uuid = { workspace = true }
 vmux_command = { path = "../vmux_command" }
+vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -75,3 +76,6 @@ web-sys = { version = "0.3", features = [
     "ScrollLogicalPosition",
     "Window",
 ] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tempfile = "3"

@@ -440,6 +440,23 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
     }
 }
 
+fn create_worktree_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "create_worktree".into(),
+        description:
+            "Before making changes, isolate this task in its own git worktree so your work lands on \
+a dedicated branch and never disturbs the user's main checkout. Call this once at the start when \
+the working directory is a git repository. Creates (or reuses) a worktree for this tab and returns \
+its absolute path — do your work there. No-op-safe: returns the existing path if already isolated."
+                .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+        }),
+    }
+}
+
 fn read_terminal_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_terminal".into(),
@@ -593,6 +610,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(read_file_definition());
     defs.push(grep_definition());
     defs.push(run_definition());
+    defs.push(create_worktree_definition());
     defs.push(read_terminal_definition());
     defs.push(screenshot_definition());
     defs.push(browser_snapshot_definition());
@@ -723,6 +741,13 @@ pub fn dispatch_with_anchor(
             mode,
             terminal,
             done_marker: None,
+        }));
+    }
+    if name == "create_worktree" {
+        let anchor = anchor
+            .ok_or("create_worktree requires an agent anchor (not available to this client)")?;
+        return Ok(DispatchTarget::Command(AgentCommand::CreateWorktree {
+            anchor,
         }));
     }
     if name == "read_terminal" {

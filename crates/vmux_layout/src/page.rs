@@ -67,6 +67,14 @@ pub fn Page() -> Element {
         },
     );
 
+    let mut boundary_state = use_signal(crate::event::TabBoundaryEvent::default);
+    let _boundary_listener = use_bin_event_listener::<crate::event::TabBoundaryEvent, _>(
+        crate::event::TAB_BOUNDARY_EVENT,
+        move |data| {
+            boundary_state.set(data);
+        },
+    );
+
     let mut team_state = use_signal(TeamEvent::default);
     let _team_listener = use_bin_event_listener::<TeamEvent, _>(TEAM_EVENT, move |data| {
         team_state.set(data);
@@ -116,6 +124,7 @@ pub fn Page() -> Element {
     let tabs = tabs_state();
     let PaneTreeEvent { panes } = pane_tree_state();
     let active_space = spaces_state().spaces.into_iter().find(|s| s.is_active);
+    let tab_boundary = boundary_state().boundary;
     let layout_error = (layout_listener.error)();
     let stacks_error = (stacks_listener.error)();
     let tabs_error = (tabs_listener.error)();
@@ -197,6 +206,7 @@ pub fn Page() -> Element {
                         SideSheetView {
                             panes,
                             active_space,
+                            tab_boundary,
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -665,15 +675,18 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
 fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
+    tab_boundary: Option<crate::event::TabBoundary>,
     pane_tree_error: Option<String>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-3 pt-2 text-foreground",
+        div { class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
-                div { class: "glass mb-2 flex flex-col overflow-hidden rounded-md",
+                div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    if !space.startup_dir.is_empty() {
-                        div { class: "flex items-center gap-1.5 border-t border-foreground/5 px-2 py-1.5 text-muted-foreground",
+                    if let Some(b) = tab_boundary {
+                        TabBoundaryPanel { boundary: b }
+                    } else if !space.startup_dir.is_empty() {
+                        div { class: "flex items-center gap-1.5 border-t border-foreground/10 px-2.5 py-2 text-muted-foreground",
                             Icon { class: "h-3.5 w-3.5 shrink-0",
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                             }
@@ -687,17 +700,69 @@ fn SideSheetView(
                     }
                 }
             }
-            if let Some(err) = pane_tree_error {
-                div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-destructive", "{err}" }
+            div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
+                if let Some(err) = pane_tree_error {
+                    div { class: "flex items-center px-2 py-1",
+                        span { class: "text-ui text-destructive", "{err}" }
+                    }
+                } else if panes.is_empty() {
+                    div { class: "flex items-center px-2 py-1",
+                        span { class: "text-ui text-muted-foreground", "No stacks" }
+                    }
+                } else {
+                    for (i, pane) in panes.iter().enumerate() {
+                        PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                    }
                 }
-            } else if panes.is_empty() {
-                div { class: "flex items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", "No stacks" }
+            }
+        }
+    }
+}
+
+/// The active tab's working directory + live git status, rendered inside the space card. Shows the
+/// dir always; when it's a git repo, adds an auto-detected git row (branch, worktree, dirty/ahead).
+/// Read-only — worktree lifecycle is agent-driven (no UI actions).
+#[component]
+fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
+    let b = boundary;
+    rsx! {
+        div { class: "flex flex-col gap-1.5 border-t border-foreground/10 px-2.5 py-2",
+            div { class: "flex items-center gap-1.5 text-muted-foreground",
+                Icon { class: "h-3.5 w-3.5 shrink-0",
+                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                 }
-            } else {
-                for (i, pane) in panes.iter().enumerate() {
-                    PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
+                span {
+                    class: "min-w-0 flex-1 truncate text-xs",
+                    style: "direction:rtl;",
+                    title: "{b.effective_dir}",
+                    bdi { style: "unicode-bidi:isolate;direction:ltr;", "{b.effective_dir}" }
+                }
+            }
+            if b.is_git_repo {
+                div { class: "flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground",
+                    span { class: "flex min-w-0 items-center gap-1",
+                        Icon { class: "h-3 w-3 shrink-0 opacity-80",
+                            path { d: "M6 3v12" }
+                            path { d: "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                            path { d: "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" }
+                            path { d: "M18 9a9 9 0 0 1-9 9" }
+                        }
+                        span { class: "min-w-0 truncate text-foreground/90", "{b.branch}" }
+                    }
+                    if b.is_worktree {
+                        span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                            "worktree"
+                        }
+                    }
+                    if b.uncommitted > 0 {
+                        span { class: "shrink-0 text-amber-400/90", "● {b.uncommitted}" }
+                    }
+                    if b.ahead > 0 {
+                        span { class: "shrink-0", "↑ {b.ahead}" }
+                    }
+                    if b.is_worktree && !b.base_ref.is_empty() {
+                        span { class: "shrink-0 opacity-60", "← {b.base_ref}" }
+                    }
                 }
             }
         }

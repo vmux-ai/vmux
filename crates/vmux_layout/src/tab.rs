@@ -26,6 +26,9 @@ pub struct TabCommandSet;
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
+            .register_type::<Option<String>>()
+            .register_type::<TabWorktree>()
+            .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
@@ -48,6 +51,44 @@ impl Plugin for TabPlugin {
 #[require(Save)]
 pub struct Tab {
     pub name: String,
+    pub startup_dir: Option<String>,
+}
+
+/// Present iff a tab's `startup_dir` points at a vmux-managed git worktree.
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabWorktree {
+    pub repo_root: String,
+    pub branch: String,
+    pub base_ref: String,
+}
+
+/// Marks that the worktree/work-here decision has been made for a tab, so the isolate offer
+/// never fires again for it.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabDirDecided;
+
+/// Walk up from `entity` to its ancestor [`Tab`] and return that tab's `startup_dir` override.
+///
+/// Everything spawned inside a tab (the ACP agent session and the user's terminals) shares the
+/// tab's working directory; this resolves that override for a given stack/pane entity.
+pub fn ancestor_tab_startup_dir(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<&Tab>,
+) -> Option<String> {
+    let mut cur = entity;
+    loop {
+        if let Ok(tab) = tabs.get(cur) {
+            return tab.startup_dir.clone();
+        }
+        cur = child_of.get(cur).ok()?.parent();
+    }
 }
 
 #[derive(Resource, Default)]
@@ -110,6 +151,7 @@ fn handle_tab_commands(
                     main,
                     primary_window: *primary_window,
                     name: Some(name),
+                    startup_dir: None,
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -125,6 +167,7 @@ fn handle_tab_commands(
                             main,
                             primary_window: *primary_window,
                             name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                            startup_dir: None,
                             content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                             clear_pending_stack: true,
                             focus: true,
@@ -133,6 +176,22 @@ fn handle_tab_commands(
                         commands.entity(next).insert(LastActivatedAt::now());
                     }
                     commands.entity(active).despawn();
+                }
+                TabCommand::New => {
+                    let Ok(main) = main_q.single() else { continue };
+                    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+                        continue;
+                    };
+                    let name = format!("Tab {}", tabs.iter().count() + 1);
+                    layout_requests.write(TabLayoutSpawnRequest {
+                        main,
+                        primary_window: *primary_window,
+                        name: Some(name),
+                        startup_dir: Some(dir.to_string_lossy().into_owned()),
+                        content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                        clear_pending_stack: true,
+                        focus: true,
+                    });
                 }
                 TabCommand::Next | TabCommand::Previous => {
                     let Some(active) = active_tab else { continue };
@@ -342,6 +401,7 @@ fn on_tabs_command_emit(
                     main,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tabs.iter().count() + 1)),
+                    startup_dir: None,
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -468,15 +528,33 @@ mod tests {
         let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
-            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "a".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let b = app
             .world_mut()
-            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "b".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "c".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
 
         app.update();
@@ -492,15 +570,33 @@ mod tests {
         let main = app.world_mut().spawn(crate::space::Space).id();
         let a = app
             .world_mut()
-            .spawn((Tab { name: "a".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "a".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let b = app
             .world_mut()
-            .spawn((Tab { name: "b".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "b".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
         let c = app
             .world_mut()
-            .spawn((Tab { name: "c".into() }, ChildOf(main)))
+            .spawn((
+                Tab {
+                    name: "c".into(),
+                    startup_dir: None,
+                },
+                ChildOf(main),
+            ))
             .id();
 
         app.update();
@@ -569,6 +665,7 @@ mod tests {
         app.world_mut().spawn((
             Tab {
                 name: "Tab 1".into(),
+                startup_dir: None,
             },
             LastActivatedAt::now(),
             ChildOf(main),
@@ -657,6 +754,7 @@ mod tests {
                 main,
                 primary_window: window,
                 name: None,
+                startup_dir: None,
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,
@@ -690,6 +788,7 @@ mod tests {
             .spawn((
                 Tab {
                     name: "Tab 1".into(),
+                    startup_dir: None,
                 },
                 LastActivatedAt::now(),
                 ChildOf(main),
@@ -700,6 +799,7 @@ mod tests {
             .spawn((
                 Tab {
                     name: "Tab 2".into(),
+                    startup_dir: None,
                 },
                 LastActivatedAt(1),
                 ChildOf(main),

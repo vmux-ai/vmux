@@ -17,6 +17,7 @@ use crate::tab::TabPlugin;
 use crate::toggle::TogglePlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
+use crate::worktree::WorktreePlugin;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
     LayoutSpawnRequest, LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest,
@@ -85,6 +86,7 @@ impl Plugin for LayoutPlugin {
                 FocusRingPlugin,
                 SideSheetLayoutPlugin,
                 HeaderLayoutPlugin,
+                WorktreePlugin,
             ))
             .add_plugins((
                 CommandBarInputPlugin,

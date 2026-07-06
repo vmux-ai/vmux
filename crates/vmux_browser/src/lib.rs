@@ -43,9 +43,9 @@ use vmux_layout::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
         HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
         PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
-        StacksHostEvent, TABS_EVENT, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT,
-        UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT, UpdateClearedEvent, UpdateProgressEvent,
-        UpdateReadyEvent,
+        StacksHostEvent, TAB_BOUNDARY_EVENT, TABS_EVENT, TabBoundary, TabBoundaryEvent, TabRow,
+        TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT,
+        UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
@@ -53,12 +53,14 @@ use vmux_layout::{
         ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
         stack_bundle,
     },
-    tab::Tab,
+    tab::{Tab, TabWorktree},
     window::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
 use vmux_setting::AppSettings;
+use vmux_setting::{DirSource, resolve_startup_dir_for_tab_with_source};
+use vmux_space::ActiveSpace;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
@@ -182,6 +184,7 @@ impl Plugin for BrowserPlugin {
                     push_pane_tree_emit,
                     push_tabs_host_emit,
                     push_update_notice_emit,
+                    push_tab_boundary_emit,
                 )
                     .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
@@ -2737,6 +2740,99 @@ fn push_pane_tree_emit(
     commands.trigger(BinHostEmitEvent::from_rkyv(
         cef_e,
         PANE_TREE_EVENT,
+        &payload,
+    ));
+    *last = ron_body;
+}
+
+fn dir_source_label(source: DirSource) -> &'static str {
+    match source {
+        DirSource::Tab => "tab",
+        DirSource::Space => "space",
+        DirSource::Global => "global",
+        DirSource::Default => "default",
+    }
+}
+
+fn abbreviate_home(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = home.to_string_lossy();
+        if !home.is_empty()
+            && let Some(rest) = s.strip_prefix(home.as_ref())
+        {
+            return format!("~{rest}");
+        }
+    }
+    s.into_owned()
+}
+
+/// Emit the active tab's working-directory boundary (dir + provenance + worktree/branch) to the
+/// layout side sheet.
+#[allow(clippy::too_many_arguments)]
+fn push_tab_boundary_emit(
+    mut commands: Commands,
+    browsers: NonSend<Browsers>,
+    cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
+    settings: Res<AppSettings>,
+    active_space: Option<Res<ActiveSpace>>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    tabs: Query<&Tab>,
+    worktrees: Query<&TabWorktree>,
+    all_children: Query<&Children>,
+    leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    mut last: Local<String>,
+    mut git_cache: Local<(String, f32, Option<vmux_git::worktree::RepoInfo>)>,
+    time: Res<Time>,
+) {
+    let Ok((cef_e, page_ready)) = cef_q.single() else {
+        return;
+    };
+    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+        return;
+    }
+    let boundary = focus.tab.map(|tab_e| {
+        let tab = tabs.get(tab_e).ok();
+        let tab_dir = tab.and_then(|t| t.startup_dir.clone());
+        let space_id = active_space
+            .as_deref()
+            .map(|s| s.record.id.clone())
+            .unwrap_or_default();
+        let (path, source) =
+            resolve_startup_dir_for_tab_with_source(&settings, &space_id, tab_dir.as_deref());
+        // Auto-detect git status for the tab dir, cached by dir + refreshed every ~3s. This only
+        // runs when the loop wakes (Reactive mode), so it never polls git while idle.
+        let dir_key = path.to_string_lossy().to_string();
+        let now = time.elapsed_secs();
+        if git_cache.0 != dir_key || now - git_cache.1 > 3.0 {
+            *git_cache = (dir_key, now, vmux_git::worktree::repo_info(&path));
+        }
+        let info = git_cache.2.clone();
+        let wt = worktrees.get(tab_e).ok();
+        let branch = info.as_ref().map(|i| i.branch.clone()).unwrap_or_default();
+        let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
+        let mut leaves = Vec::new();
+        collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
+        TabBoundary {
+            effective_dir: abbreviate_home(&path),
+            source: dir_source_label(source).to_string(),
+            is_git_repo: info.is_some(),
+            is_worktree: info.as_ref().is_some_and(|i| i.is_worktree),
+            branch,
+            base_ref,
+            uncommitted: info.as_ref().map(|i| i.uncommitted).unwrap_or(0),
+            ahead: info.as_ref().map(|i| i.ahead).unwrap_or(0),
+            pane_count: leaves.len() as u32,
+        }
+    });
+    let payload = TabBoundaryEvent { boundary };
+    let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
+    if !should_emit_cached_payload(&ron_body, &last, page_ready.is_changed()) {
+        return;
+    }
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        cef_e,
+        TAB_BOUNDARY_EVENT,
         &payload,
     ));
     *last = ron_body;
