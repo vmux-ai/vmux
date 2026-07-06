@@ -367,7 +367,6 @@ pub fn attach_acp_agent_to_stack(
         title: name.to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
-        ..default()
     });
     let anchor = vmux_service::protocol::ProcessId::new();
     commands.entity(stack).insert((
