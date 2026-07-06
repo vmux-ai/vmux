@@ -5,9 +5,12 @@ pub fn apply_env() {
     let Ok(idx) = store::Index::load(&root) else {
         return;
     };
-    let dirs: Vec<String> = idx
-        .enabled_dirs(&root)
-        .into_iter()
+    let enabled = idx.enabled_dirs(&root);
+    for dir in &enabled {
+        super::shim::ensure_window_shim(dir);
+    }
+    let dirs: Vec<String> = enabled
+        .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
     if !dirs.is_empty() {

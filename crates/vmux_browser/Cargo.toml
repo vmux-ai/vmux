@@ -18,6 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 ron = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
@@ -30,4 +31,5 @@ vmux_terminal = { path = "../vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [dev-dependencies]
+tempfile = "3"
 vmux_agent = { path = "../vmux_agent" }

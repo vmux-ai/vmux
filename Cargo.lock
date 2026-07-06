@@ -9658,6 +9658,8 @@ dependencies = [
  "reqwest",
  "ron 0.8.1",
  "serde",
+ "serde_json",
+ "tempfile",
  "vmux_agent",
  "vmux_command",
  "vmux_core",
