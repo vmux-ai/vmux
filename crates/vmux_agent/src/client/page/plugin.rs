@@ -68,7 +68,13 @@ impl Plugin for PageAgentPlugin {
 
 fn attach_last_run_state_kind(
     mut commands: Commands,
-    q: Query<Entity, (Or<(With<AgentSession>, With<AcpSession>)>, Without<LastRunStateKind>)>,
+    q: Query<
+        Entity,
+        (
+            Or<(With<AgentSession>, With<AcpSession>)>,
+            Without<LastRunStateKind>,
+        ),
+    >,
 ) {
     for entity in &q {
         commands.entity(entity).insert(LastRunStateKind::default());

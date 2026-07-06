@@ -221,7 +221,8 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<CommandBarWorkSnapshot>()
             .add_systems(Update, update_work_dirs_snapshot);
-        app.world_mut().spawn(vmux_core::AgentWorkingDir(cwd.clone()));
+        app.world_mut()
+            .spawn(vmux_core::AgentWorkingDir(cwd.clone()));
         app.update();
 
         let snap = app.world().resource::<CommandBarWorkSnapshot>();
