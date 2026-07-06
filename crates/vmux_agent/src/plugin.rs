@@ -196,10 +196,6 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
-            .add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
-                vmux_core::event::FileTidyActionEvent,
-            )>::default())
-            .add_observer(on_tidy_action)
             .add_systems(
                 Update,
                 (
@@ -1128,7 +1124,7 @@ fn tidy_acp_on_idle(
 /// The user answered the follow-pane tidy banner (`FileTidyActionEvent` from the active
 /// file page): close the remembered previews, and on "Always" persist
 /// `agent.tidy_files_auto`; "Dismiss" just drops the pending set.
-fn on_tidy_action(
+pub(crate) fn on_tidy_action(
     trigger: On<bevy_cef::prelude::BinReceive<vmux_core::event::FileTidyActionEvent>>,
     child_of: Query<&ChildOf>,
     pending: Query<&crate::tidy::PendingTidy>,
