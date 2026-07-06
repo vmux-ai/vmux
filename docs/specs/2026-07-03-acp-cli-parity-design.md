@@ -125,12 +125,18 @@ pub struct AvatarSpec {
   `color = hash_color(id)` (stable FNV→HSL hex, same technique as `agent_ring_rgb`),
   `icon = icon_url.map(Remote)`.
 
-`team::Agent` becomes a pure session marker — its only use of `kind` was the roster icon URL
-(`vmux_team/src/plugin.rs:173`), which now comes from `Profile.avatar`:
+`team::Agent.kind` becomes optional so ACP (which has no `AgentKind`) can carry the component
+while CLI/Page keep their concrete kind. CLI's only read of it — the roster favicon-fallback url
+(`vmux_team/src/plugin.rs:173`, `agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_default()`) — is
+load-bearing for CLI roster avatars, so the field is kept rather than dropped:
 
 ```rust
-pub struct Agent { pub sid: String }   // drop `kind: AgentKind`
+pub struct Agent { pub sid: String, pub kind: Option<AgentKind> }   // None for ACP
 ```
+
+Registry ACP agents render their avatar in the DOM surfaces (roster, tab) from the
+`PageMetadata`-derived favicon (`TeamMemberRow.icon` + `favicon_src_for_url`), independent of
+`AvatarSpec`; the `AvatarSpec.icon` field below is only needed for the native `CALayer` badge (§2.2).
 
 `Profile` is unchanged in shape (`{ name, avatar }`) and becomes the single identity component
 for all agent kinds. `Profile::registry(name, icon_url, id)` (NEW) builds an ACP profile.
