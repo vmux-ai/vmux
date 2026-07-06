@@ -1,67 +1,19 @@
-//! Per-tab worktree orchestration: create/remove a git worktree and bind it to a [`Tab`]
-//! (set `Tab.startup_dir` + attach [`TabWorktree`]). Creation runs on a background thread and
-//! drains through an outbox, mirroring `vmux_git`'s own thread+outbox pattern.
+//! Per-tab worktree helpers: create a git worktree bound to a [`Tab`] (set `Tab.startup_dir` +
+//! attach [`TabWorktree`]) and reconcile away a worktree whose checkout has vanished. Creation is
+//! synchronous — the agent-facing `create_worktree` MCP command needs the path back in one call.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 
-use crate::tab::{Tab, TabDirDecided, TabWorktree};
+use crate::tab::{Tab, TabWorktree};
 use vmux_git::worktree::{self, WorktreeInfo};
-
-/// Create an isolated worktree for `tab`, based on `base_dir` (a directory inside a git repo).
-#[derive(Message, Clone, Debug)]
-pub struct CreateTabWorktreeRequest {
-    pub tab: Entity,
-    pub slug_hint: String,
-    pub base_dir: PathBuf,
-}
-
-/// Remove `tab`'s worktree and delete its branch.
-#[derive(Message, Clone, Debug)]
-pub struct RemoveTabWorktreeRequest {
-    pub tab: Entity,
-    pub force: bool,
-}
-
-/// Emitted after a worktree is created and bound to its tab.
-#[derive(Message, Clone, Debug)]
-pub struct TabWorktreeReady {
-    pub tab: Entity,
-    pub info: WorktreeInfo,
-}
-
-/// Emitted when worktree creation or removal fails.
-#[derive(Message, Clone, Debug)]
-pub struct TabWorktreeError {
-    pub tab: Entity,
-    pub message: String,
-}
-
-type CreateOutcome = (Entity, Result<WorktreeInfo, String>);
-
-#[derive(Resource, Default)]
-struct WorktreeCreateOutbox(Arc<Mutex<Vec<CreateOutcome>>>);
 
 pub struct WorktreePlugin;
 
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<CreateTabWorktreeRequest>()
-            .add_message::<RemoveTabWorktreeRequest>()
-            .add_message::<TabWorktreeReady>()
-            .add_message::<TabWorktreeError>()
-            .init_resource::<WorktreeCreateOutbox>()
-            .add_systems(
-                Update,
-                (
-                    spawn_worktree_create_jobs,
-                    apply_worktree_create_outcomes,
-                    handle_remove_worktree_requests,
-                    reconcile_tab_worktrees,
-                ),
-            );
+        app.add_systems(Update, reconcile_tab_worktrees);
     }
 }
 
@@ -86,13 +38,18 @@ pub fn sanitize_slug(name: &str) -> String {
     }
 }
 
-/// Pick a `.worktrees/<slug>` path + `vmux/<slug>` branch that don't collide with existing ones.
+/// Pick a `.worktrees/<slug>` path + `vmux/<slug>` branch that collide with neither an existing
+/// worktree path nor an existing local branch (a leftover branch would fail `git worktree add`).
 fn plan_worktree(repo_root: &Path, slug_hint: &str) -> (PathBuf, String) {
     let base = sanitize_slug(slug_hint);
     let existing = worktree::worktree_list(repo_root).unwrap_or_default();
+    let branches = worktree::local_branches(repo_root).unwrap_or_default();
     let taken = |slug: &str| -> bool {
         let path = repo_root.join(".worktrees").join(slug);
-        existing.iter().any(|p| p == &path) || path.exists()
+        let branch = format!("vmux/{slug}");
+        existing.iter().any(|p| p == &path)
+            || path.exists()
+            || branches.iter().any(|b| b == &branch)
     };
     let mut slug = base.clone();
     let mut n = 2;
@@ -105,8 +62,8 @@ fn plan_worktree(repo_root: &Path, slug_hint: &str) -> (PathBuf, String) {
     (path, branch)
 }
 
-/// Create a worktree under `base_dir`'s repo, synchronously. Used by the async orchestration and
-/// by the agent-facing `create_worktree` MCP command (which needs the path back in one call).
+/// Create a worktree under `base_dir`'s repo, synchronously, and return its info. Backs the
+/// agent-facing `create_worktree` MCP command (which needs the path back in one call).
 pub fn create_worktree_blocking(base_dir: &Path, slug_hint: &str) -> Result<WorktreeInfo, String> {
     let repo_root = worktree::repo_root_of(base_dir).map_err(|e| e.0)?;
     let base_ref = worktree::head_ref(&repo_root).map_err(|e| e.0)?;
@@ -115,9 +72,12 @@ pub fn create_worktree_blocking(base_dir: &Path, slug_hint: &str) -> Result<Work
     worktree::worktree_add(&repo_root, &path, &branch, &base_ref).map_err(|e| e.0)
 }
 
-/// Add `.worktrees/` to the repo's local `.git/info/exclude` (never the tracked `.gitignore`).
+/// Add `.worktrees/` to the repo's local `info/exclude` (never the tracked `.gitignore`). The
+/// exclude path is resolved via git so it lands in the shared common dir for linked worktrees too.
 fn ensure_worktrees_ignored(repo_root: &Path) {
-    let exclude = repo_root.join(".git").join("info").join("exclude");
+    let Some(exclude) = worktree::info_exclude_path(repo_root) else {
+        return;
+    };
     let body = std::fs::read_to_string(&exclude).unwrap_or_default();
     if body.lines().any(|l| l.trim() == ".worktrees/") {
         return;
@@ -127,94 +87,10 @@ fn ensure_worktrees_ignored(repo_root: &Path) {
         next.push('\n');
     }
     next.push_str(".worktrees/\n");
+    if let Some(parent) = exclude.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let _ = std::fs::write(&exclude, next);
-}
-
-fn spawn_worktree_create_jobs(
-    mut reader: MessageReader<CreateTabWorktreeRequest>,
-    outbox: Res<WorktreeCreateOutbox>,
-) {
-    for req in reader.read() {
-        let sink = outbox.0.clone();
-        let tab = req.tab;
-        let base_dir = req.base_dir.clone();
-        let slug_hint = req.slug_hint.clone();
-        std::thread::spawn(move || {
-            let result = create_worktree_blocking(&base_dir, &slug_hint);
-            sink.lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .push((tab, result));
-        });
-    }
-}
-
-fn apply_worktree_create_outcomes(
-    outbox: Res<WorktreeCreateOutbox>,
-    mut tabs: Query<&mut Tab>,
-    mut ready: MessageWriter<TabWorktreeReady>,
-    mut errors: MessageWriter<TabWorktreeError>,
-    mut commands: Commands,
-) {
-    let drained: Vec<CreateOutcome> = {
-        let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
-        q.drain(..).collect()
-    };
-    for (tab, result) in drained {
-        match result {
-            Ok(info) => {
-                if let Ok(mut t) = tabs.get_mut(tab) {
-                    t.startup_dir = Some(info.path.to_string_lossy().into_owned());
-                }
-                commands.entity(tab).insert((
-                    TabWorktree {
-                        repo_root: info.repo_root.to_string_lossy().into_owned(),
-                        branch: info.branch.clone(),
-                        base_ref: info.base_ref.clone(),
-                    },
-                    TabDirDecided,
-                ));
-                ready.write(TabWorktreeReady { tab, info });
-            }
-            Err(message) => {
-                errors.write(TabWorktreeError { tab, message });
-            }
-        }
-    }
-}
-
-fn handle_remove_worktree_requests(
-    mut reader: MessageReader<RemoveTabWorktreeRequest>,
-    worktrees: Query<&TabWorktree>,
-    mut tabs: Query<&mut Tab>,
-    mut errors: MessageWriter<TabWorktreeError>,
-    mut commands: Commands,
-) {
-    for req in reader.read() {
-        let Ok(wt) = worktrees.get(req.tab) else {
-            continue;
-        };
-        let Some(path) = tabs.get(req.tab).ok().and_then(|t| t.startup_dir.clone()) else {
-            continue;
-        };
-        let repo_root = PathBuf::from(&wt.repo_root);
-        match worktree::worktree_remove(&repo_root, Path::new(&path), &wt.branch, req.force) {
-            Ok(()) => {
-                if let Ok(mut t) = tabs.get_mut(req.tab) {
-                    t.startup_dir = None;
-                }
-                commands
-                    .entity(req.tab)
-                    .remove::<TabWorktree>()
-                    .remove::<TabDirDecided>();
-            }
-            Err(e) => {
-                errors.write(TabWorktreeError {
-                    tab: req.tab,
-                    message: e.0,
-                });
-            }
-        }
-    }
 }
 
 /// After load (or create), drop a [`TabWorktree`] whose checkout directory no longer exists,
@@ -235,7 +111,6 @@ fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut com
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::ecs::message::Messages;
     use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -290,42 +165,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_outcome_binds_worktree_to_tab() {
-        let mut app = App::new();
-        app.add_plugins(WorktreePlugin);
-        let tab = app.world_mut().spawn(Tab::default()).id();
-
-        let info = WorktreeInfo {
-            path: PathBuf::from("/repo/.worktrees/feat"),
-            branch: "vmux/feat".into(),
-            base_ref: "main".into(),
-            repo_root: PathBuf::from("/repo"),
-        };
-        app.world()
-            .resource::<WorktreeCreateOutbox>()
-            .0
-            .lock()
-            .unwrap()
-            .push((tab, Ok(info)));
-
-        app.update();
-
-        assert_eq!(
-            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
-            Some("/repo/.worktrees/feat")
-        );
-        let wt = app
-            .world()
-            .get::<TabWorktree>(tab)
-            .expect("TabWorktree set");
-        assert_eq!(wt.branch, "vmux/feat");
-        assert!(app.world().get::<TabDirDecided>(tab).is_some());
-        let ready = app
-            .world_mut()
-            .resource_mut::<Messages<TabWorktreeReady>>()
-            .drain()
-            .count();
-        assert_eq!(ready, 1);
+    fn plan_worktree_skips_existing_branch_name() {
+        let repo = init_repo();
+        git(repo.path(), &["branch", "vmux/feat"]);
+        let (path, branch) = plan_worktree(repo.path(), "feat");
+        assert_eq!(branch, "vmux/feat-2");
+        assert!(path.ends_with(".worktrees/feat-2"), "{path:?}");
     }
 
     #[test]
@@ -366,28 +211,5 @@ mod tests {
 
         assert!(app.world().get::<TabWorktree>(kept).is_some());
         assert!(app.world().get::<TabWorktree>(dropped).is_none());
-    }
-
-    #[test]
-    fn apply_outcome_error_emits_error_no_binding() {
-        let mut app = App::new();
-        app.add_plugins(WorktreePlugin);
-        let tab = app.world_mut().spawn(Tab::default()).id();
-        app.world()
-            .resource::<WorktreeCreateOutbox>()
-            .0
-            .lock()
-            .unwrap()
-            .push((tab, Err("boom".into())));
-
-        app.update();
-
-        assert!(app.world().get::<TabWorktree>(tab).is_none());
-        let errs = app
-            .world_mut()
-            .resource_mut::<Messages<TabWorktreeError>>()
-            .drain()
-            .count();
-        assert_eq!(errs, 1);
     }
 }
