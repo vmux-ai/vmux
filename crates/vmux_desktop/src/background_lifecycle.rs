@@ -257,6 +257,11 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
+        if event_type == NSEventType::LeftMouseDown {
+            vmux_browser::set_native_left_mouse_down(true);
+        } else if event_type == NSEventType::LeftMouseUp {
+            vmux_browser::set_native_left_mouse_down(false);
+        }
         if event_type == NSEventType::LeftMouseDown
             && let Some((x_px, y_px)) = event_location_in_window_physical_px(ev)
         {
@@ -284,7 +289,13 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         event.as_ptr()
     });
     let global_wake = wake.clone();
-    let global_block = block2::RcBlock::new(move |_event: NonNull<NSEvent>| {
+    let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
+        let event_type = unsafe { event.as_ref() }.r#type();
+        if event_type == NSEventType::LeftMouseDown {
+            vmux_browser::set_native_left_mouse_down(true);
+        } else if event_type == NSEventType::LeftMouseUp {
+            vmux_browser::set_native_left_mouse_down(false);
+        }
         global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mask = NSEventMask::MouseMoved
@@ -722,6 +733,19 @@ mod tests {
 
         assert!(monitor.contains("addLocalMonitorForEventsMatchingMask_handler"));
         assert!(monitor.contains("addGlobalMonitorForEventsMatchingMask_handler"));
+    }
+
+    #[test]
+    fn native_mouse_monitor_tracks_left_button_state() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
+        assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
     }
 
     #[test]

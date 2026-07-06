@@ -1470,6 +1470,9 @@ fn refresh_active_windowed_hover(
     if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
         return;
     }
+    if native_left_mouse_down() {
+        return;
+    }
     let Some((entity, transform, computed, ui_gt, host_window)) = active_q.iter().next() else {
         return;
     };
@@ -1513,6 +1516,15 @@ const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
     LazyLock::new(|| Mutex::new(None));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
+static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_native_left_mouse_down(down: bool) {
+    NATIVE_LEFT_MOUSE_DOWN.store(down, Ordering::Relaxed);
+}
+
+pub fn native_left_mouse_down() -> bool {
+    NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
+}
 
 fn command_bar_windowed_frame(
     window_width_px: f32,
@@ -4972,6 +4984,19 @@ mod tests {
         assert!(refresh_fn.contains("With<WebviewWindowed>"));
         assert!(refresh_fn.contains("vmux_layout::pane::pane_hover_cursor_position"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
+    }
+
+    #[test]
+    fn active_windowed_hover_refresh_skips_native_left_drag() {
+        let source = include_str!("lib.rs");
+        let refresh_fn = source
+            .split("fn refresh_active_windowed_hover")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
+            .unwrap_or_default();
+
+        assert!(refresh_fn.contains("native_left_mouse_down()"));
+        assert!(refresh_fn.contains("return;"));
     }
 
     #[test]
