@@ -165,14 +165,6 @@ pub fn Page() -> Element {
                             span { class: "h-px flex-1 bg-foreground/10" }
                         }
                     }
-                    for (qi , qtext) in queued.read().iter().enumerate() {
-                        div {
-                            key: "q{qi}",
-                            class: "max-w-[80%] self-end whitespace-pre-wrap rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] px-4 py-2.5 text-sm text-muted-foreground",
-                            span { class: "mr-2 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
-                            "{qtext}"
-                        }
-                    }
                 }
             }
 
@@ -213,66 +205,113 @@ pub fn Page() -> Element {
             }
 
             div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
-                if paused() && !queued.read().is_empty() {
-                    div { class: "mx-auto mb-2 flex max-w-3xl items-center gap-2",
-                        button {
-                            class: "rounded-lg bg-foreground/10 px-3 py-1.5 text-xs font-medium hover:bg-foreground/20",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&ChatResume);
-                            },
-                            "▶ Resume ({queued.read().len()})"
-                        }
-                        button {
-                            class: "rounded-lg px-3 py-1.5 text-xs text-muted-foreground hover:bg-foreground/10",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&ChatClearQueue);
-                            },
-                            "✕ Clear"
+                div { class: "mx-auto flex max-w-3xl flex-col gap-2",
+                    if !queued.read().is_empty() {
+                        div { class: "flex flex-col items-end gap-1.5",
+                            for (qi , qtext) in queued.read().iter().enumerate() {
+                                div {
+                                    key: "q{qi}",
+                                    class: "flex max-w-[80%] items-baseline gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] px-3.5 py-2 text-sm text-muted-foreground",
+                                    span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
+                                    span { class: "whitespace-pre-wrap break-words", "{qtext}" }
+                                }
+                            }
+                            if paused() {
+                                div { class: "flex items-center gap-1",
+                                    button {
+                                        class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Resume queued prompts",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ChatResume);
+                                        },
+                                        svg {
+                                            class: "h-3.5 w-3.5",
+                                            view_box: "0 0 24 24",
+                                            fill: "currentColor",
+                                            path { d: "M8 5v14l11-7z" }
+                                        }
+                                        span { class: "tabular-nums", "{queued.read().len()}" }
+                                    }
+                                    button {
+                                        class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Clear queue",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ChatClearQueue);
+                                        },
+                                        svg {
+                                            class: "h-3.5 w-3.5",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-                div { class: "mx-auto flex max-w-3xl items-end gap-2",
-                    textarea {
-                        class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
-                        rows: "1",
-                        placeholder: "Message the agent…",
-                        value: "{draft}",
-                        oninput: move |e| draft.set(e.value()),
-                        onkeydown: move |e| {
-                            let streaming = matches!(status().as_str(), "streaming" | "awaiting");
-                            if e.key() == Key::Enter && !e.modifiers().shift() {
-                                e.prevent_default();
-                                do_submit(draft, at_bottom);
-                            } else if e.key() == Key::Escape {
-                                if streaming {
+                    div { class: "flex items-end gap-2",
+                        textarea {
+                            class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
+                            rows: "1",
+                            placeholder: "Message the agent…",
+                            value: "{draft}",
+                            oninput: move |e| draft.set(e.value()),
+                            onkeydown: move |e| {
+                                let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+                                if e.key() == Key::Enter && !e.modifiers().shift() {
+                                    e.prevent_default();
+                                    do_submit(draft, at_bottom);
+                                } else if e.key() == Key::Escape {
+                                    if streaming {
+                                        e.prevent_default();
+                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                    } else if !draft.peek().is_empty() {
+                                        draft.set(String::new());
+                                    }
+                                } else if e.modifiers().ctrl()
+                                    && matches!(e.key(), Key::Character(c) if c == "c")
+                                    && streaming
+                                    && !has_text_selection()
+                                {
                                     e.prevent_default();
                                     let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                } else if !draft.peek().is_empty() {
-                                    draft.set(String::new());
                                 }
-                            } else if e.modifiers().ctrl()
-                                && matches!(e.key(), Key::Character(c) if c == "c")
-                                && streaming
-                                && !has_text_selection()
-                            {
-                                e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                            }
-                        },
-                    }
-                    if matches!(status().as_str(), "streaming" | "awaiting") {
-                        button {
-                            class: "rounded-xl bg-red-500/90 px-4 py-2 text-sm font-medium text-white hover:brightness-110 active:scale-[0.99]",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&ChatCancel);
                             },
-                            "■ Stop"
                         }
-                    } else {
-                        button {
-                            class: "rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background hover:brightness-110 active:scale-[0.99]",
-                            onclick: move |_| do_submit(draft, at_bottom),
-                            "Send"
+                        if matches!(status().as_str(), "streaming" | "awaiting") {
+                            button {
+                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                title: "Interrupt (Esc)",
+                                onclick: move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                },
+                                svg {
+                                    class: "h-4 w-4",
+                                    view_box: "0 0 24 24",
+                                    fill: "currentColor",
+                                    rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                                }
+                            }
+                        } else {
+                            button {
+                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                title: "Send (Enter)",
+                                onclick: move |_| do_submit(draft, at_bottom),
+                                svg {
+                                    class: "h-4 w-4",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M12 19V5" }
+                                    path { d: "M5 12l7-7 7 7" }
+                                }
+                            }
                         }
                     }
                 }
