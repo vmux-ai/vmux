@@ -41,6 +41,13 @@ pub struct PendingStackClose;
 #[derive(Component)]
 pub struct CloseConfirmed;
 
+/// Close (despawn) a specific stack entity. Used by agent auto-tidy. Ignored if
+/// it is the only stack in its pane, so tidy can never empty (and collapse) a pane.
+#[derive(Message, Clone, Copy)]
+pub struct CloseStackRequest {
+    pub stack: Entity,
+}
+
 /// System set for `handle_stack_commands`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StackCommandSet;
@@ -51,11 +58,15 @@ impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Stack>()
             .init_resource::<FocusedStack>()
+            .add_message::<CloseStackRequest>()
             .add_systems(
                 Update,
-                handle_stack_commands
-                    .in_set(ReadAppCommands)
-                    .in_set(StackCommandSet),
+                (
+                    handle_stack_commands
+                        .in_set(ReadAppCommands)
+                        .in_set(StackCommandSet),
+                    handle_close_stack_requests.in_set(ReadAppCommands),
+                ),
             )
             .add_systems(
                 Update,
@@ -64,6 +75,35 @@ impl Plugin for StackPlugin {
                     .after(ReadAppCommands),
             )
             .add_systems(PostUpdate, sync_stack_picking);
+    }
+}
+
+fn handle_close_stack_requests(
+    mut reader: MessageReader<CloseStackRequest>,
+    child_of_q: Query<&ChildOf>,
+    pane_children: Query<&Children, With<Pane>>,
+    stack_q: Query<Entity, With<Stack>>,
+    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut commands: Commands,
+) {
+    for req in reader.read() {
+        let Ok(pane) = child_of_q.get(req.stack).map(Relationship::get) else {
+            continue;
+        };
+        let Ok(children) = pane_children.get(pane) else {
+            continue;
+        };
+        let stack_count = children.iter().filter(|&e| stack_q.contains(e)).count();
+        if stack_count <= 1 {
+            continue;
+        }
+        if new_stack_ctx.stack == Some(req.stack) {
+            new_stack_ctx.stack = None;
+        }
+        if new_stack_ctx.previous_stack == Some(req.stack) {
+            new_stack_ctx.previous_stack = None;
+        }
+        commands.entity(req.stack).despawn();
     }
 }
 
@@ -177,9 +217,15 @@ fn compute_focused_stack(
     let tab = active_tab_param.get();
     let pane = tab.and_then(|t| active_pane_in_tab(t, &all_children, &leaf_panes, &pane_ts));
     let stack = pane.and_then(|p| active_stack_in_pane(p, &pane_children, &stack_ts));
-    cached.tab = tab;
-    cached.pane = pane;
-    cached.stack = stack;
+    // Only write when the focus actually changed. An unconditional `ResMut` write
+    // marks `FocusedStack` changed every frame, which made `sync_live_start_pages`
+    // re-emit the `vmux://start` payload every frame — re-rendering the launcher
+    // input and eating keystrokes.
+    if cached.tab != tab || cached.pane != pane || cached.stack != stack {
+        cached.tab = tab;
+        cached.pane = pane;
+        cached.stack = stack;
+    }
 }
 
 pub fn stack_bundle() -> impl Bundle {
@@ -702,6 +748,117 @@ mod tests {
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }
+    }
+
+    #[test]
+    fn close_stack_request_despawns_target_keeps_siblings() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseStackRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_close_stack_requests);
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let s1 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+        let s2 = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(2), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest { stack: s1 });
+        app.update();
+
+        assert!(app.world().get_entity(s1).is_err(), "target despawned");
+        assert!(app.world().get_entity(s2).is_ok(), "sibling kept");
+    }
+
+    #[test]
+    fn close_stack_request_keeps_last_stack_in_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<CloseStackRequest>()
+            .init_resource::<NewStackContext>()
+            .add_systems(Update, handle_close_stack_requests);
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let only = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt(1), ChildOf(pane)))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<CloseStackRequest>>()
+            .write(CloseStackRequest { stack: only });
+        app.update();
+
+        assert!(app.world().get_entity(only).is_ok(), "never empties a pane");
+    }
+
+    #[test]
+    fn focused_stack_not_rewritten_when_focus_is_stable() {
+        #[derive(Resource, Default)]
+        struct ChangeLog(Vec<bool>);
+
+        fn probe(focused: Res<FocusedStack>, mut log: ResMut<ChangeLog>) {
+            log.0.push(focused.is_changed());
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<FocusedStack>()
+            .init_resource::<ChangeLog>()
+            .add_systems(Update, (compute_focused_stack, probe).chain());
+
+        let tab = app
+            .world_mut()
+            .spawn((Tab::default(), LastActivatedAt::now()))
+            .id();
+        let pane = app
+            .world_mut()
+            .spawn((Pane, LastActivatedAt::now(), ChildOf(tab)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .id();
+
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<FocusedStack>().stack,
+            Some(stack),
+            "focus should resolve to the only stack"
+        );
+        // With stable focus, `FocusedStack` must NOT be marked changed every frame
+        // (an unconditional ResMut write drove `sync_live_start_pages` to re-emit
+        // the vmux://start payload every frame and eat keystrokes).
+        let log = &app.world().resource::<ChangeLog>().0;
+        assert_eq!(
+            log.last(),
+            Some(&false),
+            "FocusedStack rewritten on a stable frame; log={log:?}"
+        );
     }
 
     #[test]

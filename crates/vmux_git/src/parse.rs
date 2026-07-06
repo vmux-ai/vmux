@@ -86,6 +86,32 @@ pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
     }
 }
 
+/// Repo-relative paths of every changed entry in `git status --porcelain=v2`
+/// output — one per `1 `/`2 `/`u `/`? ` line (untracked files included).
+pub fn changed_paths(out: &str) -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    for line in out.lines() {
+        let path = if line.starts_with("1 ") || line.starts_with("2 ") {
+            let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
+            entry_path(line, kind_tokens)
+                .split('\t')
+                .next()
+                .unwrap_or("")
+                .to_string()
+        } else if line.starts_with("u ") {
+            entry_path(line, 10).to_string()
+        } else if let Some(rest) = line.strip_prefix("? ") {
+            rest.trim().to_string()
+        } else {
+            continue;
+        };
+        if !path.is_empty() {
+            set.insert(path);
+        }
+    }
+    set
+}
+
 fn span(text: &str, fg: [u8; 3]) -> Vec<StyledSpan> {
     vec![StyledSpan {
         text: text.to_string(),
@@ -302,6 +328,24 @@ mod porcelain_tests {
         assert!(!p.has_upstream);
         assert_eq!(p.ahead, 0);
         assert_eq!(p.behind, 0);
+    }
+
+    #[test]
+    fn changed_paths_collects_all_entry_kinds() {
+        let out = "# branch.head main\n\
+1 .M N... 100644 100644 100644 aaa bbb src/main.rs\n\
+1 M. N... 100644 100644 100644 ccc ddd src/lib.rs\n\
+2 R. N... 100644 100644 100644 eee fff R100 new.rs\told.rs\n\
+u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
+? notes.txt\n";
+        let set = changed_paths(out);
+        assert!(set.contains("src/main.rs"));
+        assert!(set.contains("src/lib.rs"));
+        assert!(set.contains("new.rs"));
+        assert!(!set.contains("old.rs"));
+        assert!(set.contains("conflict.rs"));
+        assert!(set.contains("notes.txt"));
+        assert_eq!(set.len(), 5);
     }
 }
 

@@ -798,7 +798,7 @@ async fn handle_client(
                 args,
                 env,
                 cwd,
-                anchor: _,
+                anchor,
                 mcp_command,
                 mcp_args,
             } => {
@@ -819,6 +819,7 @@ async fn handle_client(
                     args,
                     env,
                     std::path::PathBuf::from(cwd),
+                    anchor,
                     mcp_servers,
                 );
                 // ACP has no separate Attach message; forward this session's stream now.

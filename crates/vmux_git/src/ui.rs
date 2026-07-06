@@ -219,6 +219,8 @@ pub fn GitFooter(
     behind: ReadSignal<u32>,
     staged_count: ReadSignal<u32>,
     message: ReadSignal<String>,
+    /// Right-aligned status-bar items (e.g. the editor's LSP indicator).
+    children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
 
@@ -281,6 +283,7 @@ pub fn GitFooter(
             if !message().is_empty() {
                 span { class: "shrink-0 truncate text-ansi-1", "{message}" }
             }
+            {children}
         }
     }
 }

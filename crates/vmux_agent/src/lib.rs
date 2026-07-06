@@ -42,6 +42,8 @@ pub mod snapshot_updater;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod strategy;
 #[cfg(not(target_arch = "wasm32"))]
+mod tidy;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod systems {
     pub mod approval;
     pub mod surface_errors;

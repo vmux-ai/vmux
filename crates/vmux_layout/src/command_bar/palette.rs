@@ -16,8 +16,8 @@ use dioxus::prelude::*;
 use vmux_command::event::{
     CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
-    PathCompleteRequest, PathCompleteResponse, PathEntry, is_data_uri, looks_like_url,
-    should_open_typed_query_on_enter,
+    PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_should_refocus, is_data_uri,
+    looks_like_url, should_open_typed_query_on_enter,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_ui::components::icon::Icon;
@@ -69,6 +69,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
     let mut suggestions_request_id = use_signal(|| 0u64);
     let mut last_open_id = use_signal(|| u64::MAX);
+    let mut last_focus_open_id = use_signal(|| u64::MAX);
 
     use_effect(move || {
         let s = state();
@@ -129,8 +130,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
-        let _ = state().open_id;
-        focus_and_install_ctrl_bindings();
+        let open_id = state().open_id;
+        if command_bar_should_refocus(last_focus_open_id(), open_id) {
+            last_focus_open_id.set(open_id);
+            focus_and_install_ctrl_bindings();
+        }
     });
 
     use_effect(move || {
