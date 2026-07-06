@@ -40,6 +40,7 @@ impl AcpSessionManager {
         cwd: PathBuf,
         anchor: ProcessId,
         mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
+        resume: Option<String>,
     ) {
         if self.sessions.contains_key(&sid) {
             return;
@@ -61,6 +62,7 @@ impl AcpSessionManager {
             args,
             env,
             mcp_servers,
+            resume,
             shared.clone(),
             input_rx,
         ));

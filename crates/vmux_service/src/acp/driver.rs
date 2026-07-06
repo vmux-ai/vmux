@@ -10,11 +10,12 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
     CancelNotification, ContentBlock, CreateTerminalRequest, InitializeRequest,
-    KillTerminalRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
-    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, TerminalOutputRequest, TextContent,
-    WaitForTerminalExitRequest, WriteTextFileRequest, WriteTextFileResponse,
+    KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption,
+    PermissionOptionId, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
+    TerminalOutputRequest, TextContent, WaitForTerminalExitRequest, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use tokio::process::Command;
@@ -82,6 +83,7 @@ pub async fn run(
     args: Vec<String>,
     env: Vec<(String, String)>,
     mcp_servers: Vec<McpServer>,
+    resume: Option<String>,
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
@@ -252,11 +254,32 @@ pub async fn run(
             init.client_capabilities.fs.write_text_file = true;
             // Terminals are provided via the vmux_mcp `run` tool (real panes), not ACP-native.
             init.client_capabilities.terminal = false;
-            cx.send_request(init).block_task().await?;
+            let init_resp = cx.send_request(init).block_task().await?;
 
-            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
-            new_session.mcp_servers = mcp_servers;
-            let session = cx.send_request(new_session).block_task().await?;
+            // Resume the persisted session when asked and the agent advertises `session/load`;
+            // otherwise start fresh (graceful fallback). Either way `session_id` is what we use for
+            // prompts/cancel and surface to the GUI to persist in the pane url. On load, the agent
+            // replays history as `session/update` notifications through the projector.
+            let session_id: SessionId = match resume
+                .filter(|_| init_resp.agent_capabilities.load_session)
+            {
+                Some(id) => {
+                    let sid = SessionId::new(id);
+                    let mut load = LoadSessionRequest::new(sid.clone(), main_shared.cwd.clone());
+                    load.mcp_servers = mcp_servers;
+                    cx.send_request(load).block_task().await?;
+                    sid
+                }
+                None => {
+                    let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                    new_session.mcp_servers = mcp_servers;
+                    cx.send_request(new_session).block_task().await?.session_id
+                }
+            };
+            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                sid: main_shared.sid.clone(),
+                acp_session_id: session_id.to_string(),
+            });
             main_shared.emit_status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
@@ -272,7 +295,7 @@ pub async fn run(
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
-                        let session_id = session.session_id.clone();
+                        let session_id = session_id.clone();
                         cx.spawn(async move {
                             let prompt = PromptRequest::new(
                                 session_id,
@@ -303,8 +326,7 @@ pub async fn run(
                             .send_notification(CancelNotification::new(session.session_id.clone()));
                     }
                     AcpInput::Close => {
-                        let _ = cx
-                            .send_notification(CancelNotification::new(session.session_id.clone()));
+                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
                         break;
                     }
                 }

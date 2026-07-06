@@ -106,6 +106,7 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AcpInstallChannel>()
             .init_resource::<AcpCatalog>()
+            .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
                 Update,
@@ -114,6 +115,7 @@ impl Plugin for AcpAgentPlugin {
                     send_acp_input,
                     drain_acp_installs,
                     receive_catalog,
+                    apply_acp_session_created,
                 ),
             )
             .add_observer(close_acp_session_on_remove)
@@ -289,8 +291,30 @@ fn drain_acp_installs(
                         anchor: session.anchor,
                         mcp_command: mcp.as_ref().map(|m| m.command.clone()),
                         mcp_args: mcp.map(|m| m.args).unwrap_or_default(),
+                        resume_acp_session_id: session.resume.clone(),
                     });
                 }
+            }
+        }
+    }
+}
+
+/// When the daemon reports the agent-assigned ACP session id, redirect the pane url to
+/// `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle) and record it on the session
+/// so a later reopen resumes via `session/load`.
+fn apply_acp_session_created(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentSessionCreated>,
+    mut q: Query<(&mut AcpSession, &mut vmux_core::PageMetadata)>,
+) {
+    for ev in reader.read() {
+        for (mut session, mut meta) in &mut q {
+            if session.sid != ev.sid {
+                continue;
+            }
+            session.resume = Some(ev.acp_session_id.clone());
+            let url = format!("vmux://agent/{}/{}", session.agent_id, ev.acp_session_id);
+            if meta.url != url {
+                meta.url = url;
             }
         }
     }

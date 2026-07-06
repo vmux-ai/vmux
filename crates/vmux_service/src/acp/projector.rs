@@ -84,6 +84,9 @@ impl AcpProjector {
     pub fn apply(&mut self, update: SessionUpdate) -> Vec<Intent> {
         match update {
             SessionUpdate::AgentMessageChunk(chunk) => self.append_assistant_text(chunk.content),
+            // Replayed during `session/load`: the agent re-emits prior user turns (live prompting
+            // never echoes them — those go through `push_user`).
+            SessionUpdate::UserMessageChunk(chunk) => self.append_user_chunk(chunk.content),
             SessionUpdate::AgentThoughtChunk(chunk) => self.append_thinking(chunk.content),
             SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
             SessionUpdate::ToolCallUpdate(update) => self.apply_tool_call_update(update),
@@ -105,6 +108,18 @@ impl AcpProjector {
             _ => self.messages.push(Message::Assistant {
                 blocks: vec![AssistantBlock::Thinking(text)],
             }),
+        }
+        vec![Intent::Snapshot]
+    }
+
+    fn append_user_chunk(&mut self, content: ContentBlock) -> Vec<Intent> {
+        let ContentBlock::Text(text) = content else {
+            return Vec::new();
+        };
+        let text = text.text;
+        match self.messages.last_mut() {
+            Some(Message::User { text: existing }) => existing.push_str(&text),
+            _ => self.messages.push(Message::User { text }),
         }
         vec![Intent::Snapshot]
     }

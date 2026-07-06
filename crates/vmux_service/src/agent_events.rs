@@ -77,3 +77,11 @@ pub struct PageAgentSnapshot {
     pub sid: String,
     pub messages_json: String,
 }
+
+/// The ACP session was created/loaded; carries the agent-assigned session id so the GUI can
+/// redirect the pane url to `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle).
+#[derive(Message)]
+pub struct PageAgentSessionCreated {
+    pub sid: String,
+    pub acp_session_id: String,
+}

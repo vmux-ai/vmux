@@ -1155,6 +1155,8 @@ struct PollServiceWriters<'w> {
     page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
+    page_agent_session_created:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
     agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
     agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
@@ -1654,6 +1656,17 @@ fn poll_service_messages(
                 writers
                     .command_lifecycle
                     .write(CommandLifecycleEvent { process_id, kind });
+            }
+            ServiceMessage::AcpSessionCreated {
+                sid,
+                acp_session_id,
+            } => {
+                writers.page_agent_session_created.write(
+                    vmux_service::agent_events::PageAgentSessionCreated {
+                        sid,
+                        acp_session_id,
+                    },
+                );
             }
             _ => {}
         }

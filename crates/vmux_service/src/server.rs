@@ -815,6 +815,7 @@ async fn handle_client(
                 anchor,
                 mcp_command,
                 mcp_args,
+                resume_acp_session_id,
             } => {
                 let mcp_servers = mcp_command
                     .map(|cmd| {
@@ -835,6 +836,7 @@ async fn handle_client(
                     std::path::PathBuf::from(cwd),
                     anchor,
                     mcp_servers,
+                    resume_acp_session_id,
                 );
                 // ACP has no separate Attach message; forward this session's stream now.
                 let rx = acp_manager.lock().await.subscribe(&sid);
