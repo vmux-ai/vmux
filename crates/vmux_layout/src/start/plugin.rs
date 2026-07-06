@@ -134,7 +134,9 @@ fn sync_live_start_pages(
             COMMAND_BAR_OPEN_EVENT,
             &payload,
         ));
-        commands.entity(e).insert(StartWorkSynced);
+        // The start page can be despawned this frame (e.g. selecting an agent opens in-place over
+        // it) before this command applies — `try_insert` skips silently instead of panicking.
+        commands.entity(e).try_insert(StartWorkSynced);
     }
 }
 
