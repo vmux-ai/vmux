@@ -23,6 +23,9 @@ pub struct AcpSession {
     /// Ties this agent's vmux_mcp tool calls back to its pane (also set as a `ProcessId`
     /// component on the chat webview, where the tool router resolves it).
     pub anchor: vmux_core::ProcessId,
+    /// The agent-assigned ACP session id to resume via `session/load` (from a restored
+    /// `vmux://agent/<id>/<acp-session-id>` url). `None` opens a fresh session.
+    pub resume: Option<String>,
 }
 
 /// Progress, resolved launch spec, or terminal failure of a background agent install, keyed by
@@ -345,6 +348,7 @@ mod tests {
             sid: "s1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             anchor: vmux_core::ProcessId::new(),
+            resume: None,
         });
         app.update();
     }

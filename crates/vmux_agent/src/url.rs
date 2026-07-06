@@ -2,8 +2,9 @@ pub use vmux_core::agent::AgentKind;
 
 use crate::AgentVariant;
 
-/// Reserved trailing URL segment: `vmux://agent/<kind>/cli` opens a fresh CLI session for that
-/// agent, as opposed to `vmux://agent/<kind>/<sid>` which resumes the session named by `<sid>`.
+/// Reserved marker segment for CLI agents: `vmux://agent/<kind>/cli` opens a fresh CLI session,
+/// `vmux://agent/<kind>/cli/<sid>` resumes the session named by `<sid>`. The plain two-segment
+/// form `vmux://agent/<id>/<sid>` (no `cli` marker) belongs to ACP sessions.
 pub const CLI_FRESH_SID: &str = "cli";
 
 pub fn page_url_prefix(provider: &str, model: &str) -> String {
@@ -15,6 +16,12 @@ pub enum AgentUrl {
     Cli {
         kind: AgentKind,
         sid: String,
+    },
+    /// A registry-driven ACP agent. `sid` is the agent-assigned session id when known
+    /// (`vmux://agent/<id>/<sid>`), or `None` for a fresh open (`vmux://agent/<id>`).
+    Acp {
+        id: String,
+        sid: Option<String>,
     },
     Page {
         provider: String,
@@ -30,18 +37,45 @@ impl AgentUrl {
         let segs: Vec<&str> = body.split('/').filter(|s| !s.is_empty()).collect();
         match segs.as_slice() {
             [] => Some(AgentUrl::PageDefault),
-            [kind_seg, sid] => {
-                let kind = AgentKind::from_url_segment(kind_seg)?;
-                Some(AgentUrl::Cli {
-                    kind,
-                    sid: (*sid).to_string(),
-                })
-            }
-            [provider, model, sid] => Some(AgentUrl::Page {
-                provider: (*provider).to_string(),
-                model: (*model).to_string(),
-                sid: (*sid).to_string(),
+            [id] => Some(AgentUrl::Acp {
+                id: (*id).to_string(),
+                sid: None,
             }),
+            [x, y] => {
+                if *y == CLI_FRESH_SID
+                    && let Some(kind) = AgentKind::from_url_segment(x)
+                {
+                    // `vmux://agent/<kind>/cli` — fresh CLI session.
+                    Some(AgentUrl::Cli {
+                        kind,
+                        sid: CLI_FRESH_SID.to_string(),
+                    })
+                } else {
+                    // `vmux://agent/<id>/<sid>` — an ACP session.
+                    Some(AgentUrl::Acp {
+                        id: (*x).to_string(),
+                        sid: Some((*y).to_string()),
+                    })
+                }
+            }
+            [x, y, z] => {
+                if *y == CLI_FRESH_SID
+                    && let Some(kind) = AgentKind::from_url_segment(x)
+                {
+                    // `vmux://agent/<kind>/cli/<sid>` — resume a CLI session.
+                    Some(AgentUrl::Cli {
+                        kind,
+                        sid: (*z).to_string(),
+                    })
+                } else {
+                    // `vmux://agent/<provider>/<model>/<sid>` — a Page session.
+                    Some(AgentUrl::Page {
+                        provider: (*x).to_string(),
+                        model: (*y).to_string(),
+                        sid: (*z).to_string(),
+                    })
+                }
+            }
             _ => None,
         }
     }
@@ -49,13 +83,17 @@ impl AgentUrl {
     pub fn variant(&self) -> AgentVariant {
         match self {
             AgentUrl::Cli { .. } => AgentVariant::Cli,
-            AgentUrl::Page { .. } | AgentUrl::PageDefault => AgentVariant::Page,
+            // ACP reuses the Page stream/UI infrastructure.
+            AgentUrl::Acp { .. } | AgentUrl::Page { .. } | AgentUrl::PageDefault => {
+                AgentVariant::Page
+            }
         }
     }
 
     pub fn sid(&self) -> &str {
         match self {
             AgentUrl::Cli { sid, .. } => sid,
+            AgentUrl::Acp { sid, .. } => sid.as_deref().unwrap_or(""),
             AgentUrl::Page { sid, .. } => sid,
             AgentUrl::PageDefault => "",
         }
@@ -63,7 +101,17 @@ impl AgentUrl {
 
     pub fn format(&self) -> String {
         match self {
-            AgentUrl::Cli { kind, sid } => format!("{}{sid}", kind.cli_url_prefix()),
+            AgentUrl::Cli { kind, sid } => {
+                if sid == CLI_FRESH_SID {
+                    format!("{}{CLI_FRESH_SID}", kind.cli_url_prefix())
+                } else {
+                    format!("{}{CLI_FRESH_SID}/{sid}", kind.cli_url_prefix())
+                }
+            }
+            AgentUrl::Acp { id, sid } => match sid {
+                Some(sid) => format!("vmux://agent/{id}/{sid}"),
+                None => format!("vmux://agent/{id}"),
+            },
             AgentUrl::Page {
                 provider,
                 model,
@@ -79,55 +127,129 @@ mod tests {
     use super::*;
 
     #[test]
-    fn page_url_prefix_returns_four_segment_form() {
+    fn bare_agent_url_parses_to_page_default() {
         assert_eq!(
-            page_url_prefix("openai", "gpt-5.5"),
-            "vmux://agent/openai/gpt-5.5/"
+            AgentUrl::parse("vmux://agent/"),
+            Some(AgentUrl::PageDefault)
         );
     }
 
     #[test]
-    fn cli_url_parses_three_segments() {
-        let parsed = AgentUrl::parse("vmux://agent/vibe/abc-123").unwrap();
+    fn single_segment_is_acp_fresh() {
         assert_eq!(
-            parsed,
-            AgentUrl::Cli {
+            AgentUrl::parse("vmux://agent/claude"),
+            Some(AgentUrl::Acp {
+                id: "claude".into(),
+                sid: None,
+            })
+        );
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/mistral-vibe"),
+            Some(AgentUrl::Acp {
+                id: "mistral-vibe".into(),
+                sid: None,
+            })
+        );
+    }
+
+    #[test]
+    fn two_segment_plain_is_acp_session() {
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/claude/abc-123"),
+            Some(AgentUrl::Acp {
+                id: "claude".into(),
+                sid: Some("abc-123".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn two_segment_cli_marker_is_fresh_cli() {
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/claude/cli"),
+            Some(AgentUrl::Cli {
+                kind: AgentKind::Claude,
+                sid: CLI_FRESH_SID.into(),
+            })
+        );
+    }
+
+    #[test]
+    fn three_segment_cli_marker_is_cli_resume() {
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/vibe/cli/abc-123"),
+            Some(AgentUrl::Cli {
                 kind: AgentKind::Vibe,
                 sid: "abc-123".into(),
-            }
+            })
         );
     }
 
     #[test]
-    fn page_url_parses_four_segments() {
-        let parsed = AgentUrl::parse("vmux://agent/openai/gpt-5.5/xHigh").unwrap();
+    fn three_segment_plain_is_page() {
         assert_eq!(
-            parsed,
-            AgentUrl::Page {
+            AgentUrl::parse("vmux://agent/openai/gpt-5.5/xHigh"),
+            Some(AgentUrl::Page {
                 provider: "openai".into(),
                 model: "gpt-5.5".into(),
                 sid: "xHigh".into(),
-            }
+            })
         );
     }
 
     #[test]
-    fn unknown_cli_kind_returns_none() {
-        assert!(AgentUrl::parse("vmux://agent/nope/abc").is_none());
+    fn cli_marker_with_non_kind_falls_through_to_acp() {
+        // `fast-agent` is not a CLI kind, so the `cli` word is just a session id for ACP.
+        assert_eq!(
+            AgentUrl::parse("vmux://agent/fast-agent/cli"),
+            Some(AgentUrl::Acp {
+                id: "fast-agent".into(),
+                sid: Some("cli".into()),
+            })
+        );
     }
 
     #[test]
-    fn url_format_round_trips_cli() {
-        let u = AgentUrl::Cli {
+    fn too_many_segments_rejected() {
+        assert_eq!(AgentUrl::parse("vmux://agent/vibe/cli/abc/extra"), None);
+        assert_eq!(AgentUrl::parse("vmux://agent/o/m/sid/extra"), None);
+    }
+
+    #[test]
+    fn acp_format_round_trips() {
+        for u in [
+            AgentUrl::Acp {
+                id: "claude".into(),
+                sid: None,
+            },
+            AgentUrl::Acp {
+                id: "mistral-vibe".into(),
+                sid: Some("sess-9".into()),
+            },
+        ] {
+            assert_eq!(AgentUrl::parse(&u.format()), Some(u));
+        }
+    }
+
+    #[test]
+    fn cli_format_round_trips_fresh_and_resume() {
+        let fresh = AgentUrl::Cli {
+            kind: AgentKind::Codex,
+            sid: CLI_FRESH_SID.into(),
+        };
+        assert_eq!(fresh.format(), "vmux://agent/codex/cli");
+        assert_eq!(AgentUrl::parse(&fresh.format()), Some(fresh));
+
+        let resume = AgentUrl::Cli {
             kind: AgentKind::Codex,
             sid: "xyz".into(),
         };
-        assert_eq!(u.format(), "vmux://agent/codex/xyz");
-        assert_eq!(AgentUrl::parse(&u.format()), Some(u));
+        assert_eq!(resume.format(), "vmux://agent/codex/cli/xyz");
+        assert_eq!(AgentUrl::parse(&resume.format()), Some(resume));
     }
 
     #[test]
-    fn url_format_round_trips_page() {
+    fn page_format_round_trips() {
         let u = AgentUrl::Page {
             provider: "anthropic".into(),
             model: "claude-opus-4.7".into(),
@@ -138,53 +260,31 @@ mod tests {
     }
 
     #[test]
-    fn trailing_garbage_rejected() {
-        assert_eq!(AgentUrl::parse("vmux://agent/vibe/abc/extra/junk"), None);
-        assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt/sid/extra"), None);
-    }
-
-    #[test]
-    fn prefix_only_url_rejected() {
-        assert_eq!(AgentUrl::parse("vmux://agent/vibe/"), None);
-        assert_eq!(AgentUrl::parse("vmux://agent/openai/gpt-5.5/"), None);
-    }
-
-    #[test]
-    fn bare_agent_url_parses_to_page_default() {
+    fn page_default_round_trips() {
+        assert_eq!(AgentUrl::PageDefault.format(), "vmux://agent/");
         assert_eq!(
-            AgentUrl::parse("vmux://agent/"),
+            AgentUrl::parse(&AgentUrl::PageDefault.format()),
             Some(AgentUrl::PageDefault)
         );
     }
 
     #[test]
-    fn page_default_formats_back_to_bare() {
-        assert_eq!(AgentUrl::PageDefault.format(), "vmux://agent/");
-    }
-
-    #[test]
-    fn page_default_round_trip() {
-        let url = AgentUrl::PageDefault.format();
-        assert_eq!(AgentUrl::parse(&url), Some(AgentUrl::PageDefault));
-    }
-
-    #[test]
-    fn page_default_variant_is_page() {
-        assert_eq!(AgentUrl::PageDefault.variant(), AgentVariant::Page);
-    }
-
-    #[test]
     fn variant_returned_correctly() {
-        let cli = AgentUrl::Cli {
-            kind: AgentKind::Vibe,
-            sid: "x".into(),
-        };
-        assert_eq!(cli.variant(), AgentVariant::Cli);
-        let page = AgentUrl::Page {
-            provider: "p".into(),
-            model: "m".into(),
-            sid: "x".into(),
-        };
-        assert_eq!(page.variant(), AgentVariant::Page);
+        assert_eq!(
+            AgentUrl::Cli {
+                kind: AgentKind::Vibe,
+                sid: "x".into(),
+            }
+            .variant(),
+            AgentVariant::Cli
+        );
+        assert_eq!(
+            AgentUrl::Acp {
+                id: "claude".into(),
+                sid: None,
+            }
+            .variant(),
+            AgentVariant::Page
+        );
     }
 }

@@ -351,6 +351,7 @@ pub fn attach_page_agent_to_stack(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn attach_acp_agent_to_stack(
     stack: Entity,
     agent_id: &str,
@@ -358,12 +359,19 @@ pub fn attach_acp_agent_to_stack(
     sid: &str,
     cwd: &std::path::Path,
     icon: Option<&str>,
+    resume: Option<&str>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    // A resume carries the agent-assigned session id in the url; a fresh open is bare and gets
+    // redirected to `vmux://agent/<id>/<acp-session-id>` once the agent returns its id.
+    let url = match resume {
+        Some(acp_sid) => format!("vmux://agent/{agent_id}/{acp_sid}"),
+        None => format!("vmux://agent/{agent_id}"),
+    };
     commands.entity(stack).insert(PageMetadata {
-        url: format!("vmux://agent/{agent_id}"),
+        url: url.clone(),
         title: name.to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
         icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
@@ -375,6 +383,7 @@ pub fn attach_acp_agent_to_stack(
             sid: sid.to_string(),
             cwd: cwd.to_path_buf(),
             anchor,
+            resume: resume.map(str::to_string),
         },
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
@@ -386,7 +395,6 @@ pub fn attach_acp_agent_to_stack(
         },
         vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
     ));
-    let url = format!("vmux://agent/{agent_id}");
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
@@ -2572,10 +2580,6 @@ fn handle_agent_page_open_task(
         attach_cli_setup_to_stack(kind, task.stack, children_q, commands, meshes, webview_mt);
         return Ok(());
     }
-    let parsed =
-        url::Url::parse(&task.url).map_err(|e| format!("invalid agent URL '{}': {e}", task.url))?;
-    let path = parsed.path().trim_start_matches('/');
-    let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     match crate::AgentUrl::parse(&task.url) {
         Some(crate::AgentUrl::Page {
             provider,
@@ -2645,68 +2649,57 @@ fn handle_agent_page_open_task(
             });
             Ok(())
         }
-        None => {
-            // ACP agents own the canonical single-segment names (claude/codex/…), shadowing
-            // the legacy CLI path for those ids.
-            if segs.len() == 1
-                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
-            {
-                if acp_sessions
-                    .get(task.stack)
-                    .is_ok_and(|session| session.agent_id == cfg.id)
+        Some(crate::AgentUrl::Acp { id, sid }) => {
+            // ACP agents own the canonical single-segment names (claude/codex/…) plus the
+            // two-segment `<id>/<acp-session-id>` session form.
+            let Some(cfg) = acp_configs.iter().find(|c| c.id == id) else {
+                // Not an ACP agent. A bare `vmux://agent/<kind>` for a built-in CLI kind falls
+                // back to a fresh CLI session (CLI's own url is `<kind>/cli`); this keeps the
+                // legacy bare-url entry point (and the missing-binary setup flow) working.
+                if sid.is_none()
+                    && let Some(kind) = AgentKind::from_url_segment(&id)
                 {
+                    if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
+                        spawn_agent.write(SpawnAgentInStackRequest {
+                            kind,
+                            cwd: default_cwd.to_path_buf(),
+                            session_id: None,
+                            stack: task.stack,
+                            initial_prompt: None,
+                        });
+                    }
                     return Ok(());
                 }
-                clear_stack_children(task.stack, children_q, commands);
-                let sid = uuid::Uuid::new_v4().to_string();
-                let icon = acp_icon_for_id(catalog, &cfg.id);
-                attach_acp_agent_to_stack(
-                    task.stack,
-                    &cfg.id,
-                    &cfg.name,
-                    &sid,
-                    default_cwd,
-                    icon.as_deref(),
-                    commands,
-                    meshes,
-                    webview_mt,
-                );
-                return Ok(());
-            }
-            if segs.len() == 1
-                && let Some(kind) = AgentKind::from_url_segment(segs[0])
+                return Err(format!("no ACP agent configured for '{id}'"));
+            };
+            // Already attached to this agent on this stack? A repeat open (or the post-spawn url
+            // redirect) is a no-op instead of re-spawning the session.
+            if acp_sessions
+                .get(task.stack)
+                .is_ok_and(|session| session.agent_id == cfg.id)
             {
-                // Bare agent URLs carry no session id, so they never hit the
-                // agent_to_entity dedup. Guard here: if the stack already hosts
-                // this agent kind, a repeat open is a no-op instead of spawning
-                // (and abandoning) another agent process.
-                if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                    spawn_agent.write(SpawnAgentInStackRequest {
-                        kind,
-                        cwd: default_cwd.to_path_buf(),
-                        session_id: None,
-                        stack: task.stack,
-                        initial_prompt: None,
-                    });
-                }
                 return Ok(());
             }
-            if segs.len() == 2 {
-                let provider = segs[0];
-                let model = segs[1];
-                let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
-                let sid = uuid::Uuid::new_v4().to_string();
-                clear_stack_children(task.stack, children_q, commands);
-                attach_page_agent_to_stack(
-                    task.stack, provider, model, &sid, commands, meshes, webview_mt, idx, kind_q,
-                )
-                .ok_or_else(|| {
-                    format!("no Page agent strategy registered for {provider}/{model}")
-                })?;
-                return Ok(());
-            }
-            Err(format!("malformed agent URL '{}'", task.url))
+            clear_stack_children(task.stack, children_q, commands);
+            // `sid` (when present) is the agent-assigned ACP session id from a restored url — pass
+            // it as the resume target. Fresh opens mint a routing sid and load nothing.
+            let routing_sid = uuid::Uuid::new_v4().to_string();
+            let icon = acp_icon_for_id(catalog, &cfg.id);
+            attach_acp_agent_to_stack(
+                task.stack,
+                &cfg.id,
+                &cfg.name,
+                &routing_sid,
+                default_cwd,
+                icon.as_deref(),
+                sid.as_deref(),
+                commands,
+                meshes,
+                webview_mt,
+            );
+            Ok(())
         }
+        None => Err(format!("malformed agent URL '{}'", task.url)),
     }
 }
 
@@ -3190,6 +3183,7 @@ mod tests {
                         "sid-1",
                         std::path::Path::new("/tmp"),
                         Some("https://cdn.example/vibe.svg"),
+                        None,
                         &mut commands,
                         &mut meshes,
                         &mut mt,
