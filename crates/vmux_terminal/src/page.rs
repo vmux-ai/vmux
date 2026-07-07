@@ -445,30 +445,7 @@ pub fn Page() -> Element {
                                     }
                                 }
                             }
-                            {
-                                cursor().filter(|c| c.visible).map(|c| {
-                                    let cstyle = theme()
-                                        .map(|t| t.cursor_style.clone())
-                                        .unwrap_or_else(|| "block".to_string());
-                                    let top = c.row as f64 * ch;
-                                    let left = c.col as f64 * cw;
-                                    let (w, h, oy, show_ch) = match cstyle.as_str() {
-                                        "beam" | "bar" => (2.0, ch, 0.0, false),
-                                        "underline" => (cw, 2.0, ch - 2.0, false),
-                                        _ => (cw, ch, 0.0, true),
-                                    };
-                                    let ctop = top + oy;
-                                    rsx! {
-                                        div {
-                                            class: "pointer-events-none absolute whitespace-pre",
-                                            style: "left:{left}px;top:{ctop}px;width:{w}px;height:{h}px;background:var(--term-cursor);color:var(--term-bg);overflow:hidden;",
-                                            if show_ch {
-                                                "{c.ch}"
-                                            }
-                                        }
-                                    }
-                                })
-                            }
+                            TerminalCursor { cursor, theme, cell_dims }
                         }
                     }
                 }
@@ -492,6 +469,48 @@ const _TW_SAFELIST: &[&str] = &[
     "text-term-bg", "bg-term-fg",
     "border-ansi-1",
 ];
+
+/// Terminal caret rendered as a persistent, always-present DOM node.
+///
+/// Subscribes to `cursor` internally so a caret move re-renders only this node
+/// (not the parent `Terminal` and its whole row list). Visibility is toggled via
+/// `display` rather than by adding/removing the element, so the caret never
+/// disappears for a frame while typing.
+#[component]
+fn TerminalCursor(
+    cursor: Signal<Option<TermCursor>>,
+    theme: Signal<Option<TermThemeEvent>>,
+    cell_dims: Signal<(f64, f64)>,
+) -> Element {
+    let (cw, ch) = cell_dims();
+    let cstyle = theme()
+        .map(|t| t.cursor_style.clone())
+        .unwrap_or_else(|| "block".to_string());
+    let c = cursor();
+    let visible = c.as_ref().is_some_and(|c| c.visible) && cw > 0.0 && ch > 0.0;
+    let (col, row, glyph) = c
+        .as_ref()
+        .map(|c| (c.col as f64, c.row as f64, c.ch.clone()))
+        .unwrap_or((0.0, 0.0, String::new()));
+    let (w, h, oy, show_ch) = match cstyle.as_str() {
+        "beam" | "bar" => (2.0, ch, 0.0, false),
+        "underline" => (cw, 2.0, ch - 2.0, false),
+        _ => (cw, ch, 0.0, true),
+    };
+    let left = col * cw;
+    let ctop = row * ch + oy;
+    let display = if visible { "block" } else { "none" };
+
+    rsx! {
+        div {
+            class: "pointer-events-none absolute whitespace-pre",
+            style: "display:{display};left:{left}px;top:{ctop}px;width:{w}px;height:{h}px;background:var(--term-cursor);color:var(--term-bg);overflow:hidden;",
+            if show_ch {
+                "{glyph}"
+            }
+        }
+    }
+}
 
 #[component]
 fn TerminalRow(
