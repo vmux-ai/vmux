@@ -164,6 +164,7 @@ fn install_acp_session_when_focused(
     let Some(focused) = focused else {
         return;
     };
+    let shell = crate::plugin::agent_terminal_shell(&settings);
     for (entity, session, mut state) in &mut q {
         if focused.stack != Some(entity) {
             continue;
@@ -186,6 +187,7 @@ fn install_acp_session_when_focused(
         let sid = session.sid.clone();
         let agent_id = session.agent_id.clone();
         let progress = installs.tx.clone();
+        let shell = shell.clone();
 
         std::thread::spawn(move || {
             let resolved =
@@ -196,19 +198,20 @@ fn install_acp_session_when_focused(
                         message: msg.to_string(),
                     });
                 });
+            let login_env = vmux_terminal::shell_env::login_shell_env(&shell);
             let msg = match resolved {
                 Ok(r) => InstallMsg::Ready {
                     sid,
                     command: r.command,
                     args: r.args,
-                    env: apply_path_prepend(r.env, r.path_prepend),
+                    env: build_agent_env(r.env, login_env, r.path_prepend),
                 },
                 Err(reg_err) => match fallback {
                     Some(cfg) => InstallMsg::Ready {
                         sid,
                         command: cfg.command,
                         args: cfg.args,
-                        env: cfg.env,
+                        env: build_agent_env(cfg.env, login_env, None),
                     },
                     None => InstallMsg::Failed {
                         sid,
@@ -221,21 +224,59 @@ fn install_acp_session_when_focused(
     }
 }
 
-/// Prepend a managed runtime `bin/` to the child's `PATH` (so e.g. `npx` finds its `node`),
-/// replacing any inherited `PATH` entry.
+/// Prepend a managed runtime `bin/` to the child's `PATH` (so e.g. `npx` finds its `node`). Prefers
+/// the `PATH` already assembled in `env` (the login-shell `PATH` merged by [`build_agent_env`]),
+/// falling back to this process's `PATH` only when `env` has none.
 fn apply_path_prepend(
     mut env: Vec<(String, String)>,
     prepend: Option<String>,
 ) -> Vec<(String, String)> {
     if let Some(dir) = prepend {
-        let full = match std::env::var("PATH") {
-            Ok(existing) if !existing.is_empty() => format!("{dir}:{existing}"),
-            _ => dir,
+        let existing = env
+            .iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.clone())
+            .or_else(|| std::env::var("PATH").ok())
+            .filter(|s| !s.is_empty());
+        let full = match existing {
+            Some(existing) => format!("{dir}:{existing}"),
+            None => dir,
         };
         env.retain(|(k, _)| k != "PATH");
         env.push(("PATH".to_string(), full));
     }
     env
+}
+
+/// Keep only the last occurrence of each key, preserving order — so the login-shell env (appended
+/// last) wins over the registry/config base for any shared key.
+fn dedup_env_keep_last(env: &mut Vec<(String, String)>) {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(env.len());
+    for (key, value) in std::mem::take(env).into_iter().rev() {
+        if seen.insert(key.clone()) {
+            out.push((key, value));
+        }
+    }
+    out.reverse();
+    *env = out;
+}
+
+/// Assemble an ACP agent's spawn environment. The registry/config `base` is the floor; the captured
+/// login-shell env is layered on top so the user's exported API keys and real `PATH` reach the
+/// agent even when vmux was launched from Finder/launchd (which hands the daemon a minimal
+/// environment) rather than from a shell; finally the managed runtime `bin/` is prepended to the
+/// resulting `PATH`. Without this an ACP agent authenticating via an env-var API key reports
+/// "Authentication required" in release builds while working under `make` (where the daemon
+/// inherits the launching shell's environment). Mirrors the terminal's agent-spawn merge.
+fn build_agent_env(
+    mut base: Vec<(String, String)>,
+    login_env: &[(String, String)],
+    path_prepend: Option<String>,
+) -> Vec<(String, String)> {
+    base.extend(login_env.iter().cloned());
+    dedup_env_keep_last(&mut base);
+    apply_path_prepend(base, path_prepend)
 }
 
 /// Drain background-install updates: reflect progress/failure onto the session run-state, and on
@@ -378,6 +419,45 @@ fn close_acp_session_on_remove(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn s(k: &str, v: &str) -> (String, String) {
+        (k.to_string(), v.to_string())
+    }
+
+    #[test]
+    fn login_env_reaches_agent_and_overrides_base() {
+        let base = vec![s("MISTRAL_API_KEY", ""), s("KEEP", "1")];
+        let login = vec![s("MISTRAL_API_KEY", "real-key"), s("PATH", "/login/bin")];
+        let env = build_agent_env(base, &login, None);
+        assert!(
+            env.contains(&s("MISTRAL_API_KEY", "real-key")),
+            "login-shell API key must win over the empty registry value: {env:?}"
+        );
+        assert!(env.contains(&s("KEEP", "1")));
+        assert!(env.contains(&s("PATH", "/login/bin")));
+    }
+
+    #[test]
+    fn managed_bin_prepends_to_login_path_not_process_path() {
+        let login = vec![s("PATH", "/login/bin")];
+        let env = build_agent_env(Vec::new(), &login, Some("/managed/node/bin".to_string()));
+        let path = env
+            .iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(path, Some("/managed/node/bin:/login/bin"));
+    }
+
+    #[test]
+    fn apply_path_prepend_prefers_env_path_over_process() {
+        let env = apply_path_prepend(vec![s("PATH", "/from/login")], Some("/managed".to_string()));
+        assert_eq!(
+            env.iter()
+                .find(|(k, _)| k == "PATH")
+                .map(|(_, v)| v.as_str()),
+            Some("/managed:/from/login")
+        );
+    }
 
     #[test]
     fn plugin_builds_and_runs_without_panic() {

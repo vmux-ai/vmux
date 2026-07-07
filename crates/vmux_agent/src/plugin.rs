@@ -1727,7 +1727,7 @@ fn to_pane_direction(
     }
 }
 
-fn agent_terminal_shell(settings: &AppSettings) -> String {
+pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
     settings
         .terminal
         .as_ref()
