@@ -67,6 +67,20 @@ pub fn caret_scroll_left(
     ((new_scroll - scroll_left).abs() >= 0.5).then_some(new_scroll)
 }
 
+/// Convert a UTF-16 code-unit offset (the unit DOM `selection_start`/`set_selection_range`
+/// use) to a UTF-8 byte offset into `s`. Offsets past the end clamp to `s.len()`. Byte
+/// offsets are what caret-follow needs to slice the value string for pixel measurement.
+pub fn utf16_offset_to_byte(s: &str, utf16_offset: u32) -> usize {
+    let mut units = 0u32;
+    for (byte, ch) in s.char_indices() {
+        if units >= utf16_offset {
+            return byte;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    s.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +165,32 @@ mod tests {
     fn degenerate_geometry_is_ignored() {
         assert_eq!(caret_scroll_left(100.0, 0.0, 0.0, 12.0), None);
         assert_eq!(caret_scroll_left(f64::NAN, 200.0, 0.0, 12.0), None);
+    }
+
+    #[test]
+    fn utf16_offset_maps_to_bytes_for_ascii() {
+        assert_eq!(utf16_offset_to_byte("hello", 0), 0);
+        assert_eq!(utf16_offset_to_byte("hello", 3), 3);
+        assert_eq!(utf16_offset_to_byte("hello", 5), 5);
+    }
+
+    #[test]
+    fn utf16_offset_maps_to_bytes_across_multibyte_chars() {
+        // "é" is 1 UTF-16 unit but 2 UTF-8 bytes; "本" is 1 unit, 3 bytes.
+        let s = "aé本b";
+        assert_eq!(utf16_offset_to_byte(s, 0), 0);
+        assert_eq!(utf16_offset_to_byte(s, 1), 1); // after 'a'
+        assert_eq!(utf16_offset_to_byte(s, 2), 3); // after 'é'
+        assert_eq!(utf16_offset_to_byte(s, 3), 6); // after '本'
+        assert_eq!(utf16_offset_to_byte(s, 4), 7); // after 'b'
+    }
+
+    #[test]
+    fn utf16_offset_handles_surrogate_pairs_and_overflow() {
+        // "😀" is a surrogate pair: 2 UTF-16 units, 4 UTF-8 bytes.
+        let s = "x😀y";
+        assert_eq!(utf16_offset_to_byte(s, 1), 1); // after 'x'
+        assert_eq!(utf16_offset_to_byte(s, 3), 5); // after full emoji (1 + 4)
+        assert_eq!(utf16_offset_to_byte(s, 99), s.len()); // past end clamps
     }
 }

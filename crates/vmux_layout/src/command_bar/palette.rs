@@ -2,7 +2,7 @@
 
 use crate::command_bar::keyboard::{
     CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
-    ignore_physical_rerouted_ctrl_keydown,
+    ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{CommandBarResultItem as ResultItem, filter_results};
 use crate::command_bar::style::{
@@ -803,19 +803,21 @@ fn focus_and_install_ctrl_bindings() {
                 }
             }
             CtrlEditAction::Forward => {
-                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1)
-                    .min(input2.value().len() as u32);
+                let value = input2.value();
+                let max = value.encode_utf16().count() as u32;
+                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1).min(max);
                 let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, p as usize);
+                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
             }
             CtrlEditAction::Back => {
+                let value = input2.value();
                 let p = input2
                     .selection_start()
                     .unwrap_or(Some(0))
                     .unwrap_or(0)
                     .saturating_sub(1);
                 let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, p as usize);
+                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
             }
             CtrlEditAction::Delete => {
                 let v = input2.value();
