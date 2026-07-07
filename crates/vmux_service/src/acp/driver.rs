@@ -266,9 +266,17 @@ pub async fn run(
                 Some(id) => {
                     let sid = SessionId::new(id);
                     let mut load = LoadSessionRequest::new(sid.clone(), main_shared.cwd.clone());
-                    load.mcp_servers = mcp_servers;
-                    cx.send_request(load).block_task().await?;
-                    sid
+                    load.mcp_servers = mcp_servers.clone();
+                    // A stale/evicted session id must not error the pane — fall back to a fresh
+                    // session and let the GUI re-persist the new id via `AcpSessionCreated`.
+                    match cx.send_request(load).block_task().await {
+                        Ok(_) => sid,
+                        Err(_) => {
+                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                            new_session.mcp_servers = mcp_servers;
+                            cx.send_request(new_session).block_task().await?.session_id
+                        }
+                    }
                 }
                 None => {
                     let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
