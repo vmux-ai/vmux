@@ -162,6 +162,31 @@ fn space_list_items(spaces: &[CommandBarSpace], search_lower: &str) -> Vec<Comma
         .collect()
 }
 
+/// Build the space-switcher result list: every space in snapshot order (filtered by
+/// `query`), then a trailing "Manage spaces…" entry that opens the full spaces page.
+pub fn space_switch_results(
+    spaces: &[CommandBarSpace],
+    pages: &[CommandBarPage],
+    query: &str,
+) -> Vec<CommandBarResultItem> {
+    let search_lower = query.trim().to_lowercase();
+    let mut items = space_list_items(spaces, &search_lower);
+    if let Some(page) = pages.iter().find(|p| p.host == "spaces") {
+        items.push(CommandBarResultItem::Page {
+            url: page.url.clone(),
+            title: "Manage spaces\u{2026}".to_string(),
+            icon: page.icon.clone(),
+            shortcut: String::new(),
+        });
+    }
+    items
+}
+
+/// Index of the active space, for pre-selecting the current space in the switcher.
+pub fn active_space_index(spaces: &[CommandBarSpace]) -> usize {
+    spaces.iter().position(|s| s.is_active).unwrap_or(0)
+}
+
 fn query_targets_spaces_page(q: &str, pages: &[CommandBarPage]) -> bool {
     let Some(url) = pages
         .iter()
@@ -370,6 +395,50 @@ mod tests {
                 shortcut: String::new(),
             },
         ]
+    }
+
+    #[test]
+    fn space_switch_lists_spaces_in_order_then_manage() {
+        let spaces = vec![
+            space("space-1", "Space 1", false),
+            space("work", "Work", true),
+        ];
+        let results = space_switch_results(&spaces, &sample_pages(), "");
+        assert!(matches!(&results[0], CommandBarResultItem::Space { id, .. } if id == "space-1"));
+        assert!(matches!(&results[1], CommandBarResultItem::Space { id, .. } if id == "work"));
+        assert!(matches!(
+            results.last(),
+            Some(CommandBarResultItem::Page { title, .. }) if title == "Manage spaces\u{2026}"
+        ));
+    }
+
+    #[test]
+    fn space_switch_filters_spaces_by_name() {
+        let spaces = vec![
+            space("space-1", "Space 1", false),
+            space("work", "Work", true),
+        ];
+        let results = space_switch_results(&spaces, &sample_pages(), "wor");
+        let ids: Vec<_> = results
+            .iter()
+            .filter_map(|r| match r {
+                CommandBarResultItem::Space { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, vec!["work".to_string()]);
+        assert!(matches!(
+            results.last(),
+            Some(CommandBarResultItem::Page { title, .. }) if title == "Manage spaces\u{2026}"
+        ));
+    }
+
+    #[test]
+    fn active_space_index_finds_active_then_defaults_zero() {
+        let with_active = vec![space("space-1", "S1", false), space("work", "Work", true)];
+        assert_eq!(active_space_index(&with_active), 1);
+        let none_active = vec![space("space-1", "S1", false)];
+        assert_eq!(active_space_index(&none_active), 0);
     }
 
     #[test]

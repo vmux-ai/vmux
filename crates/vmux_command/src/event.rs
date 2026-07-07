@@ -34,6 +34,8 @@ pub struct CommandBarOpenEvent {
     #[serde(default)]
     pub recent_files: Vec<CommandBarRecentFile>,
     pub target: Option<crate::open_target::OpenTarget>,
+    #[serde(default)]
+    pub space_switch: bool,
 }
 
 #[derive(
