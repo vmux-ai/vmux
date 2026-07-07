@@ -248,7 +248,8 @@ fn auto_redirect_agent_setup_when_installed(
         commands.spawn(vmux_core::PageOpenTask {
             id: vmux_core::PageOpenId::new(),
             stack: setup_stack,
-            url: kind.cli_url_prefix(),
+            // Open the freshly-installed CLI agent (bare `<kind>` is now ACP).
+            url: format!("{}cli", kind.cli_url_prefix()),
             request_id: None,
         });
         commands.entity(setup_stack).insert(AgentSetupNavigated);

@@ -463,6 +463,9 @@ pub enum ClientMessage {
         /// The `vmux mcp --anchor …` sidecar to hand the agent as an MCP server (scope C).
         mcp_command: Option<String>,
         mcp_args: Vec<String>,
+        /// When set, resume this agent-assigned ACP session id via `session/load` instead of
+        /// starting a fresh session (gated on the agent's `loadSession` capability).
+        resume_acp_session_id: Option<String>,
     },
     Status,
 }
@@ -686,6 +689,12 @@ pub enum ServiceMessage {
     StatusResponse {
         uptime_secs: u64,
         process_count: u32,
+    },
+    /// The ACP agent's session was created (or loaded); carries the agent-assigned session id so
+    /// the GUI can persist it (in the pane url) for a later `session/load` resume.
+    AcpSessionCreated {
+        sid: String,
+        acp_session_id: String,
     },
 }
 
@@ -1184,6 +1193,7 @@ mod tests {
             anchor: ProcessId::new(),
             mcp_command: Some("vmux".into()),
             mcp_args: vec!["mcp".into(), "--anchor".into()],
+            resume_acp_session_id: Some("prev-session".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
@@ -1203,6 +1213,10 @@ mod tests {
                 path: "/tmp/a.rs".into(),
                 old_text: Some("a".into()),
                 new_text: "b".into(),
+            },
+            ServiceMessage::AcpSessionCreated {
+                sid: "s".into(),
+                acp_session_id: "acp-1".into(),
             },
         ];
         for msg in services {

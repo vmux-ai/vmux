@@ -28,6 +28,7 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
             .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
             .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::with_id(
                 "vmux-agent-toast",
             ))
@@ -67,7 +68,13 @@ impl Plugin for PageAgentPlugin {
 
 fn attach_last_run_state_kind(
     mut commands: Commands,
-    q: Query<Entity, (With<AgentSession>, Without<LastRunStateKind>)>,
+    q: Query<
+        Entity,
+        (
+            Or<(With<AgentSession>, With<AcpSession>)>,
+            Without<LastRunStateKind>,
+        ),
+    >,
 ) {
     for entity in &q {
         commands.entity(entity).insert(LastRunStateKind::default());
@@ -180,6 +187,7 @@ fn consume_page_agent_stream(
         Option<&AgentSession>,
         Option<&AcpSession>,
     )>,
+    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
     mut commands: Commands,
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
@@ -212,6 +220,7 @@ fn consume_page_agent_stream(
         if let Some(&entity) = by_sid.get(&status.sid)
             && let Ok((_, _, mut state, mut queue, _, _)) = q.get_mut(entity)
         {
+            let was_streaming = matches!(*state, AgentRunState::Streaming);
             match &status.status {
                 AgentRunStatus::Idle => *state = AgentRunState::Idle,
                 AgentRunStatus::Streaming => *state = AgentRunState::Streaming,
@@ -222,6 +231,17 @@ fn consume_page_agent_stream(
                 AgentRunStatus::Errored(message) => {
                     *state = AgentRunState::Errored(message.clone())
                 }
+            }
+            // A run settling from Streaming back to Idle means the agent finished its turn.
+            // Raise attention so the done-dot + OS notification fire (mark_agent_done gates on
+            // whether the pane is viewed). Covers ACP and Page agents; an Interrupt (a distinct
+            // status) is not completion, so it does not raise attention.
+            if was_streaming && matches!(status.status, AgentRunStatus::Idle) {
+                attention.write(vmux_core::notify::AgentAttention {
+                    entity,
+                    title: None,
+                    body: None,
+                });
             }
         }
     }
@@ -276,6 +296,7 @@ mod tests {
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
             .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
 
         let mut queue = PromptQueue::default();
@@ -288,6 +309,7 @@ mod tests {
                     sid: "s1".into(),
                     cwd: std::path::PathBuf::from("/tmp"),
                     anchor: vmux_core::ProcessId::new(),
+                    resume: None,
                 },
                 AgentMessages::default(),
                 AgentRunState::Streaming,
@@ -308,5 +330,87 @@ mod tests {
         let q = world.get::<PromptQueue>(e).unwrap();
         assert!(q.paused, "queue must pause after interrupt");
         assert_eq!(q.items.len(), 1, "held item must not auto-advance");
+    }
+
+    #[test]
+    fn acp_streaming_to_idle_raises_attention() {
+        use crate::components::PromptQueue;
+        let mut app = App::new();
+        app.add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "mistral-vibe".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AgentMessages::default(),
+                AgentRunState::Streaming,
+                PromptQueue::default(),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<PageAgentRunStatus>>()
+            .write(PageAgentRunStatus {
+                sid: "s1".into(),
+                status: AgentRunStatus::Idle,
+            });
+        app.update();
+
+        let atts: Vec<_> = app
+            .world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>()
+            .drain()
+            .collect();
+        assert_eq!(atts.len(), 1);
+        assert_eq!(atts[0].entity, entity);
+    }
+
+    #[test]
+    fn idle_to_idle_does_not_raise_attention() {
+        use crate::components::PromptQueue;
+        let mut app = App::new();
+        app.add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+        app.world_mut().spawn((
+            AcpSession {
+                agent_id: "mistral-vibe".into(),
+                sid: "s1".into(),
+                cwd: std::path::PathBuf::from("/tmp"),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            },
+            AgentMessages::default(),
+            AgentRunState::Idle,
+            PromptQueue::default(),
+        ));
+
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<PageAgentRunStatus>>()
+            .write(PageAgentRunStatus {
+                sid: "s1".into(),
+                status: AgentRunStatus::Idle,
+            });
+        app.update();
+
+        let count = app
+            .world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>()
+            .drain()
+            .count();
+        assert_eq!(count, 0);
     }
 }

@@ -33,13 +33,20 @@ pub fn format_agent_url(
     >,
 ) {
     for (sid, agent, mut meta) in &mut q {
-        let Some(strategy) = strategies.get_cli(agent.kind) else {
+        if strategies.get_cli(agent.kind).is_none() {
             continue;
-        };
-        let prefix = strategy.kind().cli_url_prefix();
+        }
         let next = match sid {
-            Some(SessionId(id)) => format!("{prefix}{id}"),
-            None => format!("{prefix}{}", crate::url::CLI_FRESH_SID),
+            Some(SessionId(id)) => crate::url::AgentUrl::Cli {
+                kind: agent.kind,
+                sid: id.clone(),
+            }
+            .format(),
+            None => crate::url::AgentUrl::Cli {
+                kind: agent.kind,
+                sid: crate::url::CLI_FRESH_SID.to_string(),
+            }
+            .format(),
         };
         if meta.url != next {
             meta.url = next;
@@ -125,7 +132,7 @@ mod url_tests {
             .id();
         app.update();
         let url = &app.world().get::<PageMetadata>(entity).unwrap().url;
-        assert_eq!(url, "vmux://agent/vibe/abc");
+        assert_eq!(url, "vmux://agent/vibe/cli/abc");
     }
 
     #[test]

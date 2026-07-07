@@ -30,6 +30,12 @@ pub struct ChatSnapshot {
     pub queued: Vec<String>,
     /// True after an interrupt: the queue is held (not auto-advancing) until resume/clear/submit.
     pub paused: bool,
+    /// Agent display name (from the session `Profile`), for the header/hero.
+    pub agent_name: String,
+    /// Agent favicon URL (from `PageMetadata.icon`); may be empty (page falls back per url).
+    pub agent_icon: String,
+    /// Agent brand accent color (hex, from the avatar), for loading/status accents.
+    pub accent_color: String,
 }
 
 /// Page → native: the user submitted a prompt.

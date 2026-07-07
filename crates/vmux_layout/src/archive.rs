@@ -313,17 +313,25 @@ fn handle_reopen_closed_page(
         .insert(vmux_history::LastActivatedAt::now());
     focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
-    if let Some(kind) = AgentKind::all()
-        .into_iter()
-        .find(|k| page.url.starts_with(&k.cli_url_prefix()))
-    {
+    // CLI agent urls are `<kind>/cli` (fresh) or `<kind>/cli/<sid>` (resume). A plain
+    // `<kind>/<sid>` (no `cli` marker) is an ACP session and falls through to `PageOpenRequest`,
+    // which reconstructs it via the runtime agent handler. ("cli" is `url::CLI_FRESH_SID`, not
+    // imported here to avoid a vmux_layout -> vmux_agent dependency cycle.)
+    let agent_cli = AgentKind::all().into_iter().find_map(|k| {
+        let rest = page.url.strip_prefix(&k.cli_url_prefix())?;
+        if rest == "cli" {
+            Some((k, None))
+        } else {
+            rest.strip_prefix("cli/")
+                .map(|sid| (k, Some(sid.to_string())))
+        }
+    });
+    if let Some((kind, session_id)) = agent_cli {
         let cwd = page
             .launch
             .as_ref()
             .map(|l| PathBuf::from(&l.cwd))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        let id_part = page.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
-        let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
         spawn_agent.write(SpawnAgentInStackRequest {
             kind,
             cwd,
@@ -1011,7 +1019,7 @@ mod tests {
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
-            url: AgentKind::Claude.cli_url_prefix(),
+            url: format!("{}cli", AgentKind::Claude.cli_url_prefix()),
             title: String::new(),
             space_id: "s1".to_string(),
             closed_at: 5,
@@ -1039,7 +1047,7 @@ mod tests {
         app.world_mut()
             .spawn((crate::space::Space, crate::space::SpaceId("s1".to_string())));
         app.world_mut().spawn(ArchivedPage {
-            url: format!("{}sess-123", AgentKind::Claude.cli_url_prefix()),
+            url: format!("{}cli/sess-123", AgentKind::Claude.cli_url_prefix()),
             title: String::new(),
             space_id: "s1".to_string(),
             closed_at: 5,

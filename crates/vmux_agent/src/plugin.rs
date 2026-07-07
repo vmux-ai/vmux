@@ -340,7 +340,7 @@ pub fn attach_page_agent_to_stack(
         vmux_core::team::Profile::agent(kind),
         vmux_core::team::Agent {
             sid: sid.to_string(),
-            kind,
+            kind: Some(kind),
         },
     ));
     let url = format!("vmux://agent/{provider}");
@@ -351,21 +351,30 @@ pub fn attach_page_agent_to_stack(
     Some(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn attach_acp_agent_to_stack(
     stack: Entity,
     agent_id: &str,
     name: &str,
     sid: &str,
     cwd: &std::path::Path,
+    icon: Option<&str>,
+    resume: Option<&str>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    // A resume carries the agent-assigned session id in the url; a fresh open is bare and gets
+    // redirected to `vmux://agent/<id>/<acp-session-id>` once the agent returns its id.
+    let url = match resume {
+        Some(acp_sid) => format!("vmux://agent/{agent_id}/{acp_sid}"),
+        None => format!("vmux://agent/{agent_id}"),
+    };
     commands.entity(stack).insert(PageMetadata {
-        url: format!("vmux://agent/{agent_id}"),
+        url: url.clone(),
         title: name.to_string(),
         bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-        ..default()
+        icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
     });
     let anchor = vmux_service::protocol::ProcessId::new();
     commands.entity(stack).insert((
@@ -374,18 +383,33 @@ pub fn attach_acp_agent_to_stack(
             sid: sid.to_string(),
             cwd: cwd.to_path_buf(),
             anchor,
+            resume: resume.map(str::to_string),
         },
         crate::AgentMessages::default(),
         crate::AgentApprovalPolicy::default(),
         crate::AgentRunState::default(),
+        vmux_core::team::Profile::registry(name, agent_id),
+        vmux_core::team::Agent {
+            sid: sid.to_string(),
+            kind: None,
+        },
+        vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
     ));
-    let url = format!("vmux://agent/{agent_id}");
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
         ChildOf(stack),
         anchor,
     ));
+}
+
+/// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
+fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -> Option<String> {
+    catalog?
+        .agents
+        .iter()
+        .find(|a| a.id == id)
+        .and_then(|a| a.icon.clone())
 }
 
 #[allow(dead_code)]
@@ -2488,6 +2512,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     active_space: Option<Res<ActiveSpace>>,
     tabs: Query<&vmux_layout::tab::Tab>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
 ) {
     for (entity, task) in &tasks {
         if !task.url.starts_with("vmux://agent/") {
@@ -2519,6 +2544,7 @@ fn handle_agent_page_open(
             &mut webview_mt,
             &default_cwd,
             &settings.agent.acp,
+            catalog.as_deref(),
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
@@ -2545,6 +2571,7 @@ fn handle_agent_page_open_task(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
+    catalog: Option<&crate::client::acp::AcpCatalog>,
 ) -> Result<(), String> {
     if let Some(kind) = AgentKind::all()
         .into_iter()
@@ -2553,10 +2580,6 @@ fn handle_agent_page_open_task(
         attach_cli_setup_to_stack(kind, task.stack, children_q, commands, meshes, webview_mt);
         return Ok(());
     }
-    let parsed =
-        url::Url::parse(&task.url).map_err(|e| format!("invalid agent URL '{}': {e}", task.url))?;
-    let path = parsed.path().trim_start_matches('/');
-    let segs: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     match crate::AgentUrl::parse(&task.url) {
         Some(crate::AgentUrl::Page {
             provider,
@@ -2626,66 +2649,57 @@ fn handle_agent_page_open_task(
             });
             Ok(())
         }
-        None => {
-            // ACP agents own the canonical single-segment names (claude/codex/…), shadowing
-            // the legacy CLI path for those ids.
-            if segs.len() == 1
-                && let Some(cfg) = acp_configs.iter().find(|c| c.id == segs[0])
-            {
-                if acp_sessions
-                    .get(task.stack)
-                    .is_ok_and(|session| session.agent_id == cfg.id)
+        Some(crate::AgentUrl::Acp { id, sid }) => {
+            // ACP agents own the canonical single-segment names (claude/codex/…) plus the
+            // two-segment `<id>/<acp-session-id>` session form.
+            let Some(cfg) = acp_configs.iter().find(|c| c.id == id) else {
+                // Not an ACP agent. A bare `vmux://agent/<kind>` for a built-in CLI kind falls
+                // back to a fresh CLI session (CLI's own url is `<kind>/cli`); this keeps the
+                // legacy bare-url entry point (and the missing-binary setup flow) working.
+                if sid.is_none()
+                    && let Some(kind) = AgentKind::from_url_segment(&id)
                 {
+                    if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
+                        spawn_agent.write(SpawnAgentInStackRequest {
+                            kind,
+                            cwd: default_cwd.to_path_buf(),
+                            session_id: None,
+                            stack: task.stack,
+                            initial_prompt: None,
+                        });
+                    }
                     return Ok(());
                 }
-                clear_stack_children(task.stack, children_q, commands);
-                let sid = uuid::Uuid::new_v4().to_string();
-                attach_acp_agent_to_stack(
-                    task.stack,
-                    &cfg.id,
-                    &cfg.name,
-                    &sid,
-                    default_cwd,
-                    commands,
-                    meshes,
-                    webview_mt,
-                );
-                return Ok(());
-            }
-            if segs.len() == 1
-                && let Some(kind) = AgentKind::from_url_segment(segs[0])
+                return Err(format!("no ACP agent configured for '{id}'"));
+            };
+            // Already attached to this agent on this stack? A repeat open (or the post-spawn url
+            // redirect) is a no-op instead of re-spawning the session.
+            if acp_sessions
+                .get(task.stack)
+                .is_ok_and(|session| session.agent_id == cfg.id)
             {
-                // Bare agent URLs carry no session id, so they never hit the
-                // agent_to_entity dedup. Guard here: if the stack already hosts
-                // this agent kind, a repeat open is a no-op instead of spawning
-                // (and abandoning) another agent process.
-                if !stack_has_agent_of_kind(task.stack, kind, children_q, agents) {
-                    spawn_agent.write(SpawnAgentInStackRequest {
-                        kind,
-                        cwd: default_cwd.to_path_buf(),
-                        session_id: None,
-                        stack: task.stack,
-                        initial_prompt: None,
-                    });
-                }
                 return Ok(());
             }
-            if segs.len() == 2 {
-                let provider = segs[0];
-                let model = segs[1];
-                let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
-                let sid = uuid::Uuid::new_v4().to_string();
-                clear_stack_children(task.stack, children_q, commands);
-                attach_page_agent_to_stack(
-                    task.stack, provider, model, &sid, commands, meshes, webview_mt, idx, kind_q,
-                )
-                .ok_or_else(|| {
-                    format!("no Page agent strategy registered for {provider}/{model}")
-                })?;
-                return Ok(());
-            }
-            Err(format!("malformed agent URL '{}'", task.url))
+            clear_stack_children(task.stack, children_q, commands);
+            // `sid` (when present) is the agent-assigned ACP session id from a restored url — pass
+            // it as the resume target. Fresh opens mint a routing sid and load nothing.
+            let routing_sid = uuid::Uuid::new_v4().to_string();
+            let icon = acp_icon_for_id(catalog, &cfg.id);
+            attach_acp_agent_to_stack(
+                task.stack,
+                &cfg.id,
+                &cfg.name,
+                &routing_sid,
+                default_cwd,
+                icon.as_deref(),
+                sid.as_deref(),
+                commands,
+                meshes,
+                webview_mt,
+            );
+            Ok(())
         }
+        None => Err(format!("malformed agent URL '{}'", task.url)),
     }
 }
 
@@ -2869,7 +2883,7 @@ fn handle_spawn_agent_requests(
                     vmux_core::team::Profile::agent(req.kind),
                     vmux_core::team::Agent {
                         sid: req.session_id.clone().unwrap_or_default(),
-                        kind: req.kind,
+                        kind: Some(req.kind),
                     },
                 ));
                 if let Some(id) = req.session_id.clone() {
@@ -3147,6 +3161,70 @@ fn handle_restart_agent_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_attach_gives_profile_agent_and_icon() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let stack = app.world_mut().spawn_empty().id();
+
+        app.world_mut()
+            .run_system_once(
+                move |mut commands: Commands,
+                      mut meshes: ResMut<Assets<Mesh>>,
+                      mut mt: ResMut<Assets<WebviewExtendStandardMaterial>>| {
+                    attach_acp_agent_to_stack(
+                        stack,
+                        "mistral-vibe",
+                        "Mistral Vibe",
+                        "sid-1",
+                        std::path::Path::new("/tmp"),
+                        Some("https://cdn.example/vibe.svg"),
+                        None,
+                        &mut commands,
+                        &mut meshes,
+                        &mut mt,
+                    );
+                },
+            )
+            .unwrap();
+
+        let world = app.world();
+        let profile = world
+            .get::<vmux_core::team::Profile>(stack)
+            .expect("profile");
+        assert_eq!(profile.name, "Mistral Vibe");
+        let agent = world.get::<vmux_core::team::Agent>(stack).expect("agent");
+        assert_eq!(agent.sid, "sid-1");
+        assert_eq!(agent.kind, None);
+        let meta = world.get::<PageMetadata>(stack).expect("meta");
+        assert_eq!(meta.icon.favicon_url(), "https://cdn.example/vibe.svg");
+    }
+
+    #[test]
+    fn acp_icon_for_id_reads_catalog() {
+        use crate::acp_registry::{Distribution, RegistryAgent};
+        let catalog = crate::client::acp::AcpCatalog {
+            agents: vec![RegistryAgent {
+                id: "mistral-vibe".to_string(),
+                name: "Mistral Vibe".to_string(),
+                version: None,
+                description: None,
+                icon: Some("https://cdn.example/vibe.svg".to_string()),
+                repository: None,
+                distribution: Distribution::default(),
+            }],
+        };
+        assert_eq!(
+            acp_icon_for_id(Some(&catalog), "mistral-vibe").as_deref(),
+            Some("https://cdn.example/vibe.svg")
+        );
+        assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
+        assert_eq!(acp_icon_for_id(None, "mistral-vibe"), None);
+    }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -3183,7 +3261,7 @@ mod tests {
             .spawn((
                 vmux_core::team::Agent {
                     sid: "s".to_string(),
-                    kind: vmux_core::agent::AgentKind::Claude,
+                    kind: Some(vmux_core::agent::AgentKind::Claude),
                 },
                 pid,
             ))

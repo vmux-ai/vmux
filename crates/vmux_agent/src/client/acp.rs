@@ -23,6 +23,9 @@ pub struct AcpSession {
     /// Ties this agent's vmux_mcp tool calls back to its pane (also set as a `ProcessId`
     /// component on the chat webview, where the tool router resolves it).
     pub anchor: vmux_core::ProcessId,
+    /// The agent-assigned ACP session id to resume via `session/load` (from a restored
+    /// `vmux://agent/<id>/<acp-session-id>` url). `None` opens a fresh session.
+    pub resume: Option<String>,
 }
 
 /// Progress, resolved launch spec, or terminal failure of a background agent install, keyed by
@@ -103,6 +106,7 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AcpInstallChannel>()
             .init_resource::<AcpCatalog>()
+            .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
                 Update,
@@ -111,6 +115,7 @@ impl Plugin for AcpAgentPlugin {
                     send_acp_input,
                     drain_acp_installs,
                     receive_catalog,
+                    apply_acp_session_created,
                 ),
             )
             .add_observer(close_acp_session_on_remove)
@@ -286,7 +291,46 @@ fn drain_acp_installs(
                         anchor: session.anchor,
                         mcp_command: mcp.as_ref().map(|m| m.command.clone()),
                         mcp_args: mcp.map(|m| m.args).unwrap_or_default(),
+                        resume_acp_session_id: session.resume.clone(),
                     });
+                }
+            }
+        }
+    }
+}
+
+/// When the daemon reports the agent-assigned ACP session id, redirect the pane url to
+/// `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle) and record it on the session
+/// so a later reopen resumes via `session/load`.
+#[allow(clippy::type_complexity)]
+fn apply_acp_session_created(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentSessionCreated>,
+    mut sessions: Query<
+        (Entity, &mut AcpSession, &mut vmux_core::PageMetadata),
+        Without<vmux_layout::Browser>,
+    >,
+    children: Query<&Children>,
+    mut browser_meta: Query<&mut vmux_core::PageMetadata, With<vmux_layout::Browser>>,
+) {
+    for ev in reader.read() {
+        for (stack, mut session, mut stack_meta) in &mut sessions {
+            if session.sid != ev.sid {
+                continue;
+            }
+            session.resume = Some(ev.acp_session_id.clone());
+            let url = format!("vmux://agent/{}/{}", session.agent_id, ev.acp_session_id);
+            // The stack's PageMetadata is what persists (space.ron) so a restart can resume.
+            if stack_meta.url != url {
+                stack_meta.url = url.clone();
+            }
+            // The child Browser's PageMetadata is what the tab strip + address bar read.
+            if let Ok(kids) = children.get(stack) {
+                for kid in kids.iter() {
+                    if let Ok(mut meta) = browser_meta.get_mut(kid)
+                        && meta.url != url
+                    {
+                        meta.url = url.clone();
+                    }
                 }
             }
         }
@@ -345,6 +389,7 @@ mod tests {
             sid: "s1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             anchor: vmux_core::ProcessId::new(),
+            resume: None,
         });
         app.update();
     }

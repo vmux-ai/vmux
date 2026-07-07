@@ -170,7 +170,15 @@ fn build_team_members(
                 let is_running = matches!(run, Some(AgentRunState::Streaming));
                 let is_done_unseen = done.is_some();
                 let (icon, title) = agent_page(entity, meta_q, children_q, child_of);
-                let url = agent.kind.cli_url_prefix();
+                // CLI/Page agents resolve their favicon via the kind's url prefix; ACP (no kind)
+                // uses its `vmux://agent/<id>` page url so `favicon_src_for_url` maps it to the
+                // brand favicon (agent_host) — same as the tab and chat header.
+                let url = agent.kind.map(|k| k.cli_url_prefix()).unwrap_or_else(|| {
+                    meta_q
+                        .get(entity)
+                        .map(|m| m.url.clone())
+                        .unwrap_or_default()
+                });
                 let sid = session
                     .map(|s| s.0.clone())
                     .filter(|s| !s.is_empty())
@@ -495,7 +503,7 @@ mod tests {
                 Stack::default(),
                 Agent {
                     sid: "s".to_string(),
-                    kind: AgentKind::Claude,
+                    kind: Some(AgentKind::Claude),
                 },
                 ChildOf(space),
             ))
@@ -531,5 +539,65 @@ mod tests {
         app.world_mut().flush();
 
         assert!(app.world().get::<LastActivatedAt>(team).is_some());
+    }
+
+    #[test]
+    fn acp_agent_appears_in_roster_with_registry_icon() {
+        let mut app = App::new();
+        let space = app.world_mut().spawn(Space).id();
+        app.insert_resource(ActiveSpaceEntity(Some(space)));
+        app.world_mut().spawn((Profile::user(), User));
+        app.world_mut().spawn((
+            Profile::registry("Mistral Vibe", "mistral-vibe"),
+            Agent {
+                sid: "sid-1".to_string(),
+                kind: None,
+            },
+            PageMetadata {
+                url: "vmux://agent/mistral-vibe".to_string(),
+                icon: vmux_core::PageIcon::favicon("https://cdn.example/vibe.svg"),
+                ..default()
+            },
+            ChildOf(space),
+        ));
+
+        let rows = app
+            .world_mut()
+            .run_system_once(
+                |active: Res<ActiveSpaceEntity>,
+                 user_q: Query<(Entity, &Profile), With<User>>,
+                 agent_q: Query<(
+                    Entity,
+                    &Profile,
+                    &Agent,
+                    Option<&AgentRunState>,
+                    Option<&SessionId>,
+                    Option<&vmux_core::notify::AgentDoneUnseen>,
+                )>,
+                 child_of: Query<&ChildOf>,
+                 space_marker: Query<(), With<Space>>,
+                 meta_q: Query<&PageMetadata>,
+                 children_q: Query<&Children>| {
+                    build_team_members(
+                        &active,
+                        &user_q,
+                        &agent_q,
+                        &child_of,
+                        &space_marker,
+                        &meta_q,
+                        &children_q,
+                    )
+                },
+            )
+            .unwrap();
+
+        let agent = rows
+            .iter()
+            .find(|r| !r.is_user)
+            .expect("acp agent in roster");
+        assert_eq!(agent.name, "Mistral Vibe");
+        assert_eq!(agent.icon, "https://cdn.example/vibe.svg");
+        // ACP rows carry their page url so the frontend resolves the brand favicon.
+        assert_eq!(agent.url, "vmux://agent/mistral-vibe");
     }
 }

@@ -94,7 +94,10 @@ struct AutoSave {
     dirty: bool,
 }
 
-const STORE_SCHEMA_VERSION: u32 = 3;
+// v4: agent URL grammar changed (CLI moved to `vmux://agent/<kind>/cli/<sid>`, freeing the
+// two-segment form for ACP sessions). Persisted stores from v3 reference the old grammar, so
+// they are reset on upgrade rather than migrated in place.
+const STORE_SCHEMA_VERSION: u32 = 4;
 
 pub(crate) fn store_path() -> PathBuf {
     vmux_core::profile::store_dir().join("store.ron")
@@ -551,24 +554,40 @@ pub(crate) fn rebuild_space_views(
                 if let Some(launch) = saved_launch {
                     commands.entity(term).insert(launch.clone());
                 }
-            } else if let Some(kind) = vmux_agent::AgentKind::all()
-                .into_iter()
-                .find(|k| meta.url.starts_with(&k.cli_url_prefix()))
-            {
-                let id_part = meta.url.strip_prefix(&kind.cli_url_prefix()).unwrap_or("");
-                let session_id = (!id_part.is_empty()).then(|| id_part.to_string());
-                let cwd = saved_launch
-                    .map(|l| std::path::PathBuf::from(&l.cwd))
-                    .unwrap_or_else(|| {
-                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
-                    });
-                spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
-                    kind,
-                    cwd,
-                    session_id,
-                    stack: entity,
-                    initial_prompt: None,
-                });
+            } else if let Some(agent_url) = vmux_agent::AgentUrl::parse(&meta.url).filter(|u| {
+                matches!(
+                    u,
+                    vmux_agent::AgentUrl::Cli { .. } | vmux_agent::AgentUrl::Acp { .. }
+                )
+            }) {
+                match agent_url {
+                    vmux_agent::AgentUrl::Cli { kind, sid } => {
+                        let session_id = (sid != vmux_agent::url::CLI_FRESH_SID).then_some(sid);
+                        let cwd = saved_launch
+                            .map(|l| std::path::PathBuf::from(&l.cwd))
+                            .unwrap_or_else(|| {
+                                std::env::current_dir()
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("/"))
+                            });
+                        spawn_agent.write(vmux_core::agent::SpawnAgentInStackRequest {
+                            kind,
+                            cwd,
+                            session_id,
+                            stack: entity,
+                            initial_prompt: None,
+                        });
+                    }
+                    _ => {
+                        // ACP: reopen through the runtime page-open path, which reconstructs the
+                        // session (and requests loadSession when the url carries a session id).
+                        commands.spawn(vmux_core::PageOpenTask {
+                            id: vmux_core::PageOpenId::new(),
+                            stack: entity,
+                            url: meta.url.clone(),
+                            request_id: None,
+                        });
+                    }
+                }
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
                 commands.spawn((Spaces::new(&mut meshes, &mut webview_mt), ChildOf(entity)));
             } else if meta
@@ -1162,9 +1181,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_kind_agent_url_marks_space_stale() {
-        assert!(space_contains_stale_agent_url(
+    fn malformed_agent_url_marks_space_stale() {
+        // Under the ACP grammar `vmux://agent/<id>/<sid>` is a valid session url for any id, so an
+        // unknown id is no longer stale-by-parse (the runtime handler errors gracefully for an
+        // unconfigured agent). Only genuinely malformed urls (too many segments) are stale.
+        assert!(!space_contains_stale_agent_url(
             r#"url: "vmux://agent/bogus/edb5335d-20cf-4c3d-9433-8619c405a0f2""#
+        ));
+        assert!(space_contains_stale_agent_url(
+            r#"url: "vmux://agent/a/b/c/d/e""#
         ));
     }
 

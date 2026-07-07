@@ -23,7 +23,7 @@ pub struct Tester;
 #[derive(Component, Clone, Debug)]
 pub struct Agent {
     pub sid: String,
-    pub kind: AgentKind,
+    pub kind: Option<AgentKind>,
 }
 
 impl AvatarSpec {
@@ -52,6 +52,15 @@ impl AvatarSpec {
             color: color.into(),
         }
     }
+
+    /// Avatar for a registry-driven ACP agent: initials from the display name, a stable
+    /// brand color hashed from the registry id (so each agent reads distinctly).
+    pub fn for_registry(name: &str, seed: &str) -> Self {
+        Self {
+            initials: initials_of(name),
+            color: hash_color(seed),
+        }
+    }
 }
 
 /// Up to two uppercase initials from a display name ("Junichi Sugiura" -> "JS").
@@ -68,6 +77,20 @@ pub fn initials_of(name: &str) -> String {
     } else {
         initials
     }
+}
+
+/// A stable brand color for a seed string (e.g. an ACP registry id), picked from a fixed
+/// palette by an FNV-1a hash. Deterministic and wasm-safe.
+pub fn hash_color(seed: &str) -> String {
+    const PALETTE: [&str; 8] = [
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#8b5cf6", "#ec4899",
+    ];
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in seed.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    PALETTE[(hash % PALETTE.len() as u64) as usize].to_string()
 }
 
 impl Profile {
@@ -89,6 +112,13 @@ impl Profile {
             avatar: AvatarSpec::for_agent(kind),
         }
     }
+
+    pub fn registry(name: &str, seed: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            avatar: AvatarSpec::for_registry(name, seed),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -108,5 +138,31 @@ mod tests {
     fn agent_profile_name_is_display_name() {
         assert_eq!(Profile::agent(AgentKind::Claude).name, "Claude");
         assert_eq!(Profile::user().name, "You");
+    }
+
+    #[test]
+    fn registry_avatar_derives_initials_and_stable_color() {
+        let a = AvatarSpec::for_registry("Mistral Vibe", "mistral-vibe");
+        assert_eq!(a.initials, "MV");
+        // Deterministic: same seed -> same color.
+        assert_eq!(a.color, AvatarSpec::for_registry("X", "mistral-vibe").color);
+        // Valid 7-char hex.
+        assert!(a.color.starts_with('#') && a.color.len() == 7);
+    }
+
+    #[test]
+    fn registry_color_differs_by_seed() {
+        assert_ne!(
+            AvatarSpec::for_registry("A", "claude-acp").color,
+            AvatarSpec::for_registry("A", "mistral-vibe").color
+        );
+    }
+
+    #[test]
+    fn registry_profile_uses_name() {
+        assert_eq!(
+            Profile::registry("Claude Agent", "claude-acp").name,
+            "Claude Agent"
+        );
     }
 }

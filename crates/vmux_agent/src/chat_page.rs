@@ -26,6 +26,10 @@ use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]
+use vmux_core::PageMetadata;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::team::Profile;
+#[cfg(not(target_arch = "wasm32"))]
 use vmux_service::client::ServiceClient;
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_service::protocol::ClientMessage;
@@ -68,7 +72,13 @@ impl Plugin for AgentChatPagePlugin {
 fn push_chat_on_ready(
     newly_ready: Query<Entity, bevy::ecs::query::Added<vmux_core::page::PageReady>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<(&AgentMessages, &AgentRunState, &PromptQueue)>,
+    sessions: Query<(
+        &AgentMessages,
+        &AgentRunState,
+        Option<&Profile>,
+        Option<&PageMetadata>,
+        &PromptQueue,
+    )>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -76,7 +86,7 @@ fn push_chat_on_ready(
         let Ok(parent) = child_of.get(webview) else {
             continue;
         };
-        let Ok((messages, state, queue)) = sessions.get(parent.parent()) else {
+        let Ok((messages, state, profile, meta, queue)) = sessions.get(parent.parent()) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -85,7 +95,7 @@ fn push_chat_on_ready(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, queue),
+            &snapshot_of(messages, state, profile, meta, queue),
         ));
     }
 }
@@ -94,6 +104,8 @@ fn push_chat_on_ready(
 fn snapshot_of(
     messages: &AgentMessages,
     state: &AgentRunState,
+    profile: Option<&Profile>,
+    meta: Option<&PageMetadata>,
     queue: &PromptQueue,
 ) -> ChatSnapshot {
     let messages_json = serde_json::to_string(&messages.0).unwrap_or_else(|_| "[]".to_string());
@@ -114,12 +126,21 @@ fn snapshot_of(
             ("errored", message.clone(), String::new(), String::new())
         }
     };
+    let (agent_name, accent_color) = profile
+        .map(|p| (p.name.clone(), p.avatar.color.clone()))
+        .unwrap_or_default();
+    let agent_icon = meta
+        .map(|m| m.icon.favicon_url().to_string())
+        .unwrap_or_default();
     ChatSnapshot {
         messages_json,
         status: status.to_string(),
         error,
         approval_call_id: call_id,
         approval_name: name,
+        agent_name,
+        agent_icon,
+        accent_color,
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
     }
@@ -130,7 +151,14 @@ fn snapshot_of(
 #[cfg(not(target_arch = "wasm32"))]
 fn push_chat_to_page(
     sessions: Query<
-        (Entity, &AgentMessages, &AgentRunState, &PromptQueue),
+        (
+            Entity,
+            &AgentMessages,
+            &AgentRunState,
+            Option<&Profile>,
+            Option<&PageMetadata>,
+            &PromptQueue,
+        ),
         Or<(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
@@ -142,7 +170,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, queue) in &sessions {
+    for (stack, messages, state, profile, meta, queue) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -155,7 +183,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, queue),
+            &snapshot_of(messages, state, profile, meta, queue),
         ));
     }
 }

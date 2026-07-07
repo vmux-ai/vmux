@@ -116,6 +116,7 @@ mod tests {
                     sid: "s".into(),
                     cwd: std::path::PathBuf::from("/tmp"),
                     anchor: vmux_core::ProcessId::new(),
+                    resume: None,
                 },
                 AgentApprovalPolicy::default(),
                 AgentRunState::AwaitingApproval {
