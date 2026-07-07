@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::command_bar::keyboard::{
-    CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code,
-    ignore_physical_rerouted_ctrl_keydown,
+    CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
+    ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{CommandBarResultItem as ResultItem, filter_results};
 use crate::command_bar::style::{
@@ -421,6 +421,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         input.set_value(&new_val);
                                         let len = new_val.len() as u32;
                                         let _ = input.set_selection_range(len, len);
+                                        ensure_caret_visible(&input, new_val.len());
                                     }
                                 }
                                 return;
@@ -742,8 +743,7 @@ fn focus_and_install_ctrl_bindings() {
     };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
     input.focus().ok();
-    let len = input.value().len() as u32;
-    let _ = input.set_selection_range(0, len);
+    select_all_on_open(&input);
 
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
         .map(|v| v.is_truthy())
@@ -785,6 +785,7 @@ fn focus_and_install_ctrl_bindings() {
         match action {
             CtrlEditAction::Home => {
                 let _ = input2.set_selection_range(0, 0);
+                ensure_caret_visible(&input2, 0);
             }
             CtrlEditAction::End => {
                 let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
@@ -794,23 +795,29 @@ fn focus_and_install_ctrl_bindings() {
                     let len = new_val.len() as u32;
                     let _ = input2.set_selection_range(len, len);
                     dispatch_input_event(&input2);
+                    ensure_caret_visible(&input2, new_val.len());
                 } else {
-                    let len = input2.value().len() as u32;
-                    let _ = input2.set_selection_range(len, len);
+                    let len = input2.value().len();
+                    let _ = input2.set_selection_range(len as u32, len as u32);
+                    ensure_caret_visible(&input2, len);
                 }
             }
             CtrlEditAction::Forward => {
-                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1)
-                    .min(input2.value().len() as u32);
+                let value = input2.value();
+                let max = value.encode_utf16().count() as u32;
+                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1).min(max);
                 let _ = input2.set_selection_range(p, p);
+                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
             }
             CtrlEditAction::Back => {
+                let value = input2.value();
                 let p = input2
                     .selection_start()
                     .unwrap_or(Some(0))
                     .unwrap_or(0)
                     .saturating_sub(1);
                 let _ = input2.set_selection_range(p, p);
+                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
             }
             CtrlEditAction::Delete => {
                 let v = input2.value();
@@ -820,6 +827,7 @@ fn focus_and_install_ctrl_bindings() {
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(s as u32, s as u32);
                 dispatch_input_event(&input2);
+                ensure_caret_visible(&input2, s);
             }
             CtrlEditAction::Backspace => {
                 let v = input2.value();
@@ -834,6 +842,7 @@ fn focus_and_install_ctrl_bindings() {
                     input2.set_value(&new_val);
                     let _ = input2.set_selection_range(prev as u32, prev as u32);
                     dispatch_input_event(&input2);
+                    ensure_caret_visible(&input2, prev);
                 }
             }
             CtrlEditAction::DeleteWord => {
@@ -852,6 +861,7 @@ fn focus_and_install_ctrl_bindings() {
                 input2.set_value(&new_val);
                 let _ = input2.set_selection_range(i as u32, i as u32);
                 dispatch_input_event(&input2);
+                ensure_caret_visible(&input2, i);
             }
             CtrlEditAction::DeleteToBeginning => {
                 let v = input2.value();
@@ -859,6 +869,7 @@ fn focus_and_install_ctrl_bindings() {
                 input2.set_value(&v[s..]);
                 let _ = input2.set_selection_range(0, 0);
                 dispatch_input_event(&input2);
+                ensure_caret_visible(&input2, 0);
             }
         }
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
@@ -872,6 +883,79 @@ fn focus_and_install_ctrl_bindings() {
         &opts,
     );
     closure.forget();
+}
+
+/// Select the whole query one animation frame after open so Cmd+L reveals the current URL
+/// ready to overtype. The query signal is populated by a sibling effect that re-renders the
+/// input `value`; selecting synchronously here would catch the still-empty value and leave
+/// nothing highlighted.
+fn select_all_on_open(input: &web_sys::HtmlInputElement) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let input = input.clone();
+    let cb = Closure::once_into_js(move || {
+        input.focus().ok();
+        let len = input.value().len() as u32;
+        let _ = input.set_selection_range(0, len);
+        input.set_scroll_left(0);
+    });
+    let _ = window.request_animation_frame(cb.unchecked_ref());
+}
+
+/// Scroll the command-bar input so the caret at byte offset `caret` is visible. Programmatic
+/// caret moves (Ctrl+E/A/F/B, deletes, Tab-complete) bypass Chromium's native caret-follow,
+/// so on a long URL the caret would otherwise sit off-screen.
+fn ensure_caret_visible(input: &web_sys::HtmlInputElement, caret: usize) {
+    let value = input.value();
+    let caret = floor_char_boundary(&value, caret);
+    let Some((viewport, caret_px)) = caret_metrics(input, &value[..caret]) else {
+        return;
+    };
+    if let Some(scroll_left) =
+        caret_scroll_left(caret_px, viewport, input.scroll_left() as f64, 8.0)
+    {
+        input.set_scroll_left(scroll_left as i32);
+    }
+}
+
+/// The input's usable text viewport width and the pixel offset of `prefix` in the input's
+/// current font (measured on an offscreen canvas). `None` if the canvas/context or computed
+/// font is unavailable.
+fn caret_metrics(input: &web_sys::HtmlInputElement, prefix: &str) -> Option<(f64, f64)> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let style = window.get_computed_style(input).ok()??;
+    let font_size = style.get_property_value("font-size").unwrap_or_default();
+    let font_family = style.get_property_value("font-family").unwrap_or_default();
+    if font_size.is_empty() || font_family.is_empty() {
+        return None;
+    }
+    let font_weight = style.get_property_value("font-weight").unwrap_or_default();
+    let font_style = style.get_property_value("font-style").unwrap_or_default();
+    let canvas: web_sys::HtmlCanvasElement =
+        document.create_element("canvas").ok()?.unchecked_into();
+    let ctx: web_sys::CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
+    ctx.set_font(format!("{font_style} {font_weight} {font_size} {font_family}").trim());
+    let caret_px = ctx.measure_text(prefix).ok()?.width();
+    let pad_left = css_px(&style.get_property_value("padding-left").unwrap_or_default());
+    let pad_right = css_px(
+        &style
+            .get_property_value("padding-right")
+            .unwrap_or_default(),
+    );
+    let viewport = (input.client_width() as f64 - pad_left - pad_right).max(1.0);
+    caret_px.is_finite().then_some((viewport, caret_px))
+}
+
+/// Parse a computed `<n>px` length to `f64`, defaulting to `0.0`.
+fn css_px(value: &str) -> f64 {
+    value
+        .trim()
+        .strip_suffix("px")
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(0.0)
 }
 
 fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputElement) -> bool {
