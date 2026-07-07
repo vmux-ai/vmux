@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput};
@@ -32,6 +33,11 @@ pub fn Page() -> Element {
         }
         let _ = try_cef_bin_emit_rkyv(&StartDataRequest);
         mounted.set(true);
+    });
+
+    use_effect(|| {
+        install_window_focus_refocus();
+        focus_start_input();
     });
 
     let reveal = if mounted() {
@@ -72,15 +78,53 @@ pub fn Page() -> Element {
     }
 }
 
+/// Focus the launcher input and select its contents, deferred one animation frame so it lands
+/// after any pending native focus/composite settles — a synchronous focus can race CEF granting
+/// the OSR browser keyboard focus and be silently dropped.
 fn focus_start_input() {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("command-bar-input"))
-    else {
+    let Some(window) = web_sys::window() else {
         return;
     };
-    let input: web_sys::HtmlInputElement = el.unchecked_into();
-    let _ = input.focus();
-    let len = input.value().len() as u32;
-    let _ = input.set_selection_range(0, len);
+    let cb = Closure::once_into_js(move || {
+        let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("command-bar-input"))
+        else {
+            return;
+        };
+        let input: web_sys::HtmlInputElement = el.unchecked_into();
+        let _ = input.focus();
+        let len = input.value().len() as u32;
+        let _ = input.set_selection_range(0, len);
+    });
+    let _ = window.request_animation_frame(cb.unchecked_ref());
+}
+
+/// Refocus the launcher input whenever this page's window (re)gains native focus. CEF grants an
+/// OSR browser keyboard focus a frame or more after the page mounts — after the `autofocus`
+/// attribute was already ignored (the document was not focused at parse time) — so without this
+/// the caret never lands in the input until the user clicks. Installed once; also refocuses when
+/// switching back to an already-open start page.
+fn install_window_focus_refocus() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let already_bound = js_sys::Reflect::get(&window, &JsValue::from_str("_startFocusBound"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false);
+    if already_bound {
+        return;
+    }
+    let _ = js_sys::Reflect::set(
+        &window,
+        &JsValue::from_str("_startFocusBound"),
+        &JsValue::TRUE,
+    );
+
+    let closure = Closure::wrap(Box::new(|| {
+        focus_start_input();
+    }) as Box<dyn FnMut()>);
+    let target: &web_sys::EventTarget = window.as_ref();
+    let _ = target.add_event_listener_with_callback("focus", closure.as_ref().unchecked_ref());
+    closure.forget();
 }
