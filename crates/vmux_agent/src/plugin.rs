@@ -1735,9 +1735,13 @@ fn agent_terminal_shell(settings: &AppSettings) -> String {
         .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()))
 }
 
-/// Wrap a `run` command so the shell prints a completion marker carrying the
-/// exit code once the command finishes (success OR failure). `token` is a unique
-/// per-run id; the printed marker is `__VMUX_DONE_<token>_<exit_code>__`.
+/// Wrap a `run` command so the shell emits an invisible OSC completion escape
+/// carrying the exit code once the command finishes (success OR failure).
+/// `token` is a unique per-run id; the escape is
+/// `ESC ] <VMUX_RUN_OSC> ; <token> ; <exit_code> BEL` (see
+/// [`vmux_service::run_marker`]). Because it is an OSC sequence the terminal
+/// parser consumes it — it never renders as text, unlike the old
+/// `__VMUX_DONE_…__` printf markers.
 ///
 /// The command is prefixed with [`pager_env_prefix`] so an interactive command that would
 /// normally open a pager (e.g. `git log` → `less`) prints straight to the terminal instead of
@@ -1745,7 +1749,7 @@ fn agent_terminal_shell(settings: &AppSettings) -> String {
 ///
 /// posix/fish chain with `;` (which continues after a non-zero command). nushell
 /// aborts the rest of a `;` line when an external command fails, so it needs a
-/// `try`/`catch` wrapper to always print the marker and recover the exit code
+/// `try`/`catch` wrapper to always emit the escape and recover the exit code
 /// from the caught error.
 fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
     let base = std::path::Path::new(shell)
@@ -1753,15 +1757,16 @@ fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
         .and_then(|s| s.to_str())
         .unwrap_or(shell);
     let pager = pager_env_prefix(base);
+    let osc = vmux_service::run_marker::VMUX_RUN_OSC;
     match base {
         "nu" | "nushell" => format!(
-            "{pager}print \"\\n__VMUX_START_{token}__\"; try {{ {command}; print $\"\\n__VMUX_DONE_{token}_($env.LAST_EXIT_CODE)__\" }} catch {{ |e| print $\"\\n__VMUX_DONE_{token}_($e.exit_code? | default 1)__\" }}"
+            "{pager}try {{ {command}; print -rn $\"\\u{{1b}}]{osc};{token};($env.LAST_EXIT_CODE)\\u{{7}}\" }} catch {{ |e| print -rn $\"\\u{{1b}}]{osc};{token};($e.exit_code? | default 1)\\u{{7}}\" }}"
         ),
         "fish" => format!(
-            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; set vmux_status $status; printf '\\n__VMUX_DONE_{token}_%s__\\n' $vmux_status"
+            "{pager}{command}; set __vmux_status $status; printf '\\033]{osc};{token};%s\\007' $__vmux_status"
         ),
         _ => format!(
-            "{pager}printf '\\n__VMUX_START_{token}__\\n'; {command}; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_{token}_%s__\\n' \"$vmux_status\""
+            "{pager}{command}; __vmux_status=\"$?\"; printf '\\033]{osc};{token};%s\\007' \"$__vmux_status\""
         ),
     }
 }
@@ -2357,11 +2362,12 @@ fn handle_agent_queries(
                     name: name.clone(),
                 });
             }
-            // ReadTerminal/ReadTerminalFull/CommandExit are answered by the
-            // service directly; they never reach the GUI.
+            // ReadTerminal/ReadTerminalFull/CommandExit/RunCompletion are
+            // answered by the service directly; they never reach the GUI.
             AgentQuery::ReadTerminal { .. }
             | AgentQuery::ReadTerminalFull { .. }
-            | AgentQuery::CommandExit { .. } => {}
+            | AgentQuery::CommandExit { .. }
+            | AgentQuery::RunCompletion { .. } => {}
         }
     }
 }
@@ -3945,26 +3951,26 @@ mod tests {
 
     #[test]
     fn command_with_marker_is_shell_aware() {
-        // nushell aborts `;` on failure, so it wraps in try/catch and reads the
-        // exit code from the caught error. Success uses `($env.LAST_EXIT_CODE)`
-        // (not a literal digit) so the echoed command line can't be matched as a
-        // completion marker.
+        // The completion marker is an invisible OSC escape
+        // (ESC ] 6973 ; token ; exit BEL), consumed by the terminal parser so it
+        // never renders. nushell aborts `;` on failure, so it wraps in try/catch
+        // and reads the exit code from the caught error.
         assert_eq!(
             command_with_marker("/opt/homebrew/bin/nu", "ls", "abc"),
-            "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; print \"\\n__VMUX_START_abc__\"; try { ls; print $\"\\n__VMUX_DONE_abc_($env.LAST_EXIT_CODE)__\" } catch { |e| print $\"\\n__VMUX_DONE_abc_($e.exit_code? | default 1)__\" }"
+            "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; try { ls; print -rn $\"\\u{1b}]6973;abc;($env.LAST_EXIT_CODE)\\u{7}\" } catch { |e| print -rn $\"\\u{1b}]6973;abc;($e.exit_code? | default 1)\\u{7}\" }"
         );
         assert_eq!(
             command_with_marker("/usr/local/bin/fish", "ls", "abc"),
-            "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; printf '\\n__VMUX_START_abc__\\n'; ls; set vmux_status $status; printf '\\n__VMUX_DONE_abc_%s__\\n' $vmux_status"
+            "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; ls; set __vmux_status $status; printf '\\033]6973;abc;%s\\007' $__vmux_status"
         );
         assert_eq!(
             command_with_marker("/bin/zsh", "ls", "abc"),
-            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""
         );
         // Unknown shells fall back to posix syntax.
         assert_eq!(
             command_with_marker("/bin/bash", "ls", "abc"),
-            "export GIT_PAGER=cat PAGER=cat LESS=FRX; printf '\\n__VMUX_START_abc__\\n'; ls; vmux_status=\"$?\"; printf '\\n__VMUX_DONE_abc_%s__\\n' \"$vmux_status\""
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; ls; __vmux_status=\"$?\"; printf '\\033]6973;abc;%s\\007' \"$__vmux_status\""
         );
     }
 
@@ -3979,7 +3985,11 @@ mod tests {
         let settings = test_settings();
         let out = run_command_line("ls -la", Some("tok9"), &settings);
         assert!(out.contains("ls -la"), "got: {out}");
-        assert!(out.contains("__VMUX_DONE_tok9_"), "got: {out}");
+        assert!(out.contains("]6973;tok9;"), "got: {out}");
+        assert!(
+            !out.contains("__VMUX_DONE_"),
+            "marker must be invisible: {out}"
+        );
     }
 
     #[test]

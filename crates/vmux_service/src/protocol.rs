@@ -203,6 +203,11 @@ pub enum AgentQuery {
     CommandExit {
         process_id: ProcessId,
     },
+    /// Last agent `run` completion for this process, correlated by the per-run
+    /// token carried in the [`crate::run_marker::VMUX_RUN_OSC`] escape.
+    RunCompletion {
+        process_id: ProcessId,
+    },
     GetSettings,
     ListSpaces,
     Screenshot {
@@ -237,6 +242,10 @@ pub enum AgentQueryResult {
     Spaces(String),
     CommandExit {
         seq: u64,
+        exit: Option<i32>,
+    },
+    RunCompletion {
+        token: Option<String>,
         exit: Option<i32>,
     },
     Image {

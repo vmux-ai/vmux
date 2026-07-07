@@ -182,6 +182,11 @@ fn query_result_to_content(result: crate::protocol::AgentQueryResult) -> (String
             let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
             (format!("{{\"seq\":{seq},\"exit\":{exit}}}"), false)
         }
+        AgentQueryResult::RunCompletion { token, exit } => {
+            let token = token.map_or_else(|| "null".to_string(), |t| format!("\"{t}\""));
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+            (format!("{{\"token\":{token},\"exit\":{exit}}}"), false)
+        }
         AgentQueryResult::Image {
             path,
             width,
@@ -622,6 +627,27 @@ async fn handle_client(
                                 Some(process) => {
                                     let (seq, exit) = process.command_status();
                                     crate::protocol::AgentQueryResult::CommandExit { seq, exit }
+                                }
+                                None => crate::protocol::AgentQueryResult::Error(format!(
+                                    "process not found: {process_id}"
+                                )),
+                            }
+                        };
+                        let resp = ServiceMessage::AgentQueryResult { request_id, result };
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &resp)?;
+                        continue;
+                    }
+                    crate::protocol::AgentQuery::RunCompletion { process_id } => {
+                        let result = {
+                            let mgr = manager.lock().await;
+                            match mgr.processes.get(&process_id) {
+                                Some(process) => {
+                                    let (token, exit) = match process.run_completion() {
+                                        Some((token, exit)) => (Some(token), Some(exit)),
+                                        None => (None, None),
+                                    };
+                                    crate::protocol::AgentQueryResult::RunCompletion { token, exit }
                                 }
                                 None => crate::protocol::AgentQueryResult::Error(format!(
                                     "process not found: {process_id}"
