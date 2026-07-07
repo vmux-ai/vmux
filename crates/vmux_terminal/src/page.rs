@@ -473,7 +473,7 @@ const _TW_SAFELIST: &[&str] = &[
 /// Terminal caret rendered as a persistent, always-present DOM node.
 ///
 /// Subscribes to `cursor` internally so a caret move re-renders only this node
-/// (not the parent `Terminal` and its whole row list). Visibility is toggled via
+/// (not the parent `Page` and its whole row list). Visibility is toggled via
 /// `display` rather than by adding/removing the element, so the caret never
 /// disappears for a frame while typing.
 #[component]
