@@ -74,22 +74,37 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
-            .add_systems(
-                Update,
-                (
-                    push_chat_to_page,
-                    push_chat_on_ready,
-                    push_slash_commands_on_ready,
-                ),
-            );
+            .add_observer(reset_chat_synced_on_page_ready)
+            .add_systems(Update, (push_chat_to_page, sync_chat_to_ready_views));
     }
 }
 
-/// When a chat page first signals ready, push the current snapshot (the `Changed` push
-/// alone would miss state that settled before the webview loaded — e.g. on restore).
+/// Marks a chat-page webview (ACP or Page agent) so the ready→resync path can find it cheaply.
 #[cfg(not(target_arch = "wasm32"))]
-fn push_chat_on_ready(
-    newly_ready: Query<Entity, bevy::ecs::query::Added<vmux_core::page::PageReady>>,
+#[derive(Component)]
+pub struct AgentChatView;
+
+/// Set once the current snapshot has been pushed to a ready chat webview; cleared when the page
+/// (re)signals ready (mount or Cmd+R reload) so the transcript is re-pushed instead of blanking.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ChatSynced;
+
+/// Push the current transcript + slash commands to any chat webview that is ready but not yet
+/// synced. Runs every frame and retries until the webview's emit channel is ready, so the very
+/// first snapshot always lands. Re-runs after a reload because [`reset_chat_synced_on_page_ready`]
+/// clears `ChatSynced` when the page re-signals ready — without this, Cmd+R blanked the chat
+/// (the `Changed`/`Added` pushes never re-fire for an unchanged, already-added session).
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_chat_to_ready_views(
+    pending: Query<
+        Entity,
+        (
+            With<AgentChatView>,
+            With<vmux_core::page::PageReady>,
+            Without<ChatSynced>,
+        ),
+    >,
     child_of: Query<&ChildOf>,
     sessions: Query<(
         &AgentMessages,
@@ -98,14 +113,16 @@ fn push_chat_on_ready(
         Option<&PageMetadata>,
         &PromptQueue,
     )>,
+    acp_sessions: Query<&AcpSession>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for webview in &newly_ready {
+    for webview in &pending {
         let Ok(parent) = child_of.get(webview) else {
             continue;
         };
-        let Ok((messages, state, profile, meta, queue)) = sessions.get(parent.parent()) else {
+        let stack = parent.parent();
+        let Ok((messages, state, profile, meta, queue)) = sessions.get(stack) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -116,6 +133,34 @@ fn push_chat_on_ready(
             CHAT_SNAPSHOT_EVENT,
             &snapshot_of(messages, state, profile, meta, queue),
         ));
+        let cross = acp_sessions
+            .get(stack)
+            .ok()
+            .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+            .map(kind_supports_cross_runtime)
+            .unwrap_or(false);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            SLASH_COMMANDS_EVENT,
+            &SlashCommands {
+                commands: slash_commands_for(cross),
+            },
+        ));
+        commands.entity(webview).insert(ChatSynced);
+    }
+}
+
+/// A chat webview re-signals `PageReady` on every (re)mount, including a Cmd+R reload. Clear its
+/// `ChatSynced` marker so [`sync_chat_to_ready_views`] re-pushes the full transcript.
+#[cfg(not(target_arch = "wasm32"))]
+fn reset_chat_synced_on_page_ready(
+    trigger: On<BinReceive<vmux_core::page::PageReady>>,
+    chat_views: Query<(), With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if chat_views.get(webview).is_ok() {
+        commands.entity(webview).remove::<ChatSynced>();
     }
 }
 
@@ -359,39 +404,6 @@ fn runtime_switch_target(
     Some((target.format(), cwd.to_path_buf()))
 }
 
-/// Push the slash-command list to a chat page as soon as it signals ready (same moment the
-/// first conversation snapshot is pushed, so the page's listeners are already mounted).
-#[cfg(not(target_arch = "wasm32"))]
-fn push_slash_commands_on_ready(
-    newly_ready: Query<Entity, bevy::ecs::query::Added<vmux_core::page::PageReady>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for webview in &newly_ready {
-        let Ok(parent) = child_of.get(webview) else {
-            continue;
-        };
-        let Ok(acp) = acp_sessions.get(parent.parent()) else {
-            continue;
-        };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
-            continue;
-        }
-        let cross = AgentKind::from_url_segment(&acp.agent_id)
-            .map(kind_supports_cross_runtime)
-            .unwrap_or(false);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            SLASH_COMMANDS_EVENT,
-            &SlashCommands {
-                commands: slash_commands_for(cross),
-            },
-        ));
-    }
-}
-
 /// Page → native: `/resume` was opened — reply with the on-disk session list.
 #[cfg(not(target_arch = "wasm32"))]
 fn on_resume_list_request(
@@ -537,5 +549,37 @@ mod native_tests {
         let with_cli = slash_commands_for(true);
         assert_eq!(with_cli.len(), 2);
         assert_eq!(with_cli[1].name, "cli");
+    }
+
+    #[test]
+    fn page_ready_clears_chat_synced_only_for_chat_views() {
+        use bevy::prelude::*;
+        use bevy_cef::prelude::BinReceive;
+        use vmux_core::page::PageReady;
+
+        let mut app = App::new();
+        app.add_observer(reset_chat_synced_on_page_ready);
+
+        let chat = app.world_mut().spawn((AgentChatView, ChatSynced)).id();
+        let other = app.world_mut().spawn(ChatSynced).id();
+
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview: chat,
+            payload: PageReady {},
+        });
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview: other,
+            payload: PageReady {},
+        });
+        app.world_mut().flush();
+
+        assert!(
+            app.world().get::<ChatSynced>(chat).is_none(),
+            "a chat view must re-sync (ChatSynced cleared) when the page reloads"
+        );
+        assert!(
+            app.world().get::<ChatSynced>(other).is_some(),
+            "a non-chat view must be left untouched"
+        );
     }
 }

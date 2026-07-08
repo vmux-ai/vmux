@@ -349,6 +349,7 @@ pub fn attach_page_agent_to_stack(
     let url = format!("vmux://agent/{provider}");
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
+        crate::chat_page::AgentChatView,
         ChildOf(stack),
     ));
     Some(())
@@ -401,6 +402,7 @@ pub fn attach_acp_agent_to_stack(
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
+        crate::chat_page::AgentChatView,
         ChildOf(stack),
         anchor,
     ));
