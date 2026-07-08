@@ -38,6 +38,7 @@ pub struct ChatSnapshot {
     pub accent_color: String,
     pub handoff_source: String,
     pub handoff_truncated: bool,
+    /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
 }
 

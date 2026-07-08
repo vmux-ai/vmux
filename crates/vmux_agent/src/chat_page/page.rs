@@ -7,9 +7,9 @@ use crate::chat_page::composer::{
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatEscape,
-    ChatMessage, ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT,
+    ChatItem, ChatResume, ChatSnapshot, ChatSubmit, ChatTurn, RESUMABLE_SESSIONS_EVENT,
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -146,7 +146,7 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
 pub fn Page() -> Element {
     use_theme();
     let agent = current_agent();
-    let mut messages = use_signal(Vec::<ChatMessage>::new);
+    let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "idle".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String)>::None);
@@ -167,6 +167,7 @@ pub fn Page() -> Element {
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
+    let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
 
@@ -181,10 +182,21 @@ pub fn Page() -> Element {
         }
     });
 
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(2500).await;
+            if status() == "streaming" {
+                let n = WORKING_VERBS.len();
+                let idx = ((js_sys::Math::random() * n as f64) as usize).min(n - 1);
+                verb.set(WORKING_VERBS[idx].to_string());
+            }
+        }
+    });
+
     use_effect(move || {
         // Subscribe to any transcript/status change (each snapshot is a fresh `set`). Only pin to
         // the bottom when the user is already there — if they scrolled up to read, leave them.
-        let _ = messages.read().len();
+        let _ = items.read().len();
         let _ = status.read();
         if !*at_bottom.peek() {
             return;
@@ -198,8 +210,8 @@ pub fn Page() -> Element {
     });
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
-        if let Ok(parsed) = serde_json::from_str::<Vec<ChatMessage>>(&snap.messages_json) {
-            messages.set(parsed);
+        if let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snap.messages_json) {
+            items.set(parsed);
         }
         status.set(snap.status.clone());
         error.set(snap.error.clone());
@@ -363,7 +375,7 @@ pub fn Page() -> Element {
                     }
                 },
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
-                    if messages.read().is_empty() && status() == "idle" {
+                    if items.read().is_empty() && status() == "idle" {
                         div { class: "flex flex-col items-center gap-3 py-24 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
@@ -372,8 +384,8 @@ pub fn Page() -> Element {
                             p { class: "text-sm text-muted-foreground", "Ready when you are." }
                         }
                     }
-                    for (i , msg) in messages.read().iter().enumerate() {
-                        {render_message(i, msg)}
+                    for (i , item) in items.read().iter().enumerate() {
+                        {render_item(i, item, &verb(), elapsed())}
                         if !handoff_source().is_empty()
                             && is_handoff_boundary(i, handoff_message_count())
                         {
@@ -385,17 +397,6 @@ pub fn Page() -> Element {
                                 }
                                 span { class: "h-px flex-1 bg-foreground/10" }
                             }
-                        }
-                    }
-                    if status() == "streaming" {
-                        div { class: "flex items-center gap-2.5 text-sm",
-                            span { class: "flex items-end gap-1",
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]", style: "{dot_style}" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]", style: "{dot_style}" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70", style: "{dot_style}" }
-                            }
-                            span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "Working…" }
-                            span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed())}" }
                         }
                     }
                     if status() == "installing" {
@@ -777,41 +778,76 @@ fn send_approval(call_id: String, decision: u8) {
     let _ = try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision });
 }
 
-fn render_message(key: usize, msg: &ChatMessage) -> Element {
-    match msg {
-        ChatMessage::User { text } => rsx! {
+fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element {
+    match item {
+        ChatItem::User { text } => rsx! {
             div {
                 key: "{key}",
                 class: "max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-foreground/[0.08] px-4 py-2.5 text-sm",
                 "{text}"
             }
         },
-        ChatMessage::Assistant { blocks } => rsx! {
-            div { key: "{key}", class: "flex max-w-[85%] flex-col gap-2 self-start",
-                for (j , block) in blocks.iter().enumerate() {
-                    {render_block(j, block)}
-                }
+        ChatItem::Turn(turn) => render_turn(key, turn, verb, elapsed),
+    }
+}
+
+fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
+    let show_header = turn.step_count > 0 || (turn.running && turn.answer.is_empty());
+    rsx! {
+        div { key: "{key}", class: "flex max-w-[85%] flex-col gap-2 self-start",
+            if show_header {
+                {render_turn_header(turn, verb, elapsed)}
             }
-        },
-        ChatMessage::ToolResult {
-            content, is_error, ..
-        } => {
-            let tone = if *is_error {
-                "text-red-500"
-            } else {
-                "text-muted-foreground"
-            };
-            let label = if *is_error { "Error" } else { "Output" };
-            rsx! {
-                details {
-                    key: "{key}",
-                    class: "group max-w-[85%] self-start rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs {tone} list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "text-[10px] transition group-open:rotate-90", "▸" }
-                        span { "{label}" }
+            for (j , block) in turn.answer.iter().enumerate() {
+                {render_block(j, block)}
+            }
+        }
+    }
+}
+
+fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
+    if turn.running {
+        rsx! {
+            details { class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                summary { class: "flex cursor-pointer select-none items-center gap-2.5 text-sm list-none [&::-webkit-details-marker]:hidden",
+                    span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                    span { class: "flex items-end gap-1",
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
                     }
-                    pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground", "{content}" }
+                    span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{verb}…" }
+                    span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed)}" }
                 }
+                {render_steps(turn)}
+            }
+        }
+    } else {
+        let label = match turn.duration_secs {
+            Some(secs) => format!(
+                "Worked for {} · {} steps",
+                fmt_elapsed(secs),
+                turn.step_count
+            ),
+            None => format!("{} steps", turn.step_count),
+        };
+        rsx! {
+            details { class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
+                    span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                    span { class: "font-medium", "{label}" }
+                }
+                {render_steps(turn)}
+            }
+        }
+    }
+}
+
+fn render_steps(turn: &ChatTurn) -> Element {
+    rsx! {
+        div { class: "mt-2 flex flex-col gap-2",
+            for (j , block) in turn.steps.iter().enumerate() {
+                {render_block(j, block)}
             }
         }
     }
@@ -909,6 +945,25 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                             div { key: "{i}", class: "{cls}", "{line}" }
                         }
                     }
+                }
+            }
+        }
+        ChatBlock::ToolResult { content, is_error } => {
+            let tone = if *is_error {
+                "text-red-500"
+            } else {
+                "text-muted-foreground"
+            };
+            let label = if *is_error { "Error" } else { "Output" };
+            rsx! {
+                details {
+                    key: "{key}",
+                    class: "group rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs {tone} list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                        span { "{label}" }
+                    }
+                    pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground", "{content}" }
                 }
             }
         }

@@ -10044,6 +10044,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "gloo-timers",
+ "js-sys",
  "mockito",
  "notify 6.1.1",
  "pulldown-cmark",

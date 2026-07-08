@@ -284,7 +284,9 @@ fn snapshot_of(
             .unwrap_or_default(),
         handoff_truncated: imported.is_some_and(|imported| imported.truncated),
         handoff_message_count: imported
-            .map(|imported| u32::try_from(imported.messages.len()).unwrap_or(u32::MAX))
+            .map(|imported| {
+                u32::try_from(group_turns(&imported.messages, &[], false).len()).unwrap_or(u32::MAX)
+            })
             .unwrap_or_default(),
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
@@ -880,7 +882,7 @@ mod native_tests {
     }
 
     #[test]
-    fn snapshot_reports_imported_message_boundary() {
+    fn snapshot_reports_grouped_imported_item_boundary() {
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_kind: AgentKind::Codex,
@@ -888,7 +890,16 @@ mod native_tests {
             messages: vec![
                 crate::Message::User { text: "one".into() },
                 crate::Message::Assistant {
-                    blocks: vec![crate::AssistantBlock::Text("two".into())],
+                    blocks: vec![crate::AssistantBlock::ToolUse {
+                        call_id: "call-1".into(),
+                        name: "run".into(),
+                        args: "{}".into(),
+                    }],
+                },
+                crate::Message::ToolResult {
+                    call_id: "call-1".into(),
+                    content: "two".into(),
+                    is_error: false,
                 },
             ],
             truncated: false,

@@ -44,6 +44,7 @@ vmux_terminal = { path = "../vmux_terminal" }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
