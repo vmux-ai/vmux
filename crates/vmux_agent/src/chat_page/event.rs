@@ -109,6 +109,125 @@ pub struct ChatResume;
 )]
 pub struct ChatClearQueue;
 
+/// Bin-event id: native → page, the resumable-session list (answer to [`ResumeListRequest`]).
+pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";
+/// Bin-event id: native → page, the slash commands available for this pane.
+pub const SLASH_COMMANDS_EVENT: &str = "slash_commands";
+
+/// One row in the `/resume` picker. Strings only (the page is dumb — native does the work).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResumableSessionEntry {
+    /// `AgentKind::as_url_segment` (vibe|claude|codex).
+    pub kind: String,
+    pub sid: String,
+    pub cwd: String,
+    pub title: String,
+    /// Native-formatted "2h ago · proj".
+    pub subtitle: String,
+    pub cross_runtime: bool,
+}
+
+/// Native → page: the resumable sessions to show in the `/resume` picker, newest-first.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResumableSessions {
+    pub sessions: Vec<ResumableSessionEntry>,
+}
+
+/// One slash command entry (native → page).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SlashCommandEntry {
+    /// Bare command name without the leading slash (e.g. `resume`, `cli`).
+    pub name: String,
+    pub description: String,
+}
+
+/// Native → page: the slash commands this pane offers (varies by agent kind).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SlashCommands {
+    pub commands: Vec<SlashCommandEntry>,
+}
+
+/// Page → native: open the `/resume` picker (native replies with [`ResumableSessions`]).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResumeListRequest;
+
+/// Page → native: resume a specific past session on this stack, in the current runtime.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResumeSession {
+    pub kind: String,
+    pub sid: String,
+    pub cwd: String,
+}
+
+/// Page → native: hand the current session to the other runtime. `to`: `"cli"` | `"acp"`.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RuntimeSwitchRequest {
+    pub to: String,
+}
+
 /// Page-side mirror of `vmux_service::message::Message` (which is native-only). The JSON
 /// representation is identical, so the page deserializes `messages_json` into this.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -184,5 +303,24 @@ mod tests {
             ChatMessage::Assistant { blocks } => assert_eq!(blocks.len(), 2),
             _ => panic!("expected assistant"),
         }
+    }
+
+    #[test]
+    fn resumable_sessions_rkyv_roundtrip() {
+        let v = ResumableSessions {
+            sessions: vec![ResumableSessionEntry {
+                kind: "claude".into(),
+                sid: "sid-9".into(),
+                cwd: "/w".into(),
+                title: "fix bug".into(),
+                subtitle: "2h ago · w".into(),
+                cross_runtime: true,
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
+        let back = rkyv::from_bytes::<ResumableSessions, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.sessions.len(), 1);
+        assert_eq!(back.sessions[0].sid, "sid-9");
+        assert!(back.sessions[0].cross_runtime);
     }
 }
