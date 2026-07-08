@@ -2,8 +2,24 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use vmux_core::agent::AgentKind;
+
 use crate::McpServerConfig;
 use crate::strategy::AgentStrategy;
+
+/// A resumable agent session discovered on disk. Runtime-agnostic: `(kind, sid, cwd)`
+/// identifies the conversation; how it is opened (ACP vs CLI) is a separate choice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResumableSession {
+    pub kind: AgentKind,
+    pub sid: String,
+    pub cwd: PathBuf,
+    pub mtime: SystemTime,
+    /// First user message / summary, or a short sid fallback.
+    pub title: String,
+    /// True when this kind's ACP and CLI runtimes share the session id (Claude only, for now).
+    pub cross_runtime: bool,
+}
 
 pub trait CliAgentStrategy: AgentStrategy {
     fn sessions_root(&self) -> PathBuf;
@@ -19,4 +35,9 @@ pub trait CliAgentStrategy: AgentStrategy {
         claimed: &HashSet<String>,
     ) -> Option<String>;
     fn detect_end_time(&self, session_id: &str) -> bool;
+    /// List this kind's resumable sessions from its on-disk store. Order is not required
+    /// (the collector sorts newest-first). Default: none.
+    fn list_sessions(&self) -> Vec<ResumableSession> {
+        Vec::new()
+    }
 }

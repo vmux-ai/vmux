@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
-use crate::client::cli::strategy::CliAgentStrategy;
+use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
@@ -73,6 +73,10 @@ impl CliAgentStrategy for ClaudeStrategy {
 
     fn detect_end_time(&self, _session_id: &str) -> bool {
         false
+    }
+
+    fn list_sessions(&self) -> Vec<ResumableSession> {
+        list_claude_sessions(&self.sessions_root())
     }
 }
 
@@ -181,6 +185,95 @@ pub(crate) fn discover_claude_session_id(
         }
     }
     best.map(|(_, id)| id)
+}
+
+pub(crate) fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
+    let mut out = Vec::new();
+    let Ok(projects) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for proj in projects.flatten() {
+        let Ok(files) = std::fs::read_dir(proj.path()) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let path = f.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if stem.starts_with("agent-") {
+                continue;
+            }
+            let mtime = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            let (cwd, title) = claude_cwd_and_title(&path, stem);
+            out.push(ResumableSession {
+                kind: AgentKind::Claude,
+                sid: stem.to_string(),
+                cwd,
+                mtime,
+                title,
+                cross_runtime: true,
+            });
+        }
+    }
+    out
+}
+
+/// Read the first lines of a claude `.jsonl` to recover the working dir and a title.
+/// `cwd` is taken from the first line carrying a string `cwd`; `title` from the first user
+/// message text. Both fall back gracefully (cwd → the file's parent, title → short sid).
+fn claude_cwd_and_title(path: &Path, stem: &str) -> (PathBuf, String) {
+    use std::io::{BufRead, BufReader};
+    let mut cwd: Option<PathBuf> = None;
+    let mut title: Option<String> = None;
+    if let Ok(file) = std::fs::File::open(path) {
+        for line in BufReader::new(file).lines().map_while(Result::ok).take(40) {
+            let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if cwd.is_none()
+                && let Some(c) = v.get("cwd").and_then(|c| c.as_str())
+            {
+                cwd = Some(PathBuf::from(c));
+            }
+            if title.is_none()
+                && v.get("type").and_then(|t| t.as_str()) == Some("user")
+                && let Some(text) = user_message_text(&v)
+            {
+                title = Some(text);
+            }
+            if cwd.is_some() && title.is_some() {
+                break;
+            }
+        }
+    }
+    let cwd = cwd.unwrap_or_else(|| path.parent().map(Path::to_path_buf).unwrap_or_default());
+    let title = title.unwrap_or_else(|| stem.split('-').next().unwrap_or(stem).to_string());
+    (cwd, title)
+}
+
+/// Extract plain text from a claude `message.content` (string, or an array of `{type,text}`).
+fn user_message_text(v: &Value) -> Option<String> {
+    let content = v.get("message")?.get("content")?;
+    let text = match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(text.chars().take(80).collect())
 }
 
 #[cfg(test)]
@@ -374,5 +467,39 @@ mod tests {
         assert!(json.contains("\"cwd\":\"/work\""));
         assert!(json.contains("\"vmux\""));
         assert!(json.contains("\"mcpServers\""));
+    }
+
+    #[test]
+    fn list_sessions_reads_sid_cwd_and_title_from_jsonl() {
+        let tmp = unique_tmp("claude-list");
+        let proj = tmp.join("-Users-me-proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("11111111-2222.jsonl"),
+            b"{\"type\":\"user\",\"cwd\":\"/Users/me/proj\",\"message\":{\"role\":\"user\",\"content\":\"fix the auth bug\"}}\n",
+        )
+        .unwrap();
+        std::fs::write(proj.join("agent-log.jsonl"), b"{}\n").unwrap();
+
+        let out = list_claude_sessions(&tmp);
+        assert_eq!(out.len(), 1, "agent-* excluded, one real session");
+        let s = &out[0];
+        assert_eq!(s.sid, "11111111-2222");
+        assert_eq!(s.cwd, PathBuf::from("/Users/me/proj"));
+        assert_eq!(s.title, "fix the auth bug");
+        assert!(s.cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_title_falls_back_to_short_sid() {
+        let tmp = unique_tmp("claude-list-fallback");
+        let proj = tmp.join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("abcdef01-9999.jsonl"), b"{\"type\":\"summary\"}\n").unwrap();
+        let out = list_claude_sessions(&tmp);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].title, "abcdef01");
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::client::cli::strategy::CliAgentStrategy;
+use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
@@ -94,6 +94,10 @@ impl CliAgentStrategy for CodexStrategy {
 
     fn detect_end_time(&self, _session_id: &str) -> bool {
         false
+    }
+
+    fn list_sessions(&self) -> Vec<ResumableSession> {
+        list_codex_sessions(&self.sessions_root())
     }
 }
 
@@ -231,6 +235,43 @@ fn walk_jsonl(root: &Path, visit: &mut dyn FnMut(&Path)) {
             visit(&path);
         }
     }
+}
+
+pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
+    let mut out = Vec::new();
+    walk_jsonl(root, &mut |path: &Path| {
+        let mtime = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return;
+        };
+        let Some(line) = text.lines().next() else {
+            return;
+        };
+        let Ok(head) = serde_json::from_str::<CodexHead>(line) else {
+            return;
+        };
+        if head.kind != "session_meta" {
+            return;
+        }
+        let title = head
+            .payload
+            .id
+            .split('-')
+            .next()
+            .unwrap_or(&head.payload.id)
+            .to_string();
+        out.push(ResumableSession {
+            kind: AgentKind::Codex,
+            sid: head.payload.id.clone(),
+            cwd: PathBuf::from(&head.payload.cwd),
+            mtime,
+            title,
+            cross_runtime: false,
+        });
+    });
+    out
 }
 
 #[cfg(test)]
@@ -430,5 +471,23 @@ mod tests {
     #[test]
     fn detect_end_time_always_false() {
         assert!(!CodexStrategy.detect_end_time("anything"));
+    }
+
+    #[test]
+    fn list_sessions_reads_session_meta() {
+        let tmp = unique_tmp("codex-list");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("sess.jsonl"),
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n",
+        )
+        .unwrap();
+        let out = list_codex_sessions(&tmp);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sid, "cx-1");
+        assert_eq!(out[0].cwd, PathBuf::from("/w/x"));
+        assert!(!out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

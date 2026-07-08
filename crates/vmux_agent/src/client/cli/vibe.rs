@@ -4,7 +4,7 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
-use crate::client::cli::strategy::CliAgentStrategy;
+use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, McpServerConfig};
 
@@ -97,6 +97,10 @@ impl CliAgentStrategy for VibeStrategy {
             return exit.end_time.is_some();
         }
         false
+    }
+
+    fn list_sessions(&self) -> Vec<ResumableSession> {
+        list_vibe_sessions(&self.sessions_root())
     }
 }
 
@@ -323,6 +327,45 @@ pub(crate) fn discover_vibe_session_id(
         }
     }
     best.map(|(_, id)| id)
+}
+
+pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(dirname) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !dirname.starts_with("session_") {
+            continue;
+        }
+        let Some(short_id) = dirname.rsplit('_').next() else {
+            continue;
+        };
+        if short_id.is_empty() {
+            continue;
+        }
+        let mtime = std::fs::metadata(&path)
+            .and_then(|m| m.created().or_else(|_| m.modified()))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let cwd = std::fs::read_to_string(path.join("meta.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<MetaJson>(&t).ok())
+            .map(|m| PathBuf::from(m.environment.working_directory))
+            .unwrap_or_default();
+        out.push(ResumableSession {
+            kind: AgentKind::Vibe,
+            sid: short_id.to_string(),
+            cwd,
+            mtime,
+            title: short_id.to_string(),
+            cross_runtime: false,
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -673,6 +716,24 @@ mod tests {
         };
         assert!(read_end("ended-id"));
         assert!(!read_end("live-id"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_reads_meta_json() {
+        let tmp = unique_tmp("vibe-list");
+        let sdir = tmp.join("session_vb-1");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(
+            sdir.join("meta.json"),
+            b"{\"environment\":{\"working_directory\":\"/w/y\"}}",
+        )
+        .unwrap();
+        let out = list_vibe_sessions(&tmp);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sid, "vb-1");
+        assert_eq!(out[0].cwd, PathBuf::from("/w/y"));
+        assert!(!out[0].cross_runtime);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
