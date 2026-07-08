@@ -455,11 +455,11 @@ struct CommandBarOpenRequest {
     should_dismiss_nav: bool,
     replace_active_stack: bool,
     url_override: Option<String>,
+    space_switch: bool,
 }
 
 fn command_bar_open_request(
     commands: impl IntoIterator<Item = AppCommand>,
-    spaces_page_url: &str,
 ) -> CommandBarOpenRequest {
     let mut request = CommandBarOpenRequest::default();
     for cmd in commands {
@@ -482,7 +482,8 @@ fn command_bar_open_request(
             }
             AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)) => {
                 request.should_toggle = true;
-                request.url_override = Some(spaces_page_url.to_string());
+                request.space_switch = true;
+                request.url_override = Some(String::new());
             }
             AppCommand::Layout(LayoutCommand::Stack(StackCommand::Close)) => {
                 request.should_dismiss = true;
@@ -552,6 +553,25 @@ fn command_bar_cancel_pending_stack_for_active_open(
     Some((stack, previous_stack))
 }
 
+/// Whether an open should focus the `vmux://start/` launcher input instead of opening
+/// the modal command bar. True only for a normal open (not a new-stack open) whose active
+/// page is the start launcher. A space-switch open (`<leader> s`) always uses the modal so
+/// the switcher behaves the same on the start page as everywhere else.
+fn command_bar_should_focus_start(
+    is_new_stack: bool,
+    space_switch: bool,
+    active_page_is_start: bool,
+) -> bool {
+    !is_new_stack && !space_switch && active_page_is_start
+}
+
+/// Whether a toggle-style open should (re)open the modal command bar: when it is currently
+/// closed, or always for a space-switch open so `<leader> s` re-drives space-switch mode
+/// even when the command bar is already visible (rather than no-opping).
+fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
+    !is_open || space_switch
+}
+
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     mut modal_q: Query<
@@ -606,14 +626,14 @@ fn handle_open_command_bar(
     let pages_snap = snapshot_params.p5().clone();
     let work_snap = snapshot_params.p6().clone();
 
-    let request =
-        command_bar_open_request(reader.read().cloned(), &spaces_snapshot.spaces_page_url);
+    let request = command_bar_open_request(reader.read().cloned());
     let mut should_open = false;
     let should_toggle = request.should_toggle;
     let should_dismiss = request.should_dismiss;
     let should_dismiss_nav = request.should_dismiss_nav;
     let replace_active_stack = request.replace_active_stack;
     let url_override = request.url_override;
+    let space_switch = request.space_switch;
 
     let mut active_stack_override = None;
     let canceled_pending_stack = {
@@ -744,7 +764,7 @@ fn handle_open_command_bar(
                 command_bar_modal_is_visible(n.display, *visibility, has_keyboard_target)
             })
             .unwrap_or(false);
-        if !is_open {
+        if command_bar_toggle_should_open(is_open, space_switch) {
             should_open = true;
         }
         // If already open, do nothing — the shortcut should not close the bar.
@@ -780,7 +800,9 @@ fn handle_open_command_bar(
                 })
             })
         });
-        if let Some(browser_e) = start_browser {
+        if command_bar_should_focus_start(is_new_stack, space_switch, start_browser.is_some())
+            && let Some(browser_e) = start_browser
+        {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 browser_e,
                 START_FOCUS_INPUT_EVENT,
@@ -901,7 +923,7 @@ fn handle_open_command_bar(
     } else {
         None
     };
-    let payload = build_command_bar_open_payload(
+    let mut payload = build_command_bar_open_payload(
         open_id,
         native_windowed,
         space_name,
@@ -914,6 +936,7 @@ fn handle_open_command_bar(
         bar_tabs,
         target,
     );
+    payload.space_switch = space_switch;
     let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
     let payload_bytes = event.payload.clone();
     let payload_bytes_len = payload_bytes.len();
@@ -982,6 +1005,7 @@ fn command_bar_open_payload(
         work_dirs,
         recent_files,
         target,
+        space_switch: false,
     }
 }
 
@@ -2299,37 +2323,46 @@ mod tests {
     }
 
     #[test]
-    fn space_open_command_prefills_spaces_url() {
-        let spaces_url = "vmux://spaces/";
-        let request = command_bar_open_request(
-            [AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open))],
-            spaces_url,
-        );
+    fn space_open_command_opens_space_switch_mode() {
+        let request = command_bar_open_request([AppCommand::Layout(LayoutCommand::Space(
+            SpaceCommand::Open,
+        ))]);
 
         assert!(request.should_toggle);
-        assert_eq!(request.url_override, Some(spaces_url.to_string()));
+        assert!(request.space_switch);
+        assert_eq!(request.url_override, Some(String::new()));
+    }
+
+    #[test]
+    fn command_bar_focuses_start_only_for_non_space_switch_open() {
+        assert!(command_bar_should_focus_start(false, false, true));
+        assert!(!command_bar_should_focus_start(false, true, true));
+        assert!(!command_bar_should_focus_start(true, false, true));
+        assert!(!command_bar_should_focus_start(false, false, false));
+    }
+
+    #[test]
+    fn space_switch_reopens_command_bar_even_when_visible() {
+        assert!(command_bar_toggle_should_open(false, false));
+        assert!(!command_bar_toggle_should_open(true, false));
+        assert!(command_bar_toggle_should_open(true, true));
+        assert!(command_bar_toggle_should_open(false, true));
     }
 
     #[test]
     fn open_in_new_stack_does_not_dismiss_command_bar() {
-        let request = command_bar_open_request(
-            [AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack { url: None },
-            ))],
-            "vmux://spaces/",
-        );
+        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Open(
+            OpenCommand::InNewStack { url: None },
+        ))]);
 
         assert!(!request.should_dismiss);
     }
 
     #[test]
     fn open_command_bar_forces_empty_url_override() {
-        let request = command_bar_open_request(
-            [AppCommand::Browser(BrowserCommand::Bar(
-                BrowserBarCommand::OpenCommandBar,
-            ))],
-            "vmux://spaces/",
-        );
+        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
+            BrowserBarCommand::OpenCommandBar,
+        ))]);
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, Some(String::new()));
@@ -2337,12 +2370,9 @@ mod tests {
 
     #[test]
     fn open_page_in_command_bar_leaves_url_override_unset_so_current_url_is_prefilled() {
-        let request = command_bar_open_request(
-            [AppCommand::Browser(BrowserCommand::Bar(
-                BrowserBarCommand::OpenPageInCommandBar,
-            ))],
-            "vmux://spaces/",
-        );
+        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
+            BrowserBarCommand::OpenPageInCommandBar,
+        ))]);
 
         assert!(request.should_toggle);
         assert_eq!(request.url_override, None);
@@ -2365,12 +2395,9 @@ mod tests {
     fn open_page_in_command_bar_cancels_pending_new_stack_context() {
         let pending_stack = Entity::from_bits(7);
         let previous_stack = Entity::from_bits(6);
-        let request = command_bar_open_request(
-            [AppCommand::Browser(BrowserCommand::Bar(
-                BrowserBarCommand::OpenPageInCommandBar,
-            ))],
-            "vmux://spaces/",
-        );
+        let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
+            BrowserBarCommand::OpenPageInCommandBar,
+        ))]);
         let mut ctx = NewStackContext {
             stack: Some(pending_stack),
             previous_stack: Some(previous_stack),

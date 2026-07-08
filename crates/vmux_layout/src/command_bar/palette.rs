@@ -4,7 +4,9 @@ use crate::command_bar::keyboard::{
     CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
-use crate::command_bar::results::{CommandBarResultItem as ResultItem, filter_results};
+use crate::command_bar::results::{
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, space_switch_results,
+};
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
     result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
@@ -76,7 +78,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         if last_open_id() != s.open_id {
             last_open_id.set(s.open_id);
             query.set(s.url.clone());
-            selected.set(0);
+            selected.set(if s.space_switch {
+                active_space_index(&s.spaces)
+            } else {
+                0
+            });
             nav_mode.set(false);
             path_completions.set(Vec::new());
             history_suggestions.set(Vec::new());
@@ -155,10 +161,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let work_dirs = state_val.work_dirs.clone();
     let recent_files = state_val.recent_files.clone();
     let open_target = state_val.target;
+    let space_switch = state_val.space_switch;
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
 
     let q = query();
-    let results = {
+    let results: Vec<ResultItem> = if space_switch {
+        space_switch_results(&spaces, &pages, &q)
+    } else {
         let history = history_suggestions();
         let r = filter_results(
             &q,
@@ -176,7 +185,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         } else {
             Vec::new()
         };
-        if completions.is_empty() {
+        let r = if completions.is_empty() {
             r
         } else {
             let mut combined: Vec<ResultItem> = completions
@@ -189,21 +198,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 .collect();
             combined.extend(r);
             combined
+        };
+        if matches!(variant, PaletteVariant::Start) {
+            r.into_iter()
+                .filter(|item| {
+                    !matches!(
+                        item,
+                        ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
+                            if url.trim_end_matches('/') == "vmux://start"
+                    )
+                })
+                .collect()
+        } else {
+            r
         }
-    };
-    let results: Vec<ResultItem> = if matches!(variant, PaletteVariant::Start) {
-        results
-            .into_iter()
-            .filter(|item| {
-                !matches!(
-                    item,
-                    ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
-                        if url.trim_end_matches('/') == "vmux://start"
-                )
-            })
-            .collect()
-    } else {
-        results
     };
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
@@ -316,13 +324,17 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
 
-    let placeholder = match variant {
-        PaletteVariant::Start => "Search or ask\u{2026}",
-        PaletteVariant::Modal => {
-            if is_new_tab {
-                "Search or type a URL, or select Terminal..."
-            } else {
-                "Type a URL, search tabs, or > for commands..."
+    let placeholder = if space_switch {
+        "Switch space\u{2026}"
+    } else {
+        match variant {
+            PaletteVariant::Start => "Search or ask\u{2026}",
+            PaletteVariant::Modal => {
+                if is_new_tab {
+                    "Search or type a URL, or select Terminal..."
+                } else {
+                    "Type a URL, search tabs, or > for commands..."
+                }
             }
         }
     };
@@ -438,6 +450,27 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 e.prevent_default();
                                 return;
                             }
+                            if space_switch
+                                && !ctrl
+                                && q.trim().is_empty()
+                                && let Key::Character(s) = e.key()
+                                && let Some(idx) = s
+                                    .chars()
+                                    .next()
+                                    .filter(|c| c.is_ascii_digit())
+                                    .and_then(|c| c.to_digit(10))
+                            {
+                                let space_count = results
+                                    .iter()
+                                    .filter(|r| matches!(r, ResultItem::Space { .. }))
+                                    .count();
+                                if (idx as usize) < space_count {
+                                    e.prevent_default();
+                                    selected.set(idx as usize);
+                                    nav_mode.set(true);
+                                    return;
+                                }
+                            }
                             let go_down = (e.key() == Key::ArrowDown && !ctrl)
                                 || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
                             let go_up = (e.key() == Key::ArrowUp && !ctrl)
@@ -457,21 +490,27 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             {
                                 on_dismiss.call(());
                             } else if e.key() == Key::Enter {
-                                let prefer_page = matches!(
-                                    results.get(sel),
-                                    Some(ResultItem::Page { url, .. })
-                                        if q.trim().starts_with("vmux://")
-                                            && url.starts_with(q.trim())
-                                );
-                                if !prefer_page
-                                    && should_open_typed_query_on_enter(open_target, nav_mode(), &q)
-                                {
-                                    on_close.call(());
-                                    emit_action_with_target("open", &q, open_target);
-                                } else if let Some(item) = results.get(sel) {
-                                    execute(item);
-                                } else if !q.is_empty() {
-                                    emit_action_with_target("open", &q, open_target);
+                                if space_switch {
+                                    if let Some(item) = results.get(sel) {
+                                        execute(item);
+                                    }
+                                } else {
+                                    let prefer_page = matches!(
+                                        results.get(sel),
+                                        Some(ResultItem::Page { url, .. })
+                                            if q.trim().starts_with("vmux://")
+                                                && url.starts_with(q.trim())
+                                    );
+                                    if !prefer_page
+                                        && should_open_typed_query_on_enter(open_target, nav_mode(), &q)
+                                    {
+                                        on_close.call(());
+                                        emit_action_with_target("open", &q, open_target);
+                                    } else if let Some(item) = results.get(sel) {
+                                        execute(item);
+                                    } else if !q.is_empty() {
+                                        emit_action_with_target("open", &q, open_target);
+                                    }
                                 }
                             }
                         },
@@ -521,6 +560,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                             },
                             ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
+                                if space_switch {
+                                    span { class: "w-5 shrink-0 text-center font-mono text-xs text-muted-foreground", "{i}" }
+                                }
                                 div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                     div { class: "flex min-w-0 items-center gap-2",
                                         span { class: result_primary_text_class(), "{name}" }
