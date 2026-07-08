@@ -37,6 +37,7 @@ pub fn Page() -> Element {
 
     use_effect(|| {
         install_window_focus_refocus();
+        install_keep_input_focused_on_click();
         focus_start_input();
     });
 
@@ -126,5 +127,61 @@ fn install_window_focus_refocus() {
     }) as Box<dyn FnMut()>);
     let target: &web_sys::EventTarget = window.as_ref();
     let _ = target.add_event_listener_with_callback("focus", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+/// Keep the caret in the launcher input no matter where the user clicks. The start page has
+/// nothing to interact with but the input and the result rows, so a click on the hero
+/// background (or the card padding) should never blur the input. A capture-phase `mousedown`
+/// listener cancels the default focus shift everywhere except the input itself and the results
+/// list — result clicks still fire (`preventDefault` on `mousedown` does not cancel the click),
+/// so selecting a result keeps working. Installed once.
+fn install_keep_input_focused_on_click() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let already_bound = js_sys::Reflect::get(&window, &JsValue::from_str("_startClickBound"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false);
+    if already_bound {
+        return;
+    }
+    let _ = js_sys::Reflect::set(
+        &window,
+        &JsValue::from_str("_startClickBound"),
+        &JsValue::TRUE,
+    );
+    let Some(document) = window.document() else {
+        return;
+    };
+
+    let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        if let Some(el) = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        {
+            let on_input = el.closest("#command-bar-input").ok().flatten().is_some();
+            let on_results = el.closest("#command-bar-results").ok().flatten().is_some();
+            if on_input || on_results {
+                return;
+            }
+        }
+        e.prevent_default();
+        if let Some(input) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("command-bar-input"))
+        {
+            let input: web_sys::HtmlInputElement = input.unchecked_into();
+            let _ = input.focus();
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    let target: &web_sys::EventTarget = document.as_ref();
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+        "mousedown",
+        closure.as_ref().unchecked_ref(),
+        &opts,
+    );
     closure.forget();
 }
