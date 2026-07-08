@@ -2,7 +2,9 @@
 
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
-    ChatResume, ChatSnapshot, ChatSubmit,
+    ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
+    SlashCommandEntry, SlashCommands,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -42,6 +44,11 @@ pub fn Page() -> Element {
     let mut last_top = use_signal(|| 0i32);
     let mut queued = use_signal(Vec::<String>::new);
     let mut paused = use_signal(|| false);
+    // Slash-menu state: `resume_mode` false = command list (typing `/…`), true = session picker.
+    let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
+    let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
+    let mut menu_sel = use_signal(|| 0usize);
+    let mut resume_mode = use_signal(|| false);
 
     use_future(move || async move {
         loop {
@@ -91,6 +98,14 @@ pub fn Page() -> Element {
         }
     });
 
+    let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
+        slash_cmds.set(s.commands.clone());
+    });
+    let _sess = use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
+        sessions.set(s.sessions.clone());
+        menu_sel.set(0);
+    });
+
     // Drive the document (→ tab) title from the agent + its live run-state, so the user can see
     // what each agent is doing without opening the pane.
     use_effect(move || {
@@ -119,6 +134,20 @@ pub fn Page() -> Element {
     } else {
         format!("background:{}", accent())
     };
+
+    let draft_val = draft();
+    let menu_open = slash_query(&draft_val).is_some() && !resume_mode();
+    let session_menu_open = resume_mode() && !sessions.read().is_empty();
+    let filtered_cmds: Vec<SlashCommandEntry> = {
+        let q = slash_query(&draft_val).unwrap_or("").to_lowercase();
+        slash_cmds
+            .read()
+            .iter()
+            .filter(|c| c.name.starts_with(&q))
+            .cloned()
+            .collect()
+    };
+    let cmd_menu_open = menu_open && !filtered_cmds.is_empty();
 
     rsx! {
         main {
@@ -243,7 +272,31 @@ pub fn Page() -> Element {
             }
 
             div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
-                div { class: "mx-auto flex max-w-3xl flex-col gap-2",
+                div { class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+                    if cmd_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            for (i , c) in filtered_cmds.iter().enumerate() {
+                                div {
+                                    key: "sc{i}",
+                                    class: if i == menu_sel() { "flex items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex items-baseline gap-3 px-3.5 py-2 text-sm" },
+                                    span { class: "font-medium text-foreground", "/{c.name}" }
+                                    span { class: "text-xs text-muted-foreground", "{c.description}" }
+                                }
+                            }
+                        }
+                    }
+                    if session_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            for (i , s) in sessions.read().iter().enumerate() {
+                                div {
+                                    key: "rs{i}",
+                                    class: if i == menu_sel() { "flex flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex flex-col gap-0.5 px-3.5 py-2" },
+                                    span { class: "truncate text-sm text-foreground", "{s.title}" }
+                                    span { class: "truncate text-xs text-muted-foreground", "{s.subtitle}" }
+                                }
+                            }
+                        }
+                    }
                     if !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for (qi , qtext) in queued.read().iter().enumerate() {
@@ -299,6 +352,66 @@ pub fn Page() -> Element {
                             oninput: move |e| draft.set(e.value()),
                             onkeydown: move |e| {
                                 let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+                                let draft_now = draft.peek().clone();
+                                let sess_open = *resume_mode.peek() && !sessions.peek().is_empty();
+                                let cmd_items: Vec<SlashCommandEntry> = if slash_query(&draft_now)
+                                    .is_some()
+                                    && !*resume_mode.peek()
+                                {
+                                    let q = slash_query(&draft_now).unwrap_or("").to_lowercase();
+                                    slash_cmds
+                                        .peek()
+                                        .iter()
+                                        .filter(|c| c.name.starts_with(&q))
+                                        .cloned()
+                                        .collect()
+                                } else {
+                                    Vec::new()
+                                };
+                                let any_menu = !cmd_items.is_empty() || sess_open;
+                                let len = if sess_open {
+                                    sessions.peek().len()
+                                } else {
+                                    cmd_items.len()
+                                };
+
+                                if any_menu && matches!(e.key(), Key::ArrowDown | Key::ArrowUp) {
+                                    e.prevent_default();
+                                    if len > 0 {
+                                        let cur = *menu_sel.peek();
+                                        let next = match e.key() {
+                                            Key::ArrowDown => (cur + 1) % len,
+                                            _ => (cur + len - 1) % len,
+                                        };
+                                        menu_sel.set(next);
+                                    }
+                                    return;
+                                }
+                                if any_menu && e.key() == Key::Enter && !e.modifiers().shift() {
+                                    e.prevent_default();
+                                    let sel = *menu_sel.peek();
+                                    if sess_open {
+                                        if let Some(s) = sessions.peek().get(sel) {
+                                            let _ = try_cef_bin_emit_rkyv(&ResumeSession {
+                                                kind: s.kind.clone(),
+                                                sid: s.sid.clone(),
+                                                cwd: s.cwd.clone(),
+                                            });
+                                        }
+                                        resume_mode.set(false);
+                                        draft.set(String::new());
+                                    } else if let Some(c) = cmd_items.get(sel) {
+                                        run_slash_command(&c.name, resume_mode, draft);
+                                    }
+                                    return;
+                                }
+                                if any_menu && e.key() == Key::Escape {
+                                    e.prevent_default();
+                                    resume_mode.set(false);
+                                    draft.set(String::new());
+                                    return;
+                                }
+
                                 if e.key() == Key::Enter && !e.modifiers().shift() {
                                     e.prevent_default();
                                     do_submit(draft, at_bottom);
@@ -355,6 +468,38 @@ pub fn Page() -> Element {
                 }
             }
         }
+    }
+}
+
+/// A draft is in slash mode when it is a single `/token` (a leading slash, no whitespace yet).
+fn slash_query(draft: &str) -> Option<&str> {
+    let d = draft.strip_prefix('/')?;
+    if d.contains(char::is_whitespace) {
+        None
+    } else {
+        Some(d)
+    }
+}
+
+/// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
+/// current session to the other runtime. Unknown names are ignored (the raw text still submits
+/// via the normal Enter path).
+fn run_slash_command(name: &str, mut resume_mode: Signal<bool>, mut draft: Signal<String>) {
+    match name {
+        "resume" => {
+            let _ = try_cef_bin_emit_rkyv(&ResumeListRequest);
+            resume_mode.set(true);
+            draft.set(String::new());
+        }
+        "cli" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
+            draft.set(String::new());
+        }
+        "acp" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "acp".into() });
+            draft.set(String::new());
+        }
+        _ => {}
     }
 }
 
