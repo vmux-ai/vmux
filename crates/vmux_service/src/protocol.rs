@@ -165,6 +165,13 @@ pub enum AgentCommand {
     CreateWorktree {
         anchor: ProcessId,
     },
+    /// The calling CLI agent finished a turn (fired from its `Stop` hook). Resolved to the agent
+    /// via `anchor`; the GUI raises `AgentAttention` so the follow-pane auto-tidy and the
+    /// done-dot fire at turn-end (the terminal bell only fires on idle/permission, not turn-end).
+    /// Appended at the end to keep rkyv's positional enum discriminants stable.
+    TurnEnded {
+        anchor: ProcessId,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

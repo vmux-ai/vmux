@@ -200,6 +200,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     agent_bell_to_attention,
+                    handle_agent_turn_ended,
                     tidy_on_agent_attention,
                     mark_agent_done,
                     clear_agent_done,
@@ -1017,6 +1018,29 @@ fn handle_agent_file_touch(
     }
 }
 
+/// CLI agents fire this from their `Stop` hook at turn-end: resolve the agent terminal by its
+/// `anchor` `ProcessId` and raise `AgentAttention`, which drives the follow-pane auto-tidy
+/// (`tidy_on_agent_attention`) and the done-dot. The terminal bell only fires on
+/// idle/permission, so it is not a reliable turn-end signal.
+fn handle_agent_turn_ended(
+    mut reader: MessageReader<AgentCommandRequest>,
+    agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
+    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::TurnEnded { anchor } = &request.command else {
+            continue;
+        };
+        if let Some((entity, _)) = agents.iter().find(|(_, pid)| *pid == anchor) {
+            attention.write(vmux_core::notify::AgentAttention {
+                entity,
+                title: None,
+                body: None,
+            });
+        }
+    }
+}
+
 /// Tidy one agent's `file://` follow-pane (the sibling `file:` pane of `agent_pane`): when it
 /// holds more than `tidy_files_max` previews, keep changed files + the active one and close
 /// the rest (silently if `tidy_files_auto`, else tag the pane for the confirm dialog). Shared
@@ -1276,6 +1300,7 @@ fn handle_agent_commands(
         };
         let result = match &request.command {
             ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
+            ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
                     serde_json::json!({})
@@ -3319,6 +3344,47 @@ mod tests {
             .resource::<bevy::ecs::message::Messages<vmux_core::notify::AgentAttention>>();
         let mut cursor = messages.get_cursor();
         cursor.read(messages).map(|a| a.entity).collect()
+    }
+
+    fn turn_end_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, handle_agent_turn_ended);
+        app
+    }
+
+    fn send_turn_ended(app: &mut App, anchor: vmux_service::protocol::ProcessId) {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: vmux_service::protocol::AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::TurnEnded { anchor },
+            });
+    }
+
+    #[test]
+    fn turn_ended_resolves_to_agent_attention() {
+        let mut app = turn_end_test_app();
+        let pid = vmux_service::protocol::ProcessId::new();
+        let agent = spawn_agent_with_pid(&mut app, pid);
+        send_turn_ended(&mut app, pid);
+        app.update();
+        assert_eq!(attentions(&app), vec![agent]);
+    }
+
+    #[test]
+    fn turn_ended_unknown_anchor_emits_nothing() {
+        let mut app = turn_end_test_app();
+        let _agent = spawn_agent_with_pid(&mut app, vmux_service::protocol::ProcessId::new());
+        send_turn_ended(&mut app, vmux_service::protocol::ProcessId::new());
+        app.update();
+        assert!(attentions(&app).is_empty());
     }
 
     #[test]
