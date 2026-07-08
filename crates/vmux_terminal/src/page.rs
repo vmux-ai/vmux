@@ -427,10 +427,13 @@ pub fn Page() -> Element {
                     style: "height:{spacer_h}px;",
                     {
                         let base_rows = rows();
+                        let cur = cursor();
                         rsx! {
                             for (doc_row, line) in base_rows.iter() {
                                 {
                                     let top = *doc_row as f64 * ch;
+                                    let row_cursor =
+                                        cur.as_ref().filter(|c| c.row == *doc_row).cloned();
                                     rsx! {
                                         div {
                                             key: "{doc_row}",
@@ -440,34 +443,11 @@ pub fn Page() -> Element {
                                                 line: *line,
                                                 selection,
                                                 cols,
+                                                cursor: row_cursor,
                                             }
                                         }
                                     }
                                 }
-                            }
-                            {
-                                cursor().filter(|c| c.visible).map(|c| {
-                                    let cstyle = theme()
-                                        .map(|t| t.cursor_style.clone())
-                                        .unwrap_or_else(|| "block".to_string());
-                                    let top = c.row as f64 * ch;
-                                    let left = c.col as f64 * cw;
-                                    let (w, h, oy, show_ch) = match cstyle.as_str() {
-                                        "beam" | "bar" => (2.0, ch, 0.0, false),
-                                        "underline" => (cw, 2.0, ch - 2.0, false),
-                                        _ => (cw, ch, 0.0, true),
-                                    };
-                                    let ctop = top + oy;
-                                    rsx! {
-                                        div {
-                                            class: "pointer-events-none absolute whitespace-pre",
-                                            style: "left:{left}px;top:{ctop}px;width:{w}px;height:{h}px;background:var(--term-cursor);color:var(--term-bg);overflow:hidden;",
-                                            if show_ch {
-                                                "{c.ch}"
-                                            }
-                                        }
-                                    }
-                                })
                             }
                         }
                     }
@@ -499,6 +479,7 @@ fn TerminalRow(
     line: Signal<TermLine>,
     selection: Signal<Option<TermSelectionRange>>,
     cols: Signal<u16>,
+    cursor: Option<TermCursor>,
 ) -> Element {
     let line = line();
     let selected_cols = row_selection_cols(&selection(), row_idx, cols());
@@ -517,7 +498,7 @@ fn TerminalRow(
                 }
             }
             for (span_idx, span) in line.spans.iter().enumerate() {
-                {render_span(span, span_idx, None, "block")}
+                {render_span(span, span_idx, cursor.as_ref(), "block")}
             }
             if let Some((sel_start, sel_end)) = selected_cols {
                 div {

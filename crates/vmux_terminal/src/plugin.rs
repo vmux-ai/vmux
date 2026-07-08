@@ -1264,6 +1264,7 @@ fn poll_service_messages(
     launches: Query<&crate::launch::TerminalLaunch>,
     agent_sessions: Query<&vmux_core::agent::AgentSession>,
     output_seen: Query<(), With<ShellOutputSeen>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
 ) {
     let Some(service) = service else { return };
 
@@ -1311,7 +1312,11 @@ fn poll_service_messages(
 
     // Drain service messages and dispatch
     let mut restarted_missing_processes = Vec::new();
-    for msg in service.0.drain() {
+    let (messages, capped) = service.0.drain_with_status();
+    if capped && let Some(proxy) = proxy.as_deref() {
+        let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+    }
+    for msg in messages {
         match msg {
             ServiceMessage::ProcessCreated { process_id, pid } => {
                 let entity = (&awaiting_create)

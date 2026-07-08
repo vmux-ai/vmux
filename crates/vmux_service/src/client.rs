@@ -240,6 +240,16 @@ impl ServiceHandle {
 
     /// Drain a bounded batch of service messages (non-blocking).
     pub fn drain(&self) -> Vec<ServiceMessage> {
+        self.drain_with_status().0
+    }
+
+    /// Drain a bounded batch, also reporting whether the per-frame cap was hit.
+    ///
+    /// When the returned flag is `true` the channel filled the whole batch and
+    /// more messages likely remain; the caller must wake the event loop again so
+    /// the tail is processed on the next frame instead of stalling until the
+    /// reactive timeout.
+    pub fn drain_with_status(&self) -> (Vec<ServiceMessage>, bool) {
         let rx = self.msg_rx.lock().unwrap();
         drain_service_messages_bounded(&rx)
     }
@@ -247,15 +257,15 @@ impl ServiceHandle {
 
 fn drain_service_messages_bounded(
     rx: &std::sync::mpsc::Receiver<ServiceMessage>,
-) -> Vec<ServiceMessage> {
+) -> (Vec<ServiceMessage>, bool) {
     let mut msgs = Vec::with_capacity(MAX_SERVICE_MESSAGES_PER_DRAIN);
     for _ in 0..MAX_SERVICE_MESSAGES_PER_DRAIN {
         let Ok(msg) = rx.try_recv() else {
-            break;
+            return (msgs, false);
         };
         msgs.push(msg);
     }
-    msgs
+    (msgs, true)
 }
 
 #[cfg(test)]
@@ -298,9 +308,30 @@ mod tests {
             .expect("service message should queue");
         }
 
-        let drained = drain_service_messages_bounded(&rx);
+        let (drained, capped) = drain_service_messages_bounded(&rx);
 
         assert_eq!(drained.len(), MAX_SERVICE_MESSAGES_PER_DRAIN);
+        assert!(
+            capped,
+            "hitting the cap must report capped so the caller re-wakes"
+        );
         assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn service_message_drain_reports_not_capped_when_drained_dry() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for _ in 0..3 {
+            tx.send(ServiceMessage::ProcessList {
+                processes: Vec::new(),
+            })
+            .expect("service message should queue");
+        }
+
+        let (drained, capped) = drain_service_messages_bounded(&rx);
+
+        assert_eq!(drained.len(), 3);
+        assert!(!capped);
+        assert!(rx.try_recv().is_err());
     }
 }
