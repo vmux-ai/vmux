@@ -79,26 +79,48 @@ pub fn Page() -> Element {
     }
 }
 
-/// Focus the launcher input and select its contents, deferred one animation frame so it lands
-/// after any pending native focus/composite settles — a synchronous focus can race CEF granting
-/// the OSR browser keyboard focus and be silently dropped.
+/// Focus the launcher input, re-asserting focus once per animation frame until the document
+/// actually holds focus. CEF grants the OSR browser native keyboard focus (`SetFocus`) several
+/// frames after the page mounts — a single deferred `input.focus()` runs too early and is dropped,
+/// and CEF OSR emits no JS `window` focus event to hook — so a bounded retry keeps the input as
+/// the active element through that window and lands the caret as soon as native focus arrives.
 fn focus_start_input() {
+    focus_start_input_retry(90);
+}
+
+fn focus_start_input_retry(frames_left: u32) {
     let Some(window) = web_sys::window() else {
         return;
     };
     let cb = Closure::once_into_js(move || {
-        let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("command-bar-input"))
-        else {
-            return;
-        };
-        let input: web_sys::HtmlInputElement = el.unchecked_into();
-        let _ = input.focus();
-        let len = input.value().len() as u32;
-        let _ = input.set_selection_range(0, len);
+        if !try_focus_command_input_once() && frames_left > 1 {
+            focus_start_input_retry(frames_left - 1);
+        }
     });
     let _ = window.request_animation_frame(cb.unchecked_ref());
+}
+
+/// Focus the input if it is not already the active element; returns true once the document holds
+/// focus and the input is active (caret visible), so the retry loop can stop.
+fn try_focus_command_input_once() -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return true;
+    };
+    let Some(el) = doc.get_element_by_id("command-bar-input") else {
+        return false;
+    };
+    let input: web_sys::HtmlInputElement = el.unchecked_into();
+    let active_is_input = doc
+        .active_element()
+        .map(|a| a.id() == "command-bar-input")
+        .unwrap_or(false);
+    if !active_is_input {
+        let _ = input.focus();
+        let len = input.value().len() as u32;
+        let _ = input.set_selection_range(len, len);
+    }
+    let has_focus = doc.has_focus().unwrap_or(false);
+    has_focus && active_is_input
 }
 
 /// Refocus the launcher input whenever this page's window (re)gains native focus. CEF grants an
