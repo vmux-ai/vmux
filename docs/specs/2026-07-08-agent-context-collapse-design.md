@@ -61,8 +61,9 @@ For each assistant turn:
 
 ## Data model (brain → dumb frontend)
 
-Carried as JSON inside the existing `ChatSnapshot` string field (renamed
-`messages_json` → `items_json`). `ChatSnapshot` stays an rkyv bin-event payload;
+Carried as JSON inside the existing `ChatSnapshot.messages_json` string field
+(kept that name — its value changes from `Vec<ChatMessage>` to `Vec<ChatItem>`,
+only the doc comment updates). `ChatSnapshot` stays an rkyv bin-event payload;
 both ends are always rebuilt and shipped together, so no persisted
 `STORE_SCHEMA_VERSION` bump is involved.
 
