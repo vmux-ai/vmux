@@ -16,15 +16,11 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatResume, ChatSnapshot,
     ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry,
-    SlashCommands,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
+    SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::AcpSession;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
-#[cfg(not(target_arch = "wasm32"))]
-use vmux_core::agent::{AgentKind, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
@@ -32,7 +28,11 @@ use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]
+use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
+#[cfg(not(target_arch = "wasm32"))]
 use vmux_core::PageMetadata;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::agent::{AgentKind, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::team::Profile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -76,7 +76,11 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_runtime_switch_request)
             .add_systems(
                 Update,
-                (push_chat_to_page, push_chat_on_ready, push_slash_commands_on_ready),
+                (
+                    push_chat_to_page,
+                    push_chat_on_ready,
+                    push_slash_commands_on_ready,
+                ),
             );
     }
 }
@@ -471,9 +475,13 @@ fn on_runtime_switch_request(
         return;
     };
     let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
-    let Some((target_url, cwd)) =
-        runtime_switch_target(&acp.agent_id, acp.resume.as_deref(), &acp.cwd, &to, &acp_ids)
-    else {
+    let Some((target_url, cwd)) = runtime_switch_target(
+        &acp.agent_id,
+        acp.resume.as_deref(),
+        &acp.cwd,
+        &to,
+        &acp_ids,
+    ) else {
         bevy::log::warn!(
             "runtime switch to '{to}' unavailable for ACP agent '{}' (no shared session id yet)",
             acp.agent_id

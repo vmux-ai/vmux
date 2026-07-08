@@ -31,7 +31,10 @@ impl AgentStrategies {
 
     /// All resumable sessions across every registered CLI strategy, newest-first, deduped.
     pub fn list_all_sessions(&self) -> Vec<ResumableSession> {
-        let all = self.cli_strategies().flat_map(|s| s.list_sessions()).collect();
+        let all = self
+            .cli_strategies()
+            .flat_map(|s| s.list_sessions())
+            .collect();
         sort_sessions(all)
     }
 }

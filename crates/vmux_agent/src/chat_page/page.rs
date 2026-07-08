@@ -3,8 +3,8 @@
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
     ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
-    SlashCommandEntry, SlashCommands,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -101,10 +101,11 @@ pub fn Page() -> Element {
     let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
         slash_cmds.set(s.commands.clone());
     });
-    let _sess = use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
-        sessions.set(s.sessions.clone());
-        menu_sel.set(0);
-    });
+    let _sess =
+        use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
+            sessions.set(s.sessions.clone());
+            menu_sel.set(0);
+        });
 
     // Drive the document (→ tab) title from the agent + its live run-state, so the user can see
     // what each agent is doing without opening the pane.

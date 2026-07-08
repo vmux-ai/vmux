@@ -496,7 +496,11 @@ mod tests {
         let tmp = unique_tmp("claude-list-fallback");
         let proj = tmp.join("proj");
         std::fs::create_dir_all(&proj).unwrap();
-        std::fs::write(proj.join("abcdef01-9999.jsonl"), b"{\"type\":\"summary\"}\n").unwrap();
+        std::fs::write(
+            proj.join("abcdef01-9999.jsonl"),
+            b"{\"type\":\"summary\"}\n",
+        )
+        .unwrap();
         let out = list_claude_sessions(&tmp);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].title, "abcdef01");
