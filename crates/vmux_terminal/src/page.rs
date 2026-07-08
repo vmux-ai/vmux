@@ -42,6 +42,7 @@ pub fn Page() -> Element {
     let mut service_error = use_signal(String::new);
     let mut loading = use_signal(|| None::<(String, String)>);
     let mut prompt_draft = use_signal(|| (String::new(), false));
+    let client_h = use_signal(|| 0.0f64);
 
     let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
         SERVICE_UNAVAILABLE_EVENT,
@@ -99,6 +100,7 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         let _ = total_rows();
+        let _ = client_h();
         if following() {
             pin_scroll_to_bottom();
         }
@@ -141,7 +143,7 @@ pub fn Page() -> Element {
     let mut wheel_accum = use_signal(|| 0.0f64);
     // Set up character measurement span and ResizeObserver (runs once after mount).
     use_effect(move || {
-        setup_measurement(cell_dims);
+        setup_measurement(cell_dims, client_h);
     });
 
     let theme_style = {
@@ -193,7 +195,13 @@ pub fn Page() -> Element {
     } else {
         "overflow-auto"
     };
-    let spacer_h = total_rows() as f64 * ch;
+    let content_h = total_rows() as f64 * ch;
+    let bottom_pad = if ch > 0.0 && content_h + 2.0 * padding > client_h() {
+        vmux_core::scroll::follow_bottom_pad(client_h() as f32, padding as f32, ch as f32) as f64
+    } else {
+        0.0
+    };
+    let spacer_h = content_h + bottom_pad;
 
     rsx! {
         div {
@@ -559,7 +567,7 @@ fn TerminalRow(
 /// Create a hidden measurement span, measure character dimensions, set CSS
 /// custom properties, emit a resize event to Bevy, and install a
 /// ResizeObserver to repeat on layout changes.
-fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
+fn setup_measurement(cell_dims: Signal<(f64, f64)>, client_h: Signal<f64>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -586,7 +594,7 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     measure
         .set_attribute(
             "style",
-            "position:absolute;visibility:hidden;white-space:pre;font:inherit",
+            "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
         )
         .unwrap();
     measure.set_attribute("id", MEASURE_ID).unwrap();
@@ -595,12 +603,12 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     container.append_child(&measure).unwrap();
 
     // Run initial measurement.
-    do_measure(cell_dims);
+    do_measure(cell_dims, client_h);
 
     // Install ResizeObserver on container + measure span to catch both
     // viewport resizes and font-load-triggered reflows.
     let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        do_measure(cell_dims);
+        do_measure(cell_dims, client_h);
     }) as Box<dyn FnMut(JsValue)>);
 
     if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
@@ -615,7 +623,7 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
 /// Measure character dimensions from the hidden span, update CSS custom
 /// properties on the container, update the Dioxus signal, and emit a
 /// TermResizeEvent to the Bevy host.
-fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
+fn do_measure(mut cell_dims: Signal<(f64, f64)>, mut client_h: Signal<f64>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -666,8 +674,10 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
         })
         .unwrap_or((0.0, 0.0));
 
+    let viewport_client_h = container.client_height() as f64;
     let vw = container.client_width() as f64 - pad_x;
-    let vh = container.client_height() as f64 - pad_y;
+    let vh = viewport_client_h - pad_y;
+    client_h.set(viewport_client_h);
 
     let _ = try_cef_bin_emit_rkyv(&TermResizeEvent {
         char_width: cw as f32,
