@@ -17,7 +17,7 @@ pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
     rkyv::Deserialize,
 )]
 pub struct ChatSnapshot {
-    /// `serde_json` of `Vec<ChatMessage>` (shape matches `vmux_service::message::Message`).
+    /// `serde_json` of `Vec<ChatItem>` (user bubbles + grouped assistant turns).
     pub messages_json: String,
     /// `idle` | `streaming` | `awaiting` | `errored`.
     pub status: String,
@@ -246,24 +246,8 @@ pub struct RuntimeSwitchRequest {
     pub to: String,
 }
 
-/// Page-side mirror of `vmux_service::message::Message` (which is native-only). The JSON
-/// representation is identical, so the page deserializes `messages_json` into this.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum ChatMessage {
-    User {
-        text: String,
-    },
-    Assistant {
-        blocks: Vec<ChatBlock>,
-    },
-    ToolResult {
-        call_id: String,
-        content: String,
-        is_error: bool,
-    },
-}
-
-/// Mirror of `vmux_service::message::AssistantBlock`.
+/// The page's block type inside a [`ChatTurn`]. Mirrors `vmux_service::message::AssistantBlock`
+/// plus `ToolResult`, which `group_turns` folds in from the top-level tool-result message.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatBlock {
     Text(String),
@@ -282,6 +266,10 @@ pub enum ChatBlock {
     Plan {
         steps: Vec<ChatPlanStep>,
     },
+    ToolResult {
+        content: String,
+        is_error: bool,
+    },
 }
 
 /// Mirror of `vmux_service::message::PlanStep`.
@@ -290,6 +278,54 @@ pub struct ChatPlanStep {
     pub content: String,
     pub status: String,
 }
+
+/// A rendered conversation entry: a user bubble or a grouped assistant turn. Built backend by
+/// `group_turns`, carried as JSON in [`ChatSnapshot::messages_json`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum ChatItem {
+    User { text: String },
+    Turn(ChatTurn),
+}
+
+/// One assistant turn: its collapsed step tree, its inline prose answer, and run-state.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChatTurn {
+    /// Thinking / tool-use / tool-result / plan / diff — the collapsible "context tree".
+    pub steps: Vec<ChatBlock>,
+    /// Assistant prose — always rendered inline, never hidden.
+    pub answer: Vec<ChatBlock>,
+    /// True only for the live (tail) turn while the run is active.
+    pub running: bool,
+    /// Final wall-clock seconds for a turn that finished this process; `None` otherwise.
+    pub duration_secs: Option<u32>,
+    /// `steps.len()`, sent explicitly for the header label.
+    pub step_count: u32,
+}
+
+/// The curated verbs the running-turn header cycles through (owned by the shared contract, not
+/// the view). The page picks one at random every few seconds while streaming.
+pub const WORKING_VERBS: &[&str] = &[
+    "Working",
+    "Thinking",
+    "Pondering",
+    "Noodling",
+    "Percolating",
+    "Conjuring",
+    "Cooking",
+    "Brewing",
+    "Musing",
+    "Ruminating",
+    "Scheming",
+    "Synthesizing",
+    "Tinkering",
+    "Churning",
+    "Vibing",
+    "Simmering",
+    "Crafting",
+    "Divining",
+    "Mulling",
+    "Spelunking",
+];
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
@@ -318,15 +354,44 @@ mod tests {
     }
 
     #[test]
-    fn chat_message_mirror_matches_service_message_json() {
-        // The page deserializes the native Message JSON into ChatMessage; the shapes must match.
-        let json = r#"[{"Assistant":{"blocks":[{"Text":"hi"},{"ToolUse":{"call_id":"c","name":"run","args":"{}"}}]}}]"#;
-        let parsed: Vec<ChatMessage> = serde_json::from_str(json).unwrap();
-        assert_eq!(parsed.len(), 1);
-        match &parsed[0] {
-            ChatMessage::Assistant { blocks } => assert_eq!(blocks.len(), 2),
-            _ => panic!("expected assistant"),
-        }
+    fn chat_item_turn_roundtrip() {
+        let items = vec![
+            ChatItem::User { text: "hi".into() },
+            ChatItem::Turn(ChatTurn {
+                steps: vec![
+                    ChatBlock::Thinking("hmm".into()),
+                    ChatBlock::ToolResult {
+                        content: "ok".into(),
+                        is_error: false,
+                    },
+                ],
+                answer: vec![ChatBlock::Text("done".into())],
+                running: false,
+                duration_secs: Some(12),
+                step_count: 2,
+            }),
+        ];
+        let json = serde_json::to_string(&items).unwrap();
+        let back: Vec<ChatItem> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 2);
+        let ChatItem::Turn(turn) = &back[1] else {
+            panic!("expected turn")
+        };
+        assert_eq!(turn.step_count, 2);
+        assert_eq!(turn.duration_secs, Some(12));
+        assert_eq!(turn.answer.len(), 1);
+        assert!(matches!(
+            turn.steps[1],
+            ChatBlock::ToolResult {
+                is_error: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn working_verbs_nonempty() {
+        assert!(!WORKING_VERBS.is_empty());
     }
 
     #[test]

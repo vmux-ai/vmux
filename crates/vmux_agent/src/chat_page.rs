@@ -6,6 +6,9 @@
 pub(crate) mod composer;
 pub mod event;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod turns;
+
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
@@ -24,6 +27,8 @@ use crate::chat_page::event::{
     SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
+use crate::chat_page::turns::group_turns;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::AcpSession;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{AgentMessages, AgentSession, PromptQueue};
@@ -34,7 +39,7 @@ use crate::handoff::{
     DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context, visible_messages,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::run_state::AgentRunState;
+use crate::run_state::{AgentRunState, AgentTurnMeta};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,12 +93,38 @@ impl Plugin for AgentChatPagePlugin {
             .add_systems(
                 Update,
                 (
-                    push_chat_to_page,
+                    (track_turn_duration, push_chat_to_page).chain(),
                     sync_chat_to_ready_views,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
             );
+    }
+}
+
+/// Record per-turn wall-clock from `AgentRunState` edges (covers page + ACP mutation sites
+/// uniformly). Idempotent: the `turn_start` guard tolerates repeated same-state sets and does
+/// not reset across a mid-turn `AwaitingApproval`.
+#[cfg(not(target_arch = "wasm32"))]
+fn track_turn_duration(
+    time: Res<Time>,
+    mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
+) {
+    for (state, mut meta) in &mut sessions {
+        match state {
+            AgentRunState::Streaming => {
+                if meta.turn_start.is_none() {
+                    meta.turn_start = Some(time.elapsed());
+                }
+            }
+            AgentRunState::Idle | AgentRunState::Errored(_) => {
+                if let Some(start) = meta.turn_start.take() {
+                    meta.durations
+                        .push(time.elapsed().saturating_sub(start).as_secs() as u32);
+                }
+            }
+            AgentRunState::AwaitingApproval { .. } | AgentRunState::Installing { .. } => {}
+        }
     }
 }
 
@@ -143,6 +174,7 @@ fn sync_chat_to_ready_views(
     sessions: Query<(
         &AgentMessages,
         &AgentRunState,
+        Option<&AgentTurnMeta>,
         Option<&Profile>,
         Option<&PageMetadata>,
         &PromptQueue,
@@ -157,7 +189,8 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, profile, meta, queue, imported)) = sessions.get(stack) else {
+        let Ok((messages, state, turn_meta, profile, meta, queue, imported)) = sessions.get(stack)
+        else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -166,7 +199,7 @@ fn sync_chat_to_ready_views(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue, imported),
+            &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
         ));
         let cross = acp_sessions
             .get(stack)
@@ -203,14 +236,17 @@ fn reset_chat_synced_on_page_ready(
 fn snapshot_of(
     messages: &AgentMessages,
     state: &AgentRunState,
+    turn_meta: Option<&AgentTurnMeta>,
     profile: Option<&Profile>,
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
 ) -> ChatSnapshot {
     let display_messages = visible_messages(imported, &messages.0);
-    let messages_json =
-        serde_json::to_string(&display_messages).unwrap_or_else(|_| "[]".to_string());
+    let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
+    let running = matches!(state, AgentRunState::Streaming);
+    let items = group_turns(&display_messages, durations, running);
+    let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
     let (status, error, call_id, name) = match state {
         AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
         AgentRunState::Installing { pct, message } => {
@@ -264,6 +300,7 @@ fn push_chat_to_page(
             Entity,
             &AgentMessages,
             &AgentRunState,
+            Option<&AgentTurnMeta>,
             Option<&Profile>,
             Option<&PageMetadata>,
             &PromptQueue,
@@ -272,6 +309,7 @@ fn push_chat_to_page(
         Or<(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
+            Changed<AgentTurnMeta>,
             Changed<PromptQueue>,
             Changed<Profile>,
             Changed<ImportedConversation>,
@@ -282,7 +320,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, profile, meta, queue, imported) in &sessions {
+    for (stack, messages, state, turn_meta, profile, meta, queue, imported) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -295,7 +333,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue, imported),
+            &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
         ));
     }
 }
@@ -861,6 +899,7 @@ mod native_tests {
             &AgentRunState::Idle,
             None,
             None,
+            None,
             &PromptQueue::default(),
             Some(&imported),
         );
@@ -1101,5 +1140,47 @@ mod native_tests {
             app.world().get::<ChatSynced>(other).is_some(),
             "a non-chat view must be left untouched"
         );
+    }
+
+    fn duration_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, track_turn_duration);
+        app
+    }
+
+    #[test]
+    fn streaming_then_idle_records_one_duration() {
+        let mut app = duration_app();
+        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<AgentTurnMeta>(e)
+                .unwrap()
+                .turn_start
+                .is_some()
+        );
+        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::Idle;
+        app.update();
+        let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
+        assert_eq!(meta.durations.len(), 1);
+        assert!(meta.turn_start.is_none());
+    }
+
+    #[test]
+    fn awaiting_approval_does_not_finalize() {
+        let mut app = duration_app();
+        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        app.update();
+        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::AwaitingApproval {
+            call_id: "c".into(),
+            name: "n".into(),
+            args: serde_json::Value::Null,
+        };
+        app.update();
+        let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
+        assert!(meta.durations.is_empty());
+        assert!(meta.turn_start.is_some());
     }
 }
