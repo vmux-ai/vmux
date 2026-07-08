@@ -63,7 +63,7 @@ impl CliAgentStrategy for VibeStrategy {
     }
 
     fn prepare_launch(&self, mcp: &McpServerConfig) {
-        ensure_vibe_file_touch_hook(&mcp.command);
+        ensure_vibe_hooks(&mcp.command);
     }
 
     fn discover_session(
@@ -135,6 +135,7 @@ fn vibe_config_path() -> PathBuf {
 }
 
 const VMUX_HOOK_NAME: &str = "vmux-file-follow";
+const VMUX_TURN_END_HOOK_NAME: &str = "vmux-turn-end";
 
 fn vibe_hooks_path() -> PathBuf {
     std::env::var("VIBE_HOME")
@@ -146,16 +147,18 @@ fn vibe_hooks_path() -> PathBuf {
         .join("hooks.toml")
 }
 
-/// Idempotently register a vmux-managed `after_tool` hook in `~/.vibe/hooks.toml`
-/// that pings vmux on file read/edit. The hook command no-ops without
-/// `VMUX_ANCHOR`, so manual vibe use is unaffected. Adds our named hook if
-/// absent and reconciles its command in place when stale (e.g. after the vmux
-/// binary moves) — never clobbers user-authored hooks.
-fn ensure_vibe_file_touch_hook(vmux_command: &str) {
-    write_vmux_hook(&vibe_hooks_path(), vmux_command);
+/// Idempotently register vmux-managed hooks in `~/.vibe/hooks.toml`: an
+/// `after_tool` hook that pings vmux on file read/edit, and a `post_agent_turn`
+/// hook that pings vmux at turn-end (drives follow-pane auto-tidy + the
+/// done-dot). Both commands no-op without `VMUX_ANCHOR`, so manual vibe use is
+/// unaffected. Adds each named hook if absent and reconciles its command in
+/// place when stale (e.g. after the vmux binary moves) — never clobbers
+/// user-authored hooks.
+fn ensure_vibe_hooks(vmux_command: &str) {
+    write_vmux_hooks(&vibe_hooks_path(), vmux_command);
 }
 
-fn write_vmux_hook(path: &Path, vmux_command: &str) {
+fn write_vmux_hooks(path: &Path, vmux_command: &str) {
     let mut doc: toml::Table = std::fs::read_to_string(path)
         .ok()
         .and_then(|text| text.parse().ok())
@@ -166,35 +169,63 @@ fn write_vmux_hook(path: &Path, vmux_command: &str) {
     let toml::Value::Array(hooks) = entry else {
         return;
     };
-    let command = format!("{vmux_command} notify-file-touch");
-    if let Some(existing) = hooks
-        .iter_mut()
-        .find(|h| h.get("name").and_then(|n| n.as_str()) == Some(VMUX_HOOK_NAME))
-    {
-        if existing.get("command").and_then(|c| c.as_str()) == Some(command.as_str()) {
-            return;
-        }
-        let toml::Value::Table(table) = existing else {
-            return;
-        };
-        table.insert("type".into(), "after_tool".into());
-        table.insert("match".into(), "re:^(read|edit|write)$".into());
-        table.insert("command".into(), command.into());
-        table.insert("strict".into(), false.into());
-    } else {
-        let mut hook = toml::Table::new();
-        hook.insert("name".into(), VMUX_HOOK_NAME.into());
-        hook.insert("type".into(), "after_tool".into());
-        hook.insert("match".into(), "re:^(read|edit|write)$".into());
-        hook.insert("command".into(), command.into());
-        hook.insert("strict".into(), false.into());
-        hooks.push(toml::Value::Table(hook));
-    }
+    upsert_vmux_hook(
+        hooks,
+        VMUX_HOOK_NAME,
+        "after_tool",
+        Some("re:^(read|edit|write)$"),
+        &format!("{vmux_command} notify-file-touch"),
+    );
+    // `post_agent_turn` is not a tool hook, so vibe rejects `match`/`strict` on it.
+    upsert_vmux_hook(
+        hooks,
+        VMUX_TURN_END_HOOK_NAME,
+        "post_agent_turn",
+        None,
+        &format!("{vmux_command} notify-turn-end"),
+    );
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     if let Ok(text) = toml::to_string(&doc) {
         let _ = std::fs::write(path, text);
+    }
+}
+
+fn upsert_vmux_hook(
+    hooks: &mut Vec<toml::Value>,
+    name: &str,
+    hook_type: &str,
+    match_re: Option<&str>,
+    command: &str,
+) {
+    let table = match hooks
+        .iter_mut()
+        .find(|h| h.get("name").and_then(|n| n.as_str()) == Some(name))
+    {
+        Some(toml::Value::Table(table)) => table,
+        Some(_) => return,
+        None => {
+            let mut hook = toml::Table::new();
+            hook.insert("name".into(), name.into());
+            hooks.push(toml::Value::Table(hook));
+            let toml::Value::Table(table) = hooks.last_mut().expect("just pushed") else {
+                return;
+            };
+            table
+        }
+    };
+    table.insert("type".into(), hook_type.into());
+    table.insert("command".into(), command.into());
+    match match_re {
+        Some(re) => {
+            table.insert("match".into(), re.into());
+            table.insert("strict".into(), false.into());
+        }
+        None => {
+            table.remove("match");
+            table.remove("strict");
+        }
     }
 }
 
@@ -391,13 +422,13 @@ mod tests {
     fn vmux_hook_written_idempotently() {
         let tmp = unique_tmp("vibe-hooks");
         let path = tmp.join("hooks.toml");
-        write_vmux_hook(&path, "/bin/vmux");
+        write_vmux_hooks(&path, "/bin/vmux");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("vmux-file-follow"), "text: {text}");
         assert!(text.contains("after_tool"));
         assert!(text.contains("notify-file-touch"));
 
-        write_vmux_hook(&path, "/bin/vmux");
+        write_vmux_hooks(&path, "/bin/vmux");
         let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
         let count = doc
             .get("hooks")
@@ -411,11 +442,52 @@ mod tests {
     }
 
     #[test]
+    fn vmux_turn_end_hook_written_without_match_or_strict() {
+        let tmp = unique_tmp("vibe-hooks-turn");
+        let path = tmp.join("hooks.toml");
+        write_vmux_hooks(&path, "/bin/vmux");
+        let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let hooks = doc.get("hooks").and_then(|h| h.as_array()).unwrap();
+        let turn = hooks
+            .iter()
+            .find(|h| h.get("name").and_then(|n| n.as_str()) == Some("vmux-turn-end"))
+            .expect("turn-end hook present");
+        assert_eq!(
+            turn.get("type").and_then(|t| t.as_str()),
+            Some("post_agent_turn")
+        );
+        assert_eq!(
+            turn.get("command").and_then(|c| c.as_str()),
+            Some("/bin/vmux notify-turn-end")
+        );
+        assert!(
+            turn.get("match").is_none(),
+            "post_agent_turn must not carry match"
+        );
+        assert!(
+            turn.get("strict").is_none(),
+            "post_agent_turn must not carry strict"
+        );
+
+        write_vmux_hooks(&path, "/bin/vmux");
+        let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        let count = doc
+            .get("hooks")
+            .and_then(|h| h.as_array())
+            .unwrap()
+            .iter()
+            .filter(|h| h.get("name").and_then(|n| n.as_str()) == Some("vmux-turn-end"))
+            .count();
+        assert_eq!(count, 1, "idempotent: no duplicate turn-end hook");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn vmux_hook_reconciles_stale_command() {
         let tmp = unique_tmp("vibe-hooks-stale");
         let path = tmp.join("hooks.toml");
-        write_vmux_hook(&path, "/old/path/vmux");
-        write_vmux_hook(&path, "/new/path/vmux");
+        write_vmux_hooks(&path, "/old/path/vmux");
+        write_vmux_hooks(&path, "/new/path/vmux");
         let doc: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
         let hooks = doc.get("hooks").and_then(|h| h.as_array()).unwrap();
         let ours: Vec<_> = hooks
@@ -440,7 +512,7 @@ mod tests {
             "[[hooks]]\nname = \"mine\"\ntype = \"before_tool\"\nmatch = \"bash\"\ncommand = \"echo hi\"\n",
         )
         .unwrap();
-        write_vmux_hook(&path, "/bin/vmux");
+        write_vmux_hooks(&path, "/bin/vmux");
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("mine"), "user hook preserved: {text}");
         assert!(text.contains("vmux-file-follow"));

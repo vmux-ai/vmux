@@ -66,6 +66,8 @@ impl CliAgentStrategy for CodexStrategy {
         args.push("features.hooks=true".into());
         args.push("-c".into());
         args.push(build_file_touch_hook_override(mcp));
+        args.push("-c".into());
+        args.push(build_turn_end_hook_override(mcp));
         for feature in DISABLED_FEATURES {
             args.push("--disable".into());
             args.push((*feature).to_string());
@@ -126,6 +128,25 @@ fn build_file_touch_hook_override(mcp: &McpServerConfig) -> String {
     format!(
         "hooks.PostToolUse=[{{matcher={},hooks=[{{type={},command={},args=[{}]}}]}}]",
         quote_toml(FILE_TOUCH_MATCHER),
+        quote_toml("command"),
+        quote_toml(&mcp.command),
+        hook_args.join(","),
+    )
+}
+
+/// `-c` override registering a Stop hook that pings vmux at turn-end (drives
+/// follow-pane auto-tidy + the done-dot). Codex's `Stop` fires when the agent
+/// finishes a turn; it takes no tool matcher. Inline TOML array-of-tables.
+fn build_turn_end_hook_override(mcp: &McpServerConfig) -> String {
+    let mut hook_args = vec![quote_toml("notify-turn-end")];
+    if let Some(i) = mcp.args.iter().position(|a| a == "--anchor")
+        && let Some(anchor) = mcp.args.get(i + 1)
+    {
+        hook_args.push(quote_toml("--anchor"));
+        hook_args.push(quote_toml(anchor));
+    }
+    format!(
+        "hooks.Stop=[{{hooks=[{{type={},command={},args=[{}]}}]}}]",
         quote_toml("command"),
         quote_toml(&mcp.command),
         hook_args.join(","),
@@ -284,6 +305,27 @@ mod tests {
         assert!(hook.contains("notify-file-touch"));
         assert!(hook.contains("--anchor"));
         assert!(hook.contains("\"42\""));
+    }
+
+    #[test]
+    fn build_args_injects_turn_end_stop_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into(), "--anchor".into(), "42".into()],
+            cwd: None,
+        };
+        let args = CodexStrategy.build_args(&mcp, None);
+        let hook = args
+            .iter()
+            .find(|a| a.starts_with("hooks.Stop="))
+            .expect("Stop hook override present");
+        assert!(hook.contains("notify-turn-end"), "hook: {hook}");
+        assert!(hook.contains("--anchor"));
+        assert!(hook.contains("\"42\""));
+        assert!(
+            !hook.contains("matcher"),
+            "Stop hook takes no matcher: {hook}"
+        );
     }
 
     #[test]
