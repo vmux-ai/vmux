@@ -377,7 +377,9 @@ fn byte_to_utf16(line: &str, byte: usize) -> u32 {
     line[..idx].encode_utf16().count() as u32
 }
 
-#[cfg(test)]
+/// The tail of `final_text` after the `baseline` prefix captured before the
+/// command ran. Falls back to the full text if the prefix shifted (e.g. the
+/// screen scrolled or was cleared).
 fn output_since(baseline: &str, final_text: &str) -> String {
     final_text
         .strip_prefix(baseline)
@@ -403,22 +405,6 @@ fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -
     run
 }
 
-fn extract_done_marker_output(token: &str, text: &str) -> Option<(i32, String)> {
-    let start_marker = format!("__VMUX_START_{token}__");
-    let done_prefix = format!("__VMUX_DONE_{token}_");
-    let start_index = text.rfind(&start_marker)?;
-    let after_start = &text[start_index + start_marker.len()..];
-    let done_index = after_start.find(&done_prefix)?;
-    let after_prefix = &after_start[done_index + done_prefix.len()..];
-    let code_end = after_prefix.find("__")?;
-    let exit = after_prefix[..code_end].parse().ok()?;
-    let output = after_start[..done_index]
-        .trim_matches(|c| c == '\n' || c == '\r')
-        .trim_end()
-        .to_string();
-    Some((exit, output))
-}
-
 fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Value {
     let mut text = format!("terminal: {pid}\n");
     match exit {
@@ -434,8 +420,9 @@ fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Va
     json!({ "content": [{"type": "text", "text": text}] })
 }
 
-/// Send `run`, then block (polling the full terminal buffer) until the command's
-/// completion marker appears, returning the output + exit code in one response.
+/// Send `run`, then block (polling `RunCompletion`) until the invisible OSC
+/// completion escape for this run's token is seen, returning the output + exit
+/// code in one response.
 async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
@@ -483,14 +470,26 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
         .map_err(|_| format!("run: service returned an invalid terminal id: {pid}"))?;
 
     let start = Instant::now();
+    let baseline_text = read_full_text(&connection, process_id).await;
     let deadline = start + RUN_BLOCK_TIMEOUT;
     loop {
-        let text = read_full_text(&connection, process_id).await;
-        if let Some((exit, output)) = extract_done_marker_output(&token, &text) {
-            return Ok(run_result(&pid, Some(exit), &output, false));
+        match agent_query(&connection, AgentQuery::RunCompletion { process_id }).await? {
+            AgentQueryResult::RunCompletion {
+                token: Some(done_token),
+                exit: Some(exit),
+            } if done_token == token => {
+                let final_text = read_full_text(&connection, process_id).await;
+                let output = output_since(&baseline_text, &final_text);
+                return Ok(run_result(&pid, Some(exit), &output, false));
+            }
+            AgentQueryResult::RunCompletion { .. } => {}
+            AgentQueryResult::Error(message) => return Err(message),
+            other => return Err(format!("run: unexpected run-completion result: {other:?}")),
         }
         if Instant::now() >= deadline {
-            return Ok(run_result(&pid, None, &text, true));
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
+            return Ok(run_result(&pid, None, &output, true));
         }
         tokio::time::sleep(RUN_POLL_INTERVAL).await;
     }
@@ -652,6 +651,13 @@ pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryRe
             let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
             json!({
                 "content": [{"type": "text", "text": format!("{{\"seq\":{seq},\"exit\":{exit}}}")}]
+            })
+        }
+        AgentQueryResult::RunCompletion { token, exit } => {
+            let token = token.map_or_else(|| "null".to_string(), |t| format!("\"{t}\""));
+            let exit = exit.map_or_else(|| "null".to_string(), |code| code.to_string());
+            json!({
+                "content": [{"type": "text", "text": format!("{{\"token\":{token},\"exit\":{exit}}}")}]
             })
         }
         AgentQueryResult::Image {
@@ -858,14 +864,5 @@ mod tests {
             }
             _ => panic!("expected run command"),
         }
-    }
-
-    #[test]
-    fn done_marker_output_extracts_between_start_and_done() {
-        let text = "old output\n__VMUX_START_tok__\nhello\nworld\n__VMUX_DONE_tok_7__\nprompt";
-
-        let parsed = extract_done_marker_output("tok", text);
-
-        assert_eq!(parsed, Some((7, "hello\nworld".to_string())));
     }
 }

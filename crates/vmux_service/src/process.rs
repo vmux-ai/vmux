@@ -84,6 +84,8 @@ pub struct Process {
     osc133: crate::osc133::Osc133Scanner,
     command_ended_seq: u64,
     last_command_exit: Option<i32>,
+    run_marker: crate::run_marker::RunMarkerScanner,
+    last_run_completion: Option<(String, i32)>,
     pty_writer: PtyInputWriter,
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -347,6 +349,8 @@ impl Process {
             osc133: crate::osc133::Osc133Scanner::new(),
             command_ended_seq: 0,
             last_command_exit: None,
+            run_marker: crate::run_marker::RunMarkerScanner::new(),
+            last_run_completion: None,
             pty_writer: writer,
             master: pair.master,
             child,
@@ -373,6 +377,13 @@ impl Process {
 
     pub fn command_status(&self) -> (u64, Option<i32>) {
         (self.command_ended_seq, self.last_command_exit)
+    }
+
+    /// Last agent `run` completion `(token, exit)` parsed from a
+    /// [`crate::run_marker::VMUX_RUN_OSC`] escape. The token lets a blocking
+    /// `run` correlate the exit code to its own command.
+    pub fn run_completion(&self) -> Option<(String, i32)> {
+        self.last_run_completion.clone()
     }
 
     pub fn write_input(&self, data: &[u8]) {
@@ -1231,6 +1242,9 @@ impl Process {
                     process_id: self.id,
                     kind,
                 });
+            }
+            for marker in self.run_marker.feed(&data) {
+                self.last_run_completion = Some((marker.token, marker.exit));
             }
             got_data = true;
         }
