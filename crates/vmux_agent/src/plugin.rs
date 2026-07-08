@@ -200,6 +200,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     agent_bell_to_attention,
+                    handle_agent_turn_ended,
                     tidy_on_agent_attention,
                     mark_agent_done,
                     clear_agent_done,
@@ -209,7 +210,7 @@ impl Plugin for AgentPlugin {
             )
             .add_systems(
                 Update,
-                tidy_acp_on_idle.after(vmux_layout::stack::ComputeFocusSet),
+                (tidy_acp_on_idle, tidy_page_on_idle).after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
@@ -1017,13 +1018,37 @@ fn handle_agent_file_touch(
     }
 }
 
-/// Tidy one agent's `file://` follow-pane, anchored by its `ProcessId`: when the pane
-/// holds more than `tidy_files_max` previews, keep changed files + the active one and
-/// close the rest (silently if `tidy_files_auto`, else tag the pane for the confirm
-/// dialog). Shared by the CLI (`AgentAttention`) and ACP (`AgentRunState` → `Idle`) triggers.
+/// CLI agents fire this from their `Stop` hook at turn-end: resolve the agent terminal by its
+/// `anchor` `ProcessId` and raise `AgentAttention`, which drives the follow-pane auto-tidy
+/// (`tidy_on_agent_attention`) and the done-dot. The terminal bell only fires on
+/// idle/permission, so it is not a reliable turn-end signal.
+fn handle_agent_turn_ended(
+    mut reader: MessageReader<AgentCommandRequest>,
+    agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
+    mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::TurnEnded { anchor } = &request.command else {
+            continue;
+        };
+        if let Some((entity, _)) = agents.iter().find(|(_, pid)| *pid == anchor) {
+            attention.write(vmux_core::notify::AgentAttention {
+                entity,
+                title: None,
+                body: None,
+            });
+        }
+    }
+}
+
+/// Tidy one agent's `file://` follow-pane (the sibling `file:` pane of `agent_pane`): when it
+/// holds more than `tidy_files_max` previews, keep changed files + the active one and close
+/// the rest (silently if `tidy_files_auto`, else tag the pane for the confirm dialog). Shared
+/// by the CLI-terminal bell (`AgentAttention`), ACP idle, and native-chat idle triggers, which
+/// each resolve `agent_pane` first.
 #[allow(clippy::too_many_arguments)]
 fn tidy_follow_pane(
-    anchor: vmux_service::protocol::ProcessId,
+    agent_pane: Entity,
     settings: &AppSettings,
     resolve: &AgentFileResolve,
     last_activated: &Query<&vmux_core::LastActivatedAt>,
@@ -1031,9 +1056,6 @@ fn tidy_follow_pane(
     close: &mut MessageWriter<vmux_layout::CloseStackRequest>,
     commands: &mut Commands,
 ) {
-    let Some(agent_pane) = resolve.agent_pane(anchor) else {
-        return;
-    };
     let Some((follow_pane, stacks)) = resolve.file_stacks_for(agent_pane) else {
         return;
     };
@@ -1100,8 +1122,11 @@ fn tidy_on_agent_attention(
         let Ok(pid) = agents.get(att.entity) else {
             continue;
         };
+        let Some(agent_pane) = resolve.agent_pane(*pid) else {
+            continue;
+        };
         tidy_follow_pane(
-            *pid,
+            agent_pane,
             &settings,
             &resolve,
             &last_activated,
@@ -1133,8 +1158,52 @@ fn tidy_acp_on_idle(
         if !matches!(state, crate::AgentRunState::Idle) {
             continue;
         }
+        let Some(agent_pane) = resolve.agent_pane(acp.anchor) else {
+            continue;
+        };
         tidy_follow_pane(
-            acp.anchor,
+            agent_pane,
+            &settings,
+            &resolve,
+            &last_activated,
+            &pending,
+            &mut close,
+            &mut commands,
+        );
+    }
+}
+
+/// Native-chat agents (CLI + Page variants) have no terminal bell; their turn-end is
+/// `AgentRunState` → `Idle` on the sid-keyed [`AgentSession`](crate::components::AgentSession)
+/// stack. That stack is a different entity from the `ProcessId`-anchored one `AgentAttention`
+/// resolves through, so [`tidy_on_agent_attention`] can't see it. Tidy the follow-pane on the
+/// idle transition, resolving `agent_pane` as the session stack's parent pane. Mirrors
+/// [`tidy_acp_on_idle`] for non-ACP agents.
+fn tidy_page_on_idle(
+    settings: Res<AppSettings>,
+    sessions: Query<
+        (&ChildOf, &crate::AgentRunState),
+        (
+            With<crate::components::AgentSession>,
+            Changed<crate::AgentRunState>,
+        ),
+    >,
+    resolve: AgentFileResolve,
+    last_activated: Query<&vmux_core::LastActivatedAt>,
+    pending: Query<(), With<crate::tidy::PendingTidy>>,
+    mut close: MessageWriter<vmux_layout::CloseStackRequest>,
+    mut commands: Commands,
+) {
+    use bevy::ecs::relationship::Relationship;
+    if !settings.agent.tidy_files {
+        return;
+    }
+    for (parent, state) in &sessions {
+        if !matches!(state, crate::AgentRunState::Idle) {
+            continue;
+        }
+        tidy_follow_pane(
+            parent.get(),
             &settings,
             &resolve,
             &last_activated,
@@ -1231,6 +1300,7 @@ fn handle_agent_commands(
         };
         let result = match &request.command {
             ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
+            ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
                     serde_json::json!({})
@@ -3282,6 +3352,47 @@ mod tests {
         cursor.read(messages).map(|a| a.entity).collect()
     }
 
+    fn turn_end_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, handle_agent_turn_ended);
+        app
+    }
+
+    fn send_turn_ended(app: &mut App, anchor: vmux_service::protocol::ProcessId) {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: vmux_service::protocol::AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::TurnEnded { anchor },
+            });
+    }
+
+    #[test]
+    fn turn_ended_resolves_to_agent_attention() {
+        let mut app = turn_end_test_app();
+        let pid = vmux_service::protocol::ProcessId::new();
+        let agent = spawn_agent_with_pid(&mut app, pid);
+        send_turn_ended(&mut app, pid);
+        app.update();
+        assert_eq!(attentions(&app), vec![agent]);
+    }
+
+    #[test]
+    fn turn_ended_unknown_anchor_emits_nothing() {
+        let mut app = turn_end_test_app();
+        let _agent = spawn_agent_with_pid(&mut app, vmux_service::protocol::ProcessId::new());
+        send_turn_ended(&mut app, vmux_service::protocol::ProcessId::new());
+        app.update();
+        assert!(attentions(&app).is_empty());
+    }
+
     #[test]
     fn bell_resolves_to_agent_attention() {
         use vmux_service::protocol::ProcessId;
@@ -4389,6 +4500,95 @@ mod tests {
             ..default()
         });
         stack
+    }
+
+    fn close_stack_requests(app: &App) -> Vec<Entity> {
+        let messages = app
+            .world()
+            .resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).map(|m| m.stack).collect()
+    }
+
+    fn spawn_file_preview_stack(app: &mut App, pane: Entity, ts: i64, url: &str) -> Entity {
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                vmux_core::LastActivatedAt(ts),
+                ChildOf(pane),
+            ))
+            .id();
+        app.world_mut().spawn((
+            PageMetadata {
+                url: url.to_string(),
+                ..default()
+            },
+            ChildOf(stack),
+        ));
+        stack
+    }
+
+    #[test]
+    fn tidy_page_on_idle_closes_clean_previews_for_native_chat_cli() {
+        let mut settings = test_settings();
+        settings.agent.tidy_files_auto = true;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_layout::CloseStackRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .insert_resource(settings)
+            .add_systems(Update, tidy_page_on_idle);
+
+        let parent = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let agent_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
+        let agent_stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                crate::components::AgentSession {
+                    kind: vmux_core::agent::AgentKind::Claude,
+                    variant: crate::AgentVariant::Cli,
+                    sid: "sid-1".to_string(),
+                    provider: "claude".to_string(),
+                    model: "cli".to_string(),
+                },
+                crate::AgentRunState::Streaming,
+                ChildOf(agent_pane),
+            ))
+            .id();
+        let file_pane = app.world_mut().spawn((Pane, ChildOf(parent))).id();
+        let previews: Vec<Entity> = (0..6)
+            .map(|i| {
+                spawn_file_preview_stack(&mut app, file_pane, i, &format!("file:///clean/f{i}.rs"))
+            })
+            .collect();
+
+        app.update();
+        assert!(
+            close_stack_requests(&app).is_empty(),
+            "streaming (not idle) must not tidy"
+        );
+
+        *app.world_mut()
+            .get_mut::<crate::AgentRunState>(agent_stack)
+            .unwrap() = crate::AgentRunState::Idle;
+        app.update();
+
+        let mut closed = close_stack_requests(&app);
+        closed.sort();
+        let mut expected = previews[0..5].to_vec();
+        expected.sort();
+        assert_eq!(
+            closed, expected,
+            "clean non-active previews close; the active (max LastActivatedAt) preview is kept"
+        );
+        assert!(
+            !closed.contains(&previews[5]),
+            "active preview must be kept"
+        );
     }
 
     fn browser_claim_app() -> (App, ProcessId, Entity) {

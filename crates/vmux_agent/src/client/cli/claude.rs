@@ -89,16 +89,21 @@ pub(crate) fn project_dir_name(cwd: &Path) -> String {
         .collect()
 }
 
-/// Inline `--settings` JSON merging two vmux hooks (merges with the user's
-/// `~/.claude/settings.json`, does not modify it): a Notification bell, and a
-/// PostToolUse hook that pings vmux on every file read/edit (`async` so it
-/// never blocks the agent).
+/// Inline `--settings` JSON merging three vmux hooks (merges with the user's
+/// `~/.claude/settings.json`, does not modify it): a Notification bell; a
+/// PostToolUse hook that pings vmux on every file read/edit; and a Stop hook
+/// that pings vmux at turn-end (drives follow-pane auto-tidy + the done-dot).
+/// Both vmux pings are `async` so they never block the agent.
 fn build_settings_json(mcp: &McpServerConfig) -> String {
-    let mut hook_args = vec![Value::String("notify-file-touch".into())];
-    if let Some(anchor) = anchor_from_mcp(mcp) {
-        hook_args.push(Value::String("--anchor".into()));
-        hook_args.push(Value::String(anchor.into()));
-    }
+    let anchor = anchor_from_mcp(mcp);
+    let args_for = |subcommand: &str| {
+        let mut a = vec![Value::String(subcommand.into())];
+        if let Some(anchor) = anchor {
+            a.push(Value::String("--anchor".into()));
+            a.push(Value::String(anchor.into()));
+        }
+        a
+    };
     let value = serde_json::json!({
         "hooks": {
             "Notification": [
@@ -108,9 +113,12 @@ fn build_settings_json(mcp: &McpServerConfig) -> String {
                 {
                     "matcher": FILE_TOUCH_MATCHER,
                     "hooks": [
-                        { "type": "command", "command": mcp.command, "args": hook_args, "async": true }
+                        { "type": "command", "command": mcp.command, "args": args_for("notify-file-touch"), "async": true }
                     ]
                 }
+            ],
+            "Stop": [
+                { "hooks": [ { "type": "command", "command": mcp.command, "args": args_for("notify-turn-end"), "async": true } ] }
             ]
         }
     });
@@ -323,6 +331,29 @@ mod tests {
         assert!(json.contains("notify-file-touch"));
         assert!(json.contains("\"--anchor\""));
         assert!(json.contains("\"42\""));
+    }
+
+    #[test]
+    fn build_args_injects_turn_end_stop_hook() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into(), "--anchor".into(), "42".into()],
+            cwd: None,
+        };
+        let args = ClaudeStrategy.build_args(&mcp, None);
+        let settings = args.iter().position(|a| a == "--settings").unwrap();
+        let json = &args[settings + 1];
+        let parsed: Value = serde_json::from_str(json).unwrap();
+        let stop = &parsed["hooks"]["Stop"][0]["hooks"][0];
+        assert_eq!(stop["command"].as_str().unwrap(), "/bin/vmux");
+        let stop_args: Vec<&str> = stop["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(stop_args, vec!["notify-turn-end", "--anchor", "42"]);
+        assert_eq!(stop["async"].as_bool(), Some(true));
     }
 
     #[test]
