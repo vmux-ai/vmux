@@ -67,6 +67,23 @@ pub fn doc_row_to_line(doc_row: u32, history_size: u32) -> i32 {
     doc_row as i32 - history_size as i32
 }
 
+/// Bottom alignment pad (px) for a terminal that follows by pinning to the
+/// scroll maximum.
+///
+/// A follow-to-bottom terminal scrolls to `scrollHeight`, so the fractional
+/// sub-row left over when `client_h` is not a whole multiple of the cell
+/// height `ch` lands as a clipped partial row at the *top* of the viewport.
+/// Adding this many pixels below the last row shifts that remainder to the
+/// bottom instead, so the pinned top edge falls on a row boundary and the top
+/// line renders whole. `pad` is the container's top inner padding (the row
+/// grid's y-origin). The result is in `[0, ch)`.
+pub fn follow_bottom_pad(client_h: f32, pad: f32, ch: f32) -> f32 {
+    if ch <= 0.0 {
+        return 0.0;
+    }
+    (client_h - pad).rem_euclid(ch)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +134,38 @@ mod tests {
         assert_eq!(doc_row_to_line(0, 100), -100);
         assert_eq!(doc_row_to_line(100, 100), 0);
         assert_eq!(doc_row_to_line(149, 100), 49);
+    }
+
+    #[test]
+    fn follow_bottom_pad_aligns_pinned_top_edge_to_row_boundary() {
+        // For any viewport/pad/cell size, adding follow_bottom_pad below the
+        // rows must make the pinned (max-scroll) top edge land exactly on a
+        // row top: (max_scroll - pad) % ch == 0.
+        let cases = [
+            (790.0_f32, 4.0_f32, 18.0_f32),
+            (800.0, 4.0, 18.0), // already aligned (rem 0)
+            (1013.0, 6.0, 21.0),
+            (601.0, 8.0, 16.5),
+            (1234.0, 0.0, 19.0),
+        ];
+        for (client_h, pad, ch) in cases {
+            let e = follow_bottom_pad(client_h, pad, ch);
+            assert!((0.0..ch).contains(&e), "e={e} out of [0,{ch})");
+            // Enough rows to force scrolling.
+            let total = 200.0_f32;
+            let scroll_height = total * ch + 2.0 * pad + e;
+            let max_scroll = scroll_height - client_h;
+            let misalign = (max_scroll - pad).rem_euclid(ch);
+            let misalign = misalign.min(ch - misalign); // distance to nearest boundary
+            assert!(
+                misalign < 1e-2,
+                "client_h={client_h} pad={pad} ch={ch} e={e} misalign={misalign}"
+            );
+        }
+    }
+
+    #[test]
+    fn follow_bottom_pad_zero_ch_is_safe() {
+        assert_eq!(follow_bottom_pad(800.0, 4.0, 0.0), 0.0);
     }
 }
