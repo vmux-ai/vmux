@@ -191,6 +191,7 @@ impl Plugin for AgentPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
+            .add_message::<vmux_core::agent::SwapStackSession>()
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
@@ -275,6 +276,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     handle_spawn_agent_requests,
+                    handle_swap_stack_session.before(handle_spawn_agent_requests),
                     handle_focus_pane_requests.after(handle_agent_commands),
                     handle_rename_profile_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
@@ -2627,6 +2629,76 @@ fn handle_agent_page_open(
             }
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
+            }
+        }
+    }
+}
+
+/// Swap the agent session on a stack in place (see [`vmux_core::agent::SwapStackSession`]).
+/// Tears down the current session's stack-level components + panes, then re-attaches the
+/// target runtime with an explicit cwd — the shared path for `/resume` and the ACP↔CLI
+/// handoff. Unlike the page-open path this always re-attaches (no same-id no-op) and never
+/// falls back to `default_cwd`.
+fn handle_swap_stack_session(
+    mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
+    settings: Res<AppSettings>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    children_q: Query<&Children>,
+    mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for ev in reader.read() {
+        // Removing AcpSession fires close_acp_session_on_remove → the daemon session is closed.
+        // Children (the Browser/terminal pane) are despawned; a CLI terminal despawn kills its
+        // PTY. Stack-level removes are no-ops for a CLI stack (its agent components live on the
+        // terminal child).
+        commands
+            .entity(ev.stack)
+            .remove::<crate::client::acp::AcpSession>()
+            .remove::<crate::components::AgentSession>()
+            .remove::<crate::AgentMessages>()
+            .remove::<crate::AgentApprovalPolicy>()
+            .remove::<crate::AgentRunState>()
+            .remove::<vmux_core::AgentWorkingDir>()
+            .remove::<vmux_core::team::Agent>()
+            .remove::<vmux_core::team::Profile>();
+        clear_stack_children(ev.stack, &children_q, &mut commands);
+
+        match crate::AgentUrl::parse(&ev.target_url) {
+            Some(crate::AgentUrl::Cli { kind, sid }) => {
+                let session_id = (sid != crate::url::CLI_FRESH_SID).then_some(sid);
+                spawn_agent.write(SpawnAgentInStackRequest {
+                    kind,
+                    cwd: ev.cwd.clone(),
+                    session_id,
+                    stack: ev.stack,
+                    initial_prompt: None,
+                });
+            }
+            Some(crate::AgentUrl::Acp { id, sid }) => {
+                let Some(cfg) = settings.agent.acp.iter().find(|c| c.id == id) else {
+                    bevy::log::warn!("swap: no ACP agent configured for '{id}'");
+                    continue;
+                };
+                let routing_sid = uuid::Uuid::new_v4().to_string();
+                let icon = acp_icon_for_id(catalog.as_deref(), &cfg.id);
+                attach_acp_agent_to_stack(
+                    ev.stack,
+                    &cfg.id,
+                    &cfg.name,
+                    &routing_sid,
+                    &ev.cwd,
+                    icon.as_deref(),
+                    sid.as_deref(),
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                );
+            }
+            other => {
+                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
             }
         }
     }

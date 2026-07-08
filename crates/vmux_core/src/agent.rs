@@ -115,6 +115,16 @@ pub struct SpawnAgentInStackRequest {
     pub initial_prompt: Option<String>,
 }
 
+/// Swap the agent session shown on `stack` in place: tear down the current session and
+/// re-attach `target_url` (an ACP or CLI agent url) with the given `cwd`. Same tab position.
+/// Used by `/resume` (pick a past session) and the ACP↔CLI runtime handoff (`/cli`).
+#[derive(Message, Debug, Clone)]
+pub struct SwapStackSession {
+    pub stack: Entity,
+    pub target_url: String,
+    pub cwd: PathBuf,
+}
+
 #[derive(Message, Debug, Clone)]
 pub struct PageAgentAttachRequest {
     pub stack: Entity,
