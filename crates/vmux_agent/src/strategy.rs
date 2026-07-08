@@ -47,7 +47,7 @@ pub fn kind_supports_cross_runtime(kind: AgentKind) -> bool {
 
 /// Sort newest-first and drop duplicate `(kind, sid)` keeping the newest.
 pub fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
-    sessions.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime));
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| seen.insert((s.kind, s.sid.clone())));
     sessions
