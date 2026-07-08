@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput};
@@ -32,6 +33,12 @@ pub fn Page() -> Element {
         }
         let _ = try_cef_bin_emit_rkyv(&StartDataRequest);
         mounted.set(true);
+    });
+
+    use_effect(|| {
+        install_window_focus_refocus();
+        install_keep_input_focused_on_click();
+        focus_start_input();
     });
 
     let reveal = if mounted() {
@@ -72,15 +79,131 @@ pub fn Page() -> Element {
     }
 }
 
+/// Focus the launcher input, re-asserting focus once per animation frame until the document
+/// actually holds focus. CEF grants the OSR browser native keyboard focus (`SetFocus`) several
+/// frames after the page mounts — a single deferred `input.focus()` runs too early and is dropped,
+/// and CEF OSR emits no JS `window` focus event to hook — so a bounded retry keeps the input as
+/// the active element through that window and lands the caret as soon as native focus arrives.
 fn focus_start_input() {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("command-bar-input"))
-    else {
+    focus_start_input_retry(90);
+}
+
+fn focus_start_input_retry(frames_left: u32) {
+    let Some(window) = web_sys::window() else {
         return;
     };
+    let cb = Closure::once_into_js(move || {
+        if !try_focus_command_input_once() && frames_left > 1 {
+            focus_start_input_retry(frames_left - 1);
+        }
+    });
+    let _ = window.request_animation_frame(cb.unchecked_ref());
+}
+
+/// Focus the input if it is not already the active element; returns true once the document holds
+/// focus and the input is active (caret visible), so the retry loop can stop.
+fn try_focus_command_input_once() -> bool {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return true;
+    };
+    let Some(el) = doc.get_element_by_id("command-bar-input") else {
+        return false;
+    };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
-    let _ = input.focus();
-    let len = input.value().len() as u32;
-    let _ = input.set_selection_range(0, len);
+    let active_is_input = doc
+        .active_element()
+        .map(|a| a.id() == "command-bar-input")
+        .unwrap_or(false);
+    if !active_is_input {
+        let _ = input.focus();
+        let len = input.value().len() as u32;
+        let _ = input.set_selection_range(len, len);
+    }
+    let has_focus = doc.has_focus().unwrap_or(false);
+    has_focus && active_is_input
+}
+
+/// Refocus the launcher input whenever this page's window (re)gains native focus. CEF grants an
+/// OSR browser keyboard focus a frame or more after the page mounts — after the `autofocus`
+/// attribute was already ignored (the document was not focused at parse time) — so without this
+/// the caret never lands in the input until the user clicks. Installed once; also refocuses when
+/// switching back to an already-open start page.
+fn install_window_focus_refocus() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let already_bound = js_sys::Reflect::get(&window, &JsValue::from_str("_startFocusBound"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false);
+    if already_bound {
+        return;
+    }
+    let _ = js_sys::Reflect::set(
+        &window,
+        &JsValue::from_str("_startFocusBound"),
+        &JsValue::TRUE,
+    );
+
+    let closure = Closure::wrap(Box::new(|| {
+        focus_start_input();
+    }) as Box<dyn FnMut()>);
+    let target: &web_sys::EventTarget = window.as_ref();
+    let _ = target.add_event_listener_with_callback("focus", closure.as_ref().unchecked_ref());
+    closure.forget();
+}
+
+/// Keep the caret in the launcher input no matter where the user clicks. The start page has
+/// nothing to interact with but the input and the result rows, so a click on the hero
+/// background (or the card padding) should never blur the input. A capture-phase `mousedown`
+/// listener cancels the default focus shift everywhere except the input itself and the results
+/// list — result clicks still fire (`preventDefault` on `mousedown` does not cancel the click),
+/// so selecting a result keeps working. Installed once.
+fn install_keep_input_focused_on_click() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let already_bound = js_sys::Reflect::get(&window, &JsValue::from_str("_startClickBound"))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false);
+    if already_bound {
+        return;
+    }
+    let _ = js_sys::Reflect::set(
+        &window,
+        &JsValue::from_str("_startClickBound"),
+        &JsValue::TRUE,
+    );
+    let Some(document) = window.document() else {
+        return;
+    };
+
+    let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        if let Some(el) = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        {
+            let on_input = el.closest("#command-bar-input").ok().flatten().is_some();
+            let on_results = el.closest("#command-bar-results").ok().flatten().is_some();
+            if on_input || on_results {
+                return;
+            }
+        }
+        e.prevent_default();
+        if let Some(input) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("command-bar-input"))
+        {
+            let input: web_sys::HtmlInputElement = input.unchecked_into();
+            let _ = input.focus();
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    let target: &web_sys::EventTarget = document.as_ref();
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+        "mousedown",
+        closure.as_ref().unchecked_ref(),
+        &opts,
+    );
+    closure.forget();
 }
