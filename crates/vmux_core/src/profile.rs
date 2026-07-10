@@ -172,6 +172,37 @@ pub fn cef_cache_path() -> Option<String> {
     profile_dir().to_str().map(|s| s.to_owned())
 }
 
+/// CEF command-line switches selecting how cookies and passwords are encrypted
+/// at rest.
+///
+/// On macOS the encryption key lives in the login Keychain under the shared,
+/// framework-default `Chromium Safe Storage` item (CEF exposes no way to rename
+/// it), and access is gated by the requesting binary's code-signing identity.
+/// All interactive builds — `dev`, `local`, and `release` — use the real
+/// Keychain (no switches) so saved credentials stay securely encrypted.
+/// Persistence across updates relies on a stable signing identity: Developer-ID
+/// for `release`/`local`, and the reused self-signed `Vmux Dev` certificate that
+/// `make dev` applies. Both yield a designated requirement that survives
+/// rebuilds, so access sticks after a one-time "Always Allow" per identity.
+///
+/// Automated test sessions (`VMUX_TEST`) instead pass `use-mock-keychain`, which
+/// derives the key from a constant. Those runs are often headless (no one to
+/// approve the Keychain prompt) and use throwaway, frequently ad-hoc-signed
+/// profiles whose changing identity would otherwise churn the ACL of the shared
+/// item real logins depend on. Weak at-rest encryption is irrelevant for
+/// disposable test data.
+pub fn cef_keychain_switches() -> &'static [&'static str] {
+    cef_keychain_switches_for(is_test_session())
+}
+
+fn cef_keychain_switches_for(is_test_session: bool) -> &'static [&'static str] {
+    if is_test_session {
+        &["use-mock-keychain"]
+    } else {
+        &[]
+    }
+}
+
 fn store_dir_for(base: &std::path::Path, _profile: &str) -> PathBuf {
     base.to_path_buf()
 }
@@ -440,6 +471,19 @@ mod tests {
     #[test]
     fn local_and_release_share_one_space() {
         assert_eq!(data_dir_suffix_for("local"), data_dir_suffix_for("release"));
+    }
+
+    #[test]
+    fn test_sessions_use_mock_keychain() {
+        assert_eq!(
+            cef_keychain_switches_for(true),
+            ["use-mock-keychain"].as_slice()
+        );
+    }
+
+    #[test]
+    fn interactive_sessions_use_real_keychain() {
+        assert!(cef_keychain_switches_for(false).is_empty());
     }
 
     #[test]
