@@ -1160,6 +1160,7 @@ fn sync_windowed_frames(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
     mut last_visible_pages: Local<Vec<Entity>>,
+    mut last_windowed_pages: Local<Vec<Entity>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
@@ -1253,11 +1254,19 @@ fn sync_windowed_frames(
             }
         }
     }
+    let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
+    let newly_windowed: Vec<Entity> = current_windowed
+        .iter()
+        .copied()
+        .filter(|entity| !last_windowed_pages.contains(entity))
+        .collect();
     let ever_shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
-    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown) {
+    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown, &newly_windowed)
+    {
         browsers.set_windowed_hidden(&entity, true);
     }
     *last_visible_pages = visible;
+    *last_windowed_pages = current_windowed;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1347,11 +1356,16 @@ fn windowed_pages_to_hide(
     hidden: &[Entity],
     prev_visible: &[Entity],
     ever_shown: &[Entity],
+    newly_windowed: &[Entity],
 ) -> Vec<Entity> {
     hidden
         .iter()
         .copied()
-        .filter(|entity| prev_visible.contains(entity) || !ever_shown.contains(entity))
+        .filter(|entity| {
+            prev_visible.contains(entity)
+                || !ever_shown.contains(entity)
+                || newly_windowed.contains(entity)
+        })
         .collect()
 }
 
@@ -4362,8 +4376,18 @@ mod tests {
         let ever_shown = [just_deactivated, still_inactive];
 
         assert_eq!(
-            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown),
+            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown, &[]),
             vec![just_deactivated, never_shown]
+        );
+    }
+
+    #[test]
+    fn recreated_inactive_windowed_page_is_hidden() {
+        let page = Entity::from_bits(1);
+
+        assert_eq!(
+            windowed_pages_to_hide(&[page], &[], &[page], &[page]),
+            vec![page]
         );
     }
 
@@ -4830,6 +4854,50 @@ mod tests {
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(page).is_some(),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
+    fn user_player_user_backend_round_trip() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        let window = Window {
+            resolution: (800, 600).into(),
+            ..default()
+        };
+        let home = vmux_layout::scene::frame_main_camera_transform(&window, 800.0 / 600.0, 0.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+        app.world_mut()
+            .spawn((vmux_layout::scene::MainCamera, home));
+
+        let layout = app
+            .world_mut()
+            .spawn((Browser, LayoutCef, WebviewSource::new("vmux://layout/")))
+            .id();
+        let modal = app
+            .world_mut()
+            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((Browser, WebviewSource::new("https://example.com/")))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+        app.insert_resource(vmux_layout::scene::InteractionMode::Player);
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(modal).is_some(),
             cfg!(target_os = "macos")
