@@ -95,7 +95,8 @@ impl Plugin for ScenePlugin {
                     setup_exit_camera_animation,
                     start_pending_animation,
                     complete_mode_transition,
-                ),
+                )
+                    .chain(),
             )
             .add_systems(
                 PostUpdate,
@@ -571,6 +572,41 @@ mod tests {
             .expect("main camera free camera config");
 
         assert_eq!(config.mouse_key_cursor_grab, MouseButton::Left);
+    }
+
+    #[test]
+    fn scene_plugin_chains_exit_transition_systems_in_order() {
+        let source = include_str!("scene.rs");
+        let update_registration = source
+            .split("impl Plugin for ScenePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn setup").next())
+            .and_then(|build| build.split(".add_systems(\n                Update,").nth(1))
+            .and_then(|update| {
+                update
+                    .split(".add_systems(\n                PostUpdate,")
+                    .next()
+            })
+            .unwrap_or_default();
+        let systems = [
+            "on_interactive_mode_command.in_set(ReadAppCommands)",
+            "suppress_free_camera_when_pane_active",
+            "tick_mode_transition",
+            "fade_bloom_and_light",
+            "setup_exit_camera_animation",
+            "start_pending_animation",
+            "complete_mode_transition",
+        ];
+        let mut remainder = update_registration;
+
+        for system in systems {
+            let index = remainder
+                .find(system)
+                .expect("transition system registered");
+            remainder = &remainder[index + system.len()..];
+        }
+
+        assert!(remainder.contains(".chain()"));
     }
 
     #[test]
