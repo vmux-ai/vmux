@@ -51,6 +51,7 @@ impl Plugin for BackgroundLifecyclePlugin {
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             )
             .add_systems(Update, grab_key_window_on_pane_hover)
+            .add_systems(Last, keep_awake_while_player_active)
             .add_systems(
                 Startup,
                 (
@@ -497,6 +498,31 @@ fn keep_awake_while_revealing(
     }
 }
 
+fn player_frame_should_wake(
+    mode: InteractionMode,
+    transition_active: bool,
+    window_active: bool,
+) -> bool {
+    window_active && (mode == InteractionMode::Player || transition_active)
+}
+
+fn keep_awake_while_player_active(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mode: Res<InteractionMode>,
+    transition: Option<Res<vmux_layout::scene::ModeTransition>>,
+    windows: Query<&Window>,
+) {
+    let window_active = windows
+        .iter()
+        .any(|window| window.visible && window.focused);
+    if !player_frame_should_wake(*mode, transition.is_some(), window_active) {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
+    }
+}
+
 fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
     needs_open || has_active_reveal
 }
@@ -571,6 +597,57 @@ fn hide_all_osr_webviews(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn player_frame_demand_only_runs_for_player_or_transition() {
+        assert!(!player_frame_should_wake(
+            InteractionMode::User,
+            false,
+            true
+        ));
+        assert!(player_frame_should_wake(
+            InteractionMode::Player,
+            false,
+            true
+        ));
+        assert!(player_frame_should_wake(
+            InteractionMode::User,
+            true,
+            true
+        ));
+        assert!(player_frame_should_wake(
+            InteractionMode::Player,
+            true,
+            true
+        ));
+        assert!(!player_frame_should_wake(
+            InteractionMode::Player,
+            false,
+            false
+        ));
+        assert!(!player_frame_should_wake(
+            InteractionMode::User,
+            true,
+            false
+        ));
+    }
+
+    #[test]
+    fn player_frame_demand_runs_in_last() {
+        let source = include_str!("background_lifecycle.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or_default();
+        let plugin_build = source
+            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
+            .unwrap_or_default();
+
+        assert!(
+            plugin_build.contains(".add_systems(Last, keep_awake_while_player_active)")
+        );
+    }
 
     #[test]
     fn command_bar_wake_covers_defer_and_active_reveal() {
