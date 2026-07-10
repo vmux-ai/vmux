@@ -3,7 +3,7 @@ use crate::{
     unit::{PIXELS_PER_METER, WindowExt},
 };
 use bevy::{
-    animation::{AnimationTargetId, animated_field, prelude::*},
+    animation::{AnimatedBy, AnimationTargetId, animated_field, prelude::*},
     camera::PerspectiveProjection,
     camera::Projection,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin, FreeCameraState},
@@ -394,6 +394,8 @@ fn setup_exit_camera_animation(
     // Add animation components to camera
     commands.entity(*camera_entity).insert((
         Name::new("main_camera"),
+        target_id,
+        AnimatedBy(*camera_entity),
         AnimationGraphHandle(graph_handle),
         AnimationPlayer::default(),
     ));
@@ -469,9 +471,12 @@ fn complete_mode_transition(
                 .entity(*camera)
                 .remove::<AnimationPlayer>()
                 .remove::<AnimationGraphHandle>()
+                .remove::<AnimationTargetId>()
+                .remove::<AnimatedBy>()
                 .remove::<Name>();
 
             commands.remove_resource::<CameraHome>();
+            commands.remove_resource::<PendingAnimationStart>();
         }
     }
 
@@ -569,6 +574,33 @@ mod tests {
     }
 
     #[test]
+    fn exit_transition_wires_main_camera_animation_target() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<AnimationClip>>()
+            .init_resource::<Assets<AnimationGraph>>()
+            .insert_resource(CameraHome(Transform::IDENTITY))
+            .insert_resource(ModeTransition::new(TransitionDirection::ExitPlayer))
+            .add_systems(Update, setup_exit_camera_animation);
+
+        let camera = app
+            .world_mut()
+            .spawn((MainCamera, Transform::from_xyz(3.0, 2.0, 1.0)))
+            .id();
+
+        app.update();
+
+        let target = AnimationTargetId::from_name(&Name::new("main_camera"));
+        assert_eq!(app.world().get::<AnimationTargetId>(camera), Some(&target));
+        assert_eq!(
+            app.world()
+                .get::<AnimatedBy>(camera)
+                .map(|animated| animated.0),
+            Some(camera)
+        );
+    }
+
+    #[test]
     fn exiting_player_mode_resets_free_camera_state() {
         let mut app = App::new();
         let mut transition = ModeTransition::new(TransitionDirection::ExitPlayer);
@@ -576,6 +608,7 @@ mod tests {
             .timer
             .tick(std::time::Duration::from_secs_f32(TRANSITION_DURATION));
         let home = Transform::from_xyz(1.0, 2.0, 3.0);
+        let (_, node) = AnimationGraph::from_clip(Handle::<AnimationClip>::default());
         let mut state = FreeCameraState::default();
         state.enabled = false;
         state.pitch = 1.0;
@@ -587,11 +620,22 @@ mod tests {
             .insert_resource(InteractionMode::Player)
             .insert_resource(transition)
             .insert_resource(CameraHome(home))
+            .insert_resource(PendingAnimationStart(node))
             .add_systems(Update, complete_mode_transition);
         app.world_mut()
             .spawn((Window::default(), PrimaryWindow, Transform::default()));
-        app.world_mut()
-            .spawn((MainCamera, Transform::default(), state, Bloom::NATURAL));
+        let camera = app
+            .world_mut()
+            .spawn((MainCamera, Transform::default(), state, Bloom::NATURAL))
+            .id();
+        app.world_mut().entity_mut(camera).insert((
+            AnimationPlayer::default(),
+            AnimationGraphHandle(Handle::<AnimationGraph>::default()),
+            Name::new("main_camera"),
+            AnimationTargetId::from_name(&Name::new("main_camera")),
+            AnimatedBy(camera),
+        ));
+        app.world_mut().spawn(SceneSunlight);
         let window_entity = app
             .world_mut()
             .spawn((
@@ -601,6 +645,22 @@ mod tests {
             .id();
 
         app.update();
+
+        assert!(*app.world().resource::<InteractionMode>() == InteractionMode::User);
+        assert!(!app.world().contains_resource::<ModeTransition>());
+        assert!(!app.world().contains_resource::<CameraHome>());
+        assert!(!app.world().contains_resource::<PendingAnimationStart>());
+        assert!(app.world().get::<Bloom>(camera).is_none());
+        assert!(app.world().get::<AnimationPlayer>(camera).is_none());
+        assert!(app.world().get::<AnimationGraphHandle>(camera).is_none());
+        assert!(app.world().get::<AnimationTargetId>(camera).is_none());
+        assert!(app.world().get::<AnimatedBy>(camera).is_none());
+        assert!(app.world().get::<Name>(camera).is_none());
+        assert_eq!(app.world().get::<Transform>(camera), Some(&home));
+        let mut sunlight_q = app
+            .world_mut()
+            .query_filtered::<Entity, With<SceneSunlight>>();
+        assert!(sunlight_q.iter(app.world()).next().is_none());
 
         let state = app
             .world_mut()
