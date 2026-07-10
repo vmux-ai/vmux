@@ -10,7 +10,7 @@ Success criteria:
 - The main `vmux_desktop` process stays below 5% CPU at idle on a focused 120 Hz display.
 - Windowed CEF pages do not increase the Bevy update rate.
 - OSR paint bursts are coalesced to at most one Bevy wake per display interval.
-- Player mode renders continuously while active without using `UpdateMode::Continuous`.
+- Focused, visible Player mode renders continuously without using `UpdateMode::Continuous`.
 - User → Player → User restores camera, layout, CEF backends, focus, and native view visibility.
 
 ## Findings
@@ -34,7 +34,12 @@ Current settled-state paint sources include the two `animate-pulse` done indicat
 
 Player mode currently has no explicit frame-demand wake. Its transitions and free camera can therefore depend accidentally on unrelated OSR paints or input events. Removing persistent layout animation without replacing that accidental clock would make Player mode stall.
 
-Switching between User and Player also changes content pages between windowed CEF and OSR CEF. That requires browser recreation. The existing User → Player → User bug may be in scene cleanup, camera restoration, backend recreation, or native-view reconciliation. It must be isolated before changing that path.
+Switching between User and Player also changes content pages between windowed CEF and OSR CEF. That requires browser recreation. The existing User → Player → User bug was isolated across scene animation targeting and native-view visibility reconciliation.
+
+The return investigation found two concrete defects:
+
+- The exit camera animation creates curves for `AnimationTargetId("main_camera")` but never adds `AnimationTargetId` or `AnimatedBy` to the camera, so the camera stays off-axis until the completion snap.
+- Windowed-page visibility caches survive CEF browser recreation because the ECS entity is unchanged. An inactive page returning from Player mode can therefore skip the initial native hide call and remain layered over the active page.
 
 ## Scope
 
@@ -72,12 +77,12 @@ When the DOM and ECS are settled, no source should request another frame.
 
 Player mode gets an explicit self-sustaining wake source in `BackgroundLifecyclePlugin`.
 
-The wake predicate is true while either condition holds:
+The wake predicate is true while a focused window is visible and either condition holds:
 
 - `InteractionMode::Player`
 - `ModeTransition` exists
 
-The system sends `WinitUserEvent::WakeUp` once per Bevy update. Winit redraw/presentation pacing limits the resulting loop. The wake stops immediately after the exit transition completes and mode returns to User.
+The system runs in `Last` and sends `WinitUserEvent::WakeUp` once per Bevy update. `Last` observes deferred transition changes, prevents a missed first wake, and avoids a trailing wake after exit cleanup. Winit redraw/presentation pacing limits the resulting loop. The wake stops immediately after the exit transition completes, the mode returns to User, the app loses focus, or every window is hidden.
 
 This preserves free-camera movement, bloom/light fades, camera return animation, CEF OSR updates, and backend reconciliation without relying on a CSS animation. It complies with the project ban on `UpdateMode::Continuous`.
 
@@ -88,7 +93,7 @@ The mode round trip is treated as one restoration transaction with explicit inva
 After Player → User completes:
 
 - `InteractionMode` is `User`.
-- `ModeTransition`, `CameraHome`, `PendingAnimationStart`, `AnimationPlayer`, and `AnimationGraphHandle` are absent.
+- `ModeTransition`, `CameraHome`, `PendingAnimationStart`, `AnimationPlayer`, `AnimationGraphHandle`, `AnimationTargetId`, and `AnimatedBy` are absent.
 - `FreeCameraState` is disabled and its velocity, pitch, yaw, multiplier, and rotation curve are reset.
 - Main-camera transform equals the current framed home transform.
 - `VmuxWindow` transform equals the current window frame transform.
@@ -98,7 +103,7 @@ After Player → User completes:
 - No stale Player-mode keyboard target or suppression state remains.
 - Player frame-demand wakes stop.
 
-First add a failing round-trip test and temporary transition diagnostics. Determine whether the broken invariant belongs to scene cleanup or CEF backend reconciliation. Fix only the proven failing layer.
+The exit animation must wire the camera as its own animation target and remove all animation target/player state at completion. Windowed frame synchronization must treat every page re-entering the windowed backend as a new native view and explicitly reconcile its hidden state.
 
 ### Diagnostics
 
@@ -123,7 +128,7 @@ All temporary diagnostics are removed before commit.
 - Layout page source contains no persistent `animate-pulse`, `animate-ping`, `animate-bounce`, or unbounded spin classes.
 - Hidden User-mode focus ring does not mutate its material time.
 - Visible Player-mode focus ring still animates.
-- Player-frame wake predicate is false for settled User mode and true for Player mode or either transition.
+- Player-frame wake predicate is false for settled User mode and inactive windows, and true for focused visible Player mode or either transition.
 - User → Player → User transition restores every scene invariant.
 - CEF backend round trip restores windowed markers on macOS and keeps the layout shell OSR.
 - Existing no-`UpdateMode::Continuous` invariant remains green.
