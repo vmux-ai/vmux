@@ -54,6 +54,8 @@ Replace the entity-only local cache in `apply_windowed_host_focus` with a decisi
 
 For a macOS `Windowed(webview)` intent, focus when the browser exists and native focus is absent. Do nothing while the browser already owns focus. If the browser is still being created, retry naturally on later frames.
 
+CEF browser close completion explicitly wakes the Bevy event loop. This guarantees a focus verification pass after asynchronous teardown can clear first-responder ownership, even while the foreground event loop is otherwise sleeping in reactive mode.
+
 For `WinitHost` and `Unmanaged`, preserve current behavior. Linux keeps the existing one-shot entity cache because native windowed focus inspection is macOS-specific.
 
 ### `vmux://start/` flow
@@ -85,5 +87,5 @@ Run targeted tests for `vmux_browser` and the patched `bevy_cef_core` crate. Man
 ## Risks
 
 - CEF may place first responder on a descendant rather than its root view. The query must recognize the full native view subtree.
-- Reactive scheduling must receive a wake after asynchronous teardown. CEF lifecycle and browser creation already wake the event loop; manual verification confirms recovery timing.
+- Reactive scheduling must receive a wake after asynchronous teardown. The CEF life-span handler wakes Bevy from `on_before_close`.
 - A false negative would reintroduce repeated focus calls and selection loss. Descendant detection and the already-focused test guard this behavior.

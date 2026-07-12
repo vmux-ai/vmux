@@ -1982,7 +1982,7 @@ impl Browsers {
         ))
         .with_wake(texture_wake.clone());
         let client = if cancel_native_focus {
-            client.with_focus_handler(FocusCanceler::build(texture_wake))
+            client.with_focus_handler(FocusCanceler::build(texture_wake.clone()))
         } else {
             client
         };
@@ -2000,6 +2000,7 @@ impl Browsers {
             .with_life_span_handler(LifeSpanHandlerBuilder::build(
                 webview,
                 webview_popup_sender.clone(),
+                texture_wake.clone(),
             ))
             .with_request_handler(RequestHandlerBuilder::build(webview, webview_popup_sender))
             .with_permission_handler(PermissionHandlerBuilder::build(
@@ -2485,7 +2486,10 @@ mod tests {
 
         assert!(implementation.contains("allow_native_focus"));
         assert!(implementation.contains("if cancel_native_focus"));
-        assert!(implementation.contains(".with_focus_handler(FocusCanceler::build(texture_wake))"));
+        assert!(
+            implementation
+                .contains(".with_focus_handler(FocusCanceler::build(texture_wake.clone()))")
+        );
         assert!(implementation.contains("pub fn set_windowed_focus"));
     }
 
@@ -2495,16 +2499,17 @@ mod tests {
             .split("#[cfg(test)]\nmod tests")
             .next()
             .unwrap_or_default();
-        let focus_fn = implementation
-            .split("pub fn windowed_has_native_focus")
+        let focus_section = implementation
+            .split("/// Returns whether a native windowed browser")
             .nth(1)
             .and_then(|tail| tail.split("pub fn set_windowed_focus").next())
             .unwrap_or_default();
 
-        assert!(focus_fn.contains("window.firstResponder()"));
-        assert!(focus_fn.contains("downcast_ref::<NSView>()"));
-        assert!(focus_fn.contains("isDescendantOf(view)"));
-        assert!(implementation.contains("#[cfg(not(target_os = \"macos\"))]"));
+        assert!(focus_section.contains("#[cfg(target_os = \"macos\")]"));
+        assert!(focus_section.contains("window.firstResponder()"));
+        assert!(focus_section.contains("downcast_ref::<NSView>()"));
+        assert!(focus_section.contains("isDescendantOf(view)"));
+        assert!(focus_section.contains("#[cfg(not(target_os = \"macos\"))]"));
     }
 
     #[test]
