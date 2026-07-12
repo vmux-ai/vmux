@@ -10,21 +10,24 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, CreateTerminalRequest, Implementation, InitializeRequest,
-    KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption,
-    PermissionOptionId, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
+    CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
+    Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
+    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
+    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
-    TerminalOutputRequest, TextContent, WaitForTerminalExitRequest, WriteTextFileRequest,
+    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use tokio::process::Command;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 
 use super::projector::{AcpProjector, Intent};
+use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::{
     AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
     compose_agent_prompt,
@@ -45,6 +48,14 @@ pub enum AcpInput {
     Close,
 }
 
+/// A live ACP-native terminal: the vmux process backing it plus a receiver that resolves with the
+/// child's exit code (`None` until it exits), driving `terminal/wait_for_exit` and the exit status
+/// in `terminal/output`.
+pub struct AcpTerminal {
+    pub process_id: ProcessId,
+    pub exit_rx: watch::Receiver<Option<i32>>,
+}
+
 /// State shared between the driver's request handlers and its prompt loop.
 pub struct AcpShared {
     pub sid: String,
@@ -53,7 +64,14 @@ pub struct AcpShared {
     pub stream_tx: broadcast::Sender<ServiceMessage>,
     pub projector: Mutex<AcpProjector>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
-    pub terminals: Mutex<HashMap<String, ProcessId>>,
+    /// ACP-native terminals keyed by their ACP `terminalId` (the vmux `ProcessId` string).
+    pub terminals: Mutex<HashMap<String, AcpTerminal>>,
+    /// Daemon process manager (shared with the IPC server) so terminal handlers spawn / read / kill
+    /// PTYs directly, without a GUI round-trip.
+    pub manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+    /// PTY input writers (shared with the server) so the user can take over an ACP terminal by
+    /// typing into its pane.
+    pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
@@ -66,6 +84,8 @@ impl AcpShared {
         cwd: PathBuf,
         anchor: ProcessId,
         stream_tx: broadcast::Sender<ServiceMessage>,
+        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+        input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     ) -> Self {
         Self {
             sid,
@@ -75,6 +95,8 @@ impl AcpShared {
             projector: Mutex::new(AcpProjector::new()),
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
+            manager,
+            input_writers,
             agent_name: Mutex::new(None),
             cancel_requested: AtomicBool::new(false),
         }
@@ -156,6 +178,11 @@ pub async fn run(
     let perm_shared = shared.clone();
     let update_shared = shared.clone();
     let main_shared = shared.clone();
+    let create_shared = shared.clone();
+    let output_shared = shared.clone();
+    let wait_shared = shared.clone();
+    let kill_shared = shared.clone();
+    let release_shared = shared.clone();
     let read_cwd = shared.cwd.clone();
     let write_cwd = shared.cwd.clone();
 
@@ -220,33 +247,57 @@ pub async fn run(
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: CreateTerminalRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: terminal/create not yet implemented")
+            async move |req: CreateTerminalRequest,
+                        responder: Responder<CreateTerminalResponse>,
+                        _cx| {
+                match create_terminal(&create_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: TerminalOutputRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: terminal/output not yet implemented")
+            async move |req: TerminalOutputRequest,
+                        responder: Responder<TerminalOutputResponse>,
+                        _cx| {
+                match terminal_output(&output_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: WaitForTerminalExitRequest, responder: Responder<_>, _cx| {
-                responder
-                    .respond_with_internal_error("acp: terminal/wait_for_exit not yet implemented")
+            async move |req: WaitForTerminalExitRequest,
+                        responder: Responder<WaitForTerminalExitResponse>,
+                        _cx| {
+                match wait_for_terminal_exit(&wait_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: KillTerminalRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: terminal/kill not yet implemented")
+            async move |req: KillTerminalRequest,
+                        responder: Responder<KillTerminalResponse>,
+                        _cx| {
+                match kill_terminal(&kill_shared, req).await {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
         .on_receive_request(
-            async move |_req: ReleaseTerminalRequest, responder: Responder<_>, _cx| {
-                responder.respond_with_internal_error("acp: terminal/release not yet implemented")
+            async move |req: ReleaseTerminalRequest,
+                        responder: Responder<ReleaseTerminalResponse>,
+                        _cx| {
+                match release_terminal(&release_shared, req) {
+                    Ok(resp) => responder.respond(resp),
+                    Err(err) => responder.respond_with_internal_error(err),
+                }
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -296,8 +347,9 @@ pub async fn run(
             let mut init = InitializeRequest::new(ProtocolVersion::V1);
             init.client_capabilities.fs.read_text_file = true;
             init.client_capabilities.fs.write_text_file = true;
-            // Terminals are provided via the vmux_mcp `run` tool (real panes), not ACP-native.
-            init.client_capabilities.terminal = false;
+            // ACP-native terminals: the agent's shell/Bash execution flows through vmux's five
+            // terminal methods, backed by real visible panes (see `create_terminal` et al.).
+            init.client_capabilities.terminal = true;
             let init_resp = cx.send_request(init).block_task().await?;
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
@@ -462,6 +514,178 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr) {
     }
 }
 
+/// Default PTY geometry for an ACP-native terminal. ACP `terminal/create` is size-less; the GUI
+/// pane resizes the PTY (`ResizeProcess`) once it mounts.
+const ACP_TERMINAL_COLS: u16 = 80;
+const ACP_TERMINAL_ROWS: u16 = 24;
+
+/// `terminal/create`: spawn a real (visible) PTY on the daemon's process manager, register it as an
+/// ACP terminal, and tell the GUI to open a pane bound to it. Returns the ACP `terminalId` (the
+/// vmux `ProcessId` string).
+async fn create_terminal(
+    shared: &AcpShared,
+    req: CreateTerminalRequest,
+) -> Result<CreateTerminalResponse, String> {
+    let CreateTerminalRequest {
+        command,
+        args,
+        env,
+        cwd,
+        ..
+    } = req;
+    let env: Vec<(String, String)> = env.into_iter().map(|var| (var.name, var.value)).collect();
+    let cwd = cwd
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| shared.cwd.to_string_lossy().into_owned());
+    let id = ProcessId::new();
+
+    let (exit_stream, writer) = {
+        let mut mgr = shared.manager.lock().await;
+        mgr.create_process_keep_alive(
+            id,
+            command.clone(),
+            args.clone(),
+            cwd.clone(),
+            env,
+            ACP_TERMINAL_COLS,
+            ACP_TERMINAL_ROWS,
+        )?;
+        let exit_stream = mgr.processes.get(&id).map(|process| process.subscribe());
+        (exit_stream, mgr.input_writer(&id))
+    };
+
+    // Let the user take over the pane by typing.
+    if let Some(writer) = writer {
+        shared.input_writers.lock().await.insert(id, writer);
+    }
+
+    // Resolve the child's exit code once, off the process broadcast, for wait_for_exit / output.
+    let (exit_tx, exit_rx) = watch::channel(None);
+    if let Some(mut exit_stream) = exit_stream {
+        tokio::spawn(async move {
+            loop {
+                match exit_stream.recv().await {
+                    Ok(ServiceMessage::ProcessExited { exit_code, .. }) => {
+                        let _ = exit_tx.send(exit_code);
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    let terminal_id = id.to_string();
+    shared.terminals.lock().unwrap().insert(
+        terminal_id.clone(),
+        AcpTerminal {
+            process_id: id,
+            exit_rx,
+        },
+    );
+    shared.emit(ServiceMessage::AcpTerminalCreated {
+        sid: shared.sid.clone(),
+        terminal_id: terminal_id.clone(),
+        process_id: id,
+        command,
+        args,
+        cwd: Some(cwd),
+    });
+    Ok(CreateTerminalResponse::new(TerminalId::new(terminal_id)))
+}
+
+/// Look up the vmux `ProcessId` and last-known exit code for an ACP `terminalId`.
+fn lookup_terminal(
+    shared: &AcpShared,
+    terminal_id: &TerminalId,
+) -> Result<(ProcessId, Option<i32>), String> {
+    let key = terminal_id.0.to_string();
+    let terminals = shared.terminals.lock().unwrap();
+    let terminal = terminals
+        .get(&key)
+        .ok_or_else(|| format!("acp: unknown terminal {key}"))?;
+    Ok((terminal.process_id, *terminal.exit_rx.borrow()))
+}
+
+fn terminal_exit_status(code: Option<i32>) -> TerminalExitStatus {
+    let status = TerminalExitStatus::new();
+    match code {
+        Some(code) => status.exit_code(code as u32),
+        None => status,
+    }
+}
+
+/// `terminal/output`: current scrollback of the backing process plus its exit status (if it ended).
+async fn terminal_output(
+    shared: &AcpShared,
+    req: TerminalOutputRequest,
+) -> Result<TerminalOutputResponse, String> {
+    let (process_id, exit) = lookup_terminal(shared, &req.terminal_id)?;
+    let output = {
+        let mgr = shared.manager.lock().await;
+        mgr.processes
+            .get(&process_id)
+            .map(|process| process.full_text())
+            .unwrap_or_default()
+    };
+    let mut resp = TerminalOutputResponse::new(output, false);
+    if let Some(code) = exit {
+        resp = resp.exit_status(terminal_exit_status(Some(code)));
+    }
+    Ok(resp)
+}
+
+/// `terminal/wait_for_exit`: block until the backing child exits, then report its status.
+async fn wait_for_terminal_exit(
+    shared: &AcpShared,
+    req: WaitForTerminalExitRequest,
+) -> Result<WaitForTerminalExitResponse, String> {
+    let key = req.terminal_id.0.to_string();
+    let mut exit_rx = {
+        let terminals = shared.terminals.lock().unwrap();
+        terminals
+            .get(&key)
+            .map(|terminal| terminal.exit_rx.clone())
+            .ok_or_else(|| format!("acp: unknown terminal {key}"))?
+    };
+    let code = loop {
+        let current = *exit_rx.borrow();
+        if current.is_some() {
+            break current;
+        }
+        if exit_rx.changed().await.is_err() {
+            break None;
+        }
+    };
+    Ok(WaitForTerminalExitResponse::new(terminal_exit_status(code)))
+}
+
+/// `terminal/kill`: kill the child but keep the pane (its output stays readable).
+async fn kill_terminal(
+    shared: &AcpShared,
+    req: KillTerminalRequest,
+) -> Result<KillTerminalResponse, String> {
+    let (process_id, _) = lookup_terminal(shared, &req.terminal_id)?;
+    shared.manager.lock().await.kill_process(&process_id);
+    Ok(KillTerminalResponse::new())
+}
+
+/// `terminal/release`: stop tracking the terminal. The pane + process are left for the user (they
+/// may still want to watch or take over); the GUI reaps the pane when the user closes it.
+fn release_terminal(
+    shared: &AcpShared,
+    req: ReleaseTerminalRequest,
+) -> Result<ReleaseTerminalResponse, String> {
+    shared
+        .terminals
+        .lock()
+        .unwrap()
+        .remove(&req.terminal_id.0.to_string());
+    Ok(ReleaseTerminalResponse::new())
+}
+
 /// Maps a host decision (the wire `Allow`/`Deny`) onto an ACP permission option, preferring the
 /// one-shot kind, then the always-kind. Returns `None` (→ the request is cancelled) when the agent
 /// offers no option matching the decision — never falls back to an option that could approve a
@@ -595,6 +819,8 @@ mod tests {
             PathBuf::from("/tmp"),
             ProcessId::new(),
             stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         );
 
         shared.publish_agent_info("Antigravity".into());
@@ -749,5 +975,98 @@ mod tests {
         assert_eq!(slice_lines(text, Some(2), None), "b\nc\nd");
         assert_eq!(slice_lines(text, Some(2), Some(2)), "b\nc");
         assert_eq!(slice_lines(text, Some(10), Some(2)), "");
+    }
+
+    fn test_shared(
+        manager: Arc<tokio::sync::Mutex<ProcessManager>>,
+    ) -> (Arc<AcpShared>, broadcast::Receiver<ServiceMessage>) {
+        let (stream_tx, stream_rx) = broadcast::channel(64);
+        let shared = Arc::new(AcpShared::new(
+            "s1".to_string(),
+            std::env::temp_dir(),
+            ProcessId::new(),
+            stream_tx,
+            manager,
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        ));
+        (shared, stream_rx)
+    }
+
+    /// End-to-end of the daemon terminal path: `terminal/create` spawns a real PTY + emits
+    /// `AcpTerminalCreated`; `wait_for_exit` resolves with the child's code; `output` reads the
+    /// completed command's text after exit (kept alive); `release` stops tracking it.
+    #[tokio::test]
+    async fn acp_terminal_create_wait_output_release() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, mut stream_rx) = test_shared(manager.clone());
+
+        // Drive PTY output + exit detection like the server poll loop (which keeps ACP terminals).
+        let poll_mgr = manager.clone();
+        let poll = tokio::spawn(async move {
+            loop {
+                poll_mgr.lock().await.poll_all();
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        });
+
+        let req = CreateTerminalRequest::new("s1", "/bin/sh").args(vec![
+            "-c".to_string(),
+            "printf hi; sleep 0.1; exit 7".to_string(),
+        ]);
+        let created = create_terminal(&shared, req).await.expect("create");
+        let tid = created.terminal_id.0.to_string();
+        assert!(shared.terminals.lock().unwrap().contains_key(&tid));
+
+        let (emitted_id, emitted_pid) = loop {
+            match stream_rx.recv().await.expect("stream open") {
+                ServiceMessage::AcpTerminalCreated {
+                    terminal_id,
+                    process_id,
+                    ..
+                } => break (terminal_id, process_id),
+                _ => continue,
+            }
+        };
+        assert_eq!(emitted_id, tid);
+        assert_eq!(emitted_pid.to_string(), tid);
+
+        let wait = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            wait_for_terminal_exit(
+                &shared,
+                WaitForTerminalExitRequest::new("s1", TerminalId::new(tid.clone())),
+            ),
+        )
+        .await
+        .expect("wait_for_exit timed out")
+        .expect("wait_for_exit");
+        assert_eq!(wait.exit_status.exit_code, Some(7));
+
+        let out = terminal_output(
+            &shared,
+            TerminalOutputRequest::new("s1", TerminalId::new(tid.clone())),
+        )
+        .await
+        .expect("output");
+        assert!(out.output.contains("hi"), "output was {:?}", out.output);
+        assert_eq!(out.exit_status.and_then(|status| status.exit_code), Some(7));
+
+        release_terminal(
+            &shared,
+            ReleaseTerminalRequest::new("s1", TerminalId::new(tid.clone())),
+        )
+        .expect("release");
+        assert!(!shared.terminals.lock().unwrap().contains_key(&tid));
+
+        poll.abort();
+    }
+
+    #[tokio::test]
+    async fn terminal_output_unknown_terminal_errors() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager);
+        let result =
+            terminal_output(&shared, TerminalOutputRequest::new("s1", "does-not-exist")).await;
+        assert!(result.is_err());
     }
 }

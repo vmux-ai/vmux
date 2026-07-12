@@ -82,17 +82,27 @@ pub async fn run_server(listener: UnixListener) {
                 }
             }
 
-            let exited = {
+            let reaped = {
                 let mut mgr = poll_mgr.lock().await;
                 let exited = mgr.poll_all();
+                let mut reaped = Vec::new();
                 for id in &exited {
-                    mgr.remove_process(id);
+                    // ACP-native terminals keep their final grid until `terminal/release`; don't
+                    // reap them here.
+                    let keep = mgr
+                        .processes
+                        .get(id)
+                        .is_some_and(|process| process.keep_after_exit());
+                    if !keep {
+                        mgr.remove_process(id);
+                        reaped.push(*id);
+                    }
                 }
-                exited
+                reaped
             };
-            if !exited.is_empty() {
+            if !reaped.is_empty() {
                 let mut writers = poll_input_writers.lock().await;
-                for id in exited {
+                for id in reaped {
                     writers.remove(&id);
                 }
             }
@@ -861,6 +871,8 @@ async fn handle_client(
                     env,
                     std::path::PathBuf::from(cwd),
                     anchor,
+                    Arc::clone(&manager),
+                    Arc::clone(&input_writers),
                     mcp_servers,
                     resume_acp_session_id,
                 );

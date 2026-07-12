@@ -23,14 +23,17 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     Ok(Some(value))
 }
 
-pub async fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io::Result<()> {
+pub async fn run_stdio(
+    anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
+) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(message, anchor).await {
+        if let Some(response) = handle_message(message, anchor, acp_terminals).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -42,6 +45,7 @@ pub async fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io:
 async fn handle_message(
     message: Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
 ) -> Option<Value> {
     let id = message.get("id").cloned()?;
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
@@ -49,7 +53,9 @@ async fn handle_message(
 
     let result = match method {
         "initialize" => Ok(initialize_result(&params)),
-        "tools/list" => Ok(json!({ "tools": crate::tools::tool_definitions() })),
+        "tools/list" => {
+            Ok(json!({ "tools": crate::tools::tool_definitions_filtered(acp_terminals) }))
+        }
         "tools/call" => tool_call_result(&params, anchor).await,
         _ => {
             return Some(json!({

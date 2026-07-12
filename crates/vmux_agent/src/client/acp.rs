@@ -4,10 +4,16 @@
 //! `consume_page_agent_stream` system (ACP reuses the Page stream messages).
 
 use bevy::prelude::*;
+use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use crossbeam_channel::{Receiver, Sender};
+use vmux_core::LastActivatedAt;
+use vmux_layout::event::TERMINAL_PAGE_URL;
+use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
+use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
 use vmux_setting::AppSettings;
+use vmux_terminal::reattach_terminal_bundle;
 
 use crate::components::{AgentApprovalPolicy, PromptQueue};
 use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
@@ -109,6 +115,7 @@ impl Plugin for AcpAgentPlugin {
             .init_resource::<AcpCatalog>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
+            .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
                 Update,
@@ -119,6 +126,7 @@ impl Plugin for AcpAgentPlugin {
                     receive_catalog,
                     apply_acp_agent_info,
                     apply_acp_session_created,
+                    apply_acp_terminal_created,
                 ),
             )
             .add_observer(close_acp_session_on_remove)
@@ -335,7 +343,7 @@ fn drain_acp_installs(
                     continue;
                 };
                 if let Some((session, _)) = q.iter().find(|(s, _)| s.sid == sid) {
-                    let mcp = crate::mcp::resolve(&session.cwd, session.anchor)
+                    let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor)
                         .inspect_err(|err| {
                             bevy::log::warn!(
                                 "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
@@ -407,6 +415,49 @@ fn apply_acp_session_created(
                 }
             }
         }
+    }
+}
+
+/// An ACP agent created a terminal (`terminal/create`): the daemon already spawned the PTY, so open
+/// a visible pane beside the agent and **attach** it to `process_id` (never create a second PTY).
+/// Reuses an existing terminal region when present (stacks over splits) and keeps keyboard focus on
+/// the agent.
+#[allow(clippy::too_many_arguments)]
+fn apply_acp_terminal_created(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentAcpTerminalCreated>,
+    sessions: Query<(Entity, &AcpSession)>,
+    ctx: PlacementCtx,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut commands: Commands,
+) {
+    let mut split_batch = std::collections::HashSet::new();
+    for ev in reader.read() {
+        let Some(stack) = sessions
+            .iter()
+            .find(|(_, session)| session.sid == ev.sid)
+            .map(|(entity, _)| entity)
+        else {
+            continue;
+        };
+        let Ok(agent_pane) = ctx.child_of_q.get(stack).map(|child_of| child_of.parent()) else {
+            continue;
+        };
+        let target_pane = resolve_spiral_pane(
+            &mut commands,
+            agent_pane,
+            TERMINAL_PAGE_URL,
+            false,
+            &mut split_batch,
+            &ctx,
+        );
+        let tab = commands
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+            .id();
+        commands.spawn((
+            reattach_terminal_bundle(&mut meshes, &mut webview_mt, ev.process_id),
+            ChildOf(tab),
+        ));
     }
 }
 
@@ -573,7 +624,9 @@ mod tests {
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin);
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn(AcpSession {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),

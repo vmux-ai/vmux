@@ -6,9 +6,23 @@ pub use vmux_core::agent::McpServerConfig;
 use crate::exec;
 
 pub fn resolve(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
+    resolve_inner(cwd, anchor, false)
+}
+
+/// Like [`resolve`] but for ACP sessions: the sidecar serves the ACP toolset (`run` +
+/// `read_terminal` hidden in favor of ACP-native terminals; `terminal_send` kept).
+pub fn resolve_acp(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
+    resolve_inner(cwd, anchor, true)
+}
+
+fn resolve_inner(
+    cwd: &Path,
+    anchor: ProcessId,
+    acp_terminals: bool,
+) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;
     let profile = vmux_core::profile::active_profile_name();
-    resolve_with_sidecar(&sidecar, cwd, anchor, &profile)
+    resolve_with_sidecar(&sidecar, cwd, anchor, &profile, acp_terminals)
 }
 
 fn resolve_with_sidecar(
@@ -16,11 +30,12 @@ fn resolve_with_sidecar(
     cwd: &Path,
     anchor: ProcessId,
     profile: &str,
+    acp_terminals: bool,
 ) -> Result<McpServerConfig, String> {
     if exec::is_executable_path(sidecar) {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
-            args: mcp_subcommand_args(anchor, profile),
+            args: mcp_subcommand_args(anchor, profile, acp_terminals),
             cwd: None,
         });
     }
@@ -30,7 +45,7 @@ fn resolve_with_sidecar(
         .into_iter()
         .map(str::to_string)
         .collect();
-    args.extend(mcp_subcommand_args(anchor, profile));
+    args.extend(mcp_subcommand_args(anchor, profile, acp_terminals));
     Ok(McpServerConfig {
         command: "cargo".to_string(),
         args,
@@ -38,14 +53,18 @@ fn resolve_with_sidecar(
     })
 }
 
-fn mcp_subcommand_args(anchor: ProcessId, profile: &str) -> Vec<String> {
-    vec![
+fn mcp_subcommand_args(anchor: ProcessId, profile: &str, acp_terminals: bool) -> Vec<String> {
+    let mut args = vec![
         "mcp".to_string(),
         "--anchor".to_string(),
         anchor.to_string(),
         "--profile".to_string(),
         profile.to_string(),
-    ]
+    ];
+    if acp_terminals {
+        args.push("--acp-terminals".to_string());
+    }
+    args
 }
 
 fn find_workspace_dir(cwd: &Path) -> Option<PathBuf> {
@@ -75,12 +94,21 @@ mod tests {
     fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
         for profile in ["personal", "gregor"] {
-            let args = mcp_subcommand_args(anchor, profile);
+            let args = mcp_subcommand_args(anchor, profile, false);
             assert!(
                 args.windows(2)
                     .any(|w| w[0] == "--profile" && w[1] == profile)
             );
         }
+    }
+
+    #[test]
+    fn acp_args_append_acp_terminals_flag() {
+        let anchor = ProcessId::new();
+        let plain = mcp_subcommand_args(anchor, "personal", false);
+        let acp = mcp_subcommand_args(anchor, "personal", true);
+        assert!(!plain.iter().any(|a| a == "--acp-terminals"));
+        assert!(acp.iter().any(|a| a == "--acp-terminals"));
     }
 
     #[test]
@@ -91,9 +119,14 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config =
-            resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor, "personal")
-                .unwrap();
+        let config = resolve_with_sidecar(
+            &temp.join("missing-vmux"),
+            &workspace,
+            anchor,
+            "personal",
+            false,
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
 
         assert_eq!(config.command, "cargo");
@@ -125,9 +158,14 @@ mod tests {
         std::fs::write(workspace.join("Cargo.toml"), b"[workspace]\n").unwrap();
 
         let anchor = ProcessId::new();
-        let config =
-            resolve_with_sidecar(&temp.join("missing-vmux"), &workspace, anchor, "personal")
-                .unwrap();
+        let config = resolve_with_sidecar(
+            &temp.join("missing-vmux"),
+            &workspace,
+            anchor,
+            "personal",
+            false,
+        )
+        .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
 
         assert!(config.args.windows(2).any(|w| w[0] == "--anchor"));

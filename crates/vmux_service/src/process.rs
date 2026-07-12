@@ -118,6 +118,15 @@ pub struct Process {
     last_terminal_mode: Option<(bool, bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
     copy_mode: Option<CopyModeState>,
+    /// Keep the process (and its final grid) in the manager after the child exits instead of
+    /// being reaped by the poll loop. Set for ACP-native terminals so `terminal/output` can read
+    /// the completed command's scrollback until the agent calls `terminal/release`.
+    keep_after_exit: bool,
+    /// Set once the child has exited and `ProcessExited` has been broadcast. Guards `poll` from
+    /// re-broadcasting or re-processing a dead child every tick when `keep_after_exit` is set.
+    exited: bool,
+    /// The child's exit code, recorded when it exits. Surfaced to ACP `terminal/output`.
+    exit_code: Option<i32>,
 }
 
 /// Per-process state held while the user is in copy mode.
@@ -368,7 +377,26 @@ impl Process {
             last_viewport_copy_mode: None,
             last_terminal_mode: None,
             copy_mode: None,
+            keep_after_exit: false,
+            exited: bool::default(),
+            exit_code: None,
         })
+    }
+
+    /// Mark this process to survive child exit (ACP-native terminal). The poll loop must not reap
+    /// it; `terminal/release` removes it explicitly.
+    pub fn set_keep_after_exit(&mut self) {
+        self.keep_after_exit = true;
+    }
+
+    /// Whether this process should survive child exit instead of being reaped.
+    pub fn keep_after_exit(&self) -> bool {
+        self.keep_after_exit
+    }
+
+    /// The child's exit code once it has exited, else `None`.
+    pub fn process_exit(&self) -> Option<i32> {
+        self.exit_code
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServiceMessage> {
@@ -1221,6 +1249,11 @@ impl Process {
     /// Drain PTY output, process through VTE, broadcast viewport patches.
     /// Returns true if the child process has exited.
     pub fn poll(&mut self) -> bool {
+        // A kept-after-exit process (ACP terminal) stays in the manager with its final grid; skip
+        // re-processing and re-broadcasting `ProcessExited` on every subsequent tick.
+        if self.exited {
+            return false;
+        }
         let mut got_data = false;
         for _ in 0..MAX_PTY_CHUNKS_PER_POLL {
             let Ok(data) = self.pty_rx.try_recv() else {
@@ -1257,6 +1290,8 @@ impl Process {
         self.maybe_broadcast_mode();
         if let Ok(Some(status)) = self.child.try_wait() {
             let code = status.exit_code() as i32;
+            self.exited = true;
+            self.exit_code = Some(code);
             let _ = self.patch_tx.send(ServiceMessage::ProcessExited {
                 process_id: self.id,
                 exit_code: Some(code),
@@ -1592,6 +1627,36 @@ impl ProcessManager {
         let pid = process.pid;
         self.processes.insert(id, process);
         Ok((id, pid))
+    }
+
+    /// Like [`create_process`](Self::create_process) but marks the process to survive child exit
+    /// (ACP-native terminal): the poll loop must not reap it, so `terminal/output` can read the
+    /// completed command's scrollback until `terminal/release`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_process_keep_alive(
+        &mut self,
+        id: ProcessId,
+        command: String,
+        args: Vec<String>,
+        cwd: String,
+        env: Vec<(String, String)>,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(ProcessId, u32), String> {
+        let created = self.create_process(id, command, args, cwd, env, cols, rows)?;
+        if let Some(process) = self.processes.get_mut(&id) {
+            process.set_keep_after_exit();
+        }
+        Ok(created)
+    }
+
+    /// Kill a process's child without removing it from the manager (keeps its final grid for ACP
+    /// `terminal/output`). Distinct from [`remove_process`](Self::remove_process), which also drops
+    /// it.
+    pub fn kill_process(&mut self, id: &ProcessId) {
+        if let Some(process) = self.processes.get_mut(id) {
+            process.kill();
+        }
     }
 
     pub fn poll_all(&mut self) -> Vec<ProcessId> {
@@ -2285,5 +2350,53 @@ mod tests {
             ServiceMessage::Bell { process_id: got_id } => assert_eq!(got_id, process_id),
             other => panic!("expected Bell, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn keep_after_exit_retains_process_and_exit_code() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let id = ProcessId::new();
+        mgr.create_process_keep_alive(
+            id,
+            "/bin/sh".into(),
+            vec!["-c".into(), "exit 5".into()],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+        )
+        .expect("spawn");
+        let mut rx = mgr.processes.get(&id).unwrap().subscribe();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut saw_exit = false;
+        while Instant::now() < deadline {
+            if mgr.poll_all().contains(&id) {
+                saw_exit = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_exit, "process should have exited");
+
+        // Kept in the manager (not reaped by poll) with its exit code recorded.
+        let process = mgr.processes.get(&id).expect("kept after exit");
+        assert_eq!(process.process_exit(), Some(5));
+
+        // Further polls neither report the exit again nor drop the process.
+        assert!(mgr.poll_all().is_empty());
+        assert!(mgr.processes.contains_key(&id));
+
+        // Exactly one ProcessExited was broadcast.
+        let mut exits = 0;
+        while let Ok(msg) = rx.try_recv() {
+            if matches!(msg, ServiceMessage::ProcessExited { .. }) {
+                exits += 1;
+            }
+        }
+        assert_eq!(exits, 1);
+
+        mgr.remove_process(&id);
     }
 }
