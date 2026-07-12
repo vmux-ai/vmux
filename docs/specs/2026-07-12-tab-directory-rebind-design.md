@@ -66,6 +66,10 @@ fallbacks.
 This makes future terminals and agent-issued commands follow the rebound tab without restarting or
 mutating existing processes.
 
+Automatic run-terminal reuse excludes terminals whose launch directory differs from the current
+tab directory. The old terminal remains visible, while the command opens a new terminal rooted in
+the rebound checkout. Explicit requests targeting a particular terminal remain explicit.
+
 ### UI and persistence
 
 No new UI event is needed. Mutating `Tab.startup_dir` changes the payload produced by the existing
@@ -92,4 +96,5 @@ failures leave tab state unchanged. File preview behavior continues even when re
   tab receives a directory observation while file-follow behavior remains intact.
 - Agent command tests verify a new `run` terminal uses the rebound tab directory instead of the
   agent's original launch directory.
-
+- Agent command tests verify automatic reuse rejects a terminal launched from the previous tab
+  directory.

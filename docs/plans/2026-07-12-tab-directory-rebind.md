@@ -497,7 +497,7 @@ git add crates/vmux_agent/src/plugin.rs
 git commit -m "feat(agent): observe checkout from file activity"
 ```
 
-### Task 4: Use the rebound tab directory for future agent run terminals
+### Task 4: Use the rebound tab directory for future agent run commands
 
 **Files:**
 - Modify: `crates/vmux_agent/src/plugin.rs`
@@ -510,16 +510,38 @@ Add before `run_terminal_cwd_inherits_agent_launch_dir`:
 ```rust
 #[test]
 fn run_terminal_cwd_prefers_tab_dir() {
-    let tab_dir = tempfile::tempdir().unwrap();
-    let agent_dir = tempfile::tempdir().unwrap();
+    let tab_dir = std::env::temp_dir().join(format!("vmux-tab-cwd-{}", std::process::id()));
+    let agent_dir = std::env::temp_dir().join(format!("vmux-agent-cwd-{}", std::process::id()));
+    std::fs::create_dir_all(&tab_dir).unwrap();
+    std::fs::create_dir_all(&agent_dir).unwrap();
     assert_eq!(
         run_terminal_cwd(
-            Some(tab_dir.path().to_string_lossy().as_ref()),
-            Some(agent_dir.path().to_string_lossy().as_ref()),
+            Some(tab_dir.to_string_lossy().as_ref()),
+            Some(agent_dir.to_string_lossy().as_ref()),
             None,
         ),
-        tab_dir.path()
+        tab_dir.clone()
     );
+    let _ = std::fs::remove_dir_all(&agent_dir);
+    let _ = std::fs::remove_dir_all(&tab_dir);
+}
+
+#[test]
+fn run_terminal_launch_must_match_rebound_cwd_for_reuse() {
+    let current = std::env::temp_dir().join(format!("vmux-current-cwd-{}", std::process::id()));
+    let stale = std::env::temp_dir().join(format!("vmux-stale-cwd-{}", std::process::id()));
+    std::fs::create_dir_all(&current).unwrap();
+    std::fs::create_dir_all(&stale).unwrap();
+    assert!(run_terminal_launch_matches_cwd(
+        current.to_string_lossy().as_ref(),
+        &current,
+    ));
+    assert!(!run_terminal_launch_matches_cwd(
+        stale.to_string_lossy().as_ref(),
+        &current,
+    ));
+    let _ = std::fs::remove_dir_all(&stale);
+    let _ = std::fs::remove_dir_all(&current);
 }
 ```
 
@@ -542,7 +564,8 @@ Run:
 cargo test -p vmux_agent run_terminal_cwd_ -- --nocapture
 ```
 
-Expected: compilation fails because `run_terminal_cwd` accepts two arguments.
+Expected: compilation fails because `run_terminal_cwd` accepts two arguments and
+`run_terminal_launch_matches_cwd` is undefined.
 
 - [ ] **Step 3: Add tab-directory priority to the cwd resolver**
 
@@ -564,11 +587,23 @@ fn run_terminal_cwd(
         .map(|s| space_dir(&s.record.id))
         .unwrap_or_else(default_space_dir)
 }
+
+fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+    let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
+        return false;
+    };
+    let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
+    let desired_cwd = desired_cwd
+        .canonicalize()
+        .unwrap_or_else(|_| desired_cwd.to_path_buf());
+    launch_cwd == desired_cwd
+}
 ```
 
-- [ ] **Step 4: Resolve the current ancestor tab before spawning a run terminal**
+- [ ] **Step 4: Resolve the current ancestor tab and reject stale automatic reuse**
 
-In the new-terminal branch of `ServiceAgentCommand::Run`, before reading `agent_cwd`, add:
+In the new-terminal branch of `ServiceAgentCommand::Run`, immediately after resolving
+`self_pane`, add:
 
 ```rust
 let tab_cwd = {
@@ -583,11 +618,6 @@ let tab_cwd = {
         }
     }
 };
-```
-
-Replace the cwd call with:
-
-```rust
 let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
 let cwd = run_terminal_cwd(
     tab_cwd.as_deref(),
@@ -596,12 +626,32 @@ let cwd = run_terminal_cwd(
 );
 ```
 
+After `run_terminal_candidates` returns, retain only terminals launched in the current tab
+directory:
+
+```rust
+let candidates: Vec<_> = candidates
+    .into_iter()
+    .filter(|candidate| {
+        term_pids
+            .iter()
+            .find(|(_, pid)| **pid == candidate.pid)
+            .and_then(|(entity, _)| launch_q.get(entity).ok())
+            .is_some_and(|launch| run_terminal_launch_matches_cwd(&launch.cwd, &cwd))
+    })
+    .collect();
+```
+
+Remove the old `agent_cwd` and `cwd` calculation immediately before
+`TerminalStackSpawnRequest`; reuse the values calculated above.
+
 - [ ] **Step 5: Run agent cwd and placement tests**
 
 Run:
 
 ```bash
 cargo test -p vmux_agent run_terminal_cwd_ -- --nocapture
+cargo test -p vmux_agent run_terminal_launch_must_match_rebound_cwd_for_reuse -- --nocapture
 cargo test -p vmux_agent agent_run_spawns_terminal_before_next_agent_command_frame -- --nocapture
 ```
 
@@ -641,6 +691,7 @@ cargo test -p vmux_git common_dir_identifies_repository_across_worktrees -- --no
 cargo test -p vmux_layout worktree::tests -- --nocapture
 cargo test -p vmux_agent file_touch_ -- --nocapture
 cargo test -p vmux_agent run_terminal_cwd_ -- --nocapture
+cargo test -p vmux_agent run_terminal_launch_must_match_rebound_cwd_for_reuse -- --nocapture
 cargo test -p vmux_agent agent_run_spawns_terminal_before_next_agent_command_frame -- --nocapture
 ```
 
