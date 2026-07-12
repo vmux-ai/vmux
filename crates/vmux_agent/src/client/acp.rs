@@ -456,6 +456,7 @@ fn apply_acp_terminal_created(
             .id();
         commands.spawn((
             reattach_terminal_bundle(&mut meshes, &mut webview_mt, ev.process_id),
+            vmux_terminal::RetainOnProcessExit,
             ChildOf(tab),
         ));
     }

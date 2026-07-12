@@ -48,12 +48,18 @@ pub enum AcpInput {
     Close,
 }
 
-/// A live ACP-native terminal: the vmux process backing it plus a receiver that resolves with the
-/// child's exit code (`None` until it exits), driving `terminal/wait_for_exit` and the exit status
-/// in `terminal/output`.
+#[derive(Clone, Copy)]
+pub enum AcpTerminalExit {
+    Pending,
+    Exited(Option<i32>),
+    Removed,
+}
+
+/// A live ACP-native terminal and its process exit state.
 pub struct AcpTerminal {
     pub process_id: ProcessId,
-    pub exit_rx: watch::Receiver<Option<i32>>,
+    pub exit_rx: watch::Receiver<AcpTerminalExit>,
+    pub output_byte_limit: Option<u64>,
 }
 
 /// State shared between the driver's request handlers and its prompt loop.
@@ -294,7 +300,7 @@ pub async fn run(
             async move |req: ReleaseTerminalRequest,
                         responder: Responder<ReleaseTerminalResponse>,
                         _cx| {
-                match release_terminal(&release_shared, req) {
+                match release_terminal(&release_shared, req).await {
                     Ok(resp) => responder.respond(resp),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -531,12 +537,24 @@ async fn create_terminal(
         args,
         env,
         cwd,
+        output_byte_limit,
         ..
     } = req;
     let env: Vec<(String, String)> = env.into_iter().map(|var| (var.name, var.value)).collect();
-    let cwd = cwd
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_else(|| shared.cwd.to_string_lossy().into_owned());
+    let cwd = cwd.unwrap_or_else(|| shared.cwd.clone());
+    if !cwd.is_absolute() {
+        return Err(format!(
+            "acp: terminal cwd must be absolute: {}",
+            cwd.display()
+        ));
+    }
+    if !cwd.is_dir() {
+        return Err(format!(
+            "acp: terminal cwd is not a directory: {}",
+            cwd.display()
+        ));
+    }
+    let cwd = cwd.to_string_lossy().into_owned();
     let id = ProcessId::new();
 
     let (exit_stream, writer) = {
@@ -560,18 +578,21 @@ async fn create_terminal(
     }
 
     // Resolve the child's exit code once, off the process broadcast, for wait_for_exit / output.
-    let (exit_tx, exit_rx) = watch::channel(None);
+    let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
     if let Some(mut exit_stream) = exit_stream {
         tokio::spawn(async move {
             loop {
                 match exit_stream.recv().await {
                     Ok(ServiceMessage::ProcessExited { exit_code, .. }) => {
-                        let _ = exit_tx.send(exit_code);
+                        let _ = exit_tx.send(AcpTerminalExit::Exited(exit_code));
                         break;
                     }
                     Ok(_) => {}
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        let _ = exit_tx.send(AcpTerminalExit::Removed);
+                        break;
+                    }
                 }
             }
         });
@@ -583,6 +604,7 @@ async fn create_terminal(
         AcpTerminal {
             process_id: id,
             exit_rx,
+            output_byte_limit,
         },
     );
     shared.emit(ServiceMessage::AcpTerminalCreated {
@@ -600,13 +622,17 @@ async fn create_terminal(
 fn lookup_terminal(
     shared: &AcpShared,
     terminal_id: &TerminalId,
-) -> Result<(ProcessId, Option<i32>), String> {
+) -> Result<(ProcessId, AcpTerminalExit, Option<u64>), String> {
     let key = terminal_id.0.to_string();
     let terminals = shared.terminals.lock().unwrap();
     let terminal = terminals
         .get(&key)
         .ok_or_else(|| format!("acp: unknown terminal {key}"))?;
-    Ok((terminal.process_id, *terminal.exit_rx.borrow()))
+    let exit = *terminal.exit_rx.borrow();
+    if matches!(exit, AcpTerminalExit::Removed) {
+        return Err(format!("acp: terminal {key} process no longer exists"));
+    }
+    Ok((terminal.process_id, exit, terminal.output_byte_limit))
 }
 
 fn terminal_exit_status(code: Option<i32>) -> TerminalExitStatus {
@@ -622,17 +648,23 @@ async fn terminal_output(
     shared: &AcpShared,
     req: TerminalOutputRequest,
 ) -> Result<TerminalOutputResponse, String> {
-    let (process_id, exit) = lookup_terminal(shared, &req.terminal_id)?;
+    let (process_id, exit, output_byte_limit) = lookup_terminal(shared, &req.terminal_id)?;
     let output = {
         let mgr = shared.manager.lock().await;
         mgr.processes
             .get(&process_id)
             .map(|process| process.full_text())
-            .unwrap_or_default()
+            .ok_or_else(|| {
+                format!(
+                    "acp: terminal {} process no longer exists",
+                    req.terminal_id.0
+                )
+            })?
     };
-    let mut resp = TerminalOutputResponse::new(output, false);
-    if let Some(code) = exit {
-        resp = resp.exit_status(terminal_exit_status(Some(code)));
+    let (output, truncated) = truncate_terminal_output(output, output_byte_limit);
+    let mut resp = TerminalOutputResponse::new(output, truncated);
+    if let AcpTerminalExit::Exited(code) = exit {
+        resp = resp.exit_status(terminal_exit_status(code));
     }
     Ok(resp)
 }
@@ -651,12 +683,15 @@ async fn wait_for_terminal_exit(
             .ok_or_else(|| format!("acp: unknown terminal {key}"))?
     };
     let code = loop {
-        let current = *exit_rx.borrow();
-        if current.is_some() {
-            break current;
+        match *exit_rx.borrow() {
+            AcpTerminalExit::Pending => {}
+            AcpTerminalExit::Exited(code) => break code,
+            AcpTerminalExit::Removed => {
+                return Err(format!("acp: terminal {key} process no longer exists"));
+            }
         }
         if exit_rx.changed().await.is_err() {
-            break None;
+            return Err(format!("acp: terminal {key} exit state closed"));
         }
     };
     Ok(WaitForTerminalExitResponse::new(terminal_exit_status(code)))
@@ -667,22 +702,43 @@ async fn kill_terminal(
     shared: &AcpShared,
     req: KillTerminalRequest,
 ) -> Result<KillTerminalResponse, String> {
-    let (process_id, _) = lookup_terminal(shared, &req.terminal_id)?;
+    let (process_id, _, _) = lookup_terminal(shared, &req.terminal_id)?;
     shared.manager.lock().await.kill_process(&process_id);
     Ok(KillTerminalResponse::new())
 }
 
+fn truncate_terminal_output(output: String, output_byte_limit: Option<u64>) -> (String, bool) {
+    let Some(limit) = output_byte_limit else {
+        return (output, false);
+    };
+    let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+    if output.len() <= limit {
+        return (output, false);
+    }
+    let mut start = output.len().saturating_sub(limit);
+    while !output.is_char_boundary(start) {
+        start += 1;
+    }
+    (output[start..].to_string(), true)
+}
+
 /// `terminal/release`: stop tracking the terminal. The pane + process are left for the user (they
 /// may still want to watch or take over); the GUI reaps the pane when the user closes it.
-fn release_terminal(
+async fn release_terminal(
     shared: &AcpShared,
     req: ReleaseTerminalRequest,
 ) -> Result<ReleaseTerminalResponse, String> {
-    shared
+    let terminal = shared
         .terminals
         .lock()
         .unwrap()
-        .remove(&req.terminal_id.0.to_string());
+        .remove(&req.terminal_id.0.to_string())
+        .ok_or_else(|| format!("acp: unknown terminal {}", req.terminal_id.0))?;
+    shared
+        .manager
+        .lock()
+        .await
+        .kill_process(&terminal.process_id);
     Ok(ReleaseTerminalResponse::new())
 }
 
@@ -1055,6 +1111,7 @@ mod tests {
             &shared,
             ReleaseTerminalRequest::new("s1", TerminalId::new(tid.clone())),
         )
+        .await
         .expect("release");
         assert!(!shared.terminals.lock().unwrap().contains_key(&tid));
 
@@ -1068,5 +1125,169 @@ mod tests {
         let result =
             terminal_output(&shared, TerminalOutputRequest::new("s1", "does-not-exist")).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_terminal_rejects_nonexistent_cwd() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager.clone());
+        let cwd = std::env::temp_dir().join(format!(
+            "vmux-acp-missing-cwd-{}-{}",
+            std::process::id(),
+            ProcessId::new()
+        ));
+
+        let result = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh").cwd(cwd),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(manager.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_terminal_rejects_relative_cwd() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager.clone());
+
+        let result = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh").cwd("."),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(manager.lock().await.processes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn removed_terminal_errors_for_wait_and_output() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager.clone());
+        let created = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh")
+                .args(vec!["-c".to_string(), "sleep 30".to_string()]),
+        )
+        .await
+        .expect("create");
+        let terminal_id = created.terminal_id.0.to_string();
+        let process_id = terminal_id.parse().expect("process id");
+        manager.lock().await.remove_process(&process_id);
+
+        let wait = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            wait_for_terminal_exit(
+                &shared,
+                WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
+            ),
+        )
+        .await
+        .expect("wait timeout");
+        assert!(wait.is_err());
+
+        let output = terminal_output(
+            &shared,
+            TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
+        )
+        .await;
+        assert!(output.is_err());
+        shared.terminals.lock().unwrap().remove(&terminal_id);
+    }
+
+    #[tokio::test]
+    async fn release_terminal_kills_running_command() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager.clone());
+        let created = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh")
+                .args(vec!["-c".to_string(), "sleep 30".to_string()]),
+        )
+        .await
+        .expect("create");
+        let terminal_id = created.terminal_id.0.to_string();
+        let process_id = terminal_id.parse().expect("process id");
+
+        release_terminal(
+            &shared,
+            ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
+        )
+        .await
+        .expect("release");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        let exited = loop {
+            let exited = {
+                let mut manager = manager.lock().await;
+                manager.poll_all();
+                manager
+                    .processes
+                    .get(&process_id)
+                    .and_then(|process| process.process_exit())
+                    .is_some()
+            };
+            if exited || std::time::Instant::now() >= deadline {
+                break exited;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        };
+        if !exited {
+            manager.lock().await.remove_process(&process_id);
+        }
+
+        assert!(exited, "release must kill a running terminal command");
+    }
+
+    #[tokio::test]
+    async fn terminal_output_respects_byte_limit_at_char_boundary() {
+        let manager = Arc::new(tokio::sync::Mutex::new(ProcessManager::default()));
+        let (shared, _rx) = test_shared(manager.clone());
+        let poll_manager = manager.clone();
+        let poll = tokio::spawn(async move {
+            loop {
+                poll_manager.lock().await.poll_all();
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        });
+        let created = create_terminal(
+            &shared,
+            CreateTerminalRequest::new("s1", "/bin/sh")
+                .args(vec!["-c".to_string(), "printf 'abécd'".to_string()])
+                .output_byte_limit(3),
+        )
+        .await
+        .expect("create");
+        let terminal_id = created.terminal_id.0.to_string();
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            wait_for_terminal_exit(
+                &shared,
+                WaitForTerminalExitRequest::new("s1", TerminalId::new(terminal_id.clone())),
+            ),
+        )
+        .await
+        .expect("wait timeout")
+        .expect("wait");
+        let output = terminal_output(
+            &shared,
+            TerminalOutputRequest::new("s1", TerminalId::new(terminal_id.clone())),
+        )
+        .await
+        .expect("output");
+
+        assert_eq!(output.output, "cd");
+        assert!(output.truncated);
+
+        release_terminal(
+            &shared,
+            ReleaseTerminalRequest::new("s1", TerminalId::new(terminal_id)),
+        )
+        .await
+        .expect("release");
+        poll.abort();
     }
 }

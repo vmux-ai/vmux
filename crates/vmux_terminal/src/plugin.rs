@@ -34,7 +34,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::processes_monitor::ProcessesMonitor;
-use crate::{ProcessExited, Terminal};
+use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
@@ -1249,12 +1249,8 @@ fn poll_service_messages(
         (With<Terminal>, With<AwaitingProcessCreated>),
     >,
     terminals: Query<
-        (Entity, &ProcessId, &ChildOf),
-        (
-            With<Terminal>,
-            Without<ProcessExited>,
-            Without<AwaitingProcessCreated>,
-        ),
+        (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
+        ServiceTerminalFilter,
     >,
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
@@ -1360,7 +1356,7 @@ fn poll_service_messages(
                 mouse,
                 evicted_total,
             } => {
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !output_seen.contains(entity) {
                             let has_content =
@@ -1409,7 +1405,7 @@ fn poll_service_messages(
                     process_id,
                     title: title.clone(),
                 });
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
@@ -1431,7 +1427,7 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !output_seen.contains(entity) {
                             let has_content = lines.iter().any(line_has_content);
@@ -1480,7 +1476,7 @@ fn poll_service_messages(
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
-                for (entity, pid, child_of) in &terminals {
+                for (entity, pid, child_of, retain_on_exit) in &terminals {
                     if *pid == process_id {
                         commands
                             .entity(entity)
@@ -1505,7 +1501,7 @@ fn poll_service_messages(
                         // terminals are closed by the agent crate (it
                         // force-closes the whole pane), so skip the stack close
                         // here to avoid a double close collapsing the wrong pane.
-                        if !is_agent {
+                        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
                             let tab = child_of.get();
                             commands.entity(tab).insert(LastActivatedAt::now());
                             writers
@@ -1526,7 +1522,7 @@ fn poll_service_messages(
                 if let Some(stale_pid) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&stale_pid)
                 {
-                    let candidates = terminals.iter().map(|(entity, terminal_pid, _)| {
+                    let candidates = terminals.iter().map(|(entity, terminal_pid, _, _)| {
                         let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
                             crate::launch::TerminalLaunch {
                                 command: terminal_shell(&settings),
@@ -1703,6 +1699,16 @@ fn poll_service_messages(
             _ => {}
         }
     }
+}
+
+type ServiceTerminalFilter = (
+    With<Terminal>,
+    Or<(Without<ProcessExited>, With<RetainOnProcessExit>)>,
+    Without<AwaitingProcessCreated>,
+);
+
+fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> bool {
+    !is_agent && !retain_on_exit
 }
 
 fn flush_pending_terminal_input(
@@ -5128,6 +5134,22 @@ mod tests {
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
         assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+    }
+
+    #[test]
+    fn retained_terminal_stays_in_service_query_after_exit() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((Terminal, ProcessExited, RetainOnProcessExit))
+            .id();
+        let mut query = world.query_filtered::<Entity, ServiceTerminalFilter>();
+
+        assert!(query.get(&world, entity).is_ok());
+    }
+
+    #[test]
+    fn retained_terminal_does_not_close_stack_on_exit() {
+        assert!(!should_close_terminal_stack_on_exit(false, true));
     }
 
     fn term_theme(font_size: f32) -> vmux_setting::TerminalTheme {

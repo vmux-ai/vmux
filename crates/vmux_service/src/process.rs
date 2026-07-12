@@ -7,13 +7,16 @@ use alacritty_terminal::{
     vte::ansi::{Color, NamedColor, Processor},
 };
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    path::PathBuf,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
+#[cfg(unix)]
+use std::{os::unix::ffi::OsStrExt, path::Component};
 use tokio::sync::{broadcast, mpsc};
 use vmux_core::event::*;
 
@@ -21,6 +24,109 @@ const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
 
 pub type PtyInputWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
+#[cfg(unix)]
+fn is_executable(path: &std::path::Path) -> bool {
+    if path.is_dir() {
+        return false;
+    }
+    let Ok(path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    unsafe { libc::access(path.as_ptr(), libc::X_OK) == 0 }
+}
+
+#[cfg(unix)]
+fn resolve_executable(
+    command: &str,
+    cwd: &str,
+    env: &[(String, String)],
+) -> Result<std::path::PathBuf, String> {
+    let command_path = std::path::Path::new(command);
+    let explicit_cwd = matches!(
+        command_path.components().next(),
+        Some(Component::CurDir | Component::ParentDir)
+    );
+    if command_path.is_absolute() || explicit_cwd {
+        let candidate = if command_path.is_absolute() {
+            command_path.to_path_buf()
+        } else {
+            std::path::Path::new(cwd).join(command_path)
+        };
+        return is_executable(&candidate)
+            .then_some(candidate)
+            .ok_or_else(|| format!("unable to execute command: {command}"));
+    }
+
+    let path = env
+        .iter()
+        .rev()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| std::ffi::OsString::from(value))
+        .or_else(|| std::env::var_os("PATH"))
+        .ok_or_else(|| format!("unable to resolve command without PATH: {command}"))?;
+    for path_entry in std::env::split_paths(&path) {
+        let candidate = std::path::Path::new(cwd)
+            .join(path_entry)
+            .join(command_path);
+        if is_executable(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(format!("unable to resolve executable: {command}"))
+}
+
+#[cfg(unix)]
+fn run_pty_reader(
+    mut reader: Box<dyn Read + Send>,
+    reader_fd: std::os::fd::RawFd,
+    pty_tx: mpsc::UnboundedSender<Vec<u8>>,
+    wake_tx: mpsc::UnboundedSender<ProcessId>,
+    process_id: ProcessId,
+    in_flight: Arc<AtomicBool>,
+    send_delay: Duration,
+) {
+    let mut buf = [0u8; 4096];
+    loop {
+        let mut poll_fd = libc::pollfd {
+            fd: reader_fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ready = unsafe { libc::poll(&mut poll_fd, 1, -1) };
+        if ready < 0 {
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            break;
+        }
+        in_flight.store(true, Ordering::Release);
+        match reader.read(&mut buf) {
+            Ok(0) => {
+                in_flight.store(false, Ordering::Release);
+                break;
+            }
+            Ok(n) => {
+                if !send_delay.is_zero() {
+                    std::thread::sleep(send_delay);
+                }
+                let sent = pty_tx.send(buf[..n].to_vec()).is_ok();
+                in_flight.store(false, Ordering::Release);
+                if !sent {
+                    break;
+                }
+                let _ = wake_tx.send(process_id);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                in_flight.store(false, Ordering::Release);
+            }
+            Err(_) => {
+                in_flight.store(false, Ordering::Release);
+                break;
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 struct ServiceEventProxy {
@@ -90,6 +196,8 @@ pub struct Process {
     master: Box<dyn portable_pty::MasterPty + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pty_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    #[cfg(unix)]
+    pty_reader_in_flight: Arc<AtomicBool>,
     /// Broadcasts viewport patches to all attached GUI clients.
     patch_tx: broadcast::Sender<ServiceMessage>,
     line_hashes: Vec<u64>,
@@ -122,9 +230,10 @@ pub struct Process {
     /// being reaped by the poll loop. Set for ACP-native terminals so `terminal/output` can read
     /// the completed command's scrollback until the agent calls `terminal/release`.
     keep_after_exit: bool,
-    /// Set once the child has exited and `ProcessExited` has been broadcast. Guards `poll` from
-    /// re-broadcasting or re-processing a dead child every tick when `keep_after_exit` is set.
+    /// Set once the child has exited and all PTY output has been drained.
     exited: bool,
+    /// Set once `ProcessExited` has been broadcast for the child.
+    exit_reported: bool,
     /// The child's exit code, recorded when it exits. Surfaced to ACP `terminal/output`.
     exit_code: Option<i32>,
 }
@@ -259,12 +368,37 @@ impl Process {
     pub fn new_with_wake(
         id: ProcessId,
         command: String,
+        args: Vec<String>,
+        cwd: String,
+        env: Vec<(String, String)>,
+        cols: u16,
+        rows: u16,
+        wake_tx: mpsc::UnboundedSender<ProcessId>,
+    ) -> Result<Self, String> {
+        Self::new_with_wake_and_reader_delay(
+            id,
+            command,
+            args,
+            cwd,
+            env,
+            cols,
+            rows,
+            wake_tx,
+            Duration::ZERO,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_with_wake_and_reader_delay(
+        id: ProcessId,
+        command: String,
         mut args: Vec<String>,
         cwd: String,
         mut env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
         wake_tx: mpsc::UnboundedSender<ProcessId>,
+        reader_send_delay: Duration,
     ) -> Result<Self, String> {
         crate::shell_integration::inject(
             &command,
@@ -282,8 +416,45 @@ impl Process {
             })
             .map_err(|e| format!("failed to open PTY: {e}"))?;
 
-        let mut cmd = CommandBuilder::new(&command);
-        cmd.args(&args);
+        #[cfg(unix)]
+        let mut cmd = if cwd.is_empty() {
+            let mut cmd = CommandBuilder::new(&command);
+            cmd.args(&args);
+            cmd
+        } else {
+            let executable = resolve_executable(&command, &cwd, &env)?;
+            let original_home = env
+                .iter()
+                .rev()
+                .find(|(name, _)| name == "HOME")
+                .map(|(_, value)| value.clone())
+                .or_else(|| std::env::var("HOME").ok());
+            let mut cmd = CommandBuilder::new("/bin/sh");
+            cmd.arg("-c");
+            cmd.arg(
+                "if [ \"$1\" = 1 ]; then export HOME=\"$2\"; else unset HOME; fi; shift 2; exec \"$@\"",
+            );
+            cmd.arg("vmux-cwd");
+            cmd.arg(if original_home.is_some() { "1" } else { "0" });
+            cmd.arg(original_home.as_deref().unwrap_or_default());
+            cmd.arg(executable);
+            cmd.args(&args);
+            cmd.cwd(&cwd);
+            cmd
+        };
+        #[cfg(not(unix))]
+        let mut cmd = {
+            let mut cmd = CommandBuilder::new(&command);
+            cmd.args(&args);
+            if !cwd.is_empty() {
+                let cwd_path = std::path::Path::new(&cwd);
+                if !cwd_path.is_dir() {
+                    return Err(format!("cwd is not a directory: {cwd}"));
+                }
+                cmd.cwd(cwd_path);
+            }
+            cmd
+        };
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("LANG", "en_US.UTF-8");
@@ -291,9 +462,9 @@ impl Process {
         for (k, v) in &env {
             cmd.env(k, v);
         }
-        let cwd_path = PathBuf::from(&cwd);
-        if !cwd.is_empty() && cwd_path.exists() {
-            cmd.cwd(&cwd_path);
+        #[cfg(unix)]
+        if !cwd.is_empty() {
+            cmd.env("HOME", &cwd);
         }
 
         let child = pair
@@ -307,6 +478,11 @@ impl Process {
             .master
             .try_clone_reader()
             .map_err(|e| format!("failed to clone PTY reader: {e}"))?;
+        #[cfg(unix)]
+        let reader_fd = pair
+            .master
+            .as_raw_fd()
+            .ok_or_else(|| "PTY master has no file descriptor".to_string())?;
         let writer: PtyInputWriter = Arc::new(Mutex::new(
             pair.master
                 .take_writer()
@@ -316,6 +492,26 @@ impl Process {
 
         let (pty_tx, pty_rx) = mpsc::unbounded_channel();
         let wake_process_id = id;
+        #[cfg(unix)]
+        let pty_reader_in_flight = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
+        let thread_reader_in_flight = Arc::clone(&pty_reader_in_flight);
+        #[cfg(unix)]
+        std::thread::Builder::new()
+            .name(format!("pty-reader-{}", &id.to_string()[..8]))
+            .spawn(move || {
+                run_pty_reader(
+                    reader,
+                    reader_fd,
+                    pty_tx,
+                    wake_tx,
+                    wake_process_id,
+                    thread_reader_in_flight,
+                    reader_send_delay,
+                );
+            })
+            .map_err(|e| format!("failed to spawn PTY reader: {e}"))?;
+        #[cfg(not(unix))]
         std::thread::Builder::new()
             .name(format!("pty-reader-{}", &id.to_string()[..8]))
             .spawn(move || {
@@ -325,6 +521,9 @@ impl Process {
                     match reader.read(&mut buf) {
                         Ok(0) => break,
                         Ok(n) => {
+                            if !reader_send_delay.is_zero() {
+                                std::thread::sleep(reader_send_delay);
+                            }
                             if pty_tx.send(buf[..n].to_vec()).is_err() {
                                 break;
                             }
@@ -364,6 +563,8 @@ impl Process {
             master: pair.master,
             child,
             pty_rx,
+            #[cfg(unix)]
+            pty_reader_in_flight,
             patch_tx,
             line_hashes: Vec::new(),
             win_hashes: HashMap::new(),
@@ -379,6 +580,7 @@ impl Process {
             copy_mode: None,
             keep_after_exit: false,
             exited: bool::default(),
+            exit_reported: false,
             exit_code: None,
         })
     }
@@ -1246,6 +1448,27 @@ impl Process {
         }
     }
 
+    fn pty_reader_drained(&self) -> bool {
+        #[cfg(unix)]
+        {
+            if self.pty_reader_in_flight.load(Ordering::Acquire) {
+                return false;
+            }
+            let Some(fd) = self.master.as_raw_fd() else {
+                return false;
+            };
+            let mut available: libc::c_int = 0;
+            if unsafe { libc::ioctl(fd, libc::FIONREAD as _, &mut available) } < 0 {
+                return false;
+            }
+            available == 0 && !self.pty_reader_in_flight.load(Ordering::Acquire)
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
+
     /// Drain PTY output, process through VTE, broadcast viewport patches.
     /// Returns true if the child process has exited.
     pub fn poll(&mut self) -> bool {
@@ -1255,10 +1478,35 @@ impl Process {
             return false;
         }
         let mut got_data = false;
-        for _ in 0..MAX_PTY_CHUNKS_PER_POLL {
-            let Ok(data) = self.pty_rx.try_recv() else {
-                break;
+        let mut pty_closed = false;
+        let mut remaining = MAX_PTY_CHUNKS_PER_POLL;
+        let mut drained_after_exit = false;
+        loop {
+            if remaining == 0 {
+                if self.exit_code.is_none()
+                    && let Ok(Some(status)) = self.child.try_wait()
+                {
+                    self.exit_code = Some(status.exit_code() as i32);
+                }
+                if self.exit_code.is_some() && !drained_after_exit {
+                    remaining = self.pty_rx.len();
+                    drained_after_exit = true;
+                    if remaining == 0 {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            let data = match self.pty_rx.try_recv() {
+                Ok(data) => data,
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    pty_closed = true;
+                    break;
+                }
             };
+            remaining -= 1;
             self.processor.advance(&mut self.term, &data);
             for event in self.osc133.feed(&data) {
                 let kind = match event {
@@ -1288,14 +1536,24 @@ impl Process {
             self.sync_viewport();
         }
         self.maybe_broadcast_mode();
-        if let Ok(Some(status)) = self.child.try_wait() {
-            let code = status.exit_code() as i32;
-            self.exited = true;
-            self.exit_code = Some(code);
+        if self.exit_code.is_none()
+            && let Ok(Some(status)) = self.child.try_wait()
+        {
+            self.exit_code = Some(status.exit_code() as i32);
+        }
+        if !self.exit_reported
+            && let Some(code) = self.exit_code
+            && self.pty_reader_drained()
+            && self.pty_rx.is_empty()
+        {
+            self.exit_reported = true;
             let _ = self.patch_tx.send(ServiceMessage::ProcessExited {
                 process_id: self.id,
                 exit_code: Some(code),
             });
+        }
+        if pty_closed && self.exit_code.is_some() {
+            self.exited = true;
             return true;
         }
         false
@@ -1578,8 +1836,13 @@ impl Process {
     }
 
     pub fn kill(&mut self) {
+        if self.exit_code.is_some() {
+            return;
+        }
         let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Ok(status) = self.child.wait() {
+            self.exit_code = Some(status.exit_code() as i32);
+        }
     }
 }
 
@@ -1869,7 +2132,7 @@ mod tests {
         let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
             ProcessId::new(),
-            "/bin/sh".to_string(),
+            "sh".to_string(),
             vec![],
             String::new(),
             Vec::new(),
@@ -1900,13 +2163,14 @@ mod tests {
         let temp = std::env::temp_dir().join(format!("vmux-process-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&temp).unwrap();
         let cwd = temp.to_string_lossy().into_owned();
+        let home = temp.join("home-marker").to_string_lossy().into_owned();
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
             ProcessId::new(),
             "/bin/sh".to_string(),
             vec![],
             cwd.clone(),
-            Vec::new(),
+            vec![("HOME".to_string(), home.clone())],
             120,
             24,
             wake_tx,
@@ -1914,14 +2178,97 @@ mod tests {
         .expect("process should spawn");
 
         drain_process_output(&mut process, Duration::from_millis(300));
-        process.write_input(b"pwd\r");
+        process.write_input(b"printf 'HOME=%s\\n' \"$HOME\"; pwd\r");
         let text = wait_for_snapshot_text(&mut process, &cwd);
 
         process.kill();
         let _ = std::fs::remove_dir_all(&temp);
 
         assert!(text.contains(&cwd));
+        assert!(text.contains(&format!("HOME={home}")));
         assert!(!text.contains(&format!("cd {cwd}")));
+    }
+
+    #[test]
+    fn process_rejects_invalid_cwd_at_spawn() {
+        let mut mgr = ProcessManager::default();
+        let cwd = std::env::temp_dir().join(format!(
+            "vmux-process-missing-cwd-{}-{}",
+            std::process::id(),
+            ProcessId::new()
+        ));
+
+        let result = mgr.create_process(
+            ProcessId::new(),
+            "/bin/sh".into(),
+            vec!["-c".into(), "exit 0".into()],
+            cwd.to_string_lossy().into_owned(),
+            Vec::new(),
+            80,
+            24,
+        );
+
+        assert!(result.is_err());
+        assert!(mgr.processes.is_empty());
+
+        let file = std::env::temp_dir().join(format!(
+            "vmux-process-file-cwd-{}-{}",
+            std::process::id(),
+            ProcessId::new()
+        ));
+        std::fs::write(&file, b"not a directory").expect("write cwd file");
+        let result = mgr.create_process(
+            ProcessId::new(),
+            "/bin/sh".into(),
+            vec!["-c".into(), "exit 0".into()],
+            file.to_string_lossy().into_owned(),
+            Vec::new(),
+            80,
+            24,
+        );
+        let _ = std::fs::remove_file(file);
+
+        assert!(result.is_err());
+        assert!(mgr.processes.is_empty());
+    }
+
+    #[test]
+    fn process_with_cwd_rejects_missing_executable_at_spawn() {
+        let mut mgr = ProcessManager::default();
+        let cwd = std::env::temp_dir().join(format!(
+            "vmux-process-command-cwd-{}-{}",
+            std::process::id(),
+            ProcessId::new()
+        ));
+        std::fs::create_dir_all(&cwd).expect("create cwd");
+
+        let result = mgr.create_process(
+            ProcessId::new(),
+            "/definitely/missing/vmux-command".into(),
+            Vec::new(),
+            cwd.to_string_lossy().into_owned(),
+            Vec::new(),
+            80,
+            24,
+        );
+        assert!(result.is_err());
+        assert!(mgr.processes.is_empty());
+
+        let command = cwd.join("not-executable");
+        std::fs::write(&command, b"#!/bin/sh\nexit 0\n").expect("write command");
+        let result = mgr.create_process(
+            ProcessId::new(),
+            command.to_string_lossy().into_owned(),
+            Vec::new(),
+            cwd.to_string_lossy().into_owned(),
+            Vec::new(),
+            80,
+            24,
+        );
+        let _ = std::fs::remove_dir_all(cwd);
+
+        assert!(result.is_err());
+        assert!(mgr.processes.is_empty());
     }
 
     #[test]
@@ -2398,5 +2745,181 @@ mod tests {
         assert_eq!(exits, 1);
 
         mgr.remove_process(&id);
+    }
+
+    #[test]
+    fn process_exit_drains_all_queued_pty_output() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let id = ProcessId::new();
+        mgr.create_process_keep_alive(
+            id,
+            "/bin/sh".into(),
+            vec![
+                "-c".into(),
+                "awk 'BEGIN { for (i = 0; i < 70000; i++) print \"abcdefgh\"; print \"TAIL-SENTINEL\" }'"
+                    .into(),
+            ],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+        )
+        .expect("spawn");
+        std::thread::sleep(Duration::from_millis(500));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut saw_exit = false;
+        while Instant::now() < deadline {
+            if mgr.poll_all().contains(&id) {
+                saw_exit = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(saw_exit, "process should exit");
+        assert!(
+            mgr.processes
+                .get(&id)
+                .expect("process retained")
+                .full_text()
+                .contains("TAIL-SENTINEL"),
+            "exit must not discard queued PTY output"
+        );
+        mgr.remove_process(&id);
+    }
+
+    #[test]
+    fn process_exit_is_reported_after_queued_pty_output_is_drained() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let id = ProcessId::new();
+        mgr.create_process_keep_alive(
+            id,
+            "/bin/sh".into(),
+            vec![
+                "-c".into(),
+                "awk 'BEGIN { for (i = 0; i < 70000; i++) print \"abcdefgh\"; print \"TAIL-SENTINEL\" }'"
+                    .into(),
+            ],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+        )
+        .expect("spawn");
+        let mut rx = mgr.processes.get(&id).expect("process").subscribe();
+        std::thread::sleep(Duration::from_millis(500));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut reported = false;
+        while Instant::now() < deadline {
+            mgr.poll_all();
+            while let Ok(message) = rx.try_recv() {
+                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                    reported = true;
+                }
+            }
+            if reported {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(reported, "process exit should be reported");
+        assert!(
+            mgr.processes
+                .get(&id)
+                .expect("process retained")
+                .full_text()
+                .contains("TAIL-SENTINEL"),
+            "exit must not be reported while queued PTY output remains"
+        );
+        mgr.remove_process(&id);
+    }
+
+    #[test]
+    fn process_exit_waits_for_pty_reader_catch_up() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut process = Process::new_with_wake_and_reader_delay(
+            ProcessId::new(),
+            "/bin/sh".into(),
+            vec!["-c".into(), "printf READER-TAIL".into()],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+            wake_tx,
+            Duration::from_millis(100),
+        )
+        .expect("spawn");
+        let mut rx = process.subscribe();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut reported = false;
+        while Instant::now() < deadline {
+            process.poll();
+            while let Ok(message) = rx.try_recv() {
+                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                    reported = true;
+                }
+            }
+            if reported {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert!(reported, "process exit should be reported");
+        assert!(
+            process.full_text().contains("READER-TAIL"),
+            "exit raced with the PTY reader"
+        );
+        process.kill();
+    }
+
+    #[test]
+    fn process_exit_is_reported_before_background_descendant_closes_pty() {
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let mut mgr = ProcessManager::new(wake_tx);
+        let id = ProcessId::new();
+        mgr.create_process_keep_alive(
+            id,
+            "/bin/sh".into(),
+            vec!["-c".into(), "exit 0".into()],
+            String::new(),
+            Vec::new(),
+            80,
+            24,
+        )
+        .expect("spawn");
+        std::thread::sleep(Duration::from_millis(50));
+        let (pty_tx, pty_rx) = mpsc::unbounded_channel();
+        let process = mgr.processes.get_mut(&id).expect("process");
+        process.pty_rx = pty_rx;
+        let mut rx = process.subscribe();
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut reported = false;
+        while Instant::now() < deadline {
+            assert!(
+                !mgr.poll_all().contains(&id),
+                "process must remain until PTY output is drained"
+            );
+            while let Ok(message) = rx.try_recv() {
+                if matches!(message, ServiceMessage::ProcessExited { .. }) {
+                    reported = true;
+                }
+            }
+            if reported {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        drop(pty_tx);
+        mgr.remove_process(&id);
+        assert!(reported, "child exit must not wait for PTY closure");
     }
 }
