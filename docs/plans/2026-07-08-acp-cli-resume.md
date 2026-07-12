@@ -879,20 +879,942 @@ git add -A -- crates/ && git commit -m "chore(agent): fmt/clippy/test fixes for 
 
 ---
 
+## Phase H — Prompt-driven resume selector refinement
+
+This phase refines the implemented PR. Keep execution inline; do not dispatch subagents.
+
+### Task H1: Extract testable composer state, filtering, navigation, and edit helpers
+
+**Files:**
+- Create: `crates/vmux_agent/src/chat_page/composer.rs`
+- Modify: `crates/vmux_agent/src/chat_page.rs`
+
+- [ ] **Step 1: Write the failing helper tests.** Create
+  `crates/vmux_agent/src/chat_page/composer.rs` with the test module first:
+
+```rust
+use super::event::ResumableSessionEntry;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SelectorMode<'a> {
+    None,
+    Commands(&'a str),
+    Resume(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MenuDirection {
+    Next,
+    Previous,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptEdit<'a> {
+    Insert(&'a str),
+    Backspace,
+    Delete,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
+        ResumableSessionEntry {
+            sid: sid.into(),
+            title: title.into(),
+            cwd: cwd.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn selector_mode_distinguishes_commands_and_resume_arguments() {
+        assert_eq!(selector_mode("hello"), SelectorMode::None);
+        assert_eq!(selector_mode("/res"), SelectorMode::Commands("res"));
+        assert_eq!(selector_mode("/resume"), SelectorMode::Commands("resume"));
+        assert_eq!(selector_mode("/resume "), SelectorMode::Resume(""));
+        assert_eq!(selector_mode("/resume  SID-9"), SelectorMode::Resume("SID-9"));
+        assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
+    }
+
+    #[test]
+    fn resume_filter_matches_sid_title_and_cwd_case_insensitively() {
+        let sessions = vec![
+            session("SID-ABC", "Fix auth", "/work/api"),
+            session("sid-def", "Docs", "/work/site"),
+        ];
+        assert_eq!(filter_sessions(&sessions, "abc")[0].sid, "SID-ABC");
+        assert_eq!(filter_sessions(&sessions, "AUTH")[0].sid, "SID-ABC");
+        assert_eq!(filter_sessions(&sessions, "SITE")[0].sid, "sid-def");
+        assert!(filter_sessions(&sessions, "missing").is_empty());
+    }
+
+    #[test]
+    fn menu_navigation_wraps_and_empty_stays_zero() {
+        assert_eq!(move_selection(0, 3, MenuDirection::Previous), 2);
+        assert_eq!(move_selection(2, 3, MenuDirection::Next), 0);
+        assert_eq!(move_selection(7, 0, MenuDirection::Next), 0);
+        assert_eq!(menu_direction("n", true), Some(MenuDirection::Next));
+        assert_eq!(menu_direction("p", true), Some(MenuDirection::Previous));
+        assert_eq!(menu_direction("n", false), None);
+        assert_eq!(menu_direction("ArrowDown", true), None);
+    }
+
+    #[test]
+    fn prompt_edits_preserve_utf16_caret_semantics() {
+        assert_eq!(
+            edit_prompt("abcd", 1, 3, PromptEdit::Insert("X")),
+            ("aXd".into(), 2)
+        );
+        assert_eq!(
+            edit_prompt("a🙂b", 3, 3, PromptEdit::Backspace),
+            ("ab".into(), 1)
+        );
+        assert_eq!(
+            edit_prompt("a🙂b", 1, 1, PromptEdit::Delete),
+            ("ab".into(), 1)
+        );
+    }
+}
+```
+
+Register it beside `event` in `crates/vmux_agent/src/chat_page.rs`:
+
+```rust
+pub(crate) mod composer;
+pub mod event;
+```
+
+- [ ] **Step 2: Run the tests and verify failure.**
+
+Run: `cargo test -p vmux_agent chat_page::composer`
+
+Expected: FAIL because `selector_mode`, `filter_sessions`, `move_selection`,
+`menu_direction`, and `edit_prompt` are undefined.
+
+- [ ] **Step 3: Implement the helpers above the test module.**
+
+```rust
+pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
+    let Some(token) = draft.strip_prefix('/') else {
+        return SelectorMode::None;
+    };
+    if let Some(rest) = token.strip_prefix("resume")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        return SelectorMode::Resume(rest.trim_start_matches(char::is_whitespace));
+    }
+    if token.chars().any(char::is_whitespace) {
+        SelectorMode::None
+    } else {
+        SelectorMode::Commands(token)
+    }
+}
+
+pub(crate) fn filter_sessions(
+    sessions: &[ResumableSessionEntry],
+    query: &str,
+) -> Vec<ResumableSessionEntry> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return sessions.to_vec();
+    }
+    sessions
+        .iter()
+        .filter(|session| {
+            session.sid.to_lowercase().contains(&query)
+                || session.title.to_lowercase().contains(&query)
+                || session.cwd.to_lowercase().contains(&query)
+        })
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn menu_direction(key: &str, ctrl: bool) -> Option<MenuDirection> {
+    match key {
+        "ArrowDown" if !ctrl => Some(MenuDirection::Next),
+        "ArrowUp" if !ctrl => Some(MenuDirection::Previous),
+        "n" | "N" if ctrl => Some(MenuDirection::Next),
+        "p" | "P" if ctrl => Some(MenuDirection::Previous),
+        _ => None,
+    }
+}
+
+pub(crate) fn move_selection(
+    current: usize,
+    len: usize,
+    direction: MenuDirection,
+) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    match direction {
+        MenuDirection::Next => (current + 1) % len,
+        MenuDirection::Previous => (current + len - 1) % len,
+    }
+}
+
+pub(crate) fn edit_prompt(
+    value: &str,
+    selection_start: u32,
+    selection_end: u32,
+    edit: PromptEdit<'_>,
+) -> (String, u32) {
+    let start = utf16_to_byte(value, selection_start);
+    let end = utf16_to_byte(value, selection_end);
+    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let (replace_start, replace_end, replacement) = match edit {
+        PromptEdit::Insert(text) => (start, end, text),
+        PromptEdit::Backspace if start != end => (start, end, ""),
+        PromptEdit::Backspace => {
+            let previous = value[..start]
+                .char_indices()
+                .next_back()
+                .map(|(index, _)| index)
+                .unwrap_or(start);
+            (previous, start, "")
+        }
+        PromptEdit::Delete if start != end => (start, end, ""),
+        PromptEdit::Delete => {
+            let next = value[end..]
+                .chars()
+                .next()
+                .map(|character| end + character.len_utf8())
+                .unwrap_or(end);
+            (end, next, "")
+        }
+    };
+    let mut updated = String::with_capacity(
+        value.len() - (replace_end - replace_start) + replacement.len(),
+    );
+    updated.push_str(&value[..replace_start]);
+    updated.push_str(replacement);
+    updated.push_str(&value[replace_end..]);
+    let caret_byte = replace_start + replacement.len();
+    let caret_utf16 = updated[..caret_byte].encode_utf16().count() as u32;
+    (updated, caret_utf16)
+}
+
+fn utf16_to_byte(value: &str, offset: u32) -> usize {
+    let mut units = 0u32;
+    for (byte, character) in value.char_indices() {
+        if units >= offset {
+            return byte;
+        }
+        units += character.len_utf16() as u32;
+    }
+    value.len()
+}
+```
+
+- [ ] **Step 4: Run the helper tests and verify pass.**
+
+Run: `cargo test -p vmux_agent chat_page::composer`
+
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add crates/vmux_agent/src/chat_page.rs crates/vmux_agent/src/chat_page/composer.rs
+git commit -m "refactor(agent): add testable composer selector helpers"
+```
+
+### Task H2: Limit resume results to the requesting pane's agent kind
+
+**Files:**
+- Modify: `crates/vmux_agent/src/chat_page.rs`
+
+- [ ] **Step 1: Write a failing unit test.** Add inside the existing native test module:
+
+```rust
+#[test]
+fn resume_results_only_include_current_agent_kind() {
+    use crate::client::cli::strategy::ResumableSession;
+    use std::time::SystemTime;
+
+    let session = |kind, sid: &str| ResumableSession {
+        kind,
+        sid: sid.into(),
+        cwd: "/work".into(),
+        mtime: SystemTime::UNIX_EPOCH,
+        title: sid.into(),
+        cross_runtime: kind_supports_cross_runtime(kind),
+    };
+    let filtered = sessions_for_kind(
+        vec![
+            session(AgentKind::Claude, "claude-1"),
+            session(AgentKind::Codex, "codex-1"),
+        ],
+        AgentKind::Claude,
+    );
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].sid, "claude-1");
+}
+```
+
+- [ ] **Step 2: Run and verify failure.**
+
+Run: `cargo test -p vmux_agent resume_results_only_include_current_agent_kind`
+
+Expected: FAIL because `sessions_for_kind` is undefined.
+
+- [ ] **Step 3: Add the filter and resolve kind from the requesting stack.** Import
+  `ResumableSession` under the native cfg, then add:
+
+```rust
+#[cfg(not(target_arch = "wasm32"))]
+fn sessions_for_kind(
+    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
+    kind: AgentKind,
+) -> Vec<crate::client::cli::strategy::ResumableSession> {
+    sessions
+        .into_iter()
+        .filter(|session| session.kind == kind)
+        .collect()
+}
+```
+
+Extend `on_resume_list_request` with `child_of`, `acp_sessions`, and `agent_sessions` queries.
+Resolve the stack and kind before spawning the IO task:
+
+```rust
+let kind = child_of
+    .get(webview)
+    .ok()
+    .map(ChildOf::parent)
+    .and_then(|stack| {
+        acp_sessions
+            .get(stack)
+            .ok()
+            .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+            .or_else(|| agent_sessions.get(stack).ok().map(|session| session.kind))
+    });
+```
+
+Inside the task, replace `strategies.list_all_sessions()` with:
+
+```rust
+let sessions = kind
+    .map(|kind| sessions_for_kind(strategies.list_all_sessions(), kind))
+    .unwrap_or_default();
+let sessions = sessions
+    .into_iter()
+    .map(|session| {
+        let dir = session
+            .cwd
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| session.cwd.to_string_lossy().to_string());
+        ResumableSessionEntry {
+            kind: session.kind.as_url_segment().to_string(),
+            sid: session.sid,
+            cwd: session.cwd.to_string_lossy().to_string(),
+            title: session.title,
+            subtitle: format!("{} · {}", relative_time(session.mtime), dir),
+            cross_runtime: session.cross_runtime,
+        }
+    })
+    .collect();
+```
+
+- [ ] **Step 4: Run and verify pass.**
+
+Run: `cargo test -p vmux_agent resume_results_only_include_current_agent_kind`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit.**
+
+```bash
+git add crates/vmux_agent/src/chat_page.rs
+git commit -m "fix(agent): filter resume sessions by current agent kind"
+```
+
+### Task H3: Make `/resume <query>` the selector state and add complete navigation
+
+**Files:**
+- Modify: `crates/vmux_agent/src/chat_page/page.rs`
+- Modify: `crates/vmux_agent/src/chat_page.rs`
+- Modify: `crates/vmux_agent/Cargo.toml`
+
+- [ ] **Step 1: Add failing source-integration assertions.** Extend the existing
+  `composer_resume_menu_remains_escapeable_when_empty` test:
+
+```rust
+#[test]
+fn composer_resume_selector_supports_prompt_filter_and_keyboard_navigation() {
+    let source = include_str!("chat_page/page.rs");
+    assert!(source.contains("SelectorMode::Resume"));
+    assert!(source.contains("filter_sessions"));
+    assert!(source.contains("No matching sessions"));
+    assert!(source.contains("menu_direction"));
+    assert!(source.contains("ScrollLogicalPosition::Nearest"));
+    assert!(source.contains("agent-selector-item-{i}"));
+}
+```
+
+- [ ] **Step 2: Run and verify failure.**
+
+Run: `cargo test -p vmux_agent composer_resume_selector_supports_prompt_filter_and_keyboard_navigation`
+
+Expected: FAIL on the new source markers.
+
+- [ ] **Step 3: Add the required WASM imports and features.** In `page.rs` import:
+
+```rust
+use crate::chat_page::composer::{
+    SelectorMode, filter_sessions, menu_direction, move_selection, selector_mode,
+};
+```
+
+Add to the WASM `web-sys` feature list in `crates/vmux_agent/Cargo.toml`:
+
+```toml
+"ScrollIntoViewOptions",
+"ScrollLogicalPosition",
+```
+
+- [ ] **Step 4: Replace `resume_mode` with parser-driven state.** Replace the signal with:
+
+```rust
+let mut resume_requested = use_signal(|| false);
+```
+
+Add this effect after the session listener:
+
+```rust
+use_effect(move || {
+    let in_resume_selector = matches!(selector_mode(&draft()), SelectorMode::Resume(_));
+    if in_resume_selector && !resume_requested() {
+        let _ = try_cef_bin_emit_rkyv(&ResumeListRequest);
+        resume_requested.set(true);
+    } else if !in_resume_selector && resume_requested() {
+        resume_requested.set(false);
+    }
+});
+```
+
+Replace the menu derivation with:
+
+```rust
+let draft_val = draft();
+let selector = selector_mode(&draft_val);
+let command_query = match selector {
+    SelectorMode::Commands(query) => Some(query),
+    _ => None,
+};
+let resume_query = match selector {
+    SelectorMode::Resume(query) => Some(query),
+    _ => None,
+};
+let filtered_cmds: Vec<SlashCommandEntry> = command_query
+    .map(|query| {
+        let query = query.to_lowercase();
+        slash_cmds
+            .read()
+            .iter()
+            .filter(|command| command.name.starts_with(&query))
+            .cloned()
+            .collect()
+    })
+    .unwrap_or_default();
+let filtered_sessions = resume_query
+    .map(|query| filter_sessions(&sessions.read(), query))
+    .unwrap_or_default();
+let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
+let session_menu_open = resume_query.is_some();
+```
+
+- [ ] **Step 5: Render filtered sessions, default selection, empty messages, and row ids.**
+  Replace both selector blocks with:
+
+```rust
+if cmd_menu_open {
+    div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+        for (i, command) in filtered_cmds.iter().enumerate() {
+            {
+                let command = command.clone();
+                rsx! {
+                    div {
+                        key: "sc{i}",
+                        id: "agent-selector-item-{i}",
+                        class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
+                        onclick: move |_| run_slash_command(&command.name, draft, menu_sel),
+                        span { class: "font-medium text-foreground", "/{command.name}" }
+                        span { class: "text-xs text-muted-foreground", "{command.description}" }
+                    }
+                }
+            }
+        }
+    }
+}
+if session_menu_open {
+    div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+        if sessions.read().is_empty() {
+            div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
+        } else if filtered_sessions.is_empty() {
+            div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching sessions" }
+        } else {
+            for (i, session) in filtered_sessions.iter().enumerate() {
+                {
+                    let session = session.clone();
+                    rsx! {
+                        div {
+                            key: "rs{i}",
+                            id: "agent-selector-item-{i}",
+                            class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                            onclick: move |_| select_resume_session(&session, draft),
+                            span { class: "truncate text-sm text-foreground", "{session.title}" }
+                            span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+Change textarea `oninput` so every query change selects the first result:
+
+```rust
+oninput: move |event| {
+    draft.set(event.value());
+    menu_sel.set(0);
+},
+```
+
+- [ ] **Step 6: Add selected-row scrolling.** Add this effect before `rsx!`:
+
+```rust
+use_effect(move || {
+    let selected = menu_sel();
+    let _ = draft.read();
+    let _ = sessions.read().len();
+    if let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| {
+            document.get_element_by_id(&format!("agent-selector-item-{selected}"))
+        })
+    {
+        let options = web_sys::ScrollIntoViewOptions::new();
+        options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+        element.scroll_into_view_with_scroll_into_view_options(&options);
+    }
+});
+```
+
+- [ ] **Step 7: Replace textarea selector handling.** Derive `cmd_items` and `sess_items` from
+  `selector_mode(&draft_now)`. Before normal submit handling, use:
+
+```rust
+let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
+    SelectorMode::Commands(query) => {
+        let query = query.to_lowercase();
+        (
+            slash_cmds
+                .peek()
+                .iter()
+                .filter(|command| command.name.starts_with(&query))
+                .cloned()
+                .collect::<Vec<_>>(),
+            Vec::new(),
+            false,
+        )
+    }
+    SelectorMode::Resume(query) => (
+        Vec::new(),
+        filter_sessions(&sessions.peek(), query),
+        true,
+    ),
+    SelectorMode::None => (Vec::new(), Vec::new(), false),
+};
+let selector_open = session_selector_open || !cmd_items.is_empty();
+let selector_len = if session_selector_open {
+    sess_items.len()
+} else {
+    cmd_items.len()
+};
+let key = e.key().to_string();
+let command_modifier = e.modifiers().meta() || e.modifiers().ctrl() || e.modifiers().alt();
+let direction = if e.modifiers().meta() || e.modifiers().alt() {
+    None
+} else {
+    menu_direction(&key, e.modifiers().ctrl())
+};
+
+if selector_open && let Some(direction) = direction {
+    e.prevent_default();
+    menu_sel.set(move_selection(*menu_sel.peek(), selector_len, direction));
+    return;
+}
+if selector_open
+    && e.key() == Key::Enter
+    && !e.modifiers().shift()
+    && !command_modifier
+{
+    e.prevent_default();
+    let selected = *menu_sel.peek();
+    if session_selector_open {
+        if let Some(session) = sess_items.get(selected) {
+            select_resume_session(session, draft);
+        }
+    } else if let Some(command) = cmd_items.get(selected) {
+        run_slash_command(&command.name, draft, menu_sel);
+    }
+    return;
+}
+if selector_open && e.key() == Key::Escape && !command_modifier {
+    e.prevent_default();
+    draft.set(String::new());
+    menu_sel.set(0);
+    return;
+}
+if session_selector_open && matches!(e.key(), Key::Enter | Key::Escape) {
+    return;
+}
+```
+
+The `session_selector_open` branch remains true with zero matches. Enter is prevented and does
+nothing, so `/resume <query>` is never submitted to the agent.
+
+- [ ] **Step 8: Keep `/resume ` in the prompt.** Replace the command dispatcher and selection
+  helper signatures:
+
+```rust
+fn run_slash_command(
+    name: &str,
+    mut draft: Signal<String>,
+    mut menu_sel: Signal<usize>,
+) {
+    match name {
+        "resume" => {
+            menu_sel.set(0);
+            draft.set("/resume ".to_string());
+        }
+        "cli" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
+            draft.set(String::new());
+        }
+        "acp" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "acp".into() });
+            draft.set(String::new());
+        }
+        _ => {}
+    }
+}
+
+fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<String>) {
+    let _ = try_cef_bin_emit_rkyv(&ResumeSession {
+        kind: session.kind.clone(),
+        sid: session.sid.clone(),
+        cwd: session.cwd.clone(),
+    });
+    draft.set(String::new());
+}
+```
+
+The command-row click handler is
+`run_slash_command(&command.name, draft, menu_sel)`. The session-row click handler is
+`select_resume_session(&session, draft)`, as shown in Step 5.
+
+- [ ] **Step 9: Run tests and WASM check.**
+
+Run:
+
+```bash
+cargo test -p vmux_agent chat_page::composer
+cargo test -p vmux_agent composer_resume_selector_supports_prompt_filter_and_keyboard_navigation
+cargo check -p vmux_agent --target wasm32-unknown-unknown
+```
+
+Expected: all PASS.
+
+- [ ] **Step 10: Commit.**
+
+```bash
+git add crates/vmux_agent/Cargo.toml crates/vmux_agent/src/chat_page.rs crates/vmux_agent/src/chat_page/page.rs
+git commit -m "feat(agent): filter resume selector from prompt arguments"
+```
+
+### Task H4: Route page-wide typing into the prompt
+
+**Files:**
+- Modify: `crates/vmux_agent/Cargo.toml`
+- Modify: `crates/vmux_agent/src/chat_page/page.rs`
+- Modify: `crates/vmux_agent/src/chat_page.rs`
+
+- [ ] **Step 1: Add a failing source-integration assertion.** Add:
+
+```rust
+#[test]
+fn composer_captures_global_prompt_input_without_stealing_shortcuts() {
+    let source = include_str!("chat_page/page.rs");
+    assert!(source.contains("install_global_prompt_input"));
+    assert!(source.contains("meta_key() || event.ctrl_key() || event.alt_key()"));
+    assert!(source.contains("PromptEdit::Backspace"));
+    assert!(source.contains("PromptEdit::Delete"));
+    assert!(source.contains("dispatch_keyboard_event"));
+}
+```
+
+- [ ] **Step 2: Run and verify failure.**
+
+Run: `cargo test -p vmux_agent composer_captures_global_prompt_input_without_stealing_shortcuts`
+
+Expected: FAIL on the new source markers.
+
+- [ ] **Step 3: Add WASM dependencies and DOM features.** Add `wasm-bindgen` and extend
+  `web-sys`:
+
+```toml
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Event",
+    "EventInit",
+    "EventTarget",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "KeyboardEventInit",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+    "Selection",
+] }
+```
+
+- [ ] **Step 4: Add textarea DOM helpers.** Import `Closure`, `JsCast`, `PromptEdit`, and
+  `edit_prompt`. Add:
+
+```rust
+use wasm_bindgen::{JsCast, closure::Closure};
+
+const PROMPT_ID: &str = "agent-chat-prompt";
+
+fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(PROMPT_ID)?
+        .dyn_into()
+        .ok()
+}
+
+fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(event) = web_sys::Event::new_with_event_init_dict("input", &init) {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+
+fn dispatch_keyboard_event(
+    textarea: &web_sys::HtmlTextAreaElement,
+    source: &web_sys::KeyboardEvent,
+) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_key(&source.key());
+    init.set_code(&source.code());
+    init.set_ctrl_key(source.ctrl_key());
+    init.set_shift_key(source.shift_key());
+    init.set_alt_key(source.alt_key());
+    init.set_meta_key(source.meta_key());
+    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+    {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+```
+
+- [ ] **Step 5: Install the global listener.** Add:
+
+```rust
+fn install_global_prompt_input(
+    draft: Signal<String>,
+    slash_cmds: Signal<Vec<SlashCommandEntry>>,
+) {
+    let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+        let Some(textarea) = prompt_textarea() else {
+            return;
+        };
+        let prompt_focused = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_some_and(|element| element.id() == PROMPT_ID);
+        if prompt_focused {
+            return;
+        }
+
+        let selector_open = match selector_mode(&draft.peek()) {
+            SelectorMode::Resume(_) => true,
+            SelectorMode::Commands(query) => {
+                let query = query.to_lowercase();
+                slash_cmds
+                    .peek()
+                    .iter()
+                    .any(|command| command.name.starts_with(&query))
+            }
+            SelectorMode::None => false,
+        };
+        let key = event.key();
+        let direction = if event.meta_key() || event.alt_key() {
+            None
+        } else {
+            menu_direction(&key, event.ctrl_key())
+        };
+        let plain_invoke_or_close = !event.meta_key()
+            && !event.ctrl_key()
+            && !event.alt_key()
+            && matches!(key.as_str(), "Enter" | "Escape");
+        let selector_key = direction.is_some() || plain_invoke_or_close;
+        if selector_open && selector_key {
+            event.prevent_default();
+            event.stop_propagation();
+            let _ = textarea.focus();
+            dispatch_keyboard_event(&textarea, &event);
+            return;
+        }
+
+        if event.meta_key() || event.ctrl_key() || event.alt_key() {
+            return;
+        }
+        let edit = match key.as_str() {
+            "Backspace" => PromptEdit::Backspace,
+            "Delete" => PromptEdit::Delete,
+            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
+            _ => return,
+        };
+        event.prevent_default();
+        event.stop_propagation();
+        let start = textarea
+            .selection_start()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| textarea.value().encode_utf16().count() as u32);
+        let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+        let (value, caret) = edit_prompt(&textarea.value(), start, end, edit);
+        let _ = textarea.focus();
+        textarea.set_value(&value);
+        let _ = textarea.set_selection_range(caret, caret);
+        dispatch_input_event(&textarea);
+    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    if let Some(window) = web_sys::window() {
+        let _ = window.add_event_listener_with_callback(
+            "keydown",
+            closure.as_ref().unchecked_ref(),
+        );
+    }
+    closure.forget();
+}
+```
+
+Install it once in `Page()`:
+
+```rust
+use_effect(move || install_global_prompt_input(draft, slash_cmds));
+```
+
+Set `id: PROMPT_ID` on the textarea. Existing textarea-targeted events remain owned by the
+Dioxus handler, so no key is inserted twice. Selector Ctrl+N/P is rerouted before the general
+modifier exclusion; other Cmd/Ctrl/Alt shortcuts remain untouched.
+
+- [ ] **Step 6: Run tests and WASM check.**
+
+Run:
+
+```bash
+cargo test -p vmux_agent chat_page::composer
+cargo test -p vmux_agent composer_captures_global_prompt_input_without_stealing_shortcuts
+cargo check -p vmux_agent --target wasm32-unknown-unknown
+```
+
+Expected: all PASS.
+
+- [ ] **Step 7: Commit.**
+
+```bash
+git add crates/vmux_agent/Cargo.toml crates/vmux_agent/src/chat_page.rs crates/vmux_agent/src/chat_page/page.rs
+git commit -m "feat(agent): route page-wide typing into chat prompt"
+```
+
+### Task H5: Targeted verification and push
+
+**Files:**
+- Modify only files required by formatter or compiler findings from H1-H4.
+
+- [ ] **Step 1: Format.**
+
+Run: `cargo fmt --all`
+
+Expected: PASS. Restore unrelated formatting under `patches/` if Cargo fmt touches it.
+
+- [ ] **Step 2: Run targeted native tests.**
+
+Run: `cargo test -p vmux_agent`
+
+Expected: PASS.
+
+- [ ] **Step 3: Run targeted clippy.**
+
+Run: `cargo clippy -p vmux_agent --all-targets -- -D warnings`
+
+Expected: PASS.
+
+- [ ] **Step 4: Compile the WASM page.**
+
+Run: `cargo check -p vmux_agent --target wasm32-unknown-unknown`
+
+Expected: PASS.
+
+- [ ] **Step 5: Inspect the final diff and commit formatter/compiler fixes if present.**
+
+Run: `git diff --check` and `git status --short`.
+
+If tracked fixes remain:
+
+```bash
+git add crates/vmux_agent/Cargo.toml crates/vmux_agent/src/chat_page.rs crates/vmux_agent/src/chat_page/
+git commit -m "fix(agent): finish resume selector refinement"
+```
+
+- [ ] **Step 6: Push the branch.**
+
+Run: `git push origin feat/acp-cli-resume`
+
+Expected: PR #241 updates to the new head.
+
+---
+
 ## Self-review
 
 **Spec coverage:**
 - Runtime-agnostic identity → A1 (`ResumableSession`), B1 (`for_session`). ✓
 - Backend lister (3 kinds, on-demand, sorted) → A2/A3/A4. ✓
 - Composer slash menu (`/resume`, `/cli`, extensible, unknown→prompt) → D1, E2. ✓
+- Prompt-driven `/resume <query>` parser + case-insensitive sid/title/cwd filtering → H1, H3. ✓
+- Current-agent-kind-only results → H2. ✓
+- Immediate selection, Arrow/Ctrl+N/P wraparound, nearest scrolling, empty result state → H1, H3. ✓
+- Page-wide prompt typing, Backspace/Delete, caret preservation, shortcut exclusions → H1, H4. ✓
 - In-place swap + cwd carry → B1/B2, E1. ✓
 - Cross-runtime handoff gated by `cross_runtime` (claude) → E1/E2, `kind_supports_cross_runtime`. ✓
 - Cmd+K browser and runtime-switch commands → deferred from this PR. ✓
 - Edge cases: already-open focus (existing `AgentSessionToEntity` path in page-open — the swap intentionally forces a fresh attach; add focus-existing only if desired — noted), stale sid (ACP falls back to new; CLI warn), cwd carried, missing binary (existing setup path). ✓
 - Tests: parsers (A2/A3), url round-trip (B1), swap ECS (B2), runtime-switch ECS (E1), rkyv (C1), source-scrape (D1). ✓
 
-**Placeholder scan:** No TBD/TODO in code steps; the two "read the existing X first" steps (A3.1, B2.1, E1.1) are deliberate context-gathering before code that depends on exact upstream field paths/accessors, not deferred implementation.
+**Completeness scan:** Every Phase H code change has concrete types, signatures, assertions,
+commands, and expected results. Earlier context-reading steps remain deliberate prerequisites for
+their exact upstream field paths and accessors.
 
 **Type consistency:** `ResumableSession` (native, PathBuf/SystemTime) vs `ResumableSessionEntry` (wire, String) kept distinct and mapped in E1. `SwapStackSession.target_url: String` (built via `AgentUrl::format`, parsed in the handler) avoids a `vmux_core → vmux_agent` dep. `kind_supports_cross_runtime` is the single source for the `cross_runtime` flag (A2/A3 refactored in E2.2). Slash command names (`resume`/`cli`/`acp`) match between D1 `run_slash_command`, E2 `slash_commands_for`, and E1 `on_runtime_switch_request`.
+
+Phase H keeps `SelectorMode`, `MenuDirection`, and UTF-16-aware `PromptEdit` in a native/WASM
+shared module. DOM-only code remains in `page.rs`. `ResumeListRequest` stays payload-free because
+native ECS resolves the requesting stack's `AcpSession`/`AgentSession` kind before scanning.
 
 **Known follow-ups (not blockers):** Cmd+K session-list browser + runtime-switch commands; ACP `availableCommands` surfacing; codex/vibe cross-runtime after verification; per-row runtime pick; focus-existing-tab on resume instead of re-attach.
