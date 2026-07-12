@@ -257,38 +257,19 @@ pub async fn run(
             init.client_capabilities.terminal = false;
             let init_resp = cx.send_request(init).block_task().await?;
 
-            // Resume the persisted session when asked and the agent advertises `session/load`;
-            // otherwise start fresh (graceful fallback). Either way `session_id` is what we use for
-            // prompts/cancel and surface to the GUI to persist in the pane url. On load, the agent
-            // replays history as `session/update` notifications through the projector.
-            let session_id: SessionId = match resume
-                .filter(|_| init_resp.agent_capabilities.load_session)
-            {
-                Some(id) => {
-                    let sid = SessionId::new(id);
-                    let mut load = LoadSessionRequest::new(sid.clone(), main_shared.cwd.clone());
+            let mut session_id =
+                load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
+                    let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
                     load.mcp_servers = mcp_servers.clone();
-                    // A stale/evicted session id must not error the pane — fall back to a fresh
-                    // session and let the GUI re-persist the new id via `AcpSessionCreated`.
-                    match cx.send_request(load).block_task().await {
-                        Ok(_) => sid,
-                        Err(_) => {
-                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
-                            new_session.mcp_servers = mcp_servers;
-                            cx.send_request(new_session).block_task().await?.session_id
-                        }
-                    }
-                }
-                None => {
-                    let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
-                    new_session.mcp_servers = mcp_servers;
-                    cx.send_request(new_session).block_task().await?.session_id
-                }
-            };
-            main_shared.emit(ServiceMessage::AcpSessionCreated {
-                sid: main_shared.sid.clone(),
-                acp_session_id: session_id.to_string(),
-            });
+                    async { cx.send_request(load).block_task().await.map(|_| ()) }
+                })
+                .await;
+            if let Some(sid) = &session_id {
+                main_shared.emit(ServiceMessage::AcpSessionCreated {
+                    sid: main_shared.sid.clone(),
+                    acp_session_id: sid.to_string(),
+                });
+            }
             main_shared.emit_status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
@@ -302,12 +283,37 @@ pub async fn run(
                             .push_user(text.clone());
                         main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
+                        let ensured = ensure_session(&mut session_id, || {
+                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                            new_session.mcp_servers = mcp_servers.clone();
+                            async {
+                                cx.send_request(new_session)
+                                    .block_task()
+                                    .await
+                                    .map(|response| response.session_id)
+                            }
+                        })
+                        .await;
+                        let (active_session_id, created) = match ensured {
+                            Ok(value) => value,
+                            Err(err) => {
+                                main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                    "acp session/new failed: {err}"
+                                )));
+                                continue;
+                            }
+                        };
+                        if created {
+                            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                sid: main_shared.sid.clone(),
+                                acp_session_id: active_session_id.to_string(),
+                            });
+                        }
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
-                        let session_id = session_id.clone();
                         cx.spawn(async move {
                             let prompt = PromptRequest::new(
-                                session_id,
+                                active_session_id,
                                 vec![ContentBlock::Text(TextContent::new(text))],
                             );
                             let errored = match cx_prompt.send_request(prompt).block_task().await {
@@ -331,10 +337,14 @@ pub async fn run(
                         for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
                             let _ = tx.send(ApprovalDecision::Deny);
                         }
-                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
+                        if let Some(sid) = &session_id {
+                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                        }
                     }
                     AcpInput::Close => {
-                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
+                        if let Some(sid) = &session_id {
+                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                        }
                         break;
                     }
                 }
