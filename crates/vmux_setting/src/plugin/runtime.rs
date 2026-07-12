@@ -127,6 +127,9 @@ pub struct SpaceOverrides {
 pub struct AgentSettings {
     #[serde(default)]
     pub app_providers: Vec<AppProviderSettings>,
+    /// Allow agents to override vmux run-terminal placement with mode, direction, or beside.
+    #[serde(default)]
+    pub allow_run_placement_override: bool,
     /// When true (default), an agent reading/editing a file opens it in a
     /// `file://` follow-pane beside that agent.
     #[serde(default = "default_true")]
@@ -159,6 +162,7 @@ fn default_agent_settings() -> AgentSettings {
             kind: "vibe".to_string(),
             models: vec!["echo".to_string()],
         }],
+        allow_run_placement_override: false,
         follow_files: true,
         tidy_files: true,
         tidy_files_max: 5,
@@ -1215,6 +1219,25 @@ mod tests {
         assert!(s.tidy_files);
         assert_eq!(s.tidy_files_max, 5);
         assert!(!s.tidy_files_auto);
+    }
+
+    #[test]
+    fn agent_defaults_disable_run_placement_override() {
+        assert!(!AgentSettings::default().allow_run_placement_override);
+    }
+
+    #[test]
+    fn apply_update_enables_run_placement_override() {
+        let mut settings = base_settings();
+        let ron = apply_settings_update(
+            &mut settings,
+            "agent.allow_run_placement_override",
+            serde_json::json!(true),
+        )
+        .expect("update ok");
+        assert!(settings.agent.allow_run_placement_override);
+        let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
+        assert!(reparsed.agent.allow_run_placement_override);
     }
 
     #[test]

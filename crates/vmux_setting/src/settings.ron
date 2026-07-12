@@ -58,6 +58,7 @@
         app_providers: [
             (provider: "stub", kind: "vibe", models: ["echo"]),
         ],
+        allow_run_placement_override: false,
         follow_files: true,
         tidy_files: true,
         tidy_files_max: 5,

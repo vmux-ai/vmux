@@ -263,6 +263,13 @@ fn build_settings_schema() -> SettingsSchema {
                 root_path: "layout".to_string(),
             },
             SectionSpec {
+                id: "agent".to_string(),
+                title: "Agent".to_string(),
+                description: Some("Agent behavior and tool permissions.".to_string()),
+                synthetic_keys: vec![],
+                root_path: "agent".to_string(),
+            },
+            SectionSpec {
                 id: "shortcuts".to_string(),
                 title: "Shortcuts".to_string(),
                 description: Some(
@@ -378,6 +385,29 @@ fn build_settings_schema() -> SettingsSchema {
                 },
             ),
             field(
+                "agent",
+                FieldSpec {
+                    order: vec![
+                        "allow_run_placement_override".into(),
+                        "follow_files".into(),
+                        "tidy_files".into(),
+                        "tidy_files_max".into(),
+                        "tidy_files_auto".into(),
+                        "app_providers".into(),
+                        "acp".into(),
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "agent.allow_run_placement_override",
+                FieldSpec {
+                    label: Some("Allow run placement override".into()),
+                    hint: Some("Let agents choose run pane mode, direction, and anchor.".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
                 "shortcuts",
                 FieldSpec {
                     order: vec![
@@ -462,6 +492,24 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+}
+
+#[cfg(test)]
+mod agent_schema_tests {
+    use super::*;
+
+    #[test]
+    fn schema_exposes_run_placement_override_under_agent() {
+        let schema = build_settings_schema();
+        assert!(schema.sections.iter().any(|section| section.id == "agent"));
+        let field = schema
+            .field("agent.allow_run_placement_override")
+            .expect("run placement override field");
+        assert_eq!(
+            field.label.as_deref(),
+            Some("Allow run placement override")
+        );
     }
 }
 
