@@ -256,6 +256,28 @@ mod tests {
     }
 
     #[test]
+    fn windowed_focus_action_clears_cache_for_winit_host() {
+        let mut focused = Some(Entity::from_bits(1));
+
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused),
+            None
+        );
+        assert_eq!(focused, None);
+    }
+
+    #[test]
+    fn windowed_focus_action_clears_cache_when_unmanaged() {
+        let mut focused = Some(Entity::from_bits(1));
+
+        assert_eq!(
+            windowed_focus_action(HostFocusIntent::Unmanaged, false, None, &mut focused),
+            None
+        );
+        assert_eq!(focused, None);
+    }
+
+    #[test]
     fn player_mode_is_unmanaged() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
