@@ -1859,6 +1859,20 @@ fn run_command_line(command: &str, token: Option<&str>, settings: &AppSettings) 
     }
 }
 
+const RUN_PLACEMENT_OVERRIDE_DISABLED: &str =
+    "run placement overrides are disabled; omit mode, direction, and beside and retry";
+
+fn validate_run_placement_policy(
+    settings: &AppSettings,
+    placement_override: bool,
+) -> Result<(), &'static str> {
+    if placement_override && !settings.agent.allow_run_placement_override {
+        Err(RUN_PLACEMENT_OVERRIDE_DISABLED)
+    } else {
+        Ok(())
+    }
+}
+
 fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return path;
@@ -1932,13 +1946,17 @@ fn handle_agent_self_commands(
             ServiceAgentCommand::Run {
                 anchor,
                 command,
+                placement_override,
                 direction,
                 focus,
                 beside,
                 mode,
                 terminal,
                 done_marker,
-            } => {
+            } => 'run: {
+                if let Err(error) = validate_run_placement_policy(&settings, *placement_override) {
+                    break 'run AgentCommandResult::Error(error.to_string());
+                }
                 let focus = requested_focus_for_origin(&request.origin, *focus);
                 let mut data =
                     run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
@@ -4681,6 +4699,30 @@ mod tests {
 
         assert_eq!(picked.pid, terminal);
         assert_eq!(picked.pane, terminal_pane);
+    }
+
+    #[test]
+    fn run_placement_policy_rejects_override_by_default() {
+        let settings = test_settings();
+        assert_eq!(
+            validate_run_placement_policy(&settings, true),
+            Err(
+                "run placement overrides are disabled; omit mode, direction, and beside and retry"
+            )
+        );
+    }
+
+    #[test]
+    fn run_placement_policy_allows_bare_run() {
+        let settings = test_settings();
+        assert_eq!(validate_run_placement_policy(&settings, false), Ok(()));
+    }
+
+    #[test]
+    fn run_placement_policy_honors_user_opt_out() {
+        let mut settings = test_settings();
+        settings.agent.allow_run_placement_override = true;
+        assert_eq!(validate_run_placement_policy(&settings, true), Ok(()));
     }
 
     #[test]

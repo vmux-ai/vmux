@@ -1656,8 +1656,13 @@ mod tests {
         .unwrap();
         match target {
             DispatchTarget::Command(AgentCommand::Run {
-                terminal: Some(t), ..
-            }) => assert_eq!(t, term),
+                terminal: Some(t),
+                placement_override,
+                ..
+            }) => {
+                assert_eq!(t, term);
+                assert!(!placement_override);
+            }
             other => panic!("expected Run with terminal, got {other:?}"),
         }
         assert!(
