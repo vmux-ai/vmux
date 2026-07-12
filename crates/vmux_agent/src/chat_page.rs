@@ -423,16 +423,47 @@ fn runtime_switch_target(
 
 /// Page → native: `/resume` was opened — reply with the on-disk session list.
 #[cfg(not(target_arch = "wasm32"))]
+fn sessions_for_kind(
+    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
+    kind: AgentKind,
+) -> Vec<crate::client::cli::strategy::ResumableSession> {
+    sessions
+        .into_iter()
+        .filter(|session| session.kind == kind)
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn on_resume_list_request(
     trigger: On<BinReceive<ResumeListRequest>>,
     strategies: Option<Res<AgentStrategies>>,
+    child_of: Query<&ChildOf>,
+    acp_sessions: Query<&AcpSession>,
+    agent_sessions: Query<&AgentSession>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
+    let kind = child_of
+        .get(webview)
+        .ok()
+        .map(ChildOf::parent)
+        .and_then(|stack| {
+            acp_sessions
+                .get(stack)
+                .ok()
+                .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+                .or_else(|| {
+                    agent_sessions
+                        .get(stack)
+                        .ok()
+                        .map(|session| session.kind)
+                })
+        });
     let task = IoTaskPool::get().spawn(async move {
-        let sessions = strategies
-            .list_all_sessions()
+        let sessions = kind
+            .map(|kind| sessions_for_kind(strategies.list_all_sessions(), kind))
+            .unwrap_or_default()
             .into_iter()
             .map(|s| {
                 let dir = s
@@ -581,6 +612,30 @@ mod native_tests {
         let with_cli = slash_commands_for(true);
         assert_eq!(with_cli.len(), 2);
         assert_eq!(with_cli[1].name, "cli");
+    }
+
+    #[test]
+    fn resume_results_only_include_current_agent_kind() {
+        use crate::client::cli::strategy::ResumableSession;
+        use std::time::SystemTime;
+
+        let session = |kind, sid: &str| ResumableSession {
+            kind,
+            sid: sid.into(),
+            cwd: "/work".into(),
+            mtime: SystemTime::UNIX_EPOCH,
+            title: sid.into(),
+            cross_runtime: kind_supports_cross_runtime(kind),
+        };
+        let filtered = sessions_for_kind(
+            vec![
+                session(AgentKind::Claude, "claude-1"),
+                session(AgentKind::Codex, "codex-1"),
+            ],
+            AgentKind::Claude,
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].sid, "claude-1");
     }
 
     #[test]
