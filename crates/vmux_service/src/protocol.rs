@@ -126,6 +126,8 @@ pub enum AgentCommand {
     Run {
         anchor: ProcessId,
         command: String,
+        /// Whether the MCP caller explicitly supplied `mode`, `direction`, or `beside`.
+        placement_override: bool,
         direction: AgentPaneDirection,
         focus: bool,
         /// Anchor a newly opened terminal next to this page (a terminal's

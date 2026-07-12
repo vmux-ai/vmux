@@ -119,6 +119,7 @@ async fn tool_call_result(
         crate::tools::DispatchTarget::Command(AgentCommand::Run {
             anchor,
             command,
+            placement_override,
             direction,
             focus,
             beside,
@@ -129,6 +130,7 @@ async fn tool_call_result(
             let run = AgentCommand::Run {
                 anchor,
                 command,
+                placement_override,
                 direction,
                 focus,
                 beside,
@@ -848,6 +850,7 @@ mod tests {
         let run = AgentCommand::Run {
             anchor,
             command: "git status".into(),
+            placement_override: false,
             direction: vmux_service::protocol::AgentPaneDirection::Right,
             focus: false,
             beside: None,

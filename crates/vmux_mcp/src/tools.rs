@@ -703,6 +703,9 @@ pub fn dispatch_with_anchor(
         if command.trim().is_empty() {
             return Err("run.command is empty".to_string());
         }
+        let placement_override = ["mode", "direction", "beside"]
+            .iter()
+            .any(|key| arguments.get(*key).is_some());
         let direction = parse_direction(&arguments)?.unwrap_or(AgentPaneDirection::Right);
         let focus = arguments
             .get("focus")
@@ -735,6 +738,7 @@ pub fn dispatch_with_anchor(
         return Ok(DispatchTarget::Command(AgentCommand::Run {
             anchor,
             command,
+            placement_override,
             direction,
             focus,
             beside,
@@ -1605,6 +1609,39 @@ mod tests {
             dispatch_with_anchor("run", serde_json::json!({"command": " "}), Some(anchor)).is_err()
         );
         assert!(dispatch_with_anchor("run", serde_json::json!({"command": "x"}), None).is_err());
+    }
+
+    #[test]
+    fn run_dispatch_tracks_explicit_placement_override() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let bare = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "echo hi"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match bare {
+            DispatchTarget::Command(AgentCommand::Run {
+                placement_override,
+                ..
+            }) => assert!(!placement_override),
+            other => panic!("expected Run, got {other:?}"),
+        }
+
+        for arguments in [
+            serde_json::json!({"command": "echo hi", "direction": "bottom"}),
+            serde_json::json!({"command": "echo hi", "mode": "auto"}),
+            serde_json::json!({"command": "echo hi", "beside": "self"}),
+        ] {
+            let explicit = dispatch_with_anchor("run", arguments, Some(anchor)).unwrap();
+            match explicit {
+                DispatchTarget::Command(AgentCommand::Run {
+                    placement_override,
+                    ..
+                }) => assert!(placement_override),
+                other => panic!("expected Run, got {other:?}"),
+            }
+        }
     }
 
     #[test]
