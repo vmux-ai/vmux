@@ -5,7 +5,11 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    time::SystemTime,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 
 use bevy::prelude::*;
 
@@ -126,6 +130,49 @@ fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut com
 struct CachedCheckoutInfo {
     startup_dir: String,
     info: CheckoutInfo,
+    fingerprint: CheckoutFingerprint,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckoutFingerprint {
+    len: u64,
+    modified: Option<SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+fn checkout_fingerprint(info: &CheckoutInfo) -> Option<CheckoutFingerprint> {
+    let metadata = std::fs::symlink_metadata(info.root.join(".git")).ok()?;
+    Some(CheckoutFingerprint {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+    })
+}
+
+fn store_cached_checkout_info(
+    cache: &mut HashMap<Entity, CachedCheckoutInfo>,
+    tab: Entity,
+    startup_dir: String,
+    info: &CheckoutInfo,
+) {
+    let Some(fingerprint) = checkout_fingerprint(info) else {
+        cache.remove(&tab);
+        return;
+    };
+    cache.insert(
+        tab,
+        CachedCheckoutInfo {
+            startup_dir,
+            info: info.clone(),
+            fingerprint,
+        },
+    );
 }
 
 fn cached_checkout_info(
@@ -136,18 +183,13 @@ fn cached_checkout_info(
 ) -> Option<CheckoutInfo> {
     if let Some(cached) = cache.get(&tab)
         && cached.startup_dir == startup_dir
+        && checkout_fingerprint(&cached.info).as_ref() == Some(&cached.fingerprint)
     {
         return Some(cached.info.clone());
     }
     cache.remove(&tab);
     let info = resolve(Path::new(startup_dir))?;
-    cache.insert(
-        tab,
-        CachedCheckoutInfo {
-            startup_dir: startup_dir.to_string(),
-            info: info.clone(),
-        },
-    );
+    store_cached_checkout_info(cache, tab, startup_dir.to_string(), &info);
     Some(info)
 }
 
@@ -213,12 +255,11 @@ fn rebind_tab_directories(
         }
         let startup_dir = observed_info.root.to_string_lossy().into_owned();
         tab.startup_dir = Some(startup_dir.clone());
-        checkout_cache.insert(
+        store_cached_checkout_info(
+            &mut checkout_cache,
             observed.tab,
-            CachedCheckoutInfo {
-                startup_dir,
-                info: observed_info,
-            },
+            startup_dir,
+            &observed_info,
         );
         if managed.contains(observed.tab) {
             commands.entity(observed.tab).remove::<TabWorktree>();
@@ -572,39 +613,53 @@ mod tests {
     }
 
     #[test]
-    fn cached_checkout_info_resolves_again_only_after_startup_dir_changes() {
+    fn cached_checkout_info_resolves_again_after_startup_or_git_identity_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir(repo.path().join(".git")).unwrap();
+        let next_root = repo.path().join(".worktrees/next");
+        std::fs::create_dir_all(next_root.join(".git")).unwrap();
+        let startup_dir = repo.path().to_string_lossy().into_owned();
+        let next_startup_dir = next_root.to_string_lossy().into_owned();
         let tab = Entity::from_bits(1);
         let calls = Cell::new(0);
         let first = vmux_git::worktree::CheckoutInfo {
-            root: PathBuf::from("/repo"),
-            common_dir: PathBuf::from("/repo/.git"),
+            root: repo.path().to_path_buf(),
+            common_dir: repo.path().join(".git"),
         };
         let second = vmux_git::worktree::CheckoutInfo {
-            root: PathBuf::from("/repo/.worktrees/next"),
-            common_dir: PathBuf::from("/repo/.git"),
+            root: next_root,
+            common_dir: repo.path().join(".git"),
         };
         let mut cache = HashMap::new();
 
-        let resolved = cached_checkout_info(&mut cache, tab, "/repo", |_| {
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
             calls.set(calls.get() + 1);
             Some(first.clone())
         })
         .unwrap();
         assert_eq!(resolved, first);
-        let resolved = cached_checkout_info(&mut cache, tab, "/repo", |_| {
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
             calls.set(calls.get() + 1);
             Some(second.clone())
         })
         .unwrap();
         assert_eq!(resolved, first);
-        let resolved = cached_checkout_info(&mut cache, tab, "/repo/.worktrees/next", |_| {
+        std::fs::rename(repo.path().join(".git"), repo.path().join(".git-old")).unwrap();
+        std::fs::create_dir(repo.path().join(".git")).unwrap();
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
+            calls.set(calls.get() + 1);
+            Some(first.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved, first);
+        let resolved = cached_checkout_info(&mut cache, tab, &next_startup_dir, |_| {
             calls.set(calls.get() + 1);
             Some(second.clone())
         })
         .unwrap();
 
         assert_eq!(resolved, second);
-        assert_eq!(calls.get(), 2);
+        assert_eq!(calls.get(), 3);
     }
 
     #[test]

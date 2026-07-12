@@ -5539,6 +5539,7 @@ mod tests {
             .add_message::<vmux_layout::CloseStackRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(settings)
             .add_systems(Update, tidy_page_on_idle);
 
