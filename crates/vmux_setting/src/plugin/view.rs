@@ -506,10 +506,7 @@ mod agent_schema_tests {
         let field = schema
             .field("agent.allow_run_placement_override")
             .expect("run placement override field");
-        assert_eq!(
-            field.label.as_deref(),
-            Some("Allow run placement override")
-        );
+        assert_eq!(field.label.as_deref(), Some("Allow run placement override"));
     }
 }
 

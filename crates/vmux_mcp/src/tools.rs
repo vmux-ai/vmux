@@ -1622,8 +1622,7 @@ mod tests {
         .unwrap();
         match bare {
             DispatchTarget::Command(AgentCommand::Run {
-                placement_override,
-                ..
+                placement_override, ..
             }) => assert!(!placement_override),
             other => panic!("expected Run, got {other:?}"),
         }
@@ -1636,8 +1635,7 @@ mod tests {
             let explicit = dispatch_with_anchor("run", arguments, Some(anchor)).unwrap();
             match explicit {
                 DispatchTarget::Command(AgentCommand::Run {
-                    placement_override,
-                    ..
+                    placement_override, ..
                 }) => assert!(placement_override),
                 other => panic!("expected Run, got {other:?}"),
             }

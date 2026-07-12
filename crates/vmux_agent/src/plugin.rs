@@ -4706,9 +4706,7 @@ mod tests {
         let settings = test_settings();
         assert_eq!(
             validate_run_placement_policy(&settings, true),
-            Err(
-                "run placement overrides are disabled; omit mode, direction, and beside and retry"
-            )
+            Err("run placement overrides are disabled; omit mode, direction, and beside and retry")
         );
     }
 
