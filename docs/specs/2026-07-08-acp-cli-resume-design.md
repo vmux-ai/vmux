@@ -1,7 +1,7 @@
 # ACP ↔ CLI Session Resume (`/resume`) — Design
 
 Date: 2026-07-08
-Status: Approved (brainstorm), pending implementation plan
+Status: Core implementation complete; selector-input refinement approved in chat, pending plan
 
 ## Summary
 
@@ -10,8 +10,9 @@ user reopen any of them, and enable **cross-runtime handoff** of a single conver
 between the ACP runtime (`vmux://agent/<id>`) and the CLI PTY runtime
 (`vmux://agent/<kind>/cli/<sid>`).
 
-Trigger: a `/` slash-command menu recognized **in the ACP agent page prompt textarea**
-(Claude Code / Zed style).
+Trigger: a `/` slash-command menu recognized by the ACP agent page composer (Claude Code /
+Zed style). Keyboard input from anywhere on the page is routed into the composer when it does
+not conflict with a selector action or a modified shortcut.
 
 Core user story: start a session as `agent/claude` (ACP); hit a feature only the CLI has;
 run `/cli` to **fall back to the CLI, resuming the same session, in the same page**.
@@ -121,24 +122,55 @@ In `crates/vmux_agent/src/chat_page/page.rs` (Dioxus, WASM). Keep the frontend d
 render + emit intents; command/session data comes from the backend.
 
 - Input beginning with `/` enters slash mode. A drop-up menu renders above the textarea,
-  filtered by the text after `/`. Arrow keys navigate, Enter selects, Esc closes.
+  filtered by the command token after `/`.
+- The first visible row is selected immediately. Arrow Up/Down and Ctrl+P/N navigate with
+  wraparound. Enter executes the selected row; users never need to move away from the default
+  selection before invoking it. Esc closes the selector.
+- Every selected row has a stable DOM id. Selection changes call
+  `scrollIntoView({ block: "nearest" })`, including after filtering, so keyboard navigation
+  never leaves the selected row outside the selector viewport.
 - Command entries are pushed from the backend as a snapshot (`[{name, description}]`).
   v1 commands: `resume`, `cli` (`cli` shown only when the pane's kind has `cross_runtime`).
 - Selecting a command emits a typed intent; it does **not** send text to the agent.
 - A `/foo` that matches no vmux command and is submitted normally is sent to the agent as a
   plain prompt (agent decides what to do with it). vmux only intercepts its own commands.
 
+The prompt parser has two explicit states:
+
+- `/token` — command selector, filtered by `token`.
+- `/resume <query>` — session selector. Entering the whitespace after the exact `resume`
+  command opens the picker and requests the session snapshot once. Selecting `/resume` from
+  the command selector changes the prompt to `/resume ` and enters the same state.
+
+The page owns a global `keydown` listener for prompt capture:
+
+- Selector handling has priority over prompt editing.
+- When a selector is open, Arrow Up/Down and Ctrl+P/N navigate; Enter invokes; Esc closes.
+- Otherwise, unmodified printable input, Backspace, and Delete focus and edit the textarea at
+  its current selection/caret, even when focus was elsewhere on the page.
+- Shift remains available for uppercase/symbol input. Cmd, Ctrl, and Alt modified keys are
+  untouched, except Ctrl+P/N while a selector is open.
+- Events already targeting the textarea are left to its normal Dioxus handler so each key is
+  applied exactly once.
+
 Interactive overlay z-index caveat: the menu must sit above chat rows (see terminal overlay
 z-index memory) and capture pointer/keyboard while open.
 
 ### 3. `/resume` flow + in-place swap
 
-1. `/resume` selected → frontend emits `ResumeListRequest`.
-2. Backend runs the lister → pushes `ResumableSessionsSnapshot` to the page.
-3. Menu becomes session rows: `title · relative-time · cwd`, filterable.
-4. Enter on a row → emits `ResumeSession { kind, sid, cwd }`; the backend resumes it in the
-   current pane's runtime.
-5. Backend **swaps the current page in place**:
+1. `/resume` selected, or `/resume ` typed directly → prompt becomes/remains `/resume ` and the
+   frontend emits `ResumeListRequest` once for that picker entry.
+2. Backend resolves the requesting page's current agent kind, runs the lister, retains only
+   that kind's sessions, then pushes `ResumableSessionsSnapshot` to the page.
+3. The session selector filters incrementally as `<query>` changes. Matching is
+   case-insensitive across sid, title, and cwd; an exact or partial sid therefore narrows the
+   list naturally while the literal `/resume <query>` stays visible in the prompt.
+4. The first matching row is selected whenever the filtered result set changes. Enter emits
+   `ResumeSession { kind, sid, cwd }`; the backend resumes it in the current pane's runtime.
+5. No matches renders `No matching sessions`. An empty unfiltered history renders
+   `No resumable sessions found`. Enter does nothing in either empty state and never submits
+   the `/resume` text to the agent.
+6. Backend **swaps the current page in place**:
    - Tear down the old session pane on the stack. ACP: removing `AcpSession` already fires
      `close_acp_session_on_remove` → `ClosePageAgent`. CLI: kill `ProcessId`, drop
      `AgentSession`/`SessionId`.
@@ -187,7 +219,14 @@ per-test. `vmux_core::event` compiles for wasm — cfg-gate any Bevy `Message`/`
   "session not found," keep the pane rather than silently starting fresh.
 - **cwd mismatch**: prevented — cwd is carried in `ResumableSession`/`SwapStackSession`.
 - **Missing binary**: existing setup-page path (`attach_cli_setup_to_stack`).
-- **Empty history / huge lists**: lister caps + relative-time formatting; filter box.
+- **Empty history / huge lists**: lister caps + relative-time formatting; prompt-driven filter.
+- **Filtered empty state**: keep the session selector open and render `No matching sessions`;
+  Backspace/global typing can recover without reopening it.
+- **Direct argument**: pasting or typing `/resume <sid>` enters the session selector without a
+  separate command-selection step. Enter resumes the highlighted match; it does not submit the
+  raw command to the agent.
+- **Global prompt input**: selector keys win; all unrelated Cmd/Ctrl/Alt shortcuts retain their
+  browser/app behavior. Global edits preserve the textarea caret and selection.
 - **Persistence**: the swapped session's URL is rewritten (ACP already does this on
   `AcpSessionCreated`; CLI via `format_agent_url`), so a restart resumes the post-swap state.
 
@@ -199,8 +238,13 @@ per-test. `vmux_core::event` compiles for wasm — cfg-gate any Bevy `Message`/`
 - In-place swap: message-driven ECS test — send `SwapStackSession`, assert the stack's child
   session pane is replaced and the new session carries the correct cwd + resume sid.
 - `cross_runtime` gating hides `/cli` (and "Continue in CLI") for codex/vibe.
-- Composer slash menu: `page.rs` source-scrape tests (see page.rs source-scrape memory);
-  native `cargo test -p vmux_layout`/`vmux_agent`.
+- Composer slash parser/filter/navigation helpers: native unit tests for `/token` vs
+  `/resume <query>`, current-kind session filtering, case-insensitive sid/title/cwd matching,
+  first-row selection, wraparound, and empty results.
+- `page.rs` integration/source-scrape assertions for Arrow Up/Down + Ctrl+P/N handling,
+  `scrollIntoView` with `Nearest`, selected-row ids, global prompt capture, modifier exclusions,
+  and `No matching sessions`.
+- Native `cargo test -p vmux_agent`; WASM compile check for the Dioxus page.
 - Observable-behavior check: assert the snapshot/broadcast the frontend receives, not just
   internal state (verify-observable-behavior memory). Runtime test is user-driven at the end.
 
@@ -209,6 +253,8 @@ per-test. `vmux_core::event` compiles for wasm — cfg-gate any Bevy `Message`/`
 **v1 (this PR):**
 - Backend `list_sessions` for all 3 kinds + collector.
 - Composer slash menu (`/resume`, `/cli`) in the ACP agent page.
+- Prompt-driven `/resume <sid/query>` filtering, default selection, Ctrl+P/N navigation,
+  selected-row scrolling, and global prompt keyboard capture.
 - `/resume` list → in-place swap; cwd carry.
 - `/cli` cross-runtime handoff (Claude), gated by `cross_runtime`.
 - `SwapStackSession` message + tests.
