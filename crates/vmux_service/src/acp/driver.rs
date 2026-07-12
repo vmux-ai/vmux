@@ -2,6 +2,7 @@
 //! and pumps prompts/approvals through it while projecting `session/update` to the UI.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -350,6 +351,36 @@ pub async fn run(
     let _ = child.kill().await;
 }
 
+async fn load_requested_session<F, Fut, E>(
+    resume: Option<String>,
+    load_supported: bool,
+    load: F,
+) -> Option<SessionId>
+where
+    F: FnOnce(SessionId) -> Fut,
+    Fut: Future<Output = Result<(), E>>,
+{
+    let sid = resume.filter(|_| load_supported).map(SessionId::new)?;
+    load(sid.clone()).await.ok()?;
+    Some(sid)
+}
+
+async fn ensure_session<F, Fut, E>(
+    session_id: &mut Option<SessionId>,
+    create: F,
+) -> Result<(SessionId, bool), E>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<SessionId, E>>,
+{
+    if let Some(sid) = session_id.clone() {
+        return Ok((sid, false));
+    }
+    let sid = create().await?;
+    *session_id = Some(sid.clone());
+    Ok((sid, true))
+}
+
 async fn drain_stderr(stderr: tokio::process::ChildStderr) {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(stderr).lines();
@@ -452,6 +483,73 @@ mod tests {
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[tokio::test]
+    async fn requested_resume_loads_only_when_supported() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let loaded = load_requested_session(Some("resume-1".into()), true, |sid| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                assert_eq!(sid.to_string(), "resume-1");
+                Ok::<(), ()>(())
+            }
+        })
+        .await;
+        assert_eq!(loaded.unwrap().to_string(), "resume-1");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let skipped = load_requested_session(Some("resume-2".into()), false, |_| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<(), ()>(()) }
+        })
+        .await;
+        assert!(skipped.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_requested_resume_stays_unassigned() {
+        let loaded = load_requested_session(Some("stale".into()), true, |_| async {
+            Err::<(), &'static str>("missing")
+        })
+        .await;
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn ensure_session_creates_once_then_reuses_id() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut session_id = None;
+        let (created_id, created) = ensure_session(&mut session_id, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<SessionId, ()>(SessionId::new("created")) }
+        })
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(created_id.to_string(), "created");
+
+        let (reused_id, created) = ensure_session(&mut session_id, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<SessionId, ()>(SessionId::new("unexpected")) }
+        })
+        .await
+        .unwrap();
+        assert!(!created);
+        assert_eq!(reused_id.to_string(), "created");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_session_creation_remains_retryable() {
+        let mut session_id = None;
+        let result = ensure_session(&mut session_id, || async {
+            Err::<SessionId, &'static str>("create failed")
+        })
+        .await;
+        assert_eq!(result.unwrap_err(), "create failed");
+        assert!(session_id.is_none());
     }
 
     #[test]
