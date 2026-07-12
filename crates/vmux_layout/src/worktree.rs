@@ -11,9 +11,18 @@ use vmux_git::worktree::{self, WorktreeInfo};
 
 pub struct WorktreePlugin;
 
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct TabDirectoryObserved {
+    pub tab: Entity,
+    pub path: PathBuf,
+}
+
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, reconcile_tab_worktrees);
+        app.add_message::<TabDirectoryObserved>().add_systems(
+            Update,
+            (reconcile_tab_worktrees, rebind_tab_directories),
+        );
     }
 }
 
@@ -108,6 +117,46 @@ fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut com
     }
 }
 
+fn observed_checkout_root(path: &Path) -> Option<PathBuf> {
+    if !path.exists() {
+        return None;
+    }
+    let start = if path.is_dir() { path } else { path.parent()? };
+    worktree::repo_root_of(start).ok()
+}
+
+fn rebind_tab_directories(
+    mut reader: MessageReader<TabDirectoryObserved>,
+    mut tabs: Query<&mut Tab>,
+    managed: Query<(), With<TabWorktree>>,
+    mut commands: Commands,
+) {
+    for observed in reader.read() {
+        let Some(observed_root) = observed_checkout_root(&observed.path) else {
+            continue;
+        };
+        let Ok(mut tab) = tabs.get_mut(observed.tab) else {
+            continue;
+        };
+        let Some(current) = tab.startup_dir.as_deref() else {
+            continue;
+        };
+        let Ok(current_common) = worktree::common_dir_of(Path::new(current)) else {
+            continue;
+        };
+        let Ok(observed_common) = worktree::common_dir_of(&observed_root) else {
+            continue;
+        };
+        if current_common != observed_common || Path::new(current) == observed_root.as_path() {
+            continue;
+        }
+        tab.startup_dir = Some(observed_root.to_string_lossy().into_owned());
+        if managed.contains(observed.tab) {
+            commands.entity(observed.tab).remove::<TabWorktree>();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +186,16 @@ mod tests {
         git(p, &["add", "seed.txt"]);
         git(p, &["commit", "-qm", "init"]);
         dir
+    }
+
+    fn observe(app: &mut App, tab: Entity, path: &Path) {
+        app.world_mut()
+            .resource_mut::<Messages<TabDirectoryObserved>>()
+            .write(TabDirectoryObserved {
+                tab,
+                path: path.to_path_buf(),
+            });
+        app.update();
     }
 
     #[test]
@@ -211,5 +270,114 @@ mod tests {
 
         assert!(app.world().get::<TabWorktree>(kept).is_some());
         assert!(app.world().get::<TabWorktree>(dropped).is_none());
+    }
+
+    #[test]
+    fn observation_rebinds_managed_tab_to_same_repo_checkout() {
+        let repo = init_repo();
+        let managed = create_worktree_blocking(repo.path(), "managed").unwrap();
+        let touched = repo.path().join("seed.txt");
+        let expected = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "tab".into(),
+                    startup_dir: Some(managed.path.to_string_lossy().into_owned()),
+                },
+                TabWorktree {
+                    repo_root: managed.repo_root.to_string_lossy().into_owned(),
+                    branch: managed.branch.clone(),
+                    base_ref: managed.base_ref.clone(),
+                },
+            ))
+            .id();
+
+        observe(&mut app, tab, &touched);
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(expected.as_str())
+        );
+        assert!(app.world().get::<TabWorktree>(tab).is_none());
+        assert!(managed.path.is_dir(), "old checkout is preserved");
+    }
+
+    #[test]
+    fn observation_rebinds_repeatedly_within_same_repo() {
+        let repo = init_repo();
+        let first = create_worktree_blocking(repo.path(), "first").unwrap();
+        let second_path = repo.path().join(".worktrees/second");
+        worktree::worktree_add(repo.path(), &second_path, "vmux/second", "main").unwrap();
+        let second_file = second_path.join("seed.txt");
+        let main_file = repo.path().join("seed.txt");
+        let second_expected = second_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let main_expected = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(first.path.to_string_lossy().into_owned()),
+            })
+            .id();
+
+        observe(&mut app, tab, &second_file);
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(second_expected.as_str())
+        );
+
+        observe(&mut app, tab, &main_file);
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(main_expected.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_ignores_unrelated_and_invalid_paths() {
+        let repo = init_repo();
+        let other = init_repo();
+        let non_git = tempfile::tempdir().unwrap();
+        let non_git_file = non_git.path().join("file.txt");
+        std::fs::write(&non_git_file, "x").unwrap();
+        let missing = repo.path().join("missing.txt");
+        let original = repo.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe(&mut app, tab, &other.path().join("seed.txt"));
+        observe(&mut app, tab, &non_git_file);
+        observe(&mut app, tab, &missing);
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
     }
 }
