@@ -610,11 +610,7 @@ mod tests {
             false,
             true
         ));
-        assert!(player_frame_should_wake(
-            InteractionMode::User,
-            true,
-            true
-        ));
+        assert!(player_frame_should_wake(InteractionMode::User, true, true));
         assert!(player_frame_should_wake(
             InteractionMode::Player,
             true,
@@ -644,9 +640,7 @@ mod tests {
             .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
             .unwrap_or_default();
 
-        assert!(
-            plugin_build.contains(".add_systems(Last, keep_awake_while_player_active)")
-        );
+        assert!(plugin_build.contains(".add_systems(Last, keep_awake_while_player_active)"));
     }
 
     #[test]

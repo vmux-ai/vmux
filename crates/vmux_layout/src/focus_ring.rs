@@ -194,10 +194,7 @@ fn primary_window_focused(windows: Query<&Window, With<PrimaryWindow>>) -> bool 
 fn tick_focus_ring_gradient_time(
     time: Res<Time>,
     mut materials: ResMut<Assets<FocusRingMaterial>>,
-    rings: Query<
-        (&MeshMaterial3d<FocusRingMaterial>, &Visibility),
-        With<FocusRing>,
-    >,
+    rings: Query<(&MeshMaterial3d<FocusRingMaterial>, &Visibility), With<FocusRing>>,
 ) {
     let t = time.elapsed_secs();
     for (mesh_mat, visibility) in &rings {

@@ -36,6 +36,11 @@ pub enum InteractionMode {
     Player,
 }
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub enum SceneSystems {
+    CompleteModeTransition,
+}
+
 #[derive(Resource)]
 pub struct CameraHome(pub Transform);
 
@@ -94,7 +99,7 @@ impl Plugin for ScenePlugin {
                     fade_bloom_and_light,
                     setup_exit_camera_animation,
                     start_pending_animation,
-                    complete_mode_transition,
+                    complete_mode_transition.in_set(SceneSystems::CompleteModeTransition),
                 )
                     .chain(),
             )
