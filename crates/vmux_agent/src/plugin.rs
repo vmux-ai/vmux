@@ -1484,12 +1484,23 @@ fn handle_agent_commands(
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
                     Ok(value) => {
-                        match vmux_setting::apply_settings_update(sp.settings.as_mut(), path, value)
-                        {
+                        let mut updated = (*sp.settings).clone();
+                        match vmux_setting::apply_settings_update(&mut updated, path, value) {
                             Ok(ron_bytes) => {
-                                sp.writes
-                                    .write(vmux_setting::SettingsWriteRequest { ron_bytes });
-                                AgentCommandResult::Ok
+                                if origin_is_agent(&request.origin)
+                                    && updated.agent.allow_run_placement_override
+                                        != sp.settings.agent.allow_run_placement_override
+                                {
+                                    AgentCommandResult::Error(
+                                        "update_settings: agent.allow_run_placement_override can only be changed in Settings"
+                                            .to_string(),
+                                    )
+                                } else {
+                                    *sp.settings = updated;
+                                    sp.writes
+                                        .write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                                    AgentCommandResult::Ok
+                                }
                             }
                             Err(message) => AgentCommandResult::Error(message),
                         }
@@ -1548,6 +1559,7 @@ fn handle_agent_commands(
             }
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
+            | ServiceAgentCommand::RunWithPlacementOverride { .. }
             | ServiceAgentCommand::CreateWorktree { .. } => {
                 continue;
             }
@@ -1859,6 +1871,20 @@ fn run_command_line(command: &str, token: Option<&str>, settings: &AppSettings) 
     }
 }
 
+const RUN_PLACEMENT_OVERRIDE_DISABLED: &str =
+    "run placement overrides are disabled; omit mode, direction, and beside and retry";
+
+fn validate_run_placement_policy(
+    settings: &AppSettings,
+    placement_override: bool,
+) -> Result<(), &'static str> {
+    if placement_override && !settings.agent.allow_run_placement_override {
+        Err(RUN_PLACEMENT_OVERRIDE_DISABLED)
+    } else {
+        Ok(())
+    }
+}
+
 fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return path;
@@ -1938,7 +1964,26 @@ fn handle_agent_self_commands(
                 mode,
                 terminal,
                 done_marker,
-            } => {
+            }
+            | ServiceAgentCommand::RunWithPlacementOverride {
+                anchor,
+                command,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker,
+            } => 'run: {
+                let placement_override = matches!(
+                    &request.command,
+                    ServiceAgentCommand::RunWithPlacementOverride { .. }
+                ) || beside.is_some()
+                    || *mode != vmux_service::protocol::PlacementMode::Auto
+                    || *direction != vmux_service::protocol::AgentPaneDirection::Right;
+                if let Err(error) = validate_run_placement_policy(&settings, placement_override) {
+                    break 'run AgentCommandResult::Error(error.to_string());
+                }
                 let focus = requested_focus_for_origin(&request.origin, *focus);
                 let mut data =
                     run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
@@ -3694,6 +3739,81 @@ mod tests {
     }
 
     #[test]
+    fn run_placement_override_settings_update_rejects_agents_and_allows_users() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
+            .add_message::<vmux_layout::BrowserNavigateRequest>()
+            .add_message::<vmux_layout::BrowserGoBackRequest>()
+            .add_message::<vmux_layout::BrowserGoForwardRequest>()
+            .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::ExtensionInstallRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+            .add_message::<vmux_terminal::TerminalSendRequest>()
+            .add_message::<vmux_terminal::RunShellRequest>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<vmux_space::SpaceCommandRequest>()
+            .add_message::<vmux_history::query::HistoryOpenIntent>()
+            .insert_resource(FocusedStack::default())
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
+        agent_value["allow_run_placement_override"] = serde_json::json!(true);
+        for (path, value_json) in [
+            (
+                "agent.allow_run_placement_override",
+                serde_json::json!(true).to_string(),
+            ),
+            ("agent", agent_value.to_string()),
+        ] {
+            app.world_mut()
+                .resource_mut::<Messages<AgentCommandRequest>>()
+                .write(AgentCommandRequest {
+                    request_id: AgentRequestId::new(),
+                    origin: CommandOrigin::Agent {
+                        sid: Some("test-agent".to_string()),
+                        anchor: None,
+                    },
+                    command: ServiceAgentCommand::UpdateSettings {
+                        path: path.to_string(),
+                        value_json,
+                    },
+                });
+            app.update();
+            assert!(
+                !app.world()
+                    .resource::<AppSettings>()
+                    .agent
+                    .allow_run_placement_override,
+                "agent update unexpectedly enabled override through {path}"
+            );
+        }
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::User,
+                command: ServiceAgentCommand::UpdateSettings {
+                    path: "agent.allow_run_placement_override".to_string(),
+                    value_json: serde_json::json!(true).to_string(),
+                },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<AppSettings>()
+                .agent
+                .allow_run_placement_override
+        );
+    }
+
+    #[test]
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
@@ -4681,6 +4801,28 @@ mod tests {
 
         assert_eq!(picked.pid, terminal);
         assert_eq!(picked.pane, terminal_pane);
+    }
+
+    #[test]
+    fn run_placement_policy_rejects_override_by_default() {
+        let settings = test_settings();
+        assert_eq!(
+            validate_run_placement_policy(&settings, true),
+            Err("run placement overrides are disabled; omit mode, direction, and beside and retry")
+        );
+    }
+
+    #[test]
+    fn run_placement_policy_allows_bare_run() {
+        let settings = test_settings();
+        assert_eq!(validate_run_placement_policy(&settings, false), Ok(()));
+    }
+
+    #[test]
+    fn run_placement_policy_honors_user_opt_out() {
+        let mut settings = test_settings();
+        settings.agent.allow_run_placement_override = true;
+        assert_eq!(validate_run_placement_policy(&settings, true), Ok(()));
     }
 
     #[test]

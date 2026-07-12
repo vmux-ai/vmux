@@ -116,28 +116,10 @@ async fn tool_call_result(
     }
 
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
-        crate::tools::DispatchTarget::Command(AgentCommand::Run {
-            anchor,
-            command,
-            direction,
-            focus,
-            beside,
-            mode,
-            terminal,
-            ..
-        }) => {
-            let run = AgentCommand::Run {
-                anchor,
-                command,
-                direction,
-                focus,
-                beside,
-                mode,
-                terminal,
-                done_marker: None,
-            };
-            run_blocking(run).await
-        }
+        crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
+        | crate::tools::DispatchTarget::Command(
+            command @ AgentCommand::RunWithPlacementOverride { .. },
+        ) => run_blocking(command).await,
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
@@ -399,8 +381,12 @@ fn run_done_token(request_id: AgentRequestId) -> String {
 }
 
 fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -> AgentCommand {
-    if let AgentCommand::Run { done_marker, .. } = &mut run {
-        *done_marker = Some(run_done_token(request_id));
+    match &mut run {
+        AgentCommand::Run { done_marker, .. }
+        | AgentCommand::RunWithPlacementOverride { done_marker, .. } => {
+            *done_marker = Some(run_done_token(request_id));
+        }
+        _ => {}
     }
     run
 }
@@ -863,6 +849,30 @@ mod tests {
                 assert_eq!(done_marker, Some(run_done_token(request_id)));
             }
             _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn blocking_placement_override_run_sets_done_marker_token() {
+        let request_id = AgentRequestId([9; 16]);
+        let run = AgentCommand::RunWithPlacementOverride {
+            anchor: vmux_service::protocol::ProcessId::new(),
+            command: "git status".into(),
+            direction: vmux_service::protocol::AgentPaneDirection::Bottom,
+            focus: false,
+            beside: None,
+            mode: vmux_service::protocol::PlacementMode::Split,
+            terminal: None,
+            done_marker: None,
+        };
+
+        let marked = blocking_run_with_marker(run, request_id);
+
+        match marked {
+            AgentCommand::RunWithPlacementOverride { done_marker, .. } => {
+                assert_eq!(done_marker, Some(run_done_token(request_id)));
+            }
+            _ => panic!("expected run placement override command"),
         }
     }
 }

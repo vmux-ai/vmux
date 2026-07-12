@@ -411,7 +411,9 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
 beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
 into your project on every run; the shell stays where it was. The first `run` opens it; later ones run \
 in that same shell. Rule of thumb: don't open a new pane unless you actually need one. \
-Override only when you mean to: \
+Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects \
+them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. \
+When enabled, override only when you mean to: \
 - `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` \
 (force a new stacked terminal in the anchor's pane). \
 - `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
@@ -703,6 +705,9 @@ pub fn dispatch_with_anchor(
         if command.trim().is_empty() {
             return Err("run.command is empty".to_string());
         }
+        let placement_override = ["mode", "direction", "beside"]
+            .iter()
+            .any(|key| arguments.get(*key).is_some_and(|value| !value.is_null()));
         let direction = parse_direction(&arguments)?.unwrap_or(AgentPaneDirection::Right);
         let focus = arguments
             .get("focus")
@@ -732,16 +737,30 @@ pub fn dispatch_with_anchor(
             "stack" => vmux_service::protocol::PlacementMode::Stack,
             other => return Err(format!("unknown mode: {other}")),
         };
-        return Ok(DispatchTarget::Command(AgentCommand::Run {
-            anchor,
-            command,
-            direction,
-            focus,
-            beside,
-            mode,
-            terminal,
-            done_marker: None,
-        }));
+        let command = if placement_override {
+            AgentCommand::RunWithPlacementOverride {
+                anchor,
+                command,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker: None,
+            }
+        } else {
+            AgentCommand::Run {
+                anchor,
+                command,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker: None,
+            }
+        };
+        return Ok(DispatchTarget::Command(command));
     }
     if name == "create_worktree" {
         let anchor = anchor
@@ -1608,6 +1627,65 @@ mod tests {
     }
 
     #[test]
+    fn run_dispatch_tracks_explicit_placement_override() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let bare = dispatch_with_anchor(
+            "run",
+            serde_json::json!({"command": "echo hi"}),
+            Some(anchor),
+        )
+        .unwrap();
+        match bare {
+            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
+            other => panic!("expected Run, got {other:?}"),
+        }
+
+        let nulls = dispatch_with_anchor(
+            "run",
+            serde_json::json!({
+                "command": "echo hi",
+                "mode": null,
+                "direction": null,
+                "beside": null
+            }),
+            Some(anchor),
+        )
+        .unwrap();
+        match nulls {
+            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
+            other => panic!("expected Run for null placement values, got {other:?}"),
+        }
+
+        for arguments in [
+            serde_json::json!({"command": "echo hi", "direction": "bottom"}),
+            serde_json::json!({"command": "echo hi", "mode": "auto"}),
+            serde_json::json!({"command": "echo hi", "beside": "self"}),
+        ] {
+            let explicit = dispatch_with_anchor("run", arguments, Some(anchor)).unwrap();
+            match explicit {
+                DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { .. }) => {}
+                other => panic!("expected RunWithPlacementOverride, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn run_tool_documents_default_placement_policy() {
+        let run = tool_definitions()
+            .into_iter()
+            .find(|definition| definition.name == "run")
+            .expect("run definition");
+        assert!(
+            run.description
+                .contains("agent.allow_run_placement_override")
+        );
+        assert!(
+            run.description
+                .contains("omit `mode`, `direction`, and `beside`")
+        );
+    }
+
+    #[test]
     fn run_with_terminal_targets_existing() {
         let anchor = vmux_service::protocol::ProcessId::new();
         let term = vmux_service::protocol::ProcessId::new();
@@ -1620,7 +1698,9 @@ mod tests {
         match target {
             DispatchTarget::Command(AgentCommand::Run {
                 terminal: Some(t), ..
-            }) => assert_eq!(t, term),
+            }) => {
+                assert_eq!(t, term);
+            }
             other => panic!("expected Run with terminal, got {other:?}"),
         }
         assert!(
@@ -1647,7 +1727,7 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run {
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
                 beside: Some(b),
                 mode,
                 ..
@@ -1655,7 +1735,7 @@ mod tests {
                 assert_eq!(b, beside);
                 assert_eq!(mode, PlacementMode::Stack);
             }
-            other => panic!("expected Run with beside+stack, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with beside+stack, got {other:?}"),
         }
 
         // beside="self" => None; mode defaults to Auto (reuse the region).
@@ -1666,10 +1746,12 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run {
-                beside: None, mode, ..
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
+                beside: None,
+                mode,
+                ..
             }) => assert_eq!(mode, PlacementMode::Auto),
-            other => panic!("expected Run with self+auto, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with self+auto, got {other:?}"),
         }
 
         // explicit mode=split is honored.
@@ -1680,10 +1762,10 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run { mode, .. }) => {
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { mode, .. }) => {
                 assert_eq!(mode, PlacementMode::Split)
             }
-            other => panic!("expected Run with split, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with split, got {other:?}"),
         }
 
         // unknown mode errors.

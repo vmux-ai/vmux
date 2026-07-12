@@ -172,6 +172,18 @@ pub enum AgentCommand {
     TurnEnded {
         anchor: ProcessId,
     },
+    /// Run with caller-requested pane placement. Appended to keep existing rkyv variant layouts
+    /// and positional discriminants stable across daemon upgrades.
+    RunWithPlacementOverride {
+        anchor: ProcessId,
+        command: String,
+        direction: AgentPaneDirection,
+        focus: bool,
+        beside: Option<ProcessId>,
+        mode: PlacementMode,
+        terminal: Option<ProcessId>,
+        done_marker: Option<String>,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -325,7 +337,10 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         AgentCommand::OpenBeside { url, .. } if url.trim().is_empty() => {
             Err("open_beside_me.url is empty")
         }
-        AgentCommand::Run { command, .. } if command.trim().is_empty() => {
+        AgentCommand::Run { command, .. }
+        | AgentCommand::RunWithPlacementOverride { command, .. }
+            if command.trim().is_empty() =>
+        {
             Err("run.command is empty")
         }
         AgentCommand::FileTouched { path, .. } if path.trim().is_empty() => {
@@ -1131,6 +1146,23 @@ mod tests {
         let cmd = AgentCommand::UpdateSettings {
             path: "layout.pane.gap".to_string(),
             value_json: "12.0".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, cmd);
+    }
+
+    #[test]
+    fn run_with_placement_override_rkyv_roundtrip() {
+        let cmd = AgentCommand::RunWithPlacementOverride {
+            anchor: ProcessId::new(),
+            command: "cargo test".into(),
+            direction: AgentPaneDirection::Bottom,
+            focus: false,
+            beside: None,
+            mode: PlacementMode::Split,
+            terminal: None,
+            done_marker: Some("token".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&cmd).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
