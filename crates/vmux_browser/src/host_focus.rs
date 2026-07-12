@@ -75,16 +75,16 @@ fn set_intent(intent: &mut ResMut<HostFocusIntent>, next: HostFocusIntent) {
 fn windowed_focus_action(
     intent: HostFocusIntent,
     has_browser: bool,
+    has_native_focus: Option<bool>,
     focused: &mut Option<Entity>,
 ) -> Option<Entity> {
     match intent {
         HostFocusIntent::Windowed(webview) if has_browser => {
-            if *focused != Some(webview) {
-                *focused = Some(webview);
-                Some(webview)
-            } else {
-                None
-            }
+            let should_focus = has_native_focus
+                .map(|has_focus| !has_focus)
+                .unwrap_or(*focused != Some(webview));
+            *focused = Some(webview);
+            should_focus.then_some(webview)
         }
         _ => {
             *focused = None;
@@ -98,11 +98,16 @@ pub(crate) fn apply_windowed_host_focus(
     browsers: NonSend<Browsers>,
     mut focused: Local<Option<Entity>>,
 ) {
-    let has_browser = match *intent {
-        HostFocusIntent::Windowed(webview) => browsers.has_browser(webview),
-        _ => false,
+    let (has_browser, has_native_focus) = match *intent {
+        HostFocusIntent::Windowed(webview) => (
+            browsers.has_browser(webview),
+            browsers.windowed_has_native_focus(&webview),
+        ),
+        _ => (false, None),
     };
-    if let Some(webview) = windowed_focus_action(*intent, has_browser, &mut focused) {
+    if let Some(webview) =
+        windowed_focus_action(*intent, has_browser, has_native_focus, &mut focused)
+    {
         browsers.set_windowed_focus(&webview, true);
     }
 }
@@ -164,12 +169,12 @@ mod tests {
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
             Some(webview)
         );
         assert_eq!(focused, Some(webview));
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
             None
         );
         assert_eq!(focused, Some(webview));
@@ -181,18 +186,73 @@ mod tests {
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
             Some(webview)
         );
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), false, &mut focused),
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                false,
+                None,
+                &mut focused,
+            ),
             None
         );
         assert_eq!(focused, None);
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, &mut focused),
+            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
             Some(webview)
         );
+    }
+
+    #[test]
+    fn windowed_focus_action_recovers_lost_native_focus() {
+        let webview = Entity::from_bits(1);
+        let mut focused = Some(webview);
+
+        assert_eq!(
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                Some(false),
+                &mut focused,
+            ),
+            Some(webview)
+        );
+    }
+
+    #[test]
+    fn windowed_focus_action_preserves_held_native_focus() {
+        let webview = Entity::from_bits(1);
+        let mut focused = Some(webview);
+
+        assert_eq!(
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                Some(true),
+                &mut focused,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn windowed_focus_action_focuses_changed_target() {
+        let previous = Entity::from_bits(1);
+        let next = Entity::from_bits(2);
+        let mut focused = Some(previous);
+
+        assert_eq!(
+            windowed_focus_action(
+                HostFocusIntent::Windowed(next),
+                true,
+                Some(false),
+                &mut focused,
+            ),
+            Some(next)
+        );
+        assert_eq!(focused, Some(next));
     }
 
     #[test]
