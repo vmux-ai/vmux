@@ -325,11 +325,11 @@ fn apply_agent_compatibility_env(
         .iter()
         .rev()
         .find(|(key, _)| key == "CODEX_CONFIG")
-        .and_then(|(_, value)| serde_json::from_str::<serde_json::Value>(value).ok());
-    let mut config = match existing {
-        Some(serde_json::Value::Object(config)) => config,
-        _ => serde_json::Map::new(),
-    };
+        .map(|(_, value)| value.as_str());
+    let (mut config, warning) = parse_codex_config(existing);
+    if let Some(warning) = warning {
+        bevy::log::warn!("{warning}");
+    }
 
     let features = config
         .entry("features")
@@ -348,7 +348,7 @@ fn apply_agent_compatibility_env(
     }
     code_mode.as_object_mut().unwrap().insert(
         "direct_only_tool_namespaces".to_string(),
-        serde_json::json!(["mcp__vmux"]),
+        serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE]),
     );
 
     let tools = config
@@ -387,6 +387,39 @@ fn apply_agent_compatibility_env(
         serde_json::Value::Object(config).to_string(),
     ));
     env
+}
+
+fn parse_codex_config(
+    value: Option<&str>,
+) -> (serde_json::Map<String, serde_json::Value>, Option<String>) {
+    let Some(value) = value else {
+        return (serde_json::Map::new(), None);
+    };
+    match serde_json::from_str::<serde_json::Value>(value) {
+        Ok(serde_json::Value::Object(config)) => (config, None),
+        Ok(value) => {
+            let kind = match value {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "boolean",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "string",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => unreachable!(),
+            };
+            (
+                serde_json::Map::new(),
+                Some(format!(
+                    "acp: existing CODEX_CONFIG is not a JSON object ({kind}); discarding it"
+                )),
+            )
+        }
+        Err(err) => (
+            serde_json::Map::new(),
+            Some(format!(
+                "acp: existing CODEX_CONFIG is invalid JSON ({err}); discarding it"
+            )),
+        ),
+    }
 }
 
 /// Drain background-install updates: reflect progress/failure onto the session run-state, and on
@@ -721,7 +754,7 @@ mod tests {
         assert_eq!(config["tools"]["web_search"], false);
         assert_eq!(
             config["features"]["code_mode"]["direct_only_tool_namespaces"],
-            serde_json::json!(["mcp__vmux"])
+            serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
         );
         assert!(
             config["developer_instructions"]
@@ -750,6 +783,15 @@ mod tests {
         assert_eq!(config["features"]["custom_feature"], true);
         assert_eq!(config["features"]["code_mode"]["custom_setting"], "keep");
         assert_eq!(config["features"]["shell_tool"], false);
+    }
+
+    #[test]
+    fn codex_acp_reports_discarded_invalid_config() {
+        let (_, invalid_json) = parse_codex_config(Some("{not-json"));
+        assert!(invalid_json.unwrap().contains("invalid JSON"));
+
+        let (_, non_object) = parse_codex_config(Some("[]"));
+        assert!(non_object.unwrap().contains("not a JSON object"));
     }
 
     #[test]
