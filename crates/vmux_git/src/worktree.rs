@@ -35,11 +35,7 @@ pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
 pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
     let (stdout, stderr, ok) = git(
         dir,
-        &[
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-common-dir",
-        ],
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )?;
     if !ok {
         return Err(git_err(&stdout, &stderr));

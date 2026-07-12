@@ -19,10 +19,8 @@ pub struct TabDirectoryObserved {
 
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<TabDirectoryObserved>().add_systems(
-            Update,
-            (reconcile_tab_worktrees, rebind_tab_directories),
-        );
+        app.add_message::<TabDirectoryObserved>()
+            .add_systems(Update, (reconcile_tab_worktrees, rebind_tab_directories));
     }
 }
 
