@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
@@ -1671,7 +1671,7 @@ fn tab_of_run_pane(
 fn run_terminal_candidates(
     agent_pane: Entity,
     terminals: &Query<
-        (Entity, &ProcessId, Has<AgentRunTerminal>),
+        (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
         (
             With<Terminal>,
             Without<AgentSession>,
@@ -1681,6 +1681,7 @@ fn run_terminal_candidates(
     child_of_q: &Query<&ChildOf>,
     tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
     seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+    desired_cwd: &Path,
 ) -> Vec<RunTerminalCandidate> {
     use bevy::ecs::relationship::Relationship;
     let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
@@ -1688,8 +1689,8 @@ fn run_terminal_candidates(
     };
     terminals
         .iter()
-        .filter_map(|(terminal, pid, agent_run)| {
-            if !agent_run {
+        .filter_map(|(terminal, pid, launch, agent_run)| {
+            if !agent_run || !run_terminal_launch_matches_cwd(&launch.cwd, desired_cwd) {
                 return None;
             }
             let stack = child_of_q.get(terminal).ok()?.get();
@@ -2009,13 +2010,31 @@ fn validate_agent_terminal_shell(shell: &str) -> Result<(), String> {
     }
 }
 
-fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
+fn run_terminal_cwd(
+    tab_cwd: Option<&str>,
+    agent_launch_cwd: Option<&str>,
+    active_space: Option<&ActiveSpace>,
+) -> PathBuf {
+    if let Some(Ok(Some(path))) = tab_cwd.map(valid_cwd) {
+        return path;
+    }
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return path;
     }
     active_space
         .map(|s| space_dir(&s.record.id))
         .unwrap_or_else(default_space_dir)
+}
+
+fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+    let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
+        return false;
+    };
+    let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
+    let desired_cwd = desired_cwd
+        .canonicalize()
+        .unwrap_or_else(|_| desired_cwd.to_path_buf());
+    launch_cwd == desired_cwd
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -2031,7 +2050,7 @@ fn handle_agent_self_commands(
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     run_terms: Query<
-        (Entity, &ProcessId, Has<AgentRunTerminal>),
+        (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
         (
             With<Terminal>,
             Without<AgentSession>,
@@ -2137,12 +2156,31 @@ fn handle_agent_self_commands(
                                 "self process not found".to_string(),
                             );
                         };
+                        let tab_cwd = {
+                            let mut current = self_pane;
+                            loop {
+                                if let Ok(tab) = tabs.get(current) {
+                                    break tab.startup_dir.clone();
+                                }
+                                match ctx.child_of_q.get(current) {
+                                    Ok(child_of) => current = child_of.parent(),
+                                    Err(_) => break None,
+                                }
+                            }
+                        };
+                        let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
+                        let cwd = run_terminal_cwd(
+                            tab_cwd.as_deref(),
+                            agent_cwd.as_deref(),
+                            active_space.as_deref(),
+                        );
                         let candidates = run_terminal_candidates(
                             self_pane,
                             &run_terms,
                             &ctx.child_of_q,
                             &ctx.tab_q,
                             &ctx.seq_q,
+                            &cwd,
                         );
                         let terminal_bucket_panes = run_terminal_bucket_panes(
                             self_pane,
@@ -2284,8 +2322,6 @@ fn handle_agent_self_commands(
                             &ctx.seq_q,
                         );
                         let new_pid = ProcessId::new();
-                        let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
-                        let cwd = run_terminal_cwd(agent_cwd.as_deref(), active_space.as_deref());
                         let request_index = terminal_spawns.len();
                         terminal_spawns.push(TerminalStackSpawnRequest {
                             pane: target_pane,
@@ -3781,10 +3817,7 @@ mod tests {
             .insert_resource(settings)
             .add_systems(Update, handle_agent_file_touch);
 
-        let tab = app
-            .world_mut()
-            .spawn(vmux_layout::tab::Tab::default())
-            .id();
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
@@ -4632,18 +4665,54 @@ mod tests {
     }
 
     #[test]
+    fn run_terminal_cwd_prefers_tab_dir() {
+        let tab_dir = std::env::temp_dir().join(format!("vmux-tab-cwd-{}", std::process::id()));
+        let agent_dir = std::env::temp_dir().join(format!("vmux-agent-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&tab_dir).unwrap();
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        assert_eq!(
+            run_terminal_cwd(
+                Some(tab_dir.to_string_lossy().as_ref()),
+                Some(agent_dir.to_string_lossy().as_ref()),
+                None,
+            ),
+            tab_dir.clone()
+        );
+        let _ = std::fs::remove_dir_all(&agent_dir);
+        let _ = std::fs::remove_dir_all(&tab_dir);
+    }
+
+    #[test]
+    fn run_terminal_launch_must_match_rebound_cwd_for_reuse() {
+        let current = std::env::temp_dir().join(format!("vmux-current-cwd-{}", std::process::id()));
+        let stale = std::env::temp_dir().join(format!("vmux-stale-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&stale).unwrap();
+        assert!(run_terminal_launch_matches_cwd(
+            current.to_string_lossy().as_ref(),
+            &current,
+        ));
+        assert!(!run_terminal_launch_matches_cwd(
+            stale.to_string_lossy().as_ref(),
+            &current,
+        ));
+        let _ = std::fs::remove_dir_all(&stale);
+        let _ = std::fs::remove_dir_all(&current);
+    }
+
+    #[test]
     fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = run_terminal_cwd(Some(&dir.to_string_lossy()), None);
+        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy()), None);
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
     fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
-        assert_eq!(run_terminal_cwd(Some(""), None), default_space_dir());
-        assert_eq!(run_terminal_cwd(None, None), default_space_dir());
+        assert_eq!(run_terminal_cwd(None, Some(""), None), default_space_dir());
+        assert_eq!(run_terminal_cwd(None, None, None), default_space_dir());
     }
 
     #[test]
@@ -4954,6 +5023,7 @@ mod tests {
     #[derive(Resource)]
     struct RunTerminalCandidateInput {
         agent_pane: Entity,
+        desired_cwd: PathBuf,
     }
 
     #[derive(Resource, Default)]
@@ -4962,7 +5032,7 @@ mod tests {
     fn collect_run_terminal_candidates(
         input: Res<RunTerminalCandidateInput>,
         terminals: Query<
-            (Entity, &ProcessId, Has<AgentRunTerminal>),
+            (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
             (
                 With<Terminal>,
                 Without<AgentSession>,
@@ -4974,7 +5044,14 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
         mut out: ResMut<RunTerminalCandidateOutput>,
     ) {
-        out.0 = run_terminal_candidates(input.agent_pane, &terminals, &child_of_q, &tab_q, &seq_q);
+        out.0 = run_terminal_candidates(
+            input.agent_pane,
+            &terminals,
+            &child_of_q,
+            &tab_q,
+            &seq_q,
+            &input.desired_cwd,
+        );
     }
 
     #[test]
@@ -4993,13 +5070,15 @@ mod tests {
             .world_mut()
             .spawn((vmux_layout::stack::stack_bundle(), ChildOf(terminal_pane)))
             .id();
+        let desired_cwd = std::env::temp_dir();
         app.world_mut().spawn((
             Terminal,
             ProcessId::new(),
+            AgentRunTerminal,
             TerminalLaunch {
                 command: "/bin/zsh".to_string(),
                 args: vec![],
-                cwd: String::new(),
+                cwd: desired_cwd.to_string_lossy().into_owned(),
                 env: vec![],
                 kind: vmux_terminal::launch::TerminalKind::Plain,
             },
@@ -5010,7 +5089,10 @@ mod tests {
             .spawn((Pane, vmux_layout::pane::SpawnSeq(9)))
             .id();
 
-        app.insert_resource(RunTerminalCandidateInput { agent_pane });
+        app.insert_resource(RunTerminalCandidateInput {
+            agent_pane,
+            desired_cwd,
+        });
         app.update();
 
         assert!(
@@ -5028,12 +5110,12 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<RunTerminalCandidateOutput>()
             .add_systems(Update, collect_run_terminal_candidates);
-
         let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let agent_pane = app
             .world_mut()
             .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
             .id();
+        let desired_cwd = std::env::temp_dir();
         let agent_pid = ProcessId::new();
         let user_pid = ProcessId::new();
         let mut agent_terminal = None;
@@ -5054,7 +5136,7 @@ mod tests {
                     TerminalLaunch {
                         command: "/bin/zsh".to_string(),
                         args: vec![],
-                        cwd: String::new(),
+                        cwd: desired_cwd.to_string_lossy().into_owned(),
                         env: vec![],
                         kind: vmux_terminal::launch::TerminalKind::Plain,
                     },
@@ -5069,13 +5151,89 @@ mod tests {
             }
         }
 
-        app.insert_resource(RunTerminalCandidateInput { agent_pane });
+        app.insert_resource(RunTerminalCandidateInput {
+            agent_pane,
+            desired_cwd,
+        });
         app.update();
 
         let candidates = &app.world().resource::<RunTerminalCandidateOutput>().0;
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].pid, agent_pid);
         assert_eq!(candidates[0].terminal, agent_terminal.unwrap());
+    }
+
+    #[test]
+    fn run_terminal_candidates_exclude_stale_launch_cwd() {
+        let current =
+            std::env::temp_dir().join(format!("vmux-current-candidate-{}", std::process::id()));
+        let stale =
+            std::env::temp_dir().join(format!("vmux-stale-candidate-{}", std::process::id()));
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&stale).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<RunTerminalCandidateOutput>()
+            .add_systems(Update, collect_run_terminal_candidates);
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let agent_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .id();
+        let current_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(2), ChildOf(tab)))
+            .id();
+        let current_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(current_pane)))
+            .id();
+        let current_pid = ProcessId::new();
+        app.world_mut().spawn((
+            Terminal,
+            current_pid,
+            AgentRunTerminal,
+            TerminalLaunch {
+                command: "/bin/zsh".into(),
+                args: vec![],
+                cwd: current.to_string_lossy().into_owned(),
+                env: vec![],
+                kind: vmux_core::terminal::TerminalKind::Plain,
+            },
+            ChildOf(current_stack),
+        ));
+        let stale_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(3), ChildOf(tab)))
+            .id();
+        let stale_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(stale_pane)))
+            .id();
+        app.world_mut().spawn((
+            Terminal,
+            ProcessId::new(),
+            AgentRunTerminal,
+            TerminalLaunch {
+                command: "/bin/zsh".into(),
+                args: vec![],
+                cwd: stale.to_string_lossy().into_owned(),
+                env: vec![],
+                kind: vmux_core::terminal::TerminalKind::Plain,
+            },
+            ChildOf(stale_stack),
+        ));
+        app.insert_resource(RunTerminalCandidateInput {
+            agent_pane,
+            desired_cwd: current.clone(),
+        });
+        app.update();
+
+        let candidates = &app.world().resource::<RunTerminalCandidateOutput>().0;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].pid, current_pid);
+        let _ = std::fs::remove_dir_all(&stale);
+        let _ = std::fs::remove_dir_all(&current);
     }
 
     #[derive(Resource)]
