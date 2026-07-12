@@ -1711,7 +1711,7 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run {
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
                 beside: Some(b),
                 mode,
                 ..
@@ -1719,7 +1719,7 @@ mod tests {
                 assert_eq!(b, beside);
                 assert_eq!(mode, PlacementMode::Stack);
             }
-            other => panic!("expected Run with beside+stack, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with beside+stack, got {other:?}"),
         }
 
         // beside="self" => None; mode defaults to Auto (reuse the region).
@@ -1730,10 +1730,12 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run {
-                beside: None, mode, ..
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride {
+                beside: None,
+                mode,
+                ..
             }) => assert_eq!(mode, PlacementMode::Auto),
-            other => panic!("expected Run with self+auto, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with self+auto, got {other:?}"),
         }
 
         // explicit mode=split is honored.
@@ -1744,10 +1746,10 @@ mod tests {
         )
         .unwrap();
         match target {
-            DispatchTarget::Command(AgentCommand::Run { mode, .. }) => {
+            DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { mode, .. }) => {
                 assert_eq!(mode, PlacementMode::Split)
             }
-            other => panic!("expected Run with split, got {other:?}"),
+            other => panic!("expected RunWithPlacementOverride with split, got {other:?}"),
         }
 
         // unknown mode errors.
