@@ -65,11 +65,7 @@ pub(crate) fn menu_direction(key: &str, ctrl: bool) -> Option<MenuDirection> {
     }
 }
 
-pub(crate) fn move_selection(
-    current: usize,
-    len: usize,
-    direction: MenuDirection,
-) -> usize {
+pub(crate) fn move_selection(current: usize, len: usize, direction: MenuDirection) -> usize {
     if len == 0 {
         return 0;
     }
@@ -113,9 +109,8 @@ pub(crate) fn edit_prompt(
             (end, next, "")
         }
     };
-    let mut updated = String::with_capacity(
-        value.len() - (replace_end - replace_start) + replacement.len(),
-    );
+    let mut updated =
+        String::with_capacity(value.len() - (replace_end - replace_start) + replacement.len());
     updated.push_str(&value[..replace_start]);
     updated.push_str(replacement);
     updated.push_str(&value[replace_end..]);
@@ -154,7 +149,10 @@ mod tests {
         assert_eq!(selector_mode("/res"), SelectorMode::Commands("res"));
         assert_eq!(selector_mode("/resume"), SelectorMode::Commands("resume"));
         assert_eq!(selector_mode("/resume "), SelectorMode::Resume(""));
-        assert_eq!(selector_mode("/resume  SID-9"), SelectorMode::Resume("SID-9"));
+        assert_eq!(
+            selector_mode("/resume  SID-9"),
+            SelectorMode::Resume("SID-9")
+        );
         assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
     }
 

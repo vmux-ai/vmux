@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 
+use crate::chat_page::composer::{
+    PromptEdit, SelectorMode, edit_prompt, filter_sessions, menu_direction, move_selection,
+    selector_mode,
+};
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
     ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
     ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
     SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
-};
-use crate::chat_page::composer::{
-    PromptEdit, SelectorMode, edit_prompt, filter_sessions, menu_direction, move_selection,
-    selector_mode,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -62,16 +62,12 @@ fn dispatch_keyboard_event(
     init.set_shift_key(source.shift_key());
     init.set_alt_key(source.alt_key());
     init.set_meta_key(source.meta_key());
-    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
-    {
+    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
         let _ = textarea.dispatch_event(&event);
     }
 }
 
-fn install_global_prompt_input(
-    draft: Signal<String>,
-    slash_cmds: Signal<Vec<SlashCommandEntry>>,
-) {
+fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<SlashCommandEntry>>) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
         let Some(textarea) = prompt_textarea() else {
             return;
@@ -139,8 +135,8 @@ fn install_global_prompt_input(
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
     if let Some(window) = web_sys::window() {
-        let _ = window
-            .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+        let _ =
+            window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
     }
     closure.forget();
 }
@@ -669,11 +665,7 @@ pub fn Page() -> Element {
 /// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
 /// current session to the other runtime. Unknown names are ignored (the raw text still submits
 /// via the normal Enter path).
-fn run_slash_command(
-    name: &str,
-    mut draft: Signal<String>,
-    mut menu_sel: Signal<usize>,
-) {
+fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal<usize>) {
     match name {
         "resume" => {
             menu_sel.set(0);
@@ -691,10 +683,7 @@ fn run_slash_command(
     }
 }
 
-fn select_resume_session(
-    session: &ResumableSessionEntry,
-    mut draft: Signal<String>,
-) {
+fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<String>) {
     let _ = try_cef_bin_emit_rkyv(&ResumeSession {
         kind: session.kind.clone(),
         sid: session.sid.clone(),

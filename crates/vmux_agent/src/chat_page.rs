@@ -2,6 +2,7 @@
 //! conversation + run-state (pushed from ECS) and sends prompt/approval intents back.
 //! This is the single agent front-end; it replaced the legacy CLI-install setup page.
 
+#[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) mod composer;
 pub mod event;
 
@@ -453,12 +454,7 @@ fn on_resume_list_request(
                 .get(stack)
                 .ok()
                 .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
-                .or_else(|| {
-                    agent_sessions
-                        .get(stack)
-                        .ok()
-                        .map(|session| session.kind)
-                })
+                .or_else(|| agent_sessions.get(stack).ok().map(|session| session.kind))
         });
     let task = IoTaskPool::get().spawn(async move {
         let sessions = kind
