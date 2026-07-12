@@ -68,6 +68,27 @@ use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 /// the CEF backend, and forwards pointer and cursor input between the layout and pages.
 pub struct BrowserPlugin;
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum BrowserSystems {
+    SyncCefBackend,
+}
+
+fn configure_cef_backend_sync(app: &mut App) -> &mut App {
+    app.configure_sets(
+        Update,
+        BrowserSystems::SyncCefBackend
+            .after(vmux_layout::scene::SceneSystems::CompleteModeTransition)
+            .before(CefSystems::CreateAndResize),
+    )
+    .add_systems(
+        Update,
+        sync_cef_backend_for_interaction_mode
+            .in_set(BrowserSystems::SyncCefBackend)
+            .after(PageOpenSet::Fallback)
+            .after(spawn_popup_stacks),
+    )
+}
+
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         crate::extensions::load::apply_env();
@@ -79,7 +100,8 @@ impl Plugin for BrowserPlugin {
                 .collect(),
         );
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
-        app.add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+        configure_cef_backend_sync(app)
+            .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
@@ -123,13 +145,6 @@ impl Plugin for BrowserPlugin {
                 sync_appearance_to_cef
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<AppSettings>),
-            )
-            .add_systems(
-                Update,
-                sync_cef_backend_for_interaction_mode
-                    .after(PageOpenSet::Fallback)
-                    .after(spawn_popup_stacks)
-                    .before(CefSystems::CreateAndResize),
             )
             .add_systems(Update, sync_layout_mesh_visibility)
             .add_systems(
@@ -1160,6 +1175,7 @@ fn sync_windowed_frames(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
     mut last_visible_pages: Local<Vec<Entity>>,
+    mut last_windowed_pages: Local<Vec<Entity>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
@@ -1253,11 +1269,19 @@ fn sync_windowed_frames(
             }
         }
     }
+    let current_windowed: Vec<Entity> = visible.iter().chain(&hidden).copied().collect();
+    let newly_windowed: Vec<Entity> = current_windowed
+        .iter()
+        .copied()
+        .filter(|entity| !last_windowed_pages.contains(entity))
+        .collect();
     let ever_shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
-    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown) {
+    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown, &newly_windowed)
+    {
         browsers.set_windowed_hidden(&entity, true);
     }
     *last_visible_pages = visible;
+    *last_windowed_pages = current_windowed;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1347,11 +1371,16 @@ fn windowed_pages_to_hide(
     hidden: &[Entity],
     prev_visible: &[Entity],
     ever_shown: &[Entity],
+    newly_windowed: &[Entity],
 ) -> Vec<Entity> {
     hidden
         .iter()
         .copied()
-        .filter(|entity| prev_visible.contains(entity) || !ever_shown.contains(entity))
+        .filter(|entity| {
+            prev_visible.contains(entity)
+                || !ever_shown.contains(entity)
+                || newly_windowed.contains(entity)
+        })
         .collect()
 }
 
@@ -4362,8 +4391,18 @@ mod tests {
         let ever_shown = [just_deactivated, still_inactive];
 
         assert_eq!(
-            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown),
+            windowed_pages_to_hide(&hidden, &prev_visible, &ever_shown, &[]),
             vec![just_deactivated, never_shown]
+        );
+    }
+
+    #[test]
+    fn recreated_inactive_windowed_page_is_hidden() {
+        let page = Entity::from_bits(1);
+
+        assert_eq!(
+            windowed_pages_to_hide(&[page], &[], &[page], &[page]),
+            vec![page]
         );
     }
 
@@ -4841,6 +4880,50 @@ mod tests {
     }
 
     #[test]
+    fn user_player_user_backend_round_trip() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        let window = Window {
+            resolution: (800, 600).into(),
+            ..default()
+        };
+        let home = vmux_layout::scene::frame_main_camera_transform(&window, 800.0 / 600.0, 0.0);
+        app.world_mut().spawn((window, PrimaryWindow));
+        app.world_mut()
+            .spawn((vmux_layout::scene::MainCamera, home));
+
+        let layout = app
+            .world_mut()
+            .spawn((Browser, LayoutCef, WebviewSource::new("vmux://layout/")))
+            .id();
+        let modal = app
+            .world_mut()
+            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
+            .id();
+        let page = app
+            .world_mut()
+            .spawn((Browser, WebviewSource::new("https://example.com/")))
+            .id();
+
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+        app.insert_resource(vmux_layout::scene::InteractionMode::Player);
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+        app.insert_resource(vmux_layout::scene::InteractionMode::User);
+        sync_cef_backend_for_interaction_mode(app.world_mut());
+
+        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(page).is_some(),
+            cfg!(target_os = "macos")
+        );
+    }
+
+    #[test]
     fn browser_mode_disables_windowed_pages_when_camera_is_off_axis() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
@@ -4977,15 +5060,56 @@ mod tests {
     #[test]
     fn backend_sync_runs_after_page_spawners_before_cef_create() {
         let source = include_str!("lib.rs");
-        let plugin_build = source
-            .split("impl Plugin for BrowserPlugin")
+        let backend_sync = source
+            .split("fn configure_cef_backend_sync")
             .nth(1)
-            .and_then(|tail| tail.split("fn cef_root_cache_path").next())
+            .and_then(|tail| tail.split("impl Plugin for BrowserPlugin").next())
             .unwrap_or_default();
 
-        assert!(plugin_build.contains(".after(PageOpenSet::Fallback)"));
-        assert!(plugin_build.contains(".after(spawn_popup_stacks)"));
-        assert!(plugin_build.contains(".before(CefSystems::CreateAndResize)"));
+        assert!(backend_sync.contains(".after(PageOpenSet::Fallback)"));
+        assert!(backend_sync.contains(".after(spawn_popup_stacks)"));
+        assert!(backend_sync.contains(".before(CefSystems::CreateAndResize)"));
+    }
+
+    #[derive(Resource, Default)]
+    struct ObservedBackendMode(Option<vmux_layout::scene::InteractionMode>);
+
+    fn finish_exit_for_backend_sync_test(mut mode: ResMut<vmux_layout::scene::InteractionMode>) {
+        *mode = vmux_layout::scene::InteractionMode::User;
+    }
+
+    fn observe_backend_sync_mode(
+        mode: Res<vmux_layout::scene::InteractionMode>,
+        mut observed: ResMut<ObservedBackendMode>,
+    ) {
+        observed.0 = Some(*mode);
+    }
+
+    #[test]
+    fn backend_sync_runs_after_exit_transition_completion() {
+        let mut app = App::new();
+        app.world_mut().insert_non_send(Browsers::default());
+        configure_cef_backend_sync(&mut app)
+            .insert_resource(vmux_layout::scene::InteractionMode::Player)
+            .init_resource::<ObservedBackendMode>()
+            .add_systems(
+                Update,
+                finish_exit_for_backend_sync_test
+                    .in_set(vmux_layout::scene::SceneSystems::CompleteModeTransition),
+            )
+            .add_systems(
+                Update,
+                observe_backend_sync_mode
+                    .in_set(BrowserSystems::SyncCefBackend)
+                    .before(sync_cef_backend_for_interaction_mode),
+            );
+
+        app.update();
+
+        assert!(
+            app.world().resource::<ObservedBackendMode>().0
+                == Some(vmux_layout::scene::InteractionMode::User)
+        );
     }
 
     #[test]

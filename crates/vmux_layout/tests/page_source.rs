@@ -117,6 +117,15 @@ fn layout_page_uses_computed_header_right_offset() {
 }
 
 #[test]
+fn persistent_layout_state_has_no_infinite_animation() {
+    let source = include_str!("../src/page.rs");
+
+    for class in ["animate-pulse", "animate-ping", "animate-bounce"] {
+        assert!(!source.contains(class), "persistent layout uses {class}");
+    }
+}
+
+#[test]
 fn layout_document_disables_both_scroll_axes() {
     let css = include_str!("../assets/index.css");
 

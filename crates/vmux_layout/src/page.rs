@@ -536,7 +536,7 @@ fn Tab(tab: TabRow) -> Element {
                 span { class: "{title_class}", "{display_title}" }
             }
             if tab.is_done_unseen {
-                span { class: "size-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
+                span { class: "size-2 shrink-0 rounded-full bg-amber-400 ring-2 ring-background" }
             }
             button {
                 r#type: "button",
@@ -646,7 +646,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                     if m.is_running {
                                         span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
                                     } else if m.is_done_unseen {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
                                     }
                                 }
                             }

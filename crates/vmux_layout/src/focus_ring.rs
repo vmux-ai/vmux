@@ -194,10 +194,13 @@ fn primary_window_focused(windows: Query<&Window, With<PrimaryWindow>>) -> bool 
 fn tick_focus_ring_gradient_time(
     time: Res<Time>,
     mut materials: ResMut<Assets<FocusRingMaterial>>,
-    rings: Query<&MeshMaterial3d<FocusRingMaterial>, With<FocusRing>>,
+    rings: Query<(&MeshMaterial3d<FocusRingMaterial>, &Visibility), With<FocusRing>>,
 ) {
     let t = time.elapsed_secs();
-    for mesh_mat in &rings {
+    for (mesh_mat, visibility) in &rings {
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
         let id = mesh_mat.id();
         let Some(m) = materials.get(id) else {
             continue;
@@ -294,5 +297,65 @@ mod tests {
             .expect("focus ring pickable");
 
         assert_eq!(pickable, &Pickable::IGNORE);
+    }
+
+    #[test]
+    fn hidden_focus_ring_does_not_advance_gradient_time() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<FocusRingMaterial>>()
+            .add_systems(Update, tick_focus_ring_gradient_time);
+
+        let mut material =
+            build_focus_ring_material(320.0, 240.0, &test_layout_settings(), 7.0, false);
+        material.gradient_params.w = 7.0;
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<FocusRingMaterial>>()
+            .add(material);
+        app.world_mut().spawn((
+            FocusRing,
+            MeshMaterial3d(handle.clone()),
+            Visibility::Hidden,
+        ));
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<FocusRingMaterial>>()
+            .get(handle.id())
+            .expect("focus ring material");
+        assert_eq!(material.gradient_params.w, 7.0);
+    }
+
+    #[test]
+    fn visible_focus_ring_advances_gradient_time() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<FocusRingMaterial>>()
+            .add_systems(Update, tick_focus_ring_gradient_time);
+
+        let mut material =
+            build_focus_ring_material(320.0, 240.0, &test_layout_settings(), -1.0, false);
+        material.gradient_params.w = -1.0;
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<FocusRingMaterial>>()
+            .add(material);
+        app.world_mut().spawn((
+            FocusRing,
+            MeshMaterial3d(handle.clone()),
+            Visibility::Visible,
+        ));
+
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<FocusRingMaterial>>()
+            .get(handle.id())
+            .expect("focus ring material");
+        assert_ne!(material.gradient_params.w, -1.0);
     }
 }
