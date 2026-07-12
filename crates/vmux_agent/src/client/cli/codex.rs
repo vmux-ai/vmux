@@ -10,7 +10,7 @@ use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
-const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
+pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
 commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
 text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \

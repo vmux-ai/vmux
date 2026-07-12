@@ -9,10 +9,18 @@ pub fn resolve(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String>
     resolve_inner(cwd, anchor, false)
 }
 
-/// Like [`resolve`] but for ACP sessions: the sidecar serves the ACP toolset (`run` +
-/// `read_terminal` hidden in favor of ACP-native terminals; `terminal_send` kept).
-pub fn resolve_acp(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
-    resolve_inner(cwd, anchor, true)
+/// Resolve the MCP sidecar for an ACP agent. Agents that use ACP client terminals hide the
+/// overlapping vmux terminal tools; compatibility adapters keep them available.
+pub fn resolve_acp(
+    cwd: &Path,
+    anchor: ProcessId,
+    agent_id: &str,
+) -> Result<McpServerConfig, String> {
+    resolve_inner(cwd, anchor, acp_uses_native_terminals(agent_id))
+}
+
+fn acp_uses_native_terminals(agent_id: &str) -> bool {
+    agent_id != "codex"
 }
 
 fn resolve_inner(
@@ -109,6 +117,12 @@ mod tests {
         let acp = mcp_subcommand_args(anchor, "personal", true);
         assert!(!plain.iter().any(|a| a == "--acp-terminals"));
         assert!(acp.iter().any(|a| a == "--acp-terminals"));
+    }
+
+    #[test]
+    fn codex_acp_keeps_vmux_terminal_tools() {
+        assert!(!acp_uses_native_terminals("codex"));
+        assert!(acp_uses_native_terminals("claude"));
     }
 
     #[test]

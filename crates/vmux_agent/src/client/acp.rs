@@ -232,14 +232,20 @@ fn install_acp_session_when_focused(
                     sid,
                     command: r.command,
                     args: r.args,
-                    env: build_agent_env(r.env, login_env, r.path_prepend),
+                    env: apply_agent_compatibility_env(
+                        &agent_id,
+                        build_agent_env(r.env, login_env, r.path_prepend),
+                    ),
                 },
                 Err(reg_err) => match fallback {
                     Some(cfg) => InstallMsg::Ready {
                         sid,
                         command: cfg.command,
                         args: cfg.args,
-                        env: build_agent_env(cfg.env, login_env, None),
+                        env: apply_agent_compatibility_env(
+                            &agent_id,
+                            build_agent_env(cfg.env, login_env, None),
+                        ),
                     },
                     None => InstallMsg::Failed {
                         sid,
@@ -307,6 +313,82 @@ fn build_agent_env(
     apply_path_prepend(base, path_prepend)
 }
 
+fn apply_agent_compatibility_env(
+    agent_id: &str,
+    mut env: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    if agent_id != "codex" {
+        return env;
+    }
+
+    let existing = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "CODEX_CONFIG")
+        .and_then(|(_, value)| serde_json::from_str::<serde_json::Value>(value).ok());
+    let mut config = match existing {
+        Some(serde_json::Value::Object(config)) => config,
+        _ => serde_json::Map::new(),
+    };
+
+    let features = config
+        .entry("features")
+        .or_insert_with(|| serde_json::json!({}));
+    if !features.is_object() {
+        *features = serde_json::json!({});
+    }
+    let features = features.as_object_mut().unwrap();
+    features.insert("shell_tool".to_string(), serde_json::Value::Bool(false));
+    features.insert("unified_exec".to_string(), serde_json::Value::Bool(false));
+    let code_mode = features
+        .entry("code_mode")
+        .or_insert_with(|| serde_json::json!({}));
+    if !code_mode.is_object() {
+        *code_mode = serde_json::json!({});
+    }
+    code_mode.as_object_mut().unwrap().insert(
+        "direct_only_tool_namespaces".to_string(),
+        serde_json::json!(["mcp__vmux"]),
+    );
+
+    let tools = config
+        .entry("tools")
+        .or_insert_with(|| serde_json::json!({}));
+    if !tools.is_object() {
+        *tools = serde_json::json!({});
+    }
+    tools
+        .as_object_mut()
+        .unwrap()
+        .insert("web_search".to_string(), serde_json::Value::Bool(false));
+
+    let instructions = config
+        .get("developer_instructions")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let instructions = if instructions.contains("mcp__vmux__run") {
+        instructions.to_string()
+    } else if instructions.is_empty() {
+        crate::client::cli::codex::RUN_STEER_PROMPT.to_string()
+    } else {
+        format!(
+            "{instructions}\n\n{}",
+            crate::client::cli::codex::RUN_STEER_PROMPT
+        )
+    };
+    config.insert(
+        "developer_instructions".to_string(),
+        serde_json::Value::String(instructions),
+    );
+
+    env.retain(|(key, _)| key != "CODEX_CONFIG");
+    env.push((
+        "CODEX_CONFIG".to_string(),
+        serde_json::Value::Object(config).to_string(),
+    ));
+    env
+}
+
 /// Drain background-install updates: reflect progress/failure onto the session run-state, and on
 /// a resolved spec send `SpawnAcpAgent` (success run-state is then driven by the daemon stream).
 fn drain_acp_installs(
@@ -343,13 +425,17 @@ fn drain_acp_installs(
                     continue;
                 };
                 if let Some((session, _)) = q.iter().find(|(s, _)| s.sid == sid) {
-                    let mcp = crate::mcp::resolve_acp(&session.cwd, session.anchor)
-                        .inspect_err(|err| {
-                            bevy::log::warn!(
-                                "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
-                            );
-                        })
-                        .ok();
+                    let mcp = crate::mcp::resolve_acp(
+                        &session.cwd,
+                        session.anchor,
+                        &session.agent_id,
+                    )
+                    .inspect_err(|err| {
+                        bevy::log::warn!(
+                            "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
+                        );
+                    })
+                    .ok();
                     service.0.send(ClientMessage::SpawnAcpAgent {
                         sid,
                         agent_id: session.agent_id.clone(),
@@ -619,6 +705,51 @@ mod tests {
             app.world().get::<Profile>(matching).unwrap().name,
             "Antigravity"
         );
+    }
+
+    #[test]
+    fn codex_acp_routes_shell_commands_through_vmux_run() {
+        let env = apply_agent_compatibility_env("codex", Vec::new());
+        let config = env
+            .iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .expect("codex ACP compatibility config");
+
+        assert_eq!(config["features"]["shell_tool"], false);
+        assert_eq!(config["features"]["unified_exec"], false);
+        assert_eq!(config["tools"]["web_search"], false);
+        assert_eq!(
+            config["features"]["code_mode"]["direct_only_tool_namespaces"],
+            serde_json::json!(["mcp__vmux"])
+        );
+        assert!(
+            config["developer_instructions"]
+                .as_str()
+                .unwrap()
+                .contains("mcp__vmux__run")
+        );
+    }
+
+    #[test]
+    fn codex_acp_preserves_existing_config() {
+        let env = apply_agent_compatibility_env(
+            "codex",
+            vec![s(
+                "CODEX_CONFIG",
+                r#"{"model":"gpt-test","features":{"custom_feature":true,"code_mode":{"custom_setting":"keep"}}}"#,
+            )],
+        );
+        let config = env
+            .iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .unwrap();
+
+        assert_eq!(config["model"], "gpt-test");
+        assert_eq!(config["features"]["custom_feature"], true);
+        assert_eq!(config["features"]["code_mode"]["custom_setting"], "keep");
+        assert_eq!(config["features"]["shell_tool"], false);
     }
 
     #[test]
