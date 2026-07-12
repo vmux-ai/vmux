@@ -707,7 +707,7 @@ pub fn dispatch_with_anchor(
         }
         let placement_override = ["mode", "direction", "beside"]
             .iter()
-            .any(|key| arguments.get(*key).is_some());
+            .any(|key| arguments.get(*key).is_some_and(|value| !value.is_null()));
         let direction = parse_direction(&arguments)?.unwrap_or(AgentPaneDirection::Right);
         let focus = arguments
             .get("focus")
@@ -1638,6 +1638,22 @@ mod tests {
         match bare {
             DispatchTarget::Command(AgentCommand::Run { .. }) => {}
             other => panic!("expected Run, got {other:?}"),
+        }
+
+        let nulls = dispatch_with_anchor(
+            "run",
+            serde_json::json!({
+                "command": "echo hi",
+                "mode": null,
+                "direction": null,
+                "beside": null
+            }),
+            Some(anchor),
+        )
+        .unwrap();
+        match nulls {
+            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
+            other => panic!("expected Run for null placement values, got {other:?}"),
         }
 
         for arguments in [

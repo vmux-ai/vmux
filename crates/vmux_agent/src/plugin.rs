@@ -1484,12 +1484,23 @@ fn handle_agent_commands(
             ServiceAgentCommand::UpdateSettings { path, value_json } => {
                 match serde_json::from_str::<serde_json::Value>(value_json) {
                     Ok(value) => {
-                        match vmux_setting::apply_settings_update(sp.settings.as_mut(), path, value)
-                        {
+                        let mut updated = (*sp.settings).clone();
+                        match vmux_setting::apply_settings_update(&mut updated, path, value) {
                             Ok(ron_bytes) => {
-                                sp.writes
-                                    .write(vmux_setting::SettingsWriteRequest { ron_bytes });
-                                AgentCommandResult::Ok
+                                if origin_is_agent(&request.origin)
+                                    && updated.agent.allow_run_placement_override
+                                        != sp.settings.agent.allow_run_placement_override
+                                {
+                                    AgentCommandResult::Error(
+                                        "update_settings: agent.allow_run_placement_override can only be changed in Settings"
+                                            .to_string(),
+                                    )
+                                } else {
+                                    *sp.settings = updated;
+                                    sp.writes
+                                        .write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                                    AgentCommandResult::Ok
+                                }
                             }
                             Err(message) => AgentCommandResult::Error(message),
                         }
@@ -3725,6 +3736,63 @@ mod tests {
         // sparse RON includes only sections that differ from the embedded
         // defaults; this override differs, so it appears.
         assert!(ron_bytes.contains("https://example.com/custom"));
+    }
+
+    #[test]
+    fn agent_cannot_enable_run_placement_override_through_settings_update() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
+            .add_message::<vmux_layout::BrowserNavigateRequest>()
+            .add_message::<vmux_layout::BrowserGoBackRequest>()
+            .add_message::<vmux_layout::BrowserGoForwardRequest>()
+            .add_message::<vmux_layout::OpenInNewStackRequest>()
+            .add_message::<vmux_layout::ExtensionInstallRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+            .add_message::<vmux_terminal::TerminalSendRequest>()
+            .add_message::<vmux_terminal::RunShellRequest>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_message::<vmux_space::SpaceCommandRequest>()
+            .add_message::<vmux_history::query::HistoryOpenIntent>()
+            .insert_resource(FocusedStack::default())
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+        let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
+        agent_value["allow_run_placement_override"] = serde_json::json!(true);
+        for (path, value_json) in [
+            (
+                "agent.allow_run_placement_override",
+                serde_json::json!(true).to_string(),
+            ),
+            ("agent", agent_value.to_string()),
+        ] {
+            app.world_mut()
+                .resource_mut::<Messages<AgentCommandRequest>>()
+                .write(AgentCommandRequest {
+                    request_id: AgentRequestId::new(),
+                    origin: CommandOrigin::Agent {
+                        sid: Some("test-agent".to_string()),
+                        anchor: None,
+                    },
+                    command: ServiceAgentCommand::UpdateSettings {
+                        path: path.to_string(),
+                        value_json,
+                    },
+                });
+            app.update();
+            assert!(
+                !app.world()
+                    .resource::<AppSettings>()
+                    .agent
+                    .allow_run_placement_override,
+                "agent update unexpectedly enabled override through {path}"
+            );
+        }
     }
 
     #[test]

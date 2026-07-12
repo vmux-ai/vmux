@@ -1227,6 +1227,12 @@ mod tests {
     }
 
     #[test]
+    fn legacy_agent_settings_default_run_placement_override_to_disabled() {
+        let settings = parse_settings("(agent: (follow_files: true))").unwrap();
+        assert!(!settings.agent.allow_run_placement_override);
+    }
+
+    #[test]
     fn apply_update_enables_run_placement_override() {
         let mut settings = base_settings();
         let ron = apply_settings_update(
