@@ -11,6 +11,9 @@ use vmux_git::worktree::{self, WorktreeInfo};
 
 pub struct WorktreePlugin;
 
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TabDirectoryRebindSet;
+
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct TabDirectoryObserved {
     pub tab: Entity,
@@ -20,7 +23,8 @@ pub struct TabDirectoryObserved {
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<TabDirectoryObserved>()
-            .add_systems(Update, (reconcile_tab_worktrees, rebind_tab_directories));
+            .add_systems(Update, reconcile_tab_worktrees)
+            .add_systems(Update, rebind_tab_directories.in_set(TabDirectoryRebindSet));
     }
 }
 
@@ -159,6 +163,33 @@ fn rebind_tab_directories(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[derive(Resource)]
+    struct ObservationInput {
+        tab: Entity,
+        path: PathBuf,
+    }
+
+    #[derive(Resource, Default)]
+    struct CapturedStartupDir(Option<String>);
+
+    fn emit_observation(
+        input: Res<ObservationInput>,
+        mut observations: MessageWriter<TabDirectoryObserved>,
+    ) {
+        observations.write(TabDirectoryObserved {
+            tab: input.tab,
+            path: input.path.clone(),
+        });
+    }
+
+    fn capture_startup_dir(
+        input: Res<ObservationInput>,
+        tabs: Query<&Tab>,
+        mut captured: ResMut<CapturedStartupDir>,
+    ) {
+        captured.0 = tabs.get(input.tab).unwrap().startup_dir.clone();
+    }
 
     fn git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")
@@ -306,6 +337,41 @@ mod tests {
         );
         assert!(app.world().get::<TabWorktree>(tab).is_none());
         assert!(managed.path.is_dir(), "old checkout is preserved");
+    }
+
+    #[test]
+    fn observation_rebinds_before_same_frame_consumers() {
+        let repo = init_repo();
+        let managed = create_worktree_blocking(repo.path(), "managed").unwrap();
+        let expected = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin)
+            .init_resource::<CapturedStartupDir>();
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(managed.path.to_string_lossy().into_owned()),
+            })
+            .id();
+        app.insert_resource(ObservationInput {
+            tab,
+            path: repo.path().join("seed.txt"),
+        })
+        .add_systems(Update, emit_observation.before(TabDirectoryRebindSet))
+        .add_systems(Update, capture_startup_dir.after(TabDirectoryRebindSet));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CapturedStartupDir>().0.as_deref(),
+            Some(expected.as_str())
+        );
     }
 
     #[test]

@@ -256,9 +256,18 @@ impl Plugin for AgentPlugin {
                     forward_history_open_intent,
                     handle_agent_tool_calls,
                     handle_agent_commands,
+                    handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                )
+                    .chain()
+                    .in_set(WriteAppCommands)
+                    .after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                (
                     handle_agent_self_commands
+                        .after(vmux_layout::worktree::TabDirectoryRebindSet)
                         .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
-                    handle_agent_file_touch,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -5003,6 +5012,18 @@ mod tests {
             non_test_source[start..]
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
+        );
+        assert!(
+            non_test_source.contains(
+                "handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet)"
+            ),
+            "file observations must run before tab directory rebinding"
+        );
+        assert!(
+            non_test_source.contains(
+                "handle_agent_self_commands\n                        .after(vmux_layout::worktree::TabDirectoryRebindSet)"
+            ),
+            "run commands must resolve cwd after tab directory rebinding"
         );
     }
 
