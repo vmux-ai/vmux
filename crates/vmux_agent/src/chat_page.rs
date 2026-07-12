@@ -10,6 +10,8 @@ pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+#[cfg(not(target_arch = "wasm32"))]
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,7 +77,14 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
             .add_observer(reset_chat_synced_on_page_ready)
-            .add_systems(Update, (push_chat_to_page, sync_chat_to_ready_views));
+            .add_systems(
+                Update,
+                (
+                    push_chat_to_page,
+                    sync_chat_to_ready_views,
+                    drain_resume_list_tasks,
+                ),
+            );
     }
 }
 
@@ -89,6 +98,13 @@ pub struct AgentChatView;
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component)]
 struct ChatSynced;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ResumeListTask {
+    webview: Entity,
+    task: Task<ResumableSessions>,
+}
 
 /// Push the current transcript + slash commands to any chat webview that is ready but not yet
 /// synced. Runs every frame and retries until the webview's emit channel is ready, so the very
@@ -412,33 +428,48 @@ fn on_resume_list_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Some(strategies) = strategies else {
-        return;
-    };
-    let sessions = strategies
-        .list_all_sessions()
-        .into_iter()
-        .map(|s| {
-            let dir = s
-                .cwd
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| s.cwd.to_string_lossy().to_string());
-            ResumableSessionEntry {
-                kind: s.kind.as_url_segment().to_string(),
-                sid: s.sid,
-                cwd: s.cwd.to_string_lossy().to_string(),
-                title: s.title,
-                subtitle: format!("{} · {}", relative_time(s.mtime), dir),
-                cross_runtime: s.cross_runtime,
-            }
-        })
-        .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        RESUMABLE_SESSIONS_EVENT,
-        &ResumableSessions { sessions },
-    ));
+    let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
+    let task = IoTaskPool::get().spawn(async move {
+        let sessions = strategies
+            .list_all_sessions()
+            .into_iter()
+            .map(|s| {
+                let dir = s
+                    .cwd
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| s.cwd.to_string_lossy().to_string());
+                ResumableSessionEntry {
+                    kind: s.kind.as_url_segment().to_string(),
+                    sid: s.sid,
+                    cwd: s.cwd.to_string_lossy().to_string(),
+                    title: s.title,
+                    subtitle: format!("{} · {}", relative_time(s.mtime), dir),
+                    cross_runtime: s.cross_runtime,
+                }
+            })
+            .collect();
+        ResumableSessions { sessions }
+    });
+    commands.spawn(ResumeListTask { webview, task });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_resume_list_tasks(
+    mut tasks: Query<(Entity, &mut ResumeListTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(sessions) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            task.webview,
+            RESUMABLE_SESSIONS_EVENT,
+            &sessions,
+        ));
+    }
 }
 
 /// Page → native: resume a picked session on this stack, in the current runtime.
@@ -549,6 +580,34 @@ mod native_tests {
         let with_cli = slash_commands_for(true);
         assert_eq!(with_cli.len(), 2);
         assert_eq!(with_cli[1].name, "cli");
+    }
+
+    #[test]
+    fn resume_list_scan_runs_on_io_task_pool() {
+        let source = include_str!("chat_page.rs");
+        let handler = source
+            .split("fn on_resume_list_request")
+            .nth(1)
+            .expect("resume-list handler")
+            .split("fn on_resume_session")
+            .next()
+            .expect("resume-list handler body");
+        assert!(handler.contains("IoTaskPool::get().spawn"));
+        assert!(source.contains("fn drain_resume_list_tasks"));
+    }
+
+    #[test]
+    fn composer_resume_menu_remains_escapeable_when_empty() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("let session_menu_open = resume_mode();"));
+        assert!(source.contains("if e.key() == Key::Escape && *resume_mode.peek()"));
+    }
+
+    #[test]
+    fn composer_slash_items_support_mouse_selection() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("onclick: move |_| run_slash_command"));
+        assert!(source.contains("onclick: move |_| select_resume_session"));
     }
 
     #[test]

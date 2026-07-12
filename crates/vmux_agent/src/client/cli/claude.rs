@@ -232,7 +232,7 @@ fn claude_cwd_and_title(path: &Path, stem: &str) -> (PathBuf, String) {
     let mut cwd: Option<PathBuf> = None;
     let mut title: Option<String> = None;
     if let Ok(file) = std::fs::File::open(path) {
-        for line in BufReader::new(file).lines().map_while(Result::ok).take(40) {
+        for line in BufReader::new(file).lines().take(40).filter_map(Result::ok) {
             let Ok(v) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
@@ -504,6 +504,26 @@ mod tests {
         let out = list_claude_sessions(&tmp);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].title, "abcdef01");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_skips_unreadable_lines_before_metadata() {
+        let tmp = unique_tmp("claude-list-invalid-line");
+        let proj = tmp.join("proj");
+        std::fs::create_dir_all(&proj).unwrap();
+        let mut transcript = b"{\"type\":\"summary\"}\n".to_vec();
+        transcript.extend_from_slice(b"\xff\n");
+        transcript.extend_from_slice(
+            b"{\"type\":\"user\",\"cwd\":\"/work/after-bad-line\",\"message\":{\"content\":\"still readable\"}}\n",
+        );
+        std::fs::write(proj.join("abcdef01-9999.jsonl"), transcript).unwrap();
+
+        let out = list_claude_sessions(&tmp);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].cwd, PathBuf::from("/work/after-bad-line"));
+        assert_eq!(out[0].title, "still readable");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

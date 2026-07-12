@@ -6,7 +6,7 @@
 
 **Architecture:** A session is `(kind, sid, cwd)`; runtime (ACP vs CLI) is just how it's opened. Backend scrapes each agent kind's on-disk store into a unified list. A single `SwapStackSession` ECS message tears down the current session on a stack and re-attaches the target (ACP via `attach_acp_agent_to_stack`, CLI via `SpawnAgentInStackRequest`) with explicit cwd. The Dioxus composer renders a slash menu fed by bin-event snapshots and emits typed intents.
 
-**Tech Stack:** Rust, Bevy ECS, Dioxus (WASM page), rkyv bin-ipc, serde. Crates: `vmux_agent` (strategies, chat page, plugin), `vmux_core` (messages), `vmux_command`/`vmux_layout` (Cmd+K).
+**Tech Stack:** Rust, Bevy ECS, Dioxus (WASM page), rkyv bin-ipc, serde. Crates: `vmux_agent` (strategies, chat page, plugin), `vmux_core` (messages).
 
 **Verified facts baked in:** claude-code-acp ≥0.12 shares session ids + the `~/.claude/projects/<cwd>/<uuid>.jsonl` store with the `claude` CLI, so a claude `acp_session_id` is a valid `claude --resume` target both directions. Resume is cwd-keyed — cwd MUST travel with the session. Codex/Vibe id-sharing is unverified → `cross_runtime = false` for them (list + same-runtime resume only).
 
@@ -840,27 +840,10 @@ git commit -m "feat(agent): advertise /resume + /cli slash commands per ACP pane
 
 ---
 
-## Phase F — Cmd+K runtime-switch commands (secondary entry)
+## Phase F — Deferred: Cmd+K entry points
 
-> Scope note: the composer slash menu (Phase D) fully delivers `/resume` browsing. Phase F adds the Cmd+K runtime-switch commands (small). The full Cmd+K *session-list* browser is deferred (spec §Deferred) — call this out to the user at review.
-
-### Task F1: "Continue in CLI" / "Continue in ACP" AppCommands
-
-**Files:**
-- Modify: `crates/vmux_command/src/command.rs`
-- Modify: `crates/vmux_layout/src/command_bar/handler.rs`
-
-- [ ] **Step 1: Add command variants.** In the appropriate sub-enum (e.g. a new `AgentCommand` or the existing agent-related group), add two `#[menu(...)]` leaves: `ContinueInCli`, `ContinueInAcp`. They auto-appear in the `>` list via the `CommandBar` derive.
-
-- [ ] **Step 2: Handle them.** In `on_command_bar_action` (`handler.rs`), for these commands, resolve the focused agent stack and emit the same ECS message `on_runtime_switch_request` uses (send an ECS `RuntimeSwitch`-equivalent, or directly `SwapStackSession` built from the focused pane's live session). Reuse the E1/E4 resolution helper — extract it into a shared `fn` so the composer path and Cmd+K path share one code path (message integration per AGENTS.md).
-
-- [ ] **Step 3: Test.** Native `cargo test -p vmux_command` (command enumeration) + `cargo test -p vmux_layout` (handler). Add an assertion that the new command ids appear in `AppCommand::command_bar_entries()`.
-
-- [ ] **Step 4: Commit.**
-```bash
-git add crates/vmux_command/src/command.rs crates/vmux_layout/src/command_bar/handler.rs
-git commit -m "feat(command): Continue in CLI/ACP runtime-switch commands"
-```
+The Cmd+K session browser and "Continue in CLI/ACP" commands are deferred. This PR ships the
+ACP composer `/resume` and `/cli` flows only.
 
 ---
 
@@ -904,7 +887,7 @@ git add -A -- crates/ && git commit -m "chore(agent): fmt/clippy/test fixes for 
 - Composer slash menu (`/resume`, `/cli`, extensible, unknown→prompt) → D1, E2. ✓
 - In-place swap + cwd carry → B1/B2, E1. ✓
 - Cross-runtime handoff gated by `cross_runtime` (claude) → E1/E2, `kind_supports_cross_runtime`. ✓
-- Cmd+K secondary → F1 (runtime-switch); **session-list-in-palette deferred** (flagged). ✓ (partial by design)
+- Cmd+K browser and runtime-switch commands → deferred from this PR. ✓
 - Edge cases: already-open focus (existing `AgentSessionToEntity` path in page-open — the swap intentionally forces a fresh attach; add focus-existing only if desired — noted), stale sid (ACP falls back to new; CLI warn), cwd carried, missing binary (existing setup path). ✓
 - Tests: parsers (A2/A3), url round-trip (B1), swap ECS (B2), runtime-switch ECS (E1), rkyv (C1), source-scrape (D1). ✓
 
@@ -912,4 +895,4 @@ git add -A -- crates/ && git commit -m "chore(agent): fmt/clippy/test fixes for 
 
 **Type consistency:** `ResumableSession` (native, PathBuf/SystemTime) vs `ResumableSessionEntry` (wire, String) kept distinct and mapped in E1. `SwapStackSession.target_url: String` (built via `AgentUrl::format`, parsed in the handler) avoids a `vmux_core → vmux_agent` dep. `kind_supports_cross_runtime` is the single source for the `cross_runtime` flag (A2/A3 refactored in E2.2). Slash command names (`resume`/`cli`/`acp`) match between D1 `run_slash_command`, E2 `slash_commands_for`, and E1 `on_runtime_switch_request`.
 
-**Known follow-ups (not blockers):** Cmd+K session-list browser; ACP `availableCommands` surfacing; codex/vibe cross-runtime after verification; per-row runtime pick; focus-existing-tab on resume instead of re-attach.
+**Known follow-ups (not blockers):** Cmd+K session-list browser + runtime-switch commands; ACP `availableCommands` surfacing; codex/vibe cross-runtime after verification; per-row runtime pick; focus-existing-tab on resume instead of re-attach.

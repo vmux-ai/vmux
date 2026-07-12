@@ -2652,6 +2652,21 @@ fn handle_swap_stack_session(
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for ev in reader.read() {
+        let target = match crate::AgentUrl::parse(&ev.target_url) {
+            Some(target @ crate::AgentUrl::Cli { .. }) => target,
+            Some(target @ crate::AgentUrl::Acp { .. }) => target,
+            other => {
+                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
+                continue;
+            }
+        };
+        if let crate::AgentUrl::Acp { id, .. } = &target
+            && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
+        {
+            bevy::log::warn!("swap: no ACP agent configured for '{id}'");
+            continue;
+        }
+
         // Removing AcpSession fires close_acp_session_on_remove → the daemon session is closed.
         // Children (the Browser/terminal pane) are despawned; a CLI terminal despawn kills its
         // PTY. Stack-level removes are no-ops for a CLI stack (its agent components live on the
@@ -2668,8 +2683,8 @@ fn handle_swap_stack_session(
             .remove::<vmux_core::team::Profile>();
         clear_stack_children(ev.stack, &children_q, &mut commands);
 
-        match crate::AgentUrl::parse(&ev.target_url) {
-            Some(crate::AgentUrl::Cli { kind, sid }) => {
+        match target {
+            crate::AgentUrl::Cli { kind, sid } => {
                 let session_id = (sid != crate::url::CLI_FRESH_SID).then_some(sid);
                 spawn_agent.write(SpawnAgentInStackRequest {
                     kind,
@@ -2679,11 +2694,13 @@ fn handle_swap_stack_session(
                     initial_prompt: None,
                 });
             }
-            Some(crate::AgentUrl::Acp { id, sid }) => {
-                let Some(cfg) = settings.agent.acp.iter().find(|c| c.id == id) else {
-                    bevy::log::warn!("swap: no ACP agent configured for '{id}'");
-                    continue;
-                };
+            crate::AgentUrl::Acp { id, sid } => {
+                let cfg = settings
+                    .agent
+                    .acp
+                    .iter()
+                    .find(|cfg| cfg.id == id)
+                    .expect("ACP target validated before teardown");
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog.as_deref(), &cfg.id);
                 attach_acp_agent_to_stack(
@@ -2699,9 +2716,7 @@ fn handle_swap_stack_session(
                     &mut webview_mt,
                 );
             }
-            other => {
-                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
-            }
+            _ => unreachable!(),
         }
     }
 }
@@ -3311,6 +3326,58 @@ fn handle_restart_agent_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn swap_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::agent::SwapStackSession>()
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_swap_stack_session);
+        app
+    }
+
+    fn spawn_stack_child(app: &mut App) -> (Entity, Entity) {
+        let stack = app.world_mut().spawn_empty().id();
+        let child = app.world_mut().spawn(ChildOf(stack)).id();
+        (stack, child)
+    }
+
+    #[test]
+    fn invalid_swap_target_preserves_current_stack_child() {
+        let mut app = swap_test_app();
+        let (stack, child) = spawn_stack_child(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "not-an-agent-url".to_string(),
+                cwd: std::path::PathBuf::from("/work"),
+            });
+
+        app.update();
+
+        assert!(app.world().get_entity(child).is_ok());
+    }
+
+    #[test]
+    fn unconfigured_acp_swap_target_preserves_current_stack_child() {
+        let mut app = swap_test_app();
+        let (stack, child) = spawn_stack_child(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "vmux://agent/not-configured/sid-1".to_string(),
+                cwd: std::path::PathBuf::from("/work"),
+            });
+
+        app.update();
+
+        assert!(app.world().get_entity(child).is_ok());
+    }
 
     #[test]
     fn acp_attach_gives_profile_agent_and_icon() {

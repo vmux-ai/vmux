@@ -10,9 +10,8 @@ user reopen any of them, and enable **cross-runtime handoff** of a single conver
 between the ACP runtime (`vmux://agent/<id>`) and the CLI PTY runtime
 (`vmux://agent/<kind>/cli/<sid>`).
 
-Primary trigger: a `/` slash-command menu recognized **in the ACP agent page prompt
-textarea** (Claude Code / Zed style). Secondary trigger: the Cmd+K command bar (for CLI
-panes and global invocation).
+Trigger: a `/` slash-command menu recognized **in the ACP agent page prompt textarea**
+(Claude Code / Zed style).
 
 Core user story: start a session as `agent/claude` (ACP); hit a feature only the CLI has;
 run `/cli` to **fall back to the CLI, resuming the same session, in the same page**.
@@ -24,7 +23,6 @@ run `/cli` to **fall back to the CLI, resuming the same session, in the same pag
 - Cross-runtime handoff (ACP ↔ CLI) of the **same** session id, same cwd, same page —
   enabled only where session-id sharing is verified.
 - Extensible slash mechanism in the composer (`/resume`, `/cli` first; room for more).
-- Cmd+K "Resume session" as a secondary entry point.
 
 ## Non-goals (deferred)
 
@@ -82,8 +80,8 @@ A session is `(kind, sid, cwd)`. **Runtime** (ACP vs CLI) is how you open it, no
 - ACP projection: `vmux://agent/<kind>/<sid>` → `session/load`
 - CLI projection: `vmux://agent/<kind>/cli/<sid>` → `--resume`/`resume`
 
-Both projections require the same cwd. `/resume` chooses **which** session; `/cli` (or the
-Cmd+K reverse) chooses **which runtime** for the current session.
+Both projections require the same cwd. `/resume` chooses **which** session; `/cli` chooses
+**which runtime** for the current session.
 
 ## Architecture
 
@@ -138,8 +136,8 @@ z-index memory) and capture pointer/keyboard while open.
 1. `/resume` selected → frontend emits `ResumeListRequest`.
 2. Backend runs the lister → pushes `ResumableSessionsSnapshot` to the page.
 3. Menu becomes session rows: `title · relative-time · cwd`, filterable.
-4. Enter on a row → emits `ResumeSession { kind, sid, runtime }` (backend already holds cwd
-   from the snapshot; runtime defaults to the current pane's runtime).
+4. Enter on a row → emits `ResumeSession { kind, sid, cwd }`; the backend resumes it in the
+   current pane's runtime.
 5. Backend **swaps the current page in place**:
    - Tear down the old session pane on the stack. ACP: removing `AcpSession` already fires
      `close_acp_session_on_remove` → `ClosePageAgent`. CLI: kill `ProcessId`, drop
@@ -148,40 +146,33 @@ z-index memory) and capture pointer/keyboard while open.
      `SpawnAgentInStackRequest { stack, cwd, session_id }` (CLI) or the ACP attach-to-stack
      path (`attach_acp_agent_to_stack`) with `resume = Some(sid)`.
 
-Introduce one message, e.g. `SwapStackSession { stack, target: AgentUrl, cwd }`, that
-performs teardown-then-attach so both `/resume` and `/cli` share it.
+Introduce `SwapStackSession { stack, target_url: String, cwd }`, which performs
+teardown-then-attach so both `/resume` and `/cli` share it without adding a
+`vmux_agent` dependency to `vmux_core`.
 
 ### 4. Cross-runtime handoff (`/cli` — the fallback)
 
-`/cli` in the ACP composer → `SwapStackSession { stack, target: Cli{kind,sid}, cwd }` with
-the current session's sid + cwd → CLI PTY resumes the same conversation, same page.
+`/cli` in the ACP composer emits `SwapStackSession` with a CLI `target_url`, current sid,
+and cwd → CLI PTY resumes the same conversation, same page.
 
 - Gated by `ResumableSession.cross_runtime` / a per-kind capability. Claude only for v1.
 - cwd is taken from the live `AcpSession.cwd` (never `default_cwd`).
-- Reverse (`/acp` from a CLI pane) is offered via Cmd+K only — CLI panes have no vmux
-  composer. Same `SwapStackSession` with `target: Acp{...}`.
+- Reverse (`/acp` from a CLI pane) is deferred because CLI panes have no vmux composer.
 
-### 5. Cmd+K secondary entry
+### 5. Cmd+K entry points (deferred)
 
-- New `AppCommand` leaf: "Resume session" (`crates/vmux_command/src/command.rs`). Auto-appears
-  in the `>` list via the `CommandBar` derive.
-- Handled in `crates/vmux_layout/src/command_bar/handler.rs` (`on_command_bar_action`): opens
-  the palette in a new "sessions" group fed by the same backend lister (mirrors the existing
-  tabs/spaces/pages/work_dirs sections in `command_bar/event.rs` + `results.rs`).
-- Selecting a session issues the same `SwapStackSession` (targeting the focused/served stack;
-  if none, spawn into a new/focused stack).
-- For a live agent pane, "Continue in CLI" / "Continue in ACP" commands trigger the runtime
-  handoff (the Cmd+K equivalent of `/cli`/`/acp`).
+The Cmd+K session browser and "Continue in CLI/ACP" `AppCommand` leaves are deferred. A
+follow-up can route `on_command_bar_action` through the same `SwapStackSession` flow.
 
 ## Data flow & messages
 
 Frontend → backend (CEF bin events; keep dumb-frontend contract):
 - `SlashCommandsRequest` → backend replies `SlashCommandsSnapshot { commands }`.
 - `ResumeListRequest` → backend replies `ResumableSessionsSnapshot { sessions }`.
-- `ResumeSession { kind, sid, runtime }` — invoke.
+- `ResumeSession { kind, sid, cwd }` — invoke.
 
 Backend (ECS):
-- `SwapStackSession { stack, target: AgentUrl, cwd }` — teardown-then-attach on a stack.
+- `SwapStackSession { stack, target_url: String, cwd }` — teardown-then-attach on a stack.
 - Reuse: `SpawnAgentInStackRequest` (CLI), ACP attach-to-stack, `ClosePageAgent`.
 
 Register new message/component types in the owning plugin's `build()` (idempotent), not
@@ -220,11 +211,11 @@ per-test. `vmux_core::event` compiles for wasm — cfg-gate any Bevy `Message`/`
 - Composer slash menu (`/resume`, `/cli`) in the ACP agent page.
 - `/resume` list → in-place swap; cwd carry.
 - `/cli` cross-runtime handoff (Claude), gated by `cross_runtime`.
-- Cmd+K "Resume session" + "Continue in CLI/ACP".
 - `SwapStackSession` message + tests.
 
-**Deferred:** `vmux://resume` page; ACP `availableCommands` surfacing; codex/vibe
-cross-runtime (post-verification); per-row runtime pick.
+**Deferred:** Cmd+K session browser + "Continue in CLI/ACP" commands; `vmux://resume` page;
+ACP `availableCommands` surfacing; codex/vibe cross-runtime (post-verification); per-row
+runtime pick.
 
 ## Risks / open questions
 

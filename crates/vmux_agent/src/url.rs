@@ -317,17 +317,24 @@ mod tests {
             }
         );
         assert_eq!(
-            AgentUrl::for_session(AgentKind::Vibe, "s2", true, &ids),
-            AgentUrl::Cli {
-                kind: AgentKind::Vibe,
-                sid: "s2".into(),
+            AgentUrl::for_session(AgentKind::Codex, "s2", true, &ids),
+            AgentUrl::Acp {
+                id: "codex".into(),
+                sid: Some("s2".into()),
             }
         );
         assert_eq!(
-            AgentUrl::for_session(AgentKind::Claude, "s3", false, &ids),
+            AgentUrl::for_session(AgentKind::Vibe, "s3", true, &ids),
+            AgentUrl::Cli {
+                kind: AgentKind::Vibe,
+                sid: "s3".into(),
+            }
+        );
+        assert_eq!(
+            AgentUrl::for_session(AgentKind::Claude, "s4", false, &ids),
             AgentUrl::Cli {
                 kind: AgentKind::Claude,
-                sid: "s3".into(),
+                sid: "s4".into(),
             }
         );
     }

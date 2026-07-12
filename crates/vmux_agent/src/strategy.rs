@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use bevy::prelude::Resource;
 
@@ -11,22 +12,22 @@ pub trait AgentStrategy: Send + Sync + 'static {
     fn variant(&self) -> AgentVariant;
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub struct AgentStrategies {
-    cli: HashMap<AgentKind, Box<dyn CliAgentStrategy>>,
+    cli: HashMap<AgentKind, Arc<dyn CliAgentStrategy>>,
 }
 
 impl AgentStrategies {
     pub fn register_cli(&mut self, strategy: Box<dyn CliAgentStrategy>) {
-        self.cli.insert(strategy.kind(), strategy);
+        self.cli.insert(strategy.kind(), strategy.into());
     }
 
     pub fn get_cli(&self, kind: AgentKind) -> Option<&dyn CliAgentStrategy> {
-        self.cli.get(&kind).map(|b| b.as_ref())
+        self.cli.get(&kind).map(Arc::as_ref)
     }
 
     pub fn cli_strategies(&self) -> impl Iterator<Item = &dyn CliAgentStrategy> {
-        self.cli.values().map(|b| b.as_ref())
+        self.cli.values().map(Arc::as_ref)
     }
 
     /// All resumable sessions across every registered CLI strategy, newest-first, deduped.

@@ -238,18 +238,24 @@ fn walk_jsonl(root: &Path, visit: &mut dyn FnMut(&Path)) {
 }
 
 pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
+    use std::io::{BufRead, BufReader};
+
     let mut out = Vec::new();
     walk_jsonl(root, &mut |path: &Path| {
         let mtime = std::fs::metadata(path)
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let Ok(text) = std::fs::read_to_string(path) else {
+        let Ok(file) = std::fs::File::open(path) else {
             return;
         };
-        let Some(line) = text.lines().next() else {
+        let mut line = String::new();
+        let Ok(read) = BufReader::new(file).read_line(&mut line) else {
             return;
         };
-        let Ok(head) = serde_json::from_str::<CodexHead>(line) else {
+        if read == 0 {
+            return;
+        }
+        let Ok(head) = serde_json::from_str::<CodexHead>(line.trim_end()) else {
             return;
         };
         if head.kind != "session_meta" {
@@ -488,6 +494,24 @@ mod tests {
         assert_eq!(out[0].sid, "cx-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/x"));
         assert!(!out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_reads_valid_head_when_later_bytes_are_invalid_utf8() {
+        let tmp = unique_tmp("codex-list-invalid-tail");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        let mut transcript =
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n"
+                .to_vec();
+        transcript.extend_from_slice(b"\xff\n");
+        std::fs::write(day.join("sess.jsonl"), transcript).unwrap();
+
+        let out = list_codex_sessions(&tmp);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sid, "cx-1");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

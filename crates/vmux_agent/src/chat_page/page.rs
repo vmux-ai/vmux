@@ -138,7 +138,7 @@ pub fn Page() -> Element {
 
     let draft_val = draft();
     let menu_open = slash_query(&draft_val).is_some() && !resume_mode();
-    let session_menu_open = resume_mode() && !sessions.read().is_empty();
+    let session_menu_open = resume_mode();
     let filtered_cmds: Vec<SlashCommandEntry> = {
         let q = slash_query(&draft_val).unwrap_or("").to_lowercase();
         slash_cmds
@@ -277,23 +277,39 @@ pub fn Page() -> Element {
                     if cmd_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
                             for (i , c) in filtered_cmds.iter().enumerate() {
-                                div {
-                                    key: "sc{i}",
-                                    class: if i == menu_sel() { "flex items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex items-baseline gap-3 px-3.5 py-2 text-sm" },
-                                    span { class: "font-medium text-foreground", "/{c.name}" }
-                                    span { class: "text-xs text-muted-foreground", "{c.description}" }
+                                {
+                                    let c = c.clone();
+                                    rsx! {
+                                        div {
+                                            key: "sc{i}",
+                                            class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
+                                            onclick: move |_| run_slash_command(&c.name, resume_mode, draft),
+                                            span { class: "font-medium text-foreground", "/{c.name}" }
+                                            span { class: "text-xs text-muted-foreground", "{c.description}" }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                     if session_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
-                            for (i , s) in sessions.read().iter().enumerate() {
-                                div {
-                                    key: "rs{i}",
-                                    class: if i == menu_sel() { "flex flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex flex-col gap-0.5 px-3.5 py-2" },
-                                    span { class: "truncate text-sm text-foreground", "{s.title}" }
-                                    span { class: "truncate text-xs text-muted-foreground", "{s.subtitle}" }
+                            if sessions.read().is_empty() {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
+                            } else {
+                                for (i , s) in sessions.read().iter().enumerate() {
+                                    {
+                                        let s = s.clone();
+                                        rsx! {
+                                            div {
+                                                key: "rs{i}",
+                                                class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                                                onclick: move |_| select_resume_session(&s, resume_mode, draft),
+                                                span { class: "truncate text-sm text-foreground", "{s.title}" }
+                                                span { class: "truncate text-xs text-muted-foreground", "{s.subtitle}" }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -354,7 +370,7 @@ pub fn Page() -> Element {
                             onkeydown: move |e| {
                                 let streaming = matches!(status().as_str(), "streaming" | "awaiting");
                                 let draft_now = draft.peek().clone();
-                                let sess_open = *resume_mode.peek() && !sessions.peek().is_empty();
+                                let sess_open = *resume_mode.peek();
                                 let cmd_items: Vec<SlashCommandEntry> = if slash_query(&draft_now)
                                     .is_some()
                                     && !*resume_mode.peek()
@@ -376,6 +392,13 @@ pub fn Page() -> Element {
                                     cmd_items.len()
                                 };
 
+                                if e.key() == Key::Escape && *resume_mode.peek() {
+                                    e.prevent_default();
+                                    resume_mode.set(false);
+                                    draft.set(String::new());
+                                    return;
+                                }
+
                                 if any_menu && matches!(e.key(), Key::ArrowDown | Key::ArrowUp) {
                                     e.prevent_default();
                                     if len > 0 {
@@ -393,14 +416,8 @@ pub fn Page() -> Element {
                                     let sel = *menu_sel.peek();
                                     if sess_open {
                                         if let Some(s) = sessions.peek().get(sel) {
-                                            let _ = try_cef_bin_emit_rkyv(&ResumeSession {
-                                                kind: s.kind.clone(),
-                                                sid: s.sid.clone(),
-                                                cwd: s.cwd.clone(),
-                                            });
+                                            select_resume_session(s, resume_mode, draft);
                                         }
-                                        resume_mode.set(false);
-                                        draft.set(String::new());
                                     } else if let Some(c) = cmd_items.get(sel) {
                                         run_slash_command(&c.name, resume_mode, draft);
                                     }
@@ -502,6 +519,20 @@ fn run_slash_command(name: &str, mut resume_mode: Signal<bool>, mut draft: Signa
         }
         _ => {}
     }
+}
+
+fn select_resume_session(
+    session: &ResumableSessionEntry,
+    mut resume_mode: Signal<bool>,
+    mut draft: Signal<String>,
+) {
+    let _ = try_cef_bin_emit_rkyv(&ResumeSession {
+        kind: session.kind.clone(),
+        sid: session.sid.clone(),
+        cwd: session.cwd.clone(),
+    });
+    resume_mode.set(false);
+    draft.set(String::new());
 }
 
 /// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed

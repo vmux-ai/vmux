@@ -348,14 +348,20 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
         if short_id.is_empty() {
             continue;
         }
-        let mtime = std::fs::metadata(&path)
-            .and_then(|m| m.created().or_else(|_| m.modified()))
+        let meta_path = path.join("meta.json");
+        let mtime = std::fs::metadata(&meta_path)
+            .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let cwd = std::fs::read_to_string(path.join("meta.json"))
+        let Some(meta) = std::fs::read_to_string(&meta_path)
             .ok()
-            .and_then(|t| serde_json::from_str::<MetaJson>(&t).ok())
-            .map(|m| PathBuf::from(m.environment.working_directory))
-            .unwrap_or_default();
+            .and_then(|text| serde_json::from_str::<MetaJson>(&text).ok())
+        else {
+            continue;
+        };
+        let cwd = PathBuf::from(meta.environment.working_directory);
+        if cwd.as_os_str().is_empty() {
+            continue;
+        }
         out.push(ResumableSession {
             kind: AgentKind::Vibe,
             sid: short_id.to_string(),
@@ -734,6 +740,35 @@ mod tests {
         assert_eq!(out[0].sid, "vb-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/y"));
         assert!(!out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_uses_meta_modified_time() {
+        let tmp = unique_tmp("vibe-list-mtime");
+        let sdir = tmp.join("session_vb-1");
+        let meta = sdir.join("meta.json");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(&meta, b"{\"environment\":{\"working_directory\":\"/w/y\"}}").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(&meta, b"{\"environment\":{\"working_directory\":\"/w/y\"}}").unwrap();
+        let expected = std::fs::metadata(&meta).unwrap().modified().unwrap();
+
+        let out = list_vibe_sessions(&tmp);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].mtime, expected);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_skips_entries_without_valid_cwd_metadata() {
+        let tmp = unique_tmp("vibe-list-invalid-meta");
+        std::fs::create_dir_all(tmp.join("session_vb-1")).unwrap();
+
+        let out = list_vibe_sessions(&tmp);
+
+        assert!(out.is_empty());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
