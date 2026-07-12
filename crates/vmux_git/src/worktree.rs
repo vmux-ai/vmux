@@ -31,6 +31,26 @@ pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
     Ok(PathBuf::from(stdout.trim()))
 }
 
+/// The absolute common Git directory shared by a repository's main and linked worktrees.
+pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
+    let (stdout, stderr, ok) = git(
+        dir,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+    )?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    let path = PathBuf::from(stdout.trim());
+    if path.as_os_str().is_empty() {
+        return Err(GitError("git common dir is empty".to_string()));
+    }
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
 /// The current branch name at `root`, falling back to a short SHA when HEAD is detached.
 pub fn head_ref(root: &Path) -> Result<String, GitError> {
     if let Ok((stdout, _, true)) = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
@@ -335,5 +355,22 @@ mod tests {
             wt_excl, main_excl,
             "exclude resolves to the shared common dir"
         );
+    }
+
+    #[test]
+    fn common_dir_identifies_repository_across_worktrees() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+
+        let other = test_repo::init();
+        commit_initial(other.path());
+        let not_repo = tempfile::tempdir().unwrap();
+
+        let main_common = common_dir_of(repo.path()).unwrap();
+        assert_eq!(common_dir_of(&wt).unwrap(), main_common);
+        assert_ne!(common_dir_of(other.path()).unwrap(), main_common);
+        assert!(common_dir_of(not_repo.path()).is_err());
     }
 }
