@@ -671,6 +671,16 @@ mod native_tests {
     }
 
     #[test]
+    fn composer_captures_global_prompt_input_without_stealing_shortcuts() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("install_global_prompt_input"));
+        assert!(source.contains("meta_key() || event.ctrl_key() || event.alt_key()"));
+        assert!(source.contains("PromptEdit::Backspace"));
+        assert!(source.contains("PromptEdit::Delete"));
+        assert!(source.contains("dispatch_keyboard_event"));
+    }
+
+    #[test]
     fn composer_slash_items_support_mouse_selection() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("onclick: move |_| run_slash_command"));

@@ -7,11 +7,15 @@ use crate::chat_page::event::{
     SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
 use crate::chat_page::composer::{
-    SelectorMode, filter_sessions, menu_direction, move_selection, selector_mode,
+    PromptEdit, SelectorMode, edit_prompt, filter_sessions, menu_direction, move_selection,
+    selector_mode,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::{JsCast, closure::Closure};
+
+const PROMPT_ID: &str = "agent-chat-prompt";
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -28,6 +32,117 @@ fn current_agent() -> String {
         .and_then(|w| w.location().pathname().ok())
         .and_then(|path| path.split('/').find(|s| !s.is_empty()).map(str::to_string))
         .unwrap_or_else(|| "agent".to_string())
+}
+
+fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(PROMPT_ID)?
+        .dyn_into()
+        .ok()
+}
+
+fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(event) = web_sys::Event::new_with_event_init_dict("input", &init) {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+
+fn dispatch_keyboard_event(
+    textarea: &web_sys::HtmlTextAreaElement,
+    source: &web_sys::KeyboardEvent,
+) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_key(&source.key());
+    init.set_code(&source.code());
+    init.set_ctrl_key(source.ctrl_key());
+    init.set_shift_key(source.shift_key());
+    init.set_alt_key(source.alt_key());
+    init.set_meta_key(source.meta_key());
+    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init)
+    {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+
+fn install_global_prompt_input(
+    draft: Signal<String>,
+    slash_cmds: Signal<Vec<SlashCommandEntry>>,
+) {
+    let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+        let Some(textarea) = prompt_textarea() else {
+            return;
+        };
+        let prompt_focused = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_some_and(|element| element.id() == PROMPT_ID);
+        if prompt_focused {
+            return;
+        }
+
+        let selector_open = match selector_mode(&draft.peek()) {
+            SelectorMode::Resume(_) => true,
+            SelectorMode::Commands(query) => {
+                let query = query.to_lowercase();
+                slash_cmds
+                    .peek()
+                    .iter()
+                    .any(|command| command.name.starts_with(&query))
+            }
+            SelectorMode::None => false,
+        };
+        let key = event.key();
+        let direction = if event.meta_key() || event.alt_key() {
+            None
+        } else {
+            menu_direction(&key, event.ctrl_key())
+        };
+        let plain_invoke_or_close = !event.meta_key()
+            && !event.ctrl_key()
+            && !event.alt_key()
+            && matches!(key.as_str(), "Enter" | "Escape");
+        let selector_key = direction.is_some() || plain_invoke_or_close;
+        if selector_open && selector_key {
+            event.prevent_default();
+            event.stop_propagation();
+            let _ = textarea.focus();
+            dispatch_keyboard_event(&textarea, &event);
+            return;
+        }
+
+        if event.meta_key() || event.ctrl_key() || event.alt_key() {
+            return;
+        }
+        let edit = match key.as_str() {
+            "Backspace" => PromptEdit::Backspace,
+            "Delete" => PromptEdit::Delete,
+            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
+            _ => return,
+        };
+        event.prevent_default();
+        event.stop_propagation();
+        let start = textarea
+            .selection_start()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| textarea.value().encode_utf16().count() as u32);
+        let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+        let (value, caret) = edit_prompt(&textarea.value(), start, end, edit);
+        let _ = textarea.focus();
+        textarea.set_value(&value);
+        let _ = textarea.set_selection_range(caret, caret);
+        dispatch_input_event(&textarea);
+    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    if let Some(window) = web_sys::window() {
+        let _ = window
+            .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+    }
+    closure.forget();
 }
 
 #[component]
@@ -51,6 +166,8 @@ pub fn Page() -> Element {
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
+
+    use_effect(move || install_global_prompt_input(draft, slash_cmds));
 
     use_future(move || async move {
         loop {
@@ -407,6 +524,7 @@ pub fn Page() -> Element {
                     }
                     div { class: "flex items-end gap-2",
                         textarea {
+                            id: PROMPT_ID,
                             class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
                             rows: "1",
                             placeholder: "Message the agent…",
