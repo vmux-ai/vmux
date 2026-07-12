@@ -7,6 +7,8 @@ use cef::{
 };
 use std::os::raw::c_int;
 
+use crate::browser_process::renderer_handler::TextureWake;
+
 #[derive(Clone, Debug)]
 pub struct WebviewPopupEvent {
     pub webview: Entity,
@@ -19,14 +21,20 @@ pub struct LifeSpanHandlerBuilder {
     object: *mut RcImpl<sys::_cef_life_span_handler_t, Self>,
     webview: Entity,
     tx: WebviewPopupSenderInner,
+    wake: Option<TextureWake>,
 }
 
 impl LifeSpanHandlerBuilder {
-    pub fn build(webview: Entity, tx: WebviewPopupSenderInner) -> LifeSpanHandler {
+    pub fn build(
+        webview: Entity,
+        tx: WebviewPopupSenderInner,
+        wake: Option<TextureWake>,
+    ) -> LifeSpanHandler {
         LifeSpanHandler::new(Self {
             object: core::ptr::null_mut(),
             webview,
             tx,
+            wake,
         })
     }
 }
@@ -51,6 +59,7 @@ impl Clone for LifeSpanHandlerBuilder {
             object,
             webview: self.webview,
             tx: self.tx.clone(),
+            wake: self.wake.clone(),
         }
     }
 }
@@ -87,7 +96,40 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
         1
     }
 
+    fn on_before_close(&self, _browser: Option<&mut Browser>) {
+        if let Some(wake) = &self.wake {
+            wake();
+        }
+    }
+
     fn get_raw(&self) -> *mut sys::_cef_life_span_handler_t {
         self.object.cast()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn browser_close_wakes_bevy() {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let wakes_for_callback = Arc::clone(&wakes);
+        let wake: TextureWake = Arc::new(move || {
+            wakes_for_callback.fetch_add(1, Ordering::Relaxed);
+        });
+        let (tx, _) = async_channel::unbounded();
+        let handler = LifeSpanHandlerBuilder {
+            object: core::ptr::null_mut(),
+            webview: Entity::PLACEHOLDER,
+            tx,
+            wake: Some(wake),
+        };
+
+        handler.on_before_close(None);
+
+        assert_eq!(wakes.load(Ordering::Relaxed), 1);
     }
 }
