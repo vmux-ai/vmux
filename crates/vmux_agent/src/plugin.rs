@@ -199,6 +199,9 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
+            .init_resource::<
+                bevy::ecs::message::Messages<vmux_layout::worktree::TabDirectoryObserved>,
+            >()
             .add_systems(
                 Update,
                 (
@@ -880,6 +883,7 @@ impl AgentBrowserResolve<'_, '_> {
 pub(crate) struct AgentFileResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
+    observations: MessageWriter<'w, vmux_layout::worktree::TabDirectoryObserved>,
     agent_terms: Query<
         'w,
         's,
@@ -892,6 +896,7 @@ pub(crate) struct AgentFileResolve<'w, 's> {
     kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
     file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
+    tabs: Query<'w, 's, (), With<vmux_layout::tab::Tab>>,
 }
 
 impl AgentFileResolve<'_, '_> {
@@ -912,6 +917,17 @@ impl AgentFileResolve<'_, '_> {
             .iter()
             .find(|(_, pid, _)| **pid == anchor)?;
         self.kinds.get(entity).ok().map(|session| session.kind)
+    }
+
+    fn ancestor_tab(&self, entity: Entity) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let mut current = entity;
+        loop {
+            if self.tabs.contains(current) {
+                return Some(current);
+            }
+            current = self.child_of.get(current).ok()?.get();
+        }
     }
 
     /// The agent's existing `file://` follow-page (the page entity) and its leaf
@@ -1002,10 +1018,6 @@ fn handle_agent_file_touch(
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
 ) {
-    if !settings.agent.follow_files {
-        for _ in reader.read() {}
-        return;
-    }
     for request in reader.read() {
         let ServiceAgentCommand::FileTouched {
             anchor,
@@ -1021,6 +1033,17 @@ fn handle_agent_file_touch(
         let Some(agent_pane) = resolve.agent_pane(*anchor) else {
             continue;
         };
+        if let Some(tab) = resolve.ancestor_tab(agent_pane) {
+            resolve
+                .observations
+                .write(vmux_layout::worktree::TabDirectoryObserved {
+                    tab,
+                    path: PathBuf::from(path),
+                });
+        }
+        if !settings.agent.follow_files {
+            continue;
+        }
         let existing = resolve.file_page_for(agent_pane);
         resolve.open_beside.write(vmux_layout::OpenBesideRequest {
             pane: agent_pane,
@@ -3742,6 +3765,72 @@ mod tests {
         assert_eq!(
             file_touch_url("/a/b.rs", Some(10), Some(5), Some(12)),
             "file:///a/b.rs#L10:5-12"
+        );
+    }
+
+    #[test]
+    fn file_touch_emits_tab_directory_observation_when_file_follow_is_disabled() {
+        let mut settings = test_settings();
+        settings.agent.follow_files = false;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
+            .insert_resource(settings)
+            .add_systems(Update, handle_agent_file_touch);
+
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab::default())
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((anchor, ChildOf(stack)));
+        let path = std::env::temp_dir().join("vmux-observed-file.rs");
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::FileTouched {
+                    anchor,
+                    path: path.to_string_lossy().into_owned(),
+                    line: None,
+                    col: None,
+                    end_col: None,
+                    kind: vmux_service::protocol::FileTouchKind::Read,
+                },
+            });
+
+        app.update();
+
+        let messages = app
+            .world()
+            .resource::<Messages<vmux_layout::worktree::TabDirectoryObserved>>();
+        let mut cursor = messages.get_cursor();
+        let observations: Vec<_> = cursor.read(messages).cloned().collect();
+        assert_eq!(
+            observations,
+            vec![vmux_layout::worktree::TabDirectoryObserved { tab, path }]
+        );
+        let previews = app
+            .world()
+            .resource::<Messages<vmux_layout::OpenBesideRequest>>();
+        let mut preview_cursor = previews.get_cursor();
+        assert_eq!(
+            preview_cursor.read(previews).count(),
+            0,
+            "file-follow setting still controls preview panes"
         );
     }
 
