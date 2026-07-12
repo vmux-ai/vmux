@@ -39,12 +39,12 @@ use crate::browser_process::display_handler::{
     DisplayHandlerBuilder, SystemCursorIconSenderInner, WebviewCefStateSenderInner,
 };
 use crate::browser_process::life_span_handler::{LifeSpanHandlerBuilder, WebviewPopupSenderInner};
-use crate::browser_process::permission_handler::{
-    MediaPermissionSenderInner, PermissionHandlerBuilder,
-};
 use crate::browser_process::load_handler::{
     WebviewCommittedNavigationSenderInner, WebviewLoadHandlerBuilder,
     WebviewLoadingStateSenderInner,
+};
+use crate::browser_process::permission_handler::{
+    MediaPermissionSenderInner, PermissionHandlerBuilder,
 };
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 use crate::browser_process::request_handler::RequestHandlerBuilder;
@@ -131,8 +131,12 @@ pub struct WebviewBrowser {
     /// Cached decoded badge image, keyed by agent-kind tag, so it is rebuilt only
     /// when the owning agent changes.
     #[cfg(target_os = "macos")]
-    agent_badge_img:
-        RefCell<Option<(u8, objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>)>>,
+    agent_badge_img: RefCell<
+        Option<(
+            u8,
+            objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>,
+        )>,
+    >,
     /// Last applied badge `(kind_tag, bounds_w, bounds_h, scale_x100)` to skip
     /// redundant work (scale feeds the badge inset + border width).
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -585,6 +589,38 @@ impl Browsers {
         if let Some(browser) = self.browsers.get(webview) {
             browser.host.send_key_event(Some(&event));
         }
+    }
+
+    /// Returns whether a native windowed browser owns the macOS first responder.
+    #[cfg(target_os = "macos")]
+    pub fn windowed_has_native_focus(&self, webview: &Entity) -> Option<bool> {
+        use objc2_app_kit::NSView;
+
+        let browser = self.browsers.get(webview)?;
+        if !browser.windowed || !browser.allow_native_focus {
+            return None;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return Some(false);
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let Some(window) = view.window() else {
+            return Some(false);
+        };
+        let Some(responder) = window.firstResponder() else {
+            return Some(false);
+        };
+        let Some(responder_view) = responder.downcast_ref::<NSView>() else {
+            return Some(false);
+        };
+        Some(core::ptr::eq(responder_view, view) || responder_view.isDescendantOf(view))
+    }
+
+    /// Returns no native focus state on platforms without AppKit windowed views.
+    #[cfg(not(target_os = "macos"))]
+    pub fn windowed_has_native_focus(&self, _: &Entity) -> Option<bool> {
+        None
     }
 
     pub fn set_windowed_focus(&self, webview: &Entity, focused: bool) {
@@ -2099,13 +2135,13 @@ fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use super::requires_extension_free_context;
     use super::{
         BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
         HIDDEN_WINDOWLESS_FRAME_RATE, effective_windowless_frame_rate,
         windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
-    use super::requires_extension_free_context;
     use crate::prelude::modifiers_from_mouse_buttons;
     use bevy::prelude::*;
     use std::time::Duration;
@@ -2451,6 +2487,24 @@ mod tests {
         assert!(implementation.contains("if cancel_native_focus"));
         assert!(implementation.contains(".with_focus_handler(FocusCanceler::build(texture_wake))"));
         assert!(implementation.contains("pub fn set_windowed_focus"));
+    }
+
+    #[test]
+    fn windowed_native_focus_detects_first_responder_subtree() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let focus_fn = implementation
+            .split("pub fn windowed_has_native_focus")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn set_windowed_focus").next())
+            .unwrap_or_default();
+
+        assert!(focus_fn.contains("window.firstResponder()"));
+        assert!(focus_fn.contains("downcast_ref::<NSView>()"));
+        assert!(focus_fn.contains("isDescendantOf(view)"));
+        assert!(implementation.contains("#[cfg(not(target_os = \"macos\"))]"));
     }
 
     #[test]
