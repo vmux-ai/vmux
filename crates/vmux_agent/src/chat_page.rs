@@ -2,6 +2,7 @@
 //! conversation + run-state (pushed from ECS) and sends prompt/approval intents back.
 //! This is the single agent front-end; it replaced the legacy CLI-install setup page.
 
+pub(crate) mod composer;
 pub mod event;
 
 #[cfg(target_arch = "wasm32")]
