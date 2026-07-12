@@ -20,7 +20,7 @@ pub fn resolve_acp(
 }
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
-    agent_id != "codex"
+    !matches!(agent_id, "claude" | "codex")
 }
 
 fn resolve_inner(
@@ -120,9 +120,10 @@ mod tests {
     }
 
     #[test]
-    fn codex_acp_keeps_vmux_terminal_tools() {
+    fn compatibility_acp_agents_keep_vmux_terminal_tools() {
         assert!(!acp_uses_native_terminals("codex"));
-        assert!(acp_uses_native_terminals("claude"));
+        assert!(!acp_uses_native_terminals("claude"));
+        assert!(acp_uses_native_terminals("vibe-acp"));
     }
 
     #[test]

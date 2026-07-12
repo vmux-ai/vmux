@@ -154,11 +154,13 @@ pub async fn run(
     command: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    agent_id: String,
     mcp_servers: Vec<McpServer>,
     resume: Option<String>,
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
+    let session_meta = session_meta_for_agent(&agent_id);
     let mut child = match Command::new(&command)
         .args(&args)
         .envs(env)
@@ -366,6 +368,7 @@ pub async fn run(
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
                     load.mcp_servers = mcp_servers.clone();
+                    load.meta = session_meta.clone();
                     async { cx.send_request(load).block_task().await.map(|_| ()) }
                 })
                 .await;
@@ -391,6 +394,7 @@ pub async fn run(
                         let ensured = ensure_session(&mut session_id, || {
                             let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
                             new_session.mcp_servers = mcp_servers.clone();
+                            new_session.meta = session_meta.clone();
                             async {
                                 cx.send_request(new_session)
                                     .block_task()
@@ -510,6 +514,39 @@ where
     let sid = create().await?;
     *session_id = Some(sid.clone());
     Ok((sid, true))
+}
+
+const CLAUDE_ACP_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. \
+Run ALL shell commands via the mcp__vmux__run tool, which opens a visible terminal the user can \
+watch and take over. Use mcp__vmux__read_terminal to inspect continued output. Omit the pane \
+argument because it targets your own terminal pane. Do ALL web access via the vmux browser tools. \
+If you invoke a required Skill tool, continue the original user request in the same turn after \
+the skill loads. Never end the turn after skill activation or answer only Ready.";
+
+fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if agent_id != "claude" {
+        return None;
+    }
+    let serde_json::Value::Object(meta) = serde_json::json!({
+        "systemPrompt": {
+            "append": CLAUDE_ACP_STEER_PROMPT,
+        },
+        "claudeCode": {
+            "options": {
+                "disallowedTools": ["Bash", "Monitor", "WebSearch", "WebFetch"],
+                "allowedTools": [
+                    "mcp__vmux__run",
+                    "mcp__vmux__read_terminal",
+                    "mcp__vmux__browser_navigate",
+                    "mcp__vmux__browser_snapshot",
+                    "mcp__vmux__browser_scroll",
+                ],
+            },
+        },
+    }) else {
+        unreachable!()
+    };
+    Some(meta)
 }
 
 async fn drain_stderr(stderr: tokio::process::ChildStderr) {
@@ -979,6 +1016,28 @@ mod tests {
         assert!(wire.contains("prior conversation"));
         assert!(wire.ends_with("continue here"));
         assert_eq!(compose_agent_prompt("plain", None), "plain");
+    }
+
+    #[test]
+    fn claude_acp_disables_native_shell_and_steers_skill_continuation() {
+        let meta = session_meta_for_agent("claude").expect("Claude ACP metadata");
+        let options = &meta["claudeCode"]["options"];
+
+        assert_eq!(
+            options["disallowedTools"],
+            serde_json::json!(["Bash", "Monitor", "WebSearch", "WebFetch"])
+        );
+        assert!(
+            options["allowedTools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "mcp__vmux__run")
+        );
+        let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
+        assert!(prompt.contains("mcp__vmux__run"));
+        assert!(prompt.contains("continue the original user request"));
+        assert!(session_meta_for_agent("vibe-acp").is_none());
     }
 
     #[test]

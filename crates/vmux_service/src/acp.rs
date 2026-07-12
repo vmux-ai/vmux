@@ -35,6 +35,7 @@ impl AcpSessionManager {
     pub fn spawn(
         &mut self,
         sid: String,
+        agent_id: String,
         command: String,
         args: Vec<String>,
         env: Vec<(String, String)>,
@@ -62,6 +63,7 @@ impl AcpSessionManager {
             command,
             args,
             env,
+            agent_id,
             mcp_servers,
             resume,
             shared.clone(),

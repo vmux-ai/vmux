@@ -843,7 +843,7 @@ async fn handle_client(
 
             ClientMessage::SpawnAcpAgent {
                 sid,
-                agent_id: _,
+                agent_id,
                 command,
                 args,
                 env,
@@ -866,6 +866,7 @@ async fn handle_client(
                     .unwrap_or_default();
                 acp_manager.lock().await.spawn(
                     sid.clone(),
+                    agent_id,
                     command,
                     args,
                     env,
