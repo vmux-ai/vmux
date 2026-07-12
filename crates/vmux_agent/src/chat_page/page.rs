@@ -6,6 +6,9 @@ use crate::chat_page::event::{
     ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
     SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
+use crate::chat_page::composer::{
+    SelectorMode, filter_sessions, menu_direction, move_selection, selector_mode,
+};
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
@@ -44,11 +47,10 @@ pub fn Page() -> Element {
     let mut last_top = use_signal(|| 0i32);
     let mut queued = use_signal(Vec::<String>::new);
     let mut paused = use_signal(|| false);
-    // Slash-menu state: `resume_mode` false = command list (typing `/…`), true = session picker.
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
     let mut menu_sel = use_signal(|| 0usize);
-    let mut resume_mode = use_signal(|| false);
+    let mut resume_requested = use_signal(|| false);
 
     use_future(move || async move {
         loop {
@@ -107,6 +109,16 @@ pub fn Page() -> Element {
             menu_sel.set(0);
         });
 
+    use_effect(move || {
+        let in_resume_selector = matches!(selector_mode(&draft()), SelectorMode::Resume(_));
+        if in_resume_selector && !resume_requested() {
+            let _ = try_cef_bin_emit_rkyv(&ResumeListRequest);
+            resume_requested.set(true);
+        } else if !in_resume_selector && resume_requested() {
+            resume_requested.set(false);
+        }
+    });
+
     // Drive the document (→ tab) title from the agent + its live run-state, so the user can see
     // what each agent is doing without opening the pane.
     use_effect(move || {
@@ -137,18 +149,47 @@ pub fn Page() -> Element {
     };
 
     let draft_val = draft();
-    let menu_open = slash_query(&draft_val).is_some() && !resume_mode();
-    let session_menu_open = resume_mode();
-    let filtered_cmds: Vec<SlashCommandEntry> = {
-        let q = slash_query(&draft_val).unwrap_or("").to_lowercase();
-        slash_cmds
-            .read()
-            .iter()
-            .filter(|c| c.name.starts_with(&q))
-            .cloned()
-            .collect()
+    let selector = selector_mode(&draft_val);
+    let command_query = match selector {
+        SelectorMode::Commands(query) => Some(query),
+        _ => None,
     };
-    let cmd_menu_open = menu_open && !filtered_cmds.is_empty();
+    let resume_query = match selector {
+        SelectorMode::Resume(query) => Some(query),
+        _ => None,
+    };
+    let filtered_cmds: Vec<SlashCommandEntry> = command_query
+        .map(|query| {
+            let query = query.to_lowercase();
+            slash_cmds
+                .read()
+                .iter()
+                .filter(|command| command.name.starts_with(&query))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let filtered_sessions = resume_query
+        .map(|query| filter_sessions(&sessions.read(), query))
+        .unwrap_or_default();
+    let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
+    let session_menu_open = resume_query.is_some();
+
+    use_effect(move || {
+        let selected = menu_sel();
+        let _ = draft.read();
+        let _ = sessions.read().len();
+        if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| {
+                document.get_element_by_id(&format!("agent-selector-item-{selected}"))
+            })
+        {
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+        }
+    });
 
     rsx! {
         main {
@@ -276,16 +317,17 @@ pub fn Page() -> Element {
                 div { class: "relative mx-auto flex max-w-3xl flex-col gap-2",
                     if cmd_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
-                            for (i , c) in filtered_cmds.iter().enumerate() {
+                            for (i , command) in filtered_cmds.iter().enumerate() {
                                 {
-                                    let c = c.clone();
+                                    let command = command.clone();
                                     rsx! {
                                         div {
                                             key: "sc{i}",
+                                            id: "agent-selector-item-{i}",
                                             class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
-                                            onclick: move |_| run_slash_command(&c.name, resume_mode, draft),
-                                            span { class: "font-medium text-foreground", "/{c.name}" }
-                                            span { class: "text-xs text-muted-foreground", "{c.description}" }
+                                            onclick: move |_| run_slash_command(&command.name, draft, menu_sel),
+                                            span { class: "font-medium text-foreground", "/{command.name}" }
+                                            span { class: "text-xs text-muted-foreground", "{command.description}" }
                                         }
                                     }
                                 }
@@ -296,17 +338,20 @@ pub fn Page() -> Element {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
                             if sessions.read().is_empty() {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
+                            } else if filtered_sessions.is_empty() {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching sessions" }
                             } else {
-                                for (i , s) in sessions.read().iter().enumerate() {
+                                for (i , session) in filtered_sessions.iter().enumerate() {
                                     {
-                                        let s = s.clone();
+                                        let session = session.clone();
                                         rsx! {
                                             div {
                                                 key: "rs{i}",
+                                                id: "agent-selector-item-{i}",
                                                 class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
-                                                onclick: move |_| select_resume_session(&s, resume_mode, draft),
-                                                span { class: "truncate text-sm text-foreground", "{s.title}" }
-                                                span { class: "truncate text-xs text-muted-foreground", "{s.subtitle}" }
+                                                onclick: move |_| select_resume_session(&session, draft),
+                                                span { class: "truncate text-sm text-foreground", "{session.title}" }
+                                                span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
                                             }
                                         }
                                     }
@@ -366,67 +411,81 @@ pub fn Page() -> Element {
                             rows: "1",
                             placeholder: "Message the agent…",
                             value: "{draft}",
-                            oninput: move |e| draft.set(e.value()),
+                            oninput: move |e| {
+                                draft.set(e.value());
+                                menu_sel.set(0);
+                            },
                             onkeydown: move |e| {
                                 let streaming = matches!(status().as_str(), "streaming" | "awaiting");
                                 let draft_now = draft.peek().clone();
-                                let sess_open = *resume_mode.peek();
-                                let cmd_items: Vec<SlashCommandEntry> = if slash_query(&draft_now)
-                                    .is_some()
-                                    && !*resume_mode.peek()
-                                {
-                                    let q = slash_query(&draft_now).unwrap_or("").to_lowercase();
-                                    slash_cmds
-                                        .peek()
-                                        .iter()
-                                        .filter(|c| c.name.starts_with(&q))
-                                        .cloned()
-                                        .collect()
-                                } else {
-                                    Vec::new()
+                                let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
+                                    SelectorMode::Commands(query) => {
+                                        let query = query.to_lowercase();
+                                        (
+                                            slash_cmds
+                                                .peek()
+                                                .iter()
+                                                .filter(|command| command.name.starts_with(&query))
+                                                .cloned()
+                                                .collect::<Vec<_>>(),
+                                            Vec::new(),
+                                            false,
+                                        )
+                                    }
+                                    SelectorMode::Resume(query) => (
+                                        Vec::new(),
+                                        filter_sessions(&sessions.peek(), query),
+                                        true,
+                                    ),
+                                    SelectorMode::None => (Vec::new(), Vec::new(), false),
                                 };
-                                let any_menu = !cmd_items.is_empty() || sess_open;
-                                let len = if sess_open {
-                                    sessions.peek().len()
+                                let selector_open = session_selector_open || !cmd_items.is_empty();
+                                let selector_len = if session_selector_open {
+                                    sess_items.len()
                                 } else {
                                     cmd_items.len()
                                 };
+                                let key = e.key().to_string();
+                                let command_modifier = e.modifiers().meta()
+                                    || e.modifiers().ctrl()
+                                    || e.modifiers().alt();
+                                let direction = if e.modifiers().meta() || e.modifiers().alt() {
+                                    None
+                                } else {
+                                    menu_direction(&key, e.modifiers().ctrl())
+                                };
 
-                                if e.key() == Key::Escape && *resume_mode.peek() {
+                                if selector_open && let Some(direction) = direction {
                                     e.prevent_default();
-                                    resume_mode.set(false);
-                                    draft.set(String::new());
+                                    let selected = *menu_sel.peek();
+                                    menu_sel.set(move_selection(selected, selector_len, direction));
                                     return;
                                 }
-
-                                if any_menu && matches!(e.key(), Key::ArrowDown | Key::ArrowUp) {
+                                if selector_open
+                                    && e.key() == Key::Enter
+                                    && !e.modifiers().shift()
+                                    && !command_modifier
+                                {
                                     e.prevent_default();
-                                    if len > 0 {
-                                        let cur = *menu_sel.peek();
-                                        let next = match e.key() {
-                                            Key::ArrowDown => (cur + 1) % len,
-                                            _ => (cur + len - 1) % len,
-                                        };
-                                        menu_sel.set(next);
-                                    }
-                                    return;
-                                }
-                                if any_menu && e.key() == Key::Enter && !e.modifiers().shift() {
-                                    e.prevent_default();
-                                    let sel = *menu_sel.peek();
-                                    if sess_open {
-                                        if let Some(s) = sessions.peek().get(sel) {
-                                            select_resume_session(s, resume_mode, draft);
+                                    let selected = *menu_sel.peek();
+                                    if session_selector_open {
+                                        if let Some(session) = sess_items.get(selected) {
+                                            select_resume_session(session, draft);
                                         }
-                                    } else if let Some(c) = cmd_items.get(sel) {
-                                        run_slash_command(&c.name, resume_mode, draft);
+                                    } else if let Some(command) = cmd_items.get(selected) {
+                                        run_slash_command(&command.name, draft, menu_sel);
                                     }
                                     return;
                                 }
-                                if any_menu && e.key() == Key::Escape {
+                                if selector_open && e.key() == Key::Escape && !command_modifier {
                                     e.prevent_default();
-                                    resume_mode.set(false);
                                     draft.set(String::new());
+                                    menu_sel.set(0);
+                                    return;
+                                }
+                                if session_selector_open
+                                    && matches!(e.key(), Key::Enter | Key::Escape)
+                                {
                                     return;
                                 }
 
@@ -489,25 +548,18 @@ pub fn Page() -> Element {
     }
 }
 
-/// A draft is in slash mode when it is a single `/token` (a leading slash, no whitespace yet).
-fn slash_query(draft: &str) -> Option<&str> {
-    let d = draft.strip_prefix('/')?;
-    if d.contains(char::is_whitespace) {
-        None
-    } else {
-        Some(d)
-    }
-}
-
 /// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
 /// current session to the other runtime. Unknown names are ignored (the raw text still submits
 /// via the normal Enter path).
-fn run_slash_command(name: &str, mut resume_mode: Signal<bool>, mut draft: Signal<String>) {
+fn run_slash_command(
+    name: &str,
+    mut draft: Signal<String>,
+    mut menu_sel: Signal<usize>,
+) {
     match name {
         "resume" => {
-            let _ = try_cef_bin_emit_rkyv(&ResumeListRequest);
-            resume_mode.set(true);
-            draft.set(String::new());
+            menu_sel.set(0);
+            draft.set("/resume ".to_string());
         }
         "cli" => {
             let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
@@ -523,7 +575,6 @@ fn run_slash_command(name: &str, mut resume_mode: Signal<bool>, mut draft: Signa
 
 fn select_resume_session(
     session: &ResumableSessionEntry,
-    mut resume_mode: Signal<bool>,
     mut draft: Signal<String>,
 ) {
     let _ = try_cef_bin_emit_rkyv(&ResumeSession {
@@ -531,7 +582,6 @@ fn select_resume_session(
         sid: session.sid.clone(),
         cwd: session.cwd.clone(),
     });
-    resume_mode.set(false);
     draft.set(String::new());
 }
 

@@ -655,8 +655,19 @@ mod native_tests {
     #[test]
     fn composer_resume_menu_remains_escapeable_when_empty() {
         let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("let session_menu_open = resume_mode();"));
-        assert!(source.contains("if e.key() == Key::Escape && *resume_mode.peek()"));
+        assert!(source.contains("let session_menu_open = resume_query.is_some();"));
+        assert!(source.contains("e.key() == Key::Escape && !command_modifier"));
+    }
+
+    #[test]
+    fn composer_resume_selector_supports_prompt_filter_and_keyboard_navigation() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("SelectorMode::Resume"));
+        assert!(source.contains("filter_sessions"));
+        assert!(source.contains("No matching sessions"));
+        assert!(source.contains("menu_direction"));
+        assert!(source.contains("ScrollLogicalPosition::Nearest"));
+        assert!(source.contains("agent-selector-item-{i}"));
     }
 
     #[test]
