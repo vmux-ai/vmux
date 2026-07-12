@@ -3739,7 +3739,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_cannot_enable_run_placement_override_through_settings_update() {
+    fn run_placement_override_settings_update_rejects_agents_and_allows_users() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
             .add_message::<vmux_layout::BrowserNavigateRequest>()
@@ -3793,6 +3793,24 @@ mod tests {
                 "agent update unexpectedly enabled override through {path}"
             );
         }
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::User,
+                command: ServiceAgentCommand::UpdateSettings {
+                    path: "agent.allow_run_placement_override".to_string(),
+                    value_json: serde_json::json!(true).to_string(),
+                },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .resource::<AppSettings>()
+                .agent
+                .allow_run_placement_override
+        );
     }
 
     #[test]
