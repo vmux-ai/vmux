@@ -21,7 +21,9 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{CefEmbeddedHosts, RenderTextureMessage, webview_debug_log};
+use bevy_cef_core::prelude::{
+    CefEmbeddedHosts, CommandLineConfig, RenderTextureMessage, webview_debug_log,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
@@ -100,6 +102,10 @@ impl Plugin for BrowserPlugin {
                 .collect(),
         );
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
+        let cef_command_line = CommandLineConfig {
+            switches: vmux_core::profile::cef_keychain_switches().to_vec(),
+            switch_values: Vec::new(),
+        };
         configure_cef_backend_sync(app)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<PageOpenRequest>()
@@ -119,6 +125,7 @@ impl Plugin for BrowserPlugin {
             .add_plugins(
                 (
                     CefPlugin {
+                        command_line_config: cef_command_line,
                         root_cache_path: cef_root_cache_path(),
                         embedded_hosts,
                         ..default()
