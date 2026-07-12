@@ -411,7 +411,9 @@ PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses
 beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \
 into your project on every run; the shell stays where it was. The first `run` opens it; later ones run \
 in that same shell. Rule of thumb: don't open a new pane unless you actually need one. \
-Override only when you mean to: \
+Placement overrides are disabled by default: omit `mode`, `direction`, and `beside`. If vmux rejects \
+them, retry the bare run. Users can enable overrides with `agent.allow_run_placement_override`. \
+When enabled, override only when you mean to: \
 - `mode`: `auto` (default, reuse your one persistent shell) | `split` (force a NEW pane) | `stack` \
 (force a new stacked terminal in the anchor's pane). \
 - `beside`: anchor to a specific page — a terminal id a previous run returned, or \"self\" for your own \
@@ -735,17 +737,30 @@ pub fn dispatch_with_anchor(
             "stack" => vmux_service::protocol::PlacementMode::Stack,
             other => return Err(format!("unknown mode: {other}")),
         };
-        return Ok(DispatchTarget::Command(AgentCommand::Run {
-            anchor,
-            command,
-            placement_override,
-            direction,
-            focus,
-            beside,
-            mode,
-            terminal,
-            done_marker: None,
-        }));
+        let command = if placement_override {
+            AgentCommand::RunWithPlacementOverride {
+                anchor,
+                command,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker: None,
+            }
+        } else {
+            AgentCommand::Run {
+                anchor,
+                command,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker: None,
+            }
+        };
+        return Ok(DispatchTarget::Command(command));
     }
     if name == "create_worktree" {
         let anchor = anchor
@@ -1621,9 +1636,7 @@ mod tests {
         )
         .unwrap();
         match bare {
-            DispatchTarget::Command(AgentCommand::Run {
-                placement_override, ..
-            }) => assert!(!placement_override),
+            DispatchTarget::Command(AgentCommand::Run { .. }) => {}
             other => panic!("expected Run, got {other:?}"),
         }
 
@@ -1634,12 +1647,26 @@ mod tests {
         ] {
             let explicit = dispatch_with_anchor("run", arguments, Some(anchor)).unwrap();
             match explicit {
-                DispatchTarget::Command(AgentCommand::Run {
-                    placement_override, ..
-                }) => assert!(placement_override),
-                other => panic!("expected Run, got {other:?}"),
+                DispatchTarget::Command(AgentCommand::RunWithPlacementOverride { .. }) => {}
+                other => panic!("expected RunWithPlacementOverride, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn run_tool_documents_default_placement_policy() {
+        let run = tool_definitions()
+            .into_iter()
+            .find(|definition| definition.name == "run")
+            .expect("run definition");
+        assert!(
+            run.description
+                .contains("agent.allow_run_placement_override")
+        );
+        assert!(
+            run.description
+                .contains("omit `mode`, `direction`, and `beside`")
+        );
     }
 
     #[test]
@@ -1654,12 +1681,9 @@ mod tests {
         .unwrap();
         match target {
             DispatchTarget::Command(AgentCommand::Run {
-                terminal: Some(t),
-                placement_override,
-                ..
+                terminal: Some(t), ..
             }) => {
                 assert_eq!(t, term);
-                assert!(!placement_override);
             }
             other => panic!("expected Run with terminal, got {other:?}"),
         }

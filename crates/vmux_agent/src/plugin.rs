@@ -1548,6 +1548,7 @@ fn handle_agent_commands(
             }
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
+            | ServiceAgentCommand::RunWithPlacementOverride { .. }
             | ServiceAgentCommand::CreateWorktree { .. } => {
                 continue;
             }
@@ -1946,7 +1947,16 @@ fn handle_agent_self_commands(
             ServiceAgentCommand::Run {
                 anchor,
                 command,
-                placement_override,
+                direction,
+                focus,
+                beside,
+                mode,
+                terminal,
+                done_marker,
+            }
+            | ServiceAgentCommand::RunWithPlacementOverride {
+                anchor,
+                command,
                 direction,
                 focus,
                 beside,
@@ -1954,7 +1964,13 @@ fn handle_agent_self_commands(
                 terminal,
                 done_marker,
             } => 'run: {
-                if let Err(error) = validate_run_placement_policy(&settings, *placement_override) {
+                let placement_override = matches!(
+                    &request.command,
+                    ServiceAgentCommand::RunWithPlacementOverride { .. }
+                ) || beside.is_some()
+                    || *mode != vmux_service::protocol::PlacementMode::Auto
+                    || *direction != vmux_service::protocol::AgentPaneDirection::Right;
+                if let Err(error) = validate_run_placement_policy(&settings, placement_override) {
                     break 'run AgentCommandResult::Error(error.to_string());
                 }
                 let focus = requested_focus_for_origin(&request.origin, *focus);
