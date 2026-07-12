@@ -22,29 +22,53 @@ pub struct WorktreeStatus {
     pub ahead: u32,
 }
 
-/// The repo root containing `dir` (`git rev-parse --show-toplevel`). `dir` must exist.
-pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
-    let (stdout, stderr, ok) = git(dir, &["rev-parse", "--show-toplevel"])?;
-    if !ok {
-        return Err(git_err(&stdout, &stderr));
-    }
-    Ok(PathBuf::from(stdout.trim()))
+/// Canonical checkout root and shared Git directory for a repository checkout.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckoutInfo {
+    pub root: PathBuf,
+    pub common_dir: PathBuf,
 }
 
-/// The absolute common Git directory shared by a repository's main and linked worktrees.
-pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
+/// Resolve checkout root and shared Git directory with one `git rev-parse` call.
+pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     let (stdout, stderr, ok) = git(
         dir,
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-common-dir",
+        ],
     )?;
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
-    let path = PathBuf::from(stdout.trim());
-    if path.as_os_str().is_empty() {
-        return Err(GitError("git common dir is empty".to_string()));
-    }
-    Ok(path.canonicalize().unwrap_or(path))
+    let mut lines = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let root = lines
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| GitError("git checkout root is empty".to_string()))?;
+    let common_dir = lines
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| GitError("git common dir is empty".to_string()))?;
+    Ok(CheckoutInfo {
+        root: root.canonicalize().unwrap_or(root),
+        common_dir: common_dir.canonicalize().unwrap_or(common_dir),
+    })
+}
+
+/// The repo root containing `dir` (`git rev-parse --show-toplevel`). `dir` must exist.
+pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
+    checkout_info(dir).map(|info| info.root)
+}
+
+/// The absolute common Git directory shared by a repository's main and linked worktrees.
+pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
+    checkout_info(dir).map(|info| info.common_dir)
 }
 
 /// The current branch name at `root`, falling back to a short SHA when HEAD is detached.
@@ -368,5 +392,20 @@ mod tests {
         assert_eq!(common_dir_of(&wt).unwrap(), main_common);
         assert_ne!(common_dir_of(other.path()).unwrap(), main_common);
         assert!(common_dir_of(not_repo.path()).is_err());
+    }
+
+    #[test]
+    fn checkout_info_reports_root_and_shared_common_dir() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+
+        let main = checkout_info(repo.path()).unwrap();
+        let linked = checkout_info(&wt).unwrap();
+
+        assert_eq!(main.root, repo.path().canonicalize().unwrap());
+        assert_eq!(linked.root, wt.canonicalize().unwrap());
+        assert_eq!(linked.common_dir, main.common_dir);
     }
 }

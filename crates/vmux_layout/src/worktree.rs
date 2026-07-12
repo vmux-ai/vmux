@@ -2,12 +2,15 @@
 //! attach [`TabWorktree`]) and reconcile away a worktree whose checkout has vanished. Creation is
 //! synchronous — the agent-facing `create_worktree` MCP command needs the path back in one call.
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use bevy::prelude::*;
 
 use crate::tab::{Tab, TabWorktree};
-use vmux_git::worktree::{self, WorktreeInfo};
+use vmux_git::worktree::{self, CheckoutInfo, WorktreeInfo};
 
 pub struct WorktreePlugin;
 
@@ -119,40 +122,104 @@ fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut com
     }
 }
 
-fn observed_checkout_root(path: &Path) -> Option<PathBuf> {
+#[derive(Clone)]
+struct CachedCheckoutInfo {
+    startup_dir: String,
+    info: CheckoutInfo,
+}
+
+fn cached_checkout_info(
+    cache: &mut HashMap<Entity, CachedCheckoutInfo>,
+    tab: Entity,
+    startup_dir: &str,
+    resolve: impl FnOnce(&Path) -> Option<CheckoutInfo>,
+) -> Option<CheckoutInfo> {
+    if let Some(cached) = cache.get(&tab)
+        && cached.startup_dir == startup_dir
+    {
+        return Some(cached.info.clone());
+    }
+    cache.remove(&tab);
+    let info = resolve(Path::new(startup_dir))?;
+    cache.insert(
+        tab,
+        CachedCheckoutInfo {
+            startup_dir: startup_dir.to_string(),
+            info: info.clone(),
+        },
+    );
+    Some(info)
+}
+
+fn observed_start_dir(path: &Path) -> Option<PathBuf> {
     if !path.exists() {
         return None;
     }
     let start = if path.is_dir() { path } else { path.parent()? };
-    worktree::repo_root_of(start).ok()
+    start.canonicalize().ok()
+}
+
+fn is_within_checkout_without_nested_git_boundary(root: &Path, observed_dir: &Path) -> bool {
+    observed_dir.starts_with(root)
+        && !observed_dir
+            .ancestors()
+            .take_while(|ancestor| *ancestor != root)
+            .any(|ancestor| ancestor.join(".git").exists())
 }
 
 fn rebind_tab_directories(
     mut reader: MessageReader<TabDirectoryObserved>,
     mut tabs: Query<&mut Tab>,
     managed: Query<(), With<TabWorktree>>,
+    mut removed_tabs: RemovedComponents<Tab>,
+    mut checkout_cache: Local<HashMap<Entity, CachedCheckoutInfo>>,
     mut commands: Commands,
 ) {
+    for tab in removed_tabs.read() {
+        checkout_cache.remove(&tab);
+    }
     for observed in reader.read() {
-        let Some(observed_root) = observed_checkout_root(&observed.path) else {
+        let Some(observed_dir) = observed_start_dir(&observed.path) else {
             continue;
         };
         let Ok(mut tab) = tabs.get_mut(observed.tab) else {
             continue;
         };
-        let Some(current) = tab.startup_dir.as_deref() else {
+        let Some(current) = tab.startup_dir.clone() else {
             continue;
         };
-        let Ok(current_common) = worktree::common_dir_of(Path::new(current)) else {
-            continue;
-        };
-        let Ok(observed_common) = worktree::common_dir_of(&observed_root) else {
-            continue;
-        };
-        if current_common != observed_common || Path::new(current) == observed_root.as_path() {
+        if let Ok(current_dir) = Path::new(&current).canonicalize()
+            && is_within_checkout_without_nested_git_boundary(&current_dir, &observed_dir)
+        {
             continue;
         }
-        tab.startup_dir = Some(observed_root.to_string_lossy().into_owned());
+        let Some(current_info) =
+            cached_checkout_info(&mut checkout_cache, observed.tab, &current, |path| {
+                worktree::checkout_info(path).ok()
+            })
+        else {
+            continue;
+        };
+        if is_within_checkout_without_nested_git_boundary(&current_info.root, &observed_dir) {
+            continue;
+        }
+        let Ok(observed_info) = worktree::checkout_info(&observed_dir) else {
+            continue;
+        };
+        if current_info.common_dir != observed_info.common_dir
+            || current_info.root == observed_info.root
+        {
+            continue;
+        }
+        let startup_dir = observed_info.root.to_string_lossy().into_owned();
+        tab.startup_dir = Some(startup_dir.clone());
+        checkout_cache.insert(
+            observed.tab,
+            CachedCheckoutInfo {
+                startup_dir,
+                info: observed_info,
+            },
+        );
         if managed.contains(observed.tab) {
             commands.entity(observed.tab).remove::<TabWorktree>();
         }
@@ -162,6 +229,8 @@ fn rebind_tab_directories(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::collections::HashMap;
     use std::process::Command;
 
     #[derive(Resource)]
@@ -414,6 +483,128 @@ mod tests {
             app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
             Some(main_expected.as_str())
         );
+    }
+
+    #[test]
+    fn observation_keeps_same_checkout_directory() {
+        let repo = init_repo();
+        let original = repo
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe(&mut app, tab, &repo.path().join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_rebinds_from_main_checkout_to_nested_linked_worktree() {
+        let repo = init_repo();
+        let linked_path = repo.path().join(".worktrees/linked");
+        worktree::worktree_add(repo.path(), &linked_path, "vmux/linked", "main").unwrap();
+        let expected = linked_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(repo.path().to_string_lossy().into_owned()),
+            })
+            .id();
+
+        observe(&mut app, tab, &linked_path.join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_ignores_unrelated_repo_nested_inside_checkout() {
+        let repo = init_repo();
+        let nested = repo.path().join("vendor/nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        git(&nested, &["init", "-q", "-b", "main"]);
+        git(&nested, &["config", "user.email", "t@example.com"]);
+        git(&nested, &["config", "user.name", "Test"]);
+        git(&nested, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(nested.join("nested.txt"), "nested\n").unwrap();
+        git(&nested, &["add", "nested.txt"]);
+        git(&nested, &["commit", "-qm", "init"]);
+        let original = repo.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe(&mut app, tab, &nested.join("nested.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
+    }
+
+    #[test]
+    fn cached_checkout_info_resolves_again_only_after_startup_dir_changes() {
+        let tab = Entity::from_bits(1);
+        let calls = Cell::new(0);
+        let first = vmux_git::worktree::CheckoutInfo {
+            root: PathBuf::from("/repo"),
+            common_dir: PathBuf::from("/repo/.git"),
+        };
+        let second = vmux_git::worktree::CheckoutInfo {
+            root: PathBuf::from("/repo/.worktrees/next"),
+            common_dir: PathBuf::from("/repo/.git"),
+        };
+        let mut cache = HashMap::new();
+
+        let resolved = cached_checkout_info(&mut cache, tab, "/repo", |_| {
+            calls.set(calls.get() + 1);
+            Some(first.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved, first);
+        let resolved = cached_checkout_info(&mut cache, tab, "/repo", |_| {
+            calls.set(calls.get() + 1);
+            Some(second.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved, first);
+        let resolved = cached_checkout_info(&mut cache, tab, "/repo/.worktrees/next", |_| {
+            calls.set(calls.get() + 1);
+            Some(second.clone())
+        })
+        .unwrap();
+
+        assert_eq!(resolved, second);
+        assert_eq!(calls.get(), 2);
     }
 
     #[test]
