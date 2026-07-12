@@ -722,8 +722,8 @@ fn truncate_terminal_output(output: String, output_byte_limit: Option<u64>) -> (
     (output[start..].to_string(), true)
 }
 
-/// `terminal/release`: stop tracking the terminal. The pane + process are left for the user (they
-/// may still want to watch or take over); the GUI reaps the pane when the user closes it.
+/// `terminal/release`: stop tracking the terminal and kill the backing process. The visible pane is
+/// left in place; the GUI reaps it when the user closes it.
 async fn release_terminal(
     shared: &AcpShared,
     req: ReleaseTerminalRequest,

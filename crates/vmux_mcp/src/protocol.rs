@@ -56,7 +56,7 @@ async fn handle_message(
         "tools/list" => {
             Ok(json!({ "tools": crate::tools::tool_definitions_filtered(acp_terminals) }))
         }
-        "tools/call" => tool_call_result(&params, anchor).await,
+        "tools/call" => tool_call_result(&params, anchor, acp_terminals).await,
         _ => {
             return Some(json!({
                 "jsonrpc": "2.0",
@@ -103,11 +103,15 @@ fn initialize_result(params: &Value) -> Value {
 async fn tool_call_result(
     params: &Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
 ) -> Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "tools/call missing name".to_string())?;
+    if acp_terminals && matches!(name, "run" | "read_terminal") {
+        return Err(format!("tool {name} is unavailable for ACP sessions"));
+    }
     let arguments = params
         .get("arguments")
         .cloned()
@@ -759,6 +763,30 @@ mod tests {
         let request = read_json_line(&mut lines).unwrap().unwrap();
 
         assert_eq!(request["method"], "tools/list");
+    }
+
+    #[tokio::test]
+    async fn acp_tools_call_rejects_hidden_terminal_tools() {
+        for name in ["run", "read_terminal"] {
+            let response = handle_message(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": { "name": name, "arguments": {} }
+                }),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(response["result"]["isError"], true);
+            assert_eq!(
+                response["result"]["content"][0]["text"],
+                format!("tool {name} is unavailable for ACP sessions")
+            );
+        }
     }
 
     #[test]

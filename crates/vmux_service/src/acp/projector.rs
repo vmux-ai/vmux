@@ -558,4 +558,22 @@ mod tests {
                 if call_id == "c1" && content.contains("pane")
         )));
     }
+
+    #[test]
+    fn tool_call_with_terminal_and_text_prefers_text_output() {
+        use agent_client_protocol::schema::v1::Content;
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("c1", "Run").content(vec![
+            ToolCallContent::Terminal(Terminal::new("t1")),
+            ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new(
+                "real output",
+            )))),
+        ]);
+        p.apply(SessionUpdate::ToolCall(tc));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, .. }
+                if call_id == "c1" && content == "real output"
+        )));
+    }
 }
