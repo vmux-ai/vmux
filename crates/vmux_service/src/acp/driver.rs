@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, CreateTerminalRequest, InitializeRequest,
+    CancelNotification, ContentBlock, CreateTerminalRequest, Implementation, InitializeRequest,
     KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption,
     PermissionOptionId, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
@@ -257,6 +257,13 @@ pub async fn run(
             init.client_capabilities.terminal = false;
             let init_resp = cx.send_request(init).block_task().await?;
 
+            if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
+                main_shared.emit(ServiceMessage::AcpAgentInfo {
+                    sid: main_shared.sid.clone(),
+                    name,
+                });
+            }
+
             let mut session_id =
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
@@ -359,6 +366,19 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
+}
+
+fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
+    let info = info?;
+    info.title
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            let name = info.name.trim();
+            (!name.is_empty()).then_some(name)
+        })
+        .map(str::to_string)
 }
 
 async fn load_requested_session<F, Fut, E>(
@@ -489,10 +509,38 @@ fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::PermissionOptionKind;
+    use agent_client_protocol::schema::v1::{Implementation, PermissionOptionKind};
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[test]
+    fn acp_display_name_prefers_title_then_name() {
+        let titled = Implementation::new("antigravity", "1.0").title("Antigravity");
+        assert_eq!(
+            acp_display_name(Some(&titled)).as_deref(),
+            Some("Antigravity")
+        );
+
+        let named = Implementation::new("claude-code-acp", "1.0");
+        assert_eq!(
+            acp_display_name(Some(&named)).as_deref(),
+            Some("claude-code-acp")
+        );
+    }
+
+    #[test]
+    fn acp_display_name_ignores_blank_metadata() {
+        let blank_title = Implementation::new("codex-acp", "1.0").title("   ");
+        assert_eq!(
+            acp_display_name(Some(&blank_title)).as_deref(),
+            Some("codex-acp")
+        );
+
+        let blank = Implementation::new("   ", "1.0");
+        assert_eq!(acp_display_name(Some(&blank)), None);
+        assert_eq!(acp_display_name(None), None);
     }
 
     #[tokio::test]
