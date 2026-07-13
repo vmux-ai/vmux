@@ -685,7 +685,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin);
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         let matching = app
             .world_mut()
             .spawn((
