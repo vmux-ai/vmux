@@ -3889,6 +3889,124 @@ mod tests {
         );
     }
 
+    #[test]
+    fn edit_file_touch_rebinds_tab_in_same_frame() {
+        struct TestRepo(PathBuf);
+
+        impl TestRepo {
+            fn path(&self) -> &Path {
+                &self.0
+            }
+        }
+
+        impl Drop for TestRepo {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn git(dir: &Path, args: &[&str]) {
+            let status = std::process::Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        fn init_repo(name: &str) -> TestRepo {
+            let path = std::env::temp_dir().join(format!(
+                "vmux-agent-{name}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            let repo = TestRepo(path);
+            git(repo.path(), &["init", "-q", "-b", "main"]);
+            git(repo.path(), &["config", "user.email", "t@example.com"]);
+            git(repo.path(), &["config", "user.name", "Test"]);
+            git(repo.path(), &["config", "commit.gpgsign", "false"]);
+            std::fs::write(repo.path().join("seed.txt"), "seed\n").unwrap();
+            git(repo.path(), &["add", "seed.txt"]);
+            git(repo.path(), &["commit", "-qm", "init"]);
+            repo
+        }
+
+        let current = init_repo("current");
+        let observed = init_repo("observed");
+        let expected = observed
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut settings = test_settings();
+        settings.agent.follow_files = false;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_layout::worktree::WorktreePlugin))
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .insert_resource(settings)
+            .add_systems(
+                Update,
+                handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+            );
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "test".into(),
+                startup_dir: Some(current.path().to_string_lossy().into_owned()),
+            })
+            .id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((anchor, ChildOf(stack)));
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::FileTouched {
+                    anchor,
+                    path: observed
+                        .path()
+                        .join("seed.txt")
+                        .to_string_lossy()
+                        .into_owned(),
+                    line: None,
+                    col: None,
+                    end_col: None,
+                    kind: vmux_service::protocol::FileTouchKind::Edit,
+                },
+            });
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir
+                .as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
     fn bell_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
