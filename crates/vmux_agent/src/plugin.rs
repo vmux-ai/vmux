@@ -283,7 +283,7 @@ impl Plugin for AgentPlugin {
                     handle_rename_profile_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
                     handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    handle_restart_agent_pty,
+                    handle_restart_agent_pty.before(ServiceMessageSet),
                     respond_page_agent_attach,
                     respond_page_agent_spawn_stack,
                     respond_page_agent_spawn_default,
@@ -4845,6 +4845,20 @@ mod tests {
             non_test_source[start..]
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
+        );
+    }
+
+    #[test]
+    fn agent_restart_runs_before_terminal_service_messages() {
+        let source = include_str!("plugin.rs");
+        let non_test_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("non-test source");
+
+        assert!(
+            non_test_source.contains("handle_restart_agent_pty.before(ServiceMessageSet)"),
+            "restart state commands must apply before terminal input flush"
         );
     }
 
