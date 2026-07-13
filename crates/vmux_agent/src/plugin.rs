@@ -191,6 +191,7 @@ impl Plugin for AgentPlugin {
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
+            .add_message::<vmux_core::agent::SwapStackSession>()
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
@@ -275,6 +276,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     handle_spawn_agent_requests,
+                    handle_swap_stack_session.before(handle_spawn_agent_requests),
                     handle_focus_pane_requests.after(handle_agent_commands),
                     handle_rename_profile_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
@@ -347,6 +349,7 @@ pub fn attach_page_agent_to_stack(
     let url = format!("vmux://agent/{provider}");
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
+        crate::chat_page::AgentChatView,
         ChildOf(stack),
     ));
     Some(())
@@ -396,9 +399,15 @@ pub fn attach_acp_agent_to_stack(
         },
         vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
     ));
+    if let Some(resume) = resume
+        && let Some(imported) = crate::handoff::load(agent_id, resume)
+    {
+        commands.entity(stack).insert(imported);
+    }
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),
+        crate::chat_page::AgentChatView,
         ChildOf(stack),
         anchor,
     ));
@@ -411,6 +420,23 @@ fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -
         .iter()
         .find(|a| a.id == id)
         .and_then(|a| a.icon.clone())
+}
+
+fn acp_profile_name(
+    config: &vmux_setting::AcpAgentConfig,
+    catalog: Option<&crate::client::acp::AcpCatalog>,
+) -> String {
+    let registry_id = crate::acp_install::registry_id_alias(&config.id);
+    catalog
+        .and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == registry_id))
+        .map(|agent| agent.name.trim())
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            let name = config.name.trim();
+            (!name.is_empty()).then_some(name)
+        })
+        .unwrap_or(config.id.as_str())
+        .to_string()
 }
 
 #[allow(dead_code)]
@@ -2677,6 +2703,126 @@ fn handle_agent_page_open(
     }
 }
 
+/// Swap the agent session on a stack in place (see [`vmux_core::agent::SwapStackSession`]).
+/// Tears down the current session's stack-level components + panes, then re-attaches the
+/// target runtime with an explicit cwd — the shared path for `/resume` and the ACP↔CLI
+/// handoff. Unlike the page-open path this always re-attaches (no same-id no-op) and never
+/// falls back to `default_cwd`.
+fn handle_swap_stack_session(
+    mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
+    settings: Res<AppSettings>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    children_q: Query<&Children>,
+    mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for ev in reader.read() {
+        let target = match crate::AgentUrl::parse(&ev.target_url) {
+            Some(target @ crate::AgentUrl::Cli { .. }) => target,
+            Some(target @ crate::AgentUrl::Acp { .. }) => target,
+            other => {
+                bevy::log::warn!("swap: unsupported target url {other:?} ({})", ev.target_url);
+                continue;
+            }
+        };
+        if let crate::AgentUrl::Acp { id, .. } = &target
+            && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
+        {
+            bevy::log::warn!("swap: no ACP agent configured for '{id}'");
+            continue;
+        }
+        if ev.handoff.is_some() && !matches!(target, crate::AgentUrl::Acp { .. }) {
+            bevy::log::warn!("swap: cross-agent handoff requires an ACP target");
+            continue;
+        }
+        let imported = match ev.handoff.as_ref() {
+            Some(handoff) => {
+                let Ok(messages) =
+                    serde_json::from_str::<Vec<crate::Message>>(&handoff.messages_json)
+                else {
+                    bevy::log::warn!("swap: invalid handoff transcript");
+                    continue;
+                };
+                Some((
+                    crate::handoff::ImportedConversation {
+                        source_agent: handoff.source_agent.clone(),
+                        source_kind: handoff.source_kind,
+                        source_sid: handoff.source_sid.clone(),
+                        messages,
+                        truncated: handoff.truncated,
+                        first_prompt: None,
+                    },
+                    crate::handoff::PendingHandoff {
+                        context: handoff.context.clone(),
+                        sent: false,
+                    },
+                ))
+            }
+            None => None,
+        };
+
+        // Removing AcpSession fires close_acp_session_on_remove → the daemon session is closed.
+        // Children (the Browser/terminal pane) are despawned; a CLI terminal despawn kills its
+        // PTY. Stack-level removes are no-ops for a CLI stack (its agent components live on the
+        // terminal child).
+        commands
+            .entity(ev.stack)
+            .remove::<crate::client::acp::AcpSession>()
+            .remove::<crate::components::AgentSession>()
+            .remove::<crate::AgentMessages>()
+            .remove::<crate::AgentApprovalPolicy>()
+            .remove::<crate::AgentRunState>()
+            .remove::<crate::handoff::ImportedConversation>()
+            .remove::<crate::handoff::PendingHandoff>()
+            .remove::<vmux_core::AgentWorkingDir>()
+            .remove::<vmux_core::team::Agent>()
+            .remove::<vmux_core::team::Profile>();
+        clear_stack_children(ev.stack, &children_q, &mut commands);
+
+        match target {
+            crate::AgentUrl::Cli { kind, sid } => {
+                let session_id = (sid != crate::url::CLI_FRESH_SID).then_some(sid);
+                spawn_agent.write(SpawnAgentInStackRequest {
+                    kind,
+                    cwd: ev.cwd.clone(),
+                    session_id,
+                    stack: ev.stack,
+                    initial_prompt: None,
+                });
+            }
+            crate::AgentUrl::Acp { id, sid } => {
+                let cfg = settings
+                    .agent
+                    .acp
+                    .iter()
+                    .find(|cfg| cfg.id == id)
+                    .expect("ACP target validated before teardown");
+                let routing_sid = uuid::Uuid::new_v4().to_string();
+                let icon = acp_icon_for_id(catalog.as_deref(), &cfg.id);
+                let name = acp_profile_name(cfg, catalog.as_deref());
+                attach_acp_agent_to_stack(
+                    ev.stack,
+                    &cfg.id,
+                    &name,
+                    &routing_sid,
+                    &ev.cwd,
+                    icon.as_deref(),
+                    sid.as_deref(),
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                );
+                if let Some((imported, pending)) = imported {
+                    commands.entity(ev.stack).insert((imported, pending));
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 fn handle_agent_page_open_task(
     task: &PageOpenTask,
     children_q: &Query<&Children>,
@@ -2806,10 +2952,11 @@ fn handle_agent_page_open_task(
             // it as the resume target. Fresh opens mint a routing sid and load nothing.
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &cfg.id);
+            let name = acp_profile_name(cfg, catalog);
             attach_acp_agent_to_stack(
                 task.stack,
                 &cfg.id,
-                &cfg.name,
+                &name,
                 &routing_sid,
                 default_cwd,
                 icon.as_deref(),
@@ -3283,6 +3430,103 @@ fn handle_restart_agent_pty(
 mod tests {
     use super::*;
 
+    fn swap_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::agent::SwapStackSession>()
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_swap_stack_session);
+        app
+    }
+
+    fn spawn_stack_child(app: &mut App) -> (Entity, Entity) {
+        let stack = app.world_mut().spawn_empty().id();
+        let child = app.world_mut().spawn(ChildOf(stack)).id();
+        (stack, child)
+    }
+
+    #[test]
+    fn invalid_swap_target_preserves_current_stack_child() {
+        let mut app = swap_test_app();
+        let (stack, child) = spawn_stack_child(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "not-an-agent-url".to_string(),
+                cwd: std::path::PathBuf::from("/work"),
+                handoff: None,
+            });
+
+        app.update();
+
+        assert!(app.world().get_entity(child).is_ok());
+    }
+
+    #[test]
+    fn unconfigured_acp_swap_target_preserves_current_stack_child() {
+        let mut app = swap_test_app();
+        let (stack, child) = spawn_stack_child(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "vmux://agent/not-configured/sid-1".to_string(),
+                cwd: std::path::PathBuf::from("/work"),
+                handoff: None,
+            });
+
+        app.update();
+
+        assert!(app.world().get_entity(child).is_ok());
+    }
+
+    #[test]
+    fn cross_agent_swap_attaches_fresh_target_with_imported_history() {
+        let mut app = swap_test_app();
+        let (stack, _child) = spawn_stack_child(&mut app);
+        let messages = vec![crate::Message::User {
+            text: "fix auth".into(),
+        }];
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "vmux://agent/claude".to_string(),
+                cwd: std::path::PathBuf::from("/source/work"),
+                handoff: Some(vmux_core::agent::StackSessionHandoff {
+                    source_agent: "Codex".into(),
+                    source_kind: AgentKind::Codex,
+                    source_sid: "cx-1".into(),
+                    messages_json: serde_json::to_string(&messages).unwrap(),
+                    context: "prior conversation".into(),
+                    truncated: false,
+                }),
+            });
+
+        app.update();
+
+        let session = app.world().get::<crate::AcpSession>(stack).unwrap();
+        assert_eq!(session.agent_id, "claude");
+        assert_eq!(session.cwd, std::path::PathBuf::from("/source/work"));
+        assert!(session.resume.is_none());
+        let imported = app
+            .world()
+            .get::<crate::handoff::ImportedConversation>(stack)
+            .unwrap();
+        assert_eq!(imported.source_agent, "Codex");
+        assert_eq!(imported.messages, messages);
+        let pending = app
+            .world()
+            .get::<crate::handoff::PendingHandoff>(stack)
+            .unwrap();
+        assert_eq!(pending.context, "prior conversation");
+        assert!(!pending.sent);
+    }
+
     #[test]
     fn acp_attach_gives_profile_agent_and_icon() {
         use bevy::ecs::system::RunSystemOnce;
@@ -3345,6 +3589,37 @@ mod tests {
         );
         assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
         assert_eq!(acp_icon_for_id(None, "mistral-vibe"), None);
+    }
+
+    #[test]
+    fn acp_profile_name_prefers_registry_then_config_then_id() {
+        use crate::acp_registry::{Distribution, RegistryAgent};
+        use vmux_setting::AcpAgentConfig;
+
+        let mut config = AcpAgentConfig {
+            id: "claude".into(),
+            name: "Configured Claude".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+        };
+        let catalog = crate::client::acp::AcpCatalog {
+            agents: vec![RegistryAgent {
+                id: "claude-acp".into(),
+                name: "Claude".into(),
+                version: None,
+                description: None,
+                icon: None,
+                repository: None,
+                distribution: Distribution::default(),
+            }],
+        };
+
+        assert_eq!(acp_profile_name(&config, Some(&catalog)), "Claude");
+        assert_eq!(acp_profile_name(&config, None), "Configured Claude");
+        config.name = "   ".into();
+        assert_eq!(acp_profile_name(&config, None), "claude");
     }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,

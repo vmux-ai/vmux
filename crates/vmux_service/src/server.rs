@@ -766,12 +766,12 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AgentInput { sid, text } => {
+            ClientMessage::AgentInput { sid, text, context } => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
                         .await
-                        .input(&sid, crate::acp::AcpInput::User(text));
+                        .input(&sid, crate::acp::AcpInput::User { text, context });
                 } else {
                     agent_manager
                         .lock()
@@ -871,6 +871,10 @@ async fn handle_client(
                         let mut w = writer.lock().await;
                         write_message!(&mut *w, &snapshot)?;
                     }
+                    if let Some(agent_info) = acp_manager.lock().await.agent_info(&sid) {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &agent_info)?;
+                    }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();
                     }
@@ -930,6 +934,15 @@ mod tests {
     use super::*;
     use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
     use tokio::sync::oneshot;
+
+    #[test]
+    fn acp_spawn_replays_agent_info_after_subscribing() {
+        let production = include_str!("server.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("server production source");
+        assert!(production.contains("acp_manager.lock().await.agent_info(&sid)"));
+    }
 
     #[test]
     fn wake_drain_leaves_excess_events_for_later_ticks() {

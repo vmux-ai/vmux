@@ -47,7 +47,21 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Selection"] }
+wasm-bindgen = { workspace = true }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "Event",
+    "EventInit",
+    "EventTarget",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "KeyboardEventInit",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+    "Selection",
+] }
 
 [dev-dependencies]
 mockito = "1"

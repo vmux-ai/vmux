@@ -120,6 +120,24 @@ impl AgentUrl {
             AgentUrl::PageDefault => "vmux://agent/".to_string(),
         }
     }
+
+    /// The url that opens `(kind, sid)` in the requested runtime. ACP is only addressable when
+    /// the kind's segment is a configured ACP id (e.g. claude, codex); otherwise this falls
+    /// back to CLI so the url is always openable.
+    pub fn for_session(kind: AgentKind, sid: &str, prefer_acp: bool, acp_ids: &[String]) -> Self {
+        let seg = kind.as_url_segment();
+        if prefer_acp && acp_ids.iter().any(|id| id == seg) {
+            AgentUrl::Acp {
+                id: seg.to_string(),
+                sid: Some(sid.to_string()),
+            }
+        } else {
+            AgentUrl::Cli {
+                kind,
+                sid: sid.to_string(),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -285,6 +303,39 @@ mod tests {
             }
             .variant(),
             AgentVariant::Page
+        );
+    }
+
+    #[test]
+    fn for_session_prefers_acp_when_configured() {
+        let ids = vec!["claude".to_string(), "codex".to_string()];
+        assert_eq!(
+            AgentUrl::for_session(AgentKind::Claude, "s1", true, &ids),
+            AgentUrl::Acp {
+                id: "claude".into(),
+                sid: Some("s1".into()),
+            }
+        );
+        assert_eq!(
+            AgentUrl::for_session(AgentKind::Codex, "s2", true, &ids),
+            AgentUrl::Acp {
+                id: "codex".into(),
+                sid: Some("s2".into()),
+            }
+        );
+        assert_eq!(
+            AgentUrl::for_session(AgentKind::Vibe, "s3", true, &ids),
+            AgentUrl::Cli {
+                kind: AgentKind::Vibe,
+                sid: "s3".into(),
+            }
+        );
+        assert_eq!(
+            AgentUrl::for_session(AgentKind::Claude, "s4", false, &ids),
+            AgentUrl::Cli {
+                kind: AgentKind::Claude,
+                sid: "s4".into(),
+            }
         );
     }
 }

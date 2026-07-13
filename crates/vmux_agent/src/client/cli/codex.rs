@@ -2,9 +2,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::client::cli::strategy::CliAgentStrategy;
+use crate::client::cli::strategy::{
+    CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
+};
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, McpServerConfig};
+use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
@@ -94,6 +96,14 @@ impl CliAgentStrategy for CodexStrategy {
 
     fn detect_end_time(&self, _session_id: &str) -> bool {
         false
+    }
+
+    fn list_sessions(&self) -> Vec<ResumableSession> {
+        list_codex_sessions(&self.sessions_root())
+    }
+
+    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        load_codex_transcript(&self.sessions_root(), session_id)
     }
 }
 
@@ -231,6 +241,114 @@ fn walk_jsonl(root: &Path, visit: &mut dyn FnMut(&Path)) {
             visit(&path);
         }
     }
+}
+
+pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
+    use std::io::{BufRead, BufReader};
+
+    let mut out = Vec::new();
+    walk_jsonl(root, &mut |path: &Path| {
+        let mtime = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        let Ok(file) = std::fs::File::open(path) else {
+            return;
+        };
+        let mut line = String::new();
+        let Ok(read) = BufReader::new(file).read_line(&mut line) else {
+            return;
+        };
+        if read == 0 {
+            return;
+        }
+        let Ok(head) = serde_json::from_str::<CodexHead>(line.trim_end()) else {
+            return;
+        };
+        if head.kind != "session_meta" {
+            return;
+        }
+        let title = head
+            .payload
+            .id
+            .split('-')
+            .next()
+            .unwrap_or(&head.payload.id)
+            .to_string();
+        out.push(ResumableSession {
+            kind: AgentKind::Codex,
+            sid: head.payload.id.clone(),
+            cwd: PathBuf::from(&head.payload.cwd),
+            mtime,
+            title,
+            cross_runtime: false,
+        });
+    });
+    out
+}
+
+pub(crate) fn load_codex_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
+    use std::io::{BufRead, BufReader};
+
+    let mut session_path = None;
+    walk_jsonl(root, &mut |path| {
+        if session_path.is_some() {
+            return;
+        }
+        let Ok(file) = std::fs::File::open(path) else {
+            return;
+        };
+        let mut line = String::new();
+        let Ok(read) = BufReader::new(file).read_line(&mut line) else {
+            return;
+        };
+        if read == 0 {
+            return;
+        }
+        let Ok(head) = serde_json::from_str::<CodexHead>(line.trim_end()) else {
+            return;
+        };
+        if head.kind == "session_meta" && head.payload.id == session_id {
+            session_path = Some(path.to_path_buf());
+        }
+    });
+    let path = session_path.ok_or_else(|| format!("Codex session '{session_id}' not found"))?;
+    let file = std::fs::File::open(&path)
+        .map_err(|err| format!("open Codex session {}: {err}", path.display()))?;
+    let mut messages = Vec::new();
+    for line in lines_skipping_invalid_utf8(BufReader::new(file)) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+        let Some(text) = payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        match payload.get("type").and_then(|v| v.as_str()) {
+            Some("user_message") => messages.push(Message::User {
+                text: text.to_string(),
+            }),
+            Some("agent_message") => messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(text.to_string())],
+            }),
+            _ => {}
+        }
+    }
+    if messages.is_empty() {
+        return Err(format!(
+            "Codex session '{session_id}' has no usable conversation"
+        ));
+    }
+    Ok(messages)
 }
 
 #[cfg(test)]
@@ -430,5 +548,122 @@ mod tests {
     #[test]
     fn detect_end_time_always_false() {
         assert!(!CodexStrategy.detect_end_time("anything"));
+    }
+
+    #[test]
+    fn list_sessions_reads_session_meta() {
+        let tmp = unique_tmp("codex-list");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("sess.jsonl"),
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n",
+        )
+        .unwrap();
+        let out = list_codex_sessions(&tmp);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sid, "cx-1");
+        assert_eq!(out[0].cwd, PathBuf::from("/w/x"));
+        assert!(!out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_reads_valid_head_when_later_bytes_are_invalid_utf8() {
+        let tmp = unique_tmp("codex-list-invalid-tail");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        let mut transcript =
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n"
+                .to_vec();
+        transcript.extend_from_slice(b"\xff\n");
+        std::fs::write(day.join("sess.jsonl"), transcript).unwrap();
+
+        let out = list_codex_sessions(&tmp);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].sid, "cx-1");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn codex_transcript_extracts_user_and_agent_messages() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("codex-transcript");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("sess.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n",
+                "{not-json}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix auth\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"reasoning\",\"content\":\"secret\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"working\"}}\n",
+                "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"output\":\"tool output\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let messages = load_codex_transcript(&tmp, "cx-1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "fix auth".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn codex_transcript_skips_invalid_utf8_line() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("codex-transcript-invalid-utf8");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        let mut transcript =
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n"
+                .to_vec();
+        transcript.extend_from_slice(
+            b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"before\"}}\n",
+        );
+        transcript.extend_from_slice(b"\xff\n");
+        transcript.extend_from_slice(
+            b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"after\"}}\n",
+        );
+        std::fs::write(day.join("sess.jsonl"), transcript).unwrap();
+
+        let messages = load_codex_transcript(&tmp, "cx-1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "before".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("after".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn codex_transcript_rejects_unknown_or_empty_session() {
+        let tmp = unique_tmp("codex-transcript-empty");
+        write_session(&tmp, "2026/07", "sess.jsonl", "cx-1", "/w");
+
+        assert!(load_codex_transcript(&tmp, "missing").is_err());
+        assert!(load_codex_transcript(&tmp, "cx-1").is_err());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

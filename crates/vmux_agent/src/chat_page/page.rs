@@ -1,12 +1,21 @@
 #![allow(non_snake_case)]
 
+use crate::chat_page::composer::{
+    PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, is_handoff_boundary,
+    menu_direction, move_selection, resume_menu_state, selector_mode, should_fetch_resume,
+};
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
-    ChatResume, ChatSnapshot, ChatSubmit,
+    ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use wasm_bindgen::{JsCast, closure::Closure};
+
+const PROMPT_ID: &str = "agent-chat-prompt";
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -25,6 +34,113 @@ fn current_agent() -> String {
         .unwrap_or_else(|| "agent".to_string())
 }
 
+fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(PROMPT_ID)?
+        .dyn_into()
+        .ok()
+}
+
+fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    if let Ok(event) = web_sys::Event::new_with_event_init_dict("input", &init) {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+
+fn dispatch_keyboard_event(
+    textarea: &web_sys::HtmlTextAreaElement,
+    source: &web_sys::KeyboardEvent,
+) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_bubbles(true);
+    init.set_key(&source.key());
+    init.set_code(&source.code());
+    init.set_ctrl_key(source.ctrl_key());
+    init.set_shift_key(source.shift_key());
+    init.set_alt_key(source.alt_key());
+    init.set_meta_key(source.meta_key());
+    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
+        let _ = textarea.dispatch_event(&event);
+    }
+}
+
+fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<SlashCommandEntry>>) {
+    let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+        let Some(textarea) = prompt_textarea() else {
+            return;
+        };
+        let prompt_focused = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.active_element())
+            .is_some_and(|element| element.id() == PROMPT_ID);
+        if prompt_focused {
+            return;
+        }
+
+        let selector_open = match selector_mode(&draft.peek()) {
+            SelectorMode::Resume(_) => true,
+            SelectorMode::Commands(query) => {
+                let query = query.to_lowercase();
+                slash_cmds
+                    .peek()
+                    .iter()
+                    .any(|command| command.name.starts_with(&query))
+            }
+            SelectorMode::None => false,
+        };
+        let key = event.key();
+        let direction = if event.meta_key() || event.alt_key() {
+            None
+        } else {
+            menu_direction(&key, event.ctrl_key())
+        };
+        let plain_invoke_or_close = !event.meta_key()
+            && !event.ctrl_key()
+            && !event.alt_key()
+            && matches!(key.as_str(), "Enter" | "Escape");
+        let selector_key = direction.is_some() || plain_invoke_or_close;
+        if selector_open && selector_key {
+            event.prevent_default();
+            event.stop_propagation();
+            let _ = textarea.focus();
+            dispatch_keyboard_event(&textarea, &event);
+            return;
+        }
+
+        if event.meta_key() || event.ctrl_key() || event.alt_key() {
+            return;
+        }
+        let edit = match key.as_str() {
+            "Backspace" => PromptEdit::Backspace,
+            "Delete" => PromptEdit::Delete,
+            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
+            _ => return,
+        };
+        event.prevent_default();
+        event.stop_propagation();
+        let start = textarea
+            .selection_start()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| textarea.value().encode_utf16().count() as u32);
+        let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+        let (value, caret) = edit_prompt(&textarea.value(), start, end, edit);
+        let _ = textarea.focus();
+        textarea.set_value(&value);
+        let _ = textarea.set_selection_range(caret, caret);
+        dispatch_input_event(&textarea);
+    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+
+    if let Some(window) = web_sys::window() {
+        let _ =
+            window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
+    }
+    closure.forget();
+}
+
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -36,12 +152,22 @@ pub fn Page() -> Element {
     let mut agent_name = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
+    let mut handoff_source = use_signal(String::new);
+    let mut handoff_truncated = use_signal(|| false);
+    let mut handoff_message_count = use_signal(|| 0u32);
     let mut draft = use_signal(String::new);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
     let mut queued = use_signal(Vec::<String>::new);
     let mut paused = use_signal(|| false);
+    let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
+    let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
+    let mut menu_sel = use_signal(|| 0usize);
+    let mut resume_requested = use_signal(|| false);
+    let mut resume_loading = use_signal(|| false);
+
+    use_effect(move || install_global_prompt_input(draft, slash_cmds));
 
     use_future(move || async move {
         loop {
@@ -81,6 +207,9 @@ pub fn Page() -> Element {
         agent_name.set(snap.agent_name.clone());
         agent_icon.set(snap.agent_icon.clone());
         accent.set(snap.accent_color.clone());
+        handoff_source.set(snap.handoff_source.clone());
+        handoff_truncated.set(snap.handoff_truncated);
+        handoff_message_count.set(snap.handoff_message_count);
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -88,6 +217,30 @@ pub fn Page() -> Element {
             )));
         } else {
             approval.set(None);
+        }
+    });
+
+    let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
+        slash_cmds.set(s.commands.clone());
+    });
+    let _sess =
+        use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
+            sessions.set(s.sessions.clone());
+            menu_sel.set(0);
+            resume_loading.set(false);
+        });
+
+    use_effect(move || {
+        let should_fetch = should_fetch_resume(&draft(), &slash_cmds.read());
+        if should_fetch && !resume_requested() {
+            resume_loading.set(true);
+            if try_cef_bin_emit_rkyv(&ResumeListRequest).is_err() {
+                resume_loading.set(false);
+            }
+            resume_requested.set(true);
+        } else if !should_fetch && resume_requested() {
+            resume_requested.set(false);
+            resume_loading.set(false);
         }
     });
 
@@ -119,6 +272,57 @@ pub fn Page() -> Element {
     } else {
         format!("background:{}", accent())
     };
+
+    let draft_val = draft();
+    let selector = selector_mode(&draft_val);
+    let command_query = match selector {
+        SelectorMode::Commands(query) => Some(query),
+        _ => None,
+    };
+    let resume_query = match selector {
+        SelectorMode::Resume(query) => Some(query),
+        _ => None,
+    };
+    let filtered_cmds: Vec<SlashCommandEntry> = command_query
+        .map(|query| {
+            let query = query.to_lowercase();
+            slash_cmds
+                .read()
+                .iter()
+                .filter(|command| command.name.starts_with(&query))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let filtered_sessions = resume_query
+        .map(|query| filter_sessions(&sessions.read(), query))
+        .unwrap_or_default();
+    let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
+    let session_menu_open = resume_query.is_some();
+    let resume_state = resume_query.map(|_| {
+        resume_menu_state(
+            resume_requested(),
+            resume_loading(),
+            sessions.read().len(),
+            filtered_sessions.len(),
+        )
+    });
+
+    use_effect(move || {
+        let selected = menu_sel();
+        let _ = draft.read();
+        let _ = sessions.read().len();
+        if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| {
+                document.get_element_by_id(&format!("agent-selector-item-{selected}"))
+            })
+        {
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+        }
+    });
 
     rsx! {
         main {
@@ -169,6 +373,18 @@ pub fn Page() -> Element {
                     }
                     for (i , msg) in messages.read().iter().enumerate() {
                         {render_message(i, msg)}
+                        if !handoff_source().is_empty()
+                            && is_handoff_boundary(i, handoff_message_count())
+                        {
+                            div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
+                                span { class: "h-px flex-1 bg-foreground/10" }
+                                span { "Continued from {handoff_source}" }
+                                if handoff_truncated() {
+                                    span { class: "text-amber-500/80", "· older context omitted" }
+                                }
+                                span { class: "h-px flex-1 bg-foreground/10" }
+                            }
+                        }
                     }
                     if status() == "streaming" {
                         div { class: "flex items-center gap-2.5 text-sm",
@@ -243,7 +459,58 @@ pub fn Page() -> Element {
             }
 
             div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
-                div { class: "mx-auto flex max-w-3xl flex-col gap-2",
+                div { class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+                    if cmd_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            for (i , command) in filtered_cmds.iter().enumerate() {
+                                {
+                                    let command = command.clone();
+                                    rsx! {
+                                        div {
+                                            key: "sc{i}",
+                                            id: "agent-selector-item-{i}",
+                                            class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
+                                            onclick: move |_| run_slash_command(&command.name, draft, menu_sel),
+                                            span { class: "font-medium text-foreground", "/{command.name}" }
+                                            span { class: "text-xs text-muted-foreground", "{command.description}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if session_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            if resume_state == Some(ResumeMenuState::Loading) {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading sessions…" }
+                            } else if resume_state == Some(ResumeMenuState::Empty) {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
+                            } else if resume_state == Some(ResumeMenuState::NoMatch) {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching sessions" }
+                            } else {
+                                for (i , session) in filtered_sessions.iter().enumerate() {
+                                    {
+                                        let session = session.clone();
+                                        rsx! {
+                                            div {
+                                                key: "rs{i}",
+                                                id: "agent-selector-item-{i}",
+                                                class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                                                onclick: move |_| select_resume_session(&session, draft),
+                                                div { class: "flex min-w-0 items-baseline gap-2",
+                                                    span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{session.title}" }
+                                                    if !session.agent_name.is_empty() {
+                                                        span { class: "max-w-[40%] shrink-0 truncate text-xs text-muted-foreground", "{session.agent_name}" }
+                                                    }
+                                                }
+                                                span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for (qi , qtext) in queued.read().iter().enumerate() {
@@ -292,13 +559,89 @@ pub fn Page() -> Element {
                     }
                     div { class: "flex items-end gap-2",
                         textarea {
+                            id: PROMPT_ID,
                             class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
                             rows: "1",
                             placeholder: "Message the agent…",
                             value: "{draft}",
-                            oninput: move |e| draft.set(e.value()),
+                            oninput: move |e| {
+                                draft.set(e.value());
+                                menu_sel.set(0);
+                            },
                             onkeydown: move |e| {
                                 let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+                                let draft_now = draft.peek().clone();
+                                let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
+                                    SelectorMode::Commands(query) => {
+                                        let query = query.to_lowercase();
+                                        (
+                                            slash_cmds
+                                                .peek()
+                                                .iter()
+                                                .filter(|command| command.name.starts_with(&query))
+                                                .cloned()
+                                                .collect::<Vec<_>>(),
+                                            Vec::new(),
+                                            false,
+                                        )
+                                    }
+                                    SelectorMode::Resume(query) => (
+                                        Vec::new(),
+                                        filter_sessions(&sessions.peek(), query),
+                                        true,
+                                    ),
+                                    SelectorMode::None => (Vec::new(), Vec::new(), false),
+                                };
+                                let selector_open = session_selector_open || !cmd_items.is_empty();
+                                let selector_len = if session_selector_open {
+                                    sess_items.len()
+                                } else {
+                                    cmd_items.len()
+                                };
+                                let key = e.key().to_string();
+                                let command_modifier = e.modifiers().meta()
+                                    || e.modifiers().ctrl()
+                                    || e.modifiers().alt();
+                                let direction = if e.modifiers().meta() || e.modifiers().alt() {
+                                    None
+                                } else {
+                                    menu_direction(&key, e.modifiers().ctrl())
+                                };
+
+                                if selector_open && let Some(direction) = direction {
+                                    e.prevent_default();
+                                    let selected = *menu_sel.peek();
+                                    menu_sel.set(move_selection(selected, selector_len, direction));
+                                    return;
+                                }
+                                if selector_open
+                                    && e.key() == Key::Enter
+                                    && !e.modifiers().shift()
+                                    && !command_modifier
+                                {
+                                    e.prevent_default();
+                                    let selected = *menu_sel.peek();
+                                    if session_selector_open {
+                                        if let Some(session) = sess_items.get(selected) {
+                                            select_resume_session(session, draft);
+                                        }
+                                    } else if let Some(command) = cmd_items.get(selected) {
+                                        run_slash_command(&command.name, draft, menu_sel);
+                                    }
+                                    return;
+                                }
+                                if selector_open && e.key() == Key::Escape && !command_modifier {
+                                    e.prevent_default();
+                                    draft.set(String::new());
+                                    menu_sel.set(0);
+                                    return;
+                                }
+                                if session_selector_open
+                                    && matches!(e.key(), Key::Enter | Key::Escape)
+                                {
+                                    return;
+                                }
+
                                 if e.key() == Key::Enter && !e.modifiers().shift() {
                                     e.prevent_default();
                                     do_submit(draft, at_bottom);
@@ -356,6 +699,36 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+/// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
+/// current session to the other runtime. Unknown names are ignored (the raw text still submits
+/// via the normal Enter path).
+fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal<usize>) {
+    match name {
+        "resume" => {
+            menu_sel.set(0);
+            draft.set("/resume ".to_string());
+        }
+        "cli" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
+            draft.set(String::new());
+        }
+        "acp" => {
+            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "acp".into() });
+            draft.set(String::new());
+        }
+        _ => {}
+    }
+}
+
+fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<String>) {
+    let _ = try_cef_bin_emit_rkyv(&ResumeSession {
+        kind: session.kind.clone(),
+        sid: session.sid.clone(),
+        cwd: session.cwd.clone(),
+    });
+    draft.set(String::new());
 }
 
 /// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed

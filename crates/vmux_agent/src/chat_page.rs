@@ -2,6 +2,8 @@
 //! conversation + run-state (pushed from ECS) and sends prompt/approval intents back.
 //! This is the single agent front-end; it replaced the legacy CLI-install setup page.
 
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod composer;
 pub mod event;
 
 #[cfg(target_arch = "wasm32")]
@@ -10,12 +12,16 @@ pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+#[cfg(not(target_arch = "wasm32"))]
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatResume, ChatSnapshot,
-    ChatSubmit,
+    ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
+    SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::AcpSession;
@@ -24,9 +30,17 @@ use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
+use crate::handoff::{
+    DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context, visible_messages,
+};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]
+use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
+#[cfg(not(target_arch = "wasm32"))]
 use vmux_core::PageMetadata;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::team::Profile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,21 +70,73 @@ impl Plugin for AgentChatPagePlugin {
             ChatCancel,
             ChatResume,
             ChatClearQueue,
+            ResumeListRequest,
+            ResumeSession,
+            RuntimeSwitchRequest,
         )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_resume)
             .add_observer(on_chat_clear_queue)
-            .add_systems(Update, (push_chat_to_page, push_chat_on_ready));
+            .add_observer(on_resume_list_request)
+            .add_observer(on_resume_session)
+            .add_observer(on_runtime_switch_request)
+            .add_observer(reset_chat_synced_on_page_ready)
+            .add_systems(
+                Update,
+                (
+                    push_chat_to_page,
+                    sync_chat_to_ready_views,
+                    drain_resume_list_tasks,
+                    drain_resume_handoff_tasks,
+                ),
+            );
     }
 }
 
-/// When a chat page first signals ready, push the current snapshot (the `Changed` push
-/// alone would miss state that settled before the webview loaded — e.g. on restore).
+/// Marks a chat-page webview (ACP or Page agent) so the ready→resync path can find it cheaply.
 #[cfg(not(target_arch = "wasm32"))]
-fn push_chat_on_ready(
-    newly_ready: Query<Entity, bevy::ecs::query::Added<vmux_core::page::PageReady>>,
+#[derive(Component)]
+pub struct AgentChatView;
+
+/// Set once the current snapshot has been pushed to a ready chat webview; cleared when the page
+/// (re)signals ready (mount or Cmd+R reload) so the transcript is re-pushed instead of blanking.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ChatSynced;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ResumeListTask {
+    webview: Entity,
+    task: Task<ResumableSessions>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ResumeHandoffTask {
+    stack: Entity,
+    target_url: String,
+    cwd: std::path::PathBuf,
+    task: Task<Result<StackSessionHandoff, String>>,
+}
+
+/// Push the current transcript + slash commands to any chat webview that is ready but not yet
+/// synced. Runs every frame and retries until the webview's emit channel is ready, so the very
+/// first snapshot always lands. Re-runs after a reload because [`reset_chat_synced_on_page_ready`]
+/// clears `ChatSynced` when the page re-signals ready — without this, Cmd+R blanked the chat
+/// (the `Changed`/`Added` pushes never re-fire for an unchanged, already-added session).
+#[cfg(not(target_arch = "wasm32"))]
+fn sync_chat_to_ready_views(
+    pending: Query<
+        Entity,
+        (
+            With<AgentChatView>,
+            With<vmux_core::page::PageReady>,
+            Without<ChatSynced>,
+        ),
+    >,
     child_of: Query<&ChildOf>,
     sessions: Query<(
         &AgentMessages,
@@ -78,15 +144,18 @@ fn push_chat_on_ready(
         Option<&Profile>,
         Option<&PageMetadata>,
         &PromptQueue,
+        Option<&ImportedConversation>,
     )>,
+    acp_sessions: Query<&AcpSession>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for webview in &newly_ready {
+    for webview in &pending {
         let Ok(parent) = child_of.get(webview) else {
             continue;
         };
-        let Ok((messages, state, profile, meta, queue)) = sessions.get(parent.parent()) else {
+        let stack = parent.parent();
+        let Ok((messages, state, profile, meta, queue, imported)) = sessions.get(stack) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -95,8 +164,36 @@ fn push_chat_on_ready(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue),
+            &snapshot_of(messages, state, profile, meta, queue, imported),
         ));
+        let cross = acp_sessions
+            .get(stack)
+            .ok()
+            .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+            .map(kind_supports_cross_runtime)
+            .unwrap_or(false);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            SLASH_COMMANDS_EVENT,
+            &SlashCommands {
+                commands: slash_commands_for(cross),
+            },
+        ));
+        commands.entity(webview).insert(ChatSynced);
+    }
+}
+
+/// A chat webview re-signals `PageReady` on every (re)mount, including a Cmd+R reload. Clear its
+/// `ChatSynced` marker so [`sync_chat_to_ready_views`] re-pushes the full transcript.
+#[cfg(not(target_arch = "wasm32"))]
+fn reset_chat_synced_on_page_ready(
+    trigger: On<BinReceive<vmux_core::page::PageReady>>,
+    chat_views: Query<(), With<AgentChatView>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if chat_views.get(webview).is_ok() {
+        commands.entity(webview).remove::<ChatSynced>();
     }
 }
 
@@ -107,8 +204,11 @@ fn snapshot_of(
     profile: Option<&Profile>,
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
+    imported: Option<&ImportedConversation>,
 ) -> ChatSnapshot {
-    let messages_json = serde_json::to_string(&messages.0).unwrap_or_else(|_| "[]".to_string());
+    let display_messages = visible_messages(imported, &messages.0);
+    let messages_json =
+        serde_json::to_string(&display_messages).unwrap_or_else(|_| "[]".to_string());
     let (status, error, call_id, name) = match state {
         AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
         AgentRunState::Installing { pct, message } => {
@@ -141,6 +241,13 @@ fn snapshot_of(
         agent_name,
         agent_icon,
         accent_color,
+        handoff_source: imported
+            .map(|imported| imported.source_agent.clone())
+            .unwrap_or_default(),
+        handoff_truncated: imported.is_some_and(|imported| imported.truncated),
+        handoff_message_count: imported
+            .map(|imported| u32::try_from(imported.messages.len()).unwrap_or(u32::MAX))
+            .unwrap_or_default(),
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
     }
@@ -158,11 +265,14 @@ fn push_chat_to_page(
             Option<&Profile>,
             Option<&PageMetadata>,
             &PromptQueue,
+            Option<&ImportedConversation>,
         ),
         Or<(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
             Changed<PromptQueue>,
+            Changed<Profile>,
+            Changed<ImportedConversation>,
         )>,
     >,
     children: Query<&Children>,
@@ -170,7 +280,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, profile, meta, queue) in &sessions {
+    for (stack, messages, state, profile, meta, queue, imported) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -183,7 +293,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue),
+            &snapshot_of(messages, state, profile, meta, queue, imported),
         ));
     }
 }
@@ -192,16 +302,24 @@ fn push_chat_to_page(
 fn on_chat_submit(
     trigger: On<BinReceive<ChatSubmit>>,
     child_of: Query<&ChildOf>,
-    mut queues: Query<&mut PromptQueue>,
+    mut sessions: Query<(&mut PromptQueue, &mut AgentRunState)>,
 ) {
     let webview = trigger.event().webview;
     let text = trigger.event().payload.text.clone();
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
-        queue.items.push_back(text);
-        queue.paused = false;
+    if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
+        enqueue_prompt(&mut queue, &mut state, text);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn enqueue_prompt(queue: &mut PromptQueue, state: &mut AgentRunState, text: String) {
+    queue.items.push_back(text);
+    queue.paused = false;
+    if matches!(state, AgentRunState::Errored(_)) {
+        *state = AgentRunState::Idle;
     }
 }
 
@@ -280,4 +398,540 @@ fn on_chat_approval(
         call_id: payload.call_id.clone(),
         decision,
     });
+}
+
+/// A short "2h ago"-style age for a session's last-modified time.
+#[cfg(not(target_arch = "wasm32"))]
+fn relative_time(mtime: std::time::SystemTime) -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(mtime)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match secs {
+        0..=59 => "just now".to_string(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86400),
+    }
+}
+
+/// The slash commands offered on an ACP pane: `/resume` always, `/cli` only when the agent's
+/// runtime shares session ids with its CLI (so the handoff actually continues the conversation).
+#[cfg(not(target_arch = "wasm32"))]
+fn slash_commands_for(cross_runtime: bool) -> Vec<SlashCommandEntry> {
+    let mut v = vec![SlashCommandEntry {
+        name: "resume".into(),
+        description: "Resume a past session".into(),
+    }];
+    if cross_runtime {
+        v.push(SlashCommandEntry {
+            name: "cli".into(),
+            description: "Continue this session in the CLI".into(),
+        });
+    }
+    v
+}
+
+/// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
+/// the handoff is unavailable (unknown/non-cross-runtime kind, no session id yet, bad `to`).
+#[cfg(not(target_arch = "wasm32"))]
+fn runtime_switch_target(
+    agent_id: &str,
+    resume: Option<&str>,
+    cwd: &std::path::Path,
+    to: &str,
+    acp_ids: &[String],
+) -> Option<(String, std::path::PathBuf)> {
+    let kind = AgentKind::from_url_segment(agent_id)?;
+    if !kind_supports_cross_runtime(kind) {
+        return None;
+    }
+    let sid = resume?;
+    let target = match to {
+        "cli" => crate::AgentUrl::Cli {
+            kind,
+            sid: sid.to_string(),
+        },
+        "acp" => crate::AgentUrl::for_session(kind, sid, true, acp_ids),
+        _ => return None,
+    };
+    Some((target.format(), cwd.to_path_buf()))
+}
+
+/// Page → native: `/resume` was opened — reply with the on-disk session list.
+#[cfg(not(target_arch = "wasm32"))]
+fn resume_entries(
+    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
+    active_kind: Option<AgentKind>,
+    active_name: &str,
+) -> Vec<ResumableSessionEntry> {
+    sessions
+        .into_iter()
+        .map(|session| {
+            let dir = session
+                .cwd
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| session.cwd.to_string_lossy().to_string());
+            let agent_name = if Some(session.kind) == active_kind && !active_name.is_empty() {
+                active_name.to_string()
+            } else {
+                session.kind.display_name().to_string()
+            };
+            ResumableSessionEntry {
+                kind: session.kind.as_url_segment().to_string(),
+                sid: session.sid,
+                cwd: session.cwd.to_string_lossy().to_string(),
+                title: session.title,
+                subtitle: format!("{} · {}", relative_time(session.mtime), dir),
+                agent_name,
+                cross_runtime: session.cross_runtime,
+            }
+        })
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn foreign_handoff_target(
+    active_agent_id: &str,
+    active_kind: Option<AgentKind>,
+    source_kind: AgentKind,
+) -> Option<String> {
+    (active_kind != Some(source_kind)).then(|| {
+        crate::AgentUrl::Acp {
+            id: active_agent_id.to_string(),
+            sid: None,
+        }
+        .format()
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resume_agent_name(
+    profile: Option<&Profile>,
+    kind: Option<AgentKind>,
+    acp_id: Option<&str>,
+) -> String {
+    profile
+        .map(|profile| profile.name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| kind.map(|kind| kind.display_name().to_string()))
+        .or_else(|| acp_id.map(str::to_string))
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_resume_list_request(
+    trigger: On<BinReceive<ResumeListRequest>>,
+    strategies: Option<Res<AgentStrategies>>,
+    child_of: Query<&ChildOf>,
+    acp_sessions: Query<&AcpSession>,
+    agent_sessions: Query<&AgentSession>,
+    profiles: Query<&Profile>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
+    let stack = child_of.get(webview).ok().map(ChildOf::parent);
+    let acp = stack.and_then(|stack| acp_sessions.get(stack).ok());
+    let kind = acp
+        .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+        .or_else(|| {
+            stack.and_then(|stack| agent_sessions.get(stack).ok().map(|session| session.kind))
+        });
+    let agent_name = resume_agent_name(
+        stack.and_then(|stack| profiles.get(stack).ok()),
+        kind,
+        acp.map(|acp| acp.agent_id.as_str()),
+    );
+    let task = IoTaskPool::get().spawn(async move {
+        let sessions = resume_entries(strategies.list_all_sessions(), kind, &agent_name);
+        ResumableSessions { sessions }
+    });
+    commands.spawn(ResumeListTask { webview, task });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_resume_list_tasks(
+    mut tasks: Query<(Entity, &mut ResumeListTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(sessions) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            task.webview,
+            RESUMABLE_SESSIONS_EVENT,
+            &sessions,
+        ));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_resume_handoff_tasks(
+    mut tasks: Query<(Entity, &mut ResumeHandoffTask)>,
+    mut states: Query<&mut AgentRunState>,
+    mut swap: MessageWriter<SwapStackSession>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        match result {
+            Ok(handoff) => {
+                swap.write(SwapStackSession {
+                    stack: pending.stack,
+                    target_url: pending.target_url.clone(),
+                    cwd: pending.cwd.clone(),
+                    handoff: Some(handoff),
+                });
+            }
+            Err(message) => {
+                if let Ok(mut state) = states.get_mut(pending.stack) {
+                    *state = AgentRunState::Errored(message);
+                }
+            }
+        }
+    }
+}
+
+/// Page → native: resume a picked session on this stack, in the current runtime.
+#[cfg(not(target_arch = "wasm32"))]
+fn on_resume_session(
+    trigger: On<BinReceive<ResumeSession>>,
+    child_of: Query<&ChildOf>,
+    acp_sessions: Query<&AcpSession>,
+    settings: Res<vmux_setting::AppSettings>,
+    strategies: Option<Res<AgentStrategies>>,
+    mut commands: Commands,
+    mut swap: MessageWriter<SwapStackSession>,
+) {
+    let payload = &trigger.event().payload;
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let stack = parent.parent();
+    let Some(kind) = AgentKind::from_url_segment(&payload.kind) else {
+        return;
+    };
+    if let Ok(acp) = acp_sessions.get(stack)
+        && let Some(target_url) = foreign_handoff_target(
+            &acp.agent_id,
+            AgentKind::from_url_segment(&acp.agent_id),
+            kind,
+        )
+    {
+        let strategies = strategies
+            .map(|strategies| (*strategies).clone())
+            .unwrap_or_default();
+        let source_sid = payload.sid.clone();
+        let source_agent = kind.display_name().to_string();
+        let cwd = std::path::PathBuf::from(&payload.cwd);
+        let task = IoTaskPool::get().spawn(async move {
+            let messages = strategies.load_transcript(kind, &source_sid)?;
+            let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
+            let messages_json = serde_json::to_string(&messages)
+                .map_err(|err| format!("serialize imported conversation: {err}"))?;
+            Ok(StackSessionHandoff {
+                source_agent,
+                source_kind: kind,
+                source_sid,
+                messages_json,
+                context: built.text,
+                truncated: built.truncated,
+            })
+        });
+        commands.spawn(ResumeHandoffTask {
+            stack,
+            target_url,
+            cwd,
+            task,
+        });
+        return;
+    }
+    let prefer_acp = acp_sessions.get(stack).is_ok();
+    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
+    let target = crate::AgentUrl::for_session(kind, &payload.sid, prefer_acp, &acp_ids);
+    swap.write(SwapStackSession {
+        stack,
+        target_url: target.format(),
+        cwd: std::path::PathBuf::from(&payload.cwd),
+        handoff: None,
+    });
+}
+
+/// Page → native: hand the current ACP session off to the other runtime (the `/cli` fallback).
+#[cfg(not(target_arch = "wasm32"))]
+fn on_runtime_switch_request(
+    trigger: On<BinReceive<RuntimeSwitchRequest>>,
+    child_of: Query<&ChildOf>,
+    acp_sessions: Query<&AcpSession>,
+    settings: Res<vmux_setting::AppSettings>,
+    mut swap: MessageWriter<SwapStackSession>,
+) {
+    let to = trigger.event().payload.to.clone();
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let stack = parent.parent();
+    let Ok(acp) = acp_sessions.get(stack) else {
+        bevy::log::warn!("runtime switch: current pane is not an ACP session");
+        return;
+    };
+    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
+    let Some((target_url, cwd)) = runtime_switch_target(
+        &acp.agent_id,
+        acp.resume.as_deref(),
+        &acp.cwd,
+        &to,
+        &acp_ids,
+    ) else {
+        bevy::log::warn!(
+            "runtime switch to '{to}' unavailable for ACP agent '{}' (no shared session id yet)",
+            acp.agent_id
+        );
+        return;
+    };
+    swap.write(SwapStackSession {
+        stack,
+        target_url,
+        cwd,
+        handoff: None,
+    });
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod native_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn runtime_switch_claude_acp_to_cli() {
+        let ids = vec!["claude".to_string()];
+        let got = runtime_switch_target("claude", Some("sid-9"), Path::new("/w"), "cli", &ids);
+        assert_eq!(
+            got,
+            Some((
+                "vmux://agent/claude/cli/sid-9".to_string(),
+                std::path::PathBuf::from("/w")
+            ))
+        );
+    }
+
+    #[test]
+    fn runtime_switch_requires_session_id() {
+        let ids = vec!["claude".to_string()];
+        assert_eq!(
+            runtime_switch_target("claude", None, Path::new("/w"), "cli", &ids),
+            None
+        );
+    }
+
+    #[test]
+    fn runtime_switch_gated_for_non_cross_runtime_kind() {
+        let ids = vec!["claude".to_string()];
+        assert_eq!(
+            runtime_switch_target("codex", Some("s"), Path::new("/w"), "cli", &ids),
+            None
+        );
+    }
+
+    #[test]
+    fn slash_commands_include_cli_only_when_cross_runtime() {
+        assert_eq!(slash_commands_for(false).len(), 1);
+        let with_cli = slash_commands_for(true);
+        assert_eq!(with_cli.len(), 2);
+        assert_eq!(with_cli[1].name, "cli");
+    }
+
+    #[test]
+    fn resume_results_include_all_agent_kinds_with_source_labels() {
+        use crate::client::cli::strategy::ResumableSession;
+        use std::time::SystemTime;
+
+        let session = |kind, sid: &str| ResumableSession {
+            kind,
+            sid: sid.into(),
+            cwd: "/work".into(),
+            mtime: SystemTime::UNIX_EPOCH,
+            title: sid.into(),
+            cross_runtime: kind_supports_cross_runtime(kind),
+        };
+        let entries = resume_entries(
+            vec![
+                session(AgentKind::Claude, "claude-1"),
+                session(AgentKind::Codex, "codex-1"),
+            ],
+            Some(AgentKind::Claude),
+            "Antigravity",
+        );
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].agent_name, "Antigravity");
+        assert_eq!(entries[1].agent_name, "Codex");
+    }
+
+    #[test]
+    fn foreign_resume_keeps_active_acp_agent_fresh() {
+        assert_eq!(
+            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Codex,),
+            Some("vmux://agent/claude".to_string())
+        );
+        assert_eq!(
+            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Claude,),
+            None
+        );
+        assert_eq!(
+            foreign_handoff_target("custom-acp", None, AgentKind::Codex),
+            Some("vmux://agent/custom-acp".to_string())
+        );
+    }
+
+    #[test]
+    fn snapshot_reports_imported_message_boundary() {
+        let imported = ImportedConversation {
+            source_agent: "Codex".into(),
+            source_kind: AgentKind::Codex,
+            source_sid: "codex-1".into(),
+            messages: vec![
+                crate::Message::User { text: "one".into() },
+                crate::Message::Assistant {
+                    blocks: vec![crate::AssistantBlock::Text("two".into())],
+                },
+            ],
+            truncated: false,
+            first_prompt: None,
+        };
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::Idle,
+            None,
+            None,
+            &PromptQueue::default(),
+            Some(&imported),
+        );
+
+        assert_eq!(snapshot.handoff_message_count, 2);
+    }
+
+    #[test]
+    fn submitting_after_error_rearms_prompt_dispatch() {
+        let mut queue = PromptQueue::default();
+        let mut state = AgentRunState::Errored("failed".into());
+
+        enqueue_prompt(&mut queue, &mut state, "retry".into());
+
+        assert!(matches!(state, AgentRunState::Idle));
+        assert_eq!(queue.items.front().map(String::as_str), Some("retry"));
+        assert!(!queue.paused);
+    }
+
+    #[test]
+    fn resume_agent_name_prefers_profile_then_kind_then_id() {
+        let profile = Profile::registry("Antigravity", "antigravity");
+        assert_eq!(
+            resume_agent_name(Some(&profile), Some(AgentKind::Claude), Some("claude")),
+            "Antigravity"
+        );
+        assert_eq!(
+            resume_agent_name(None, Some(AgentKind::Claude), Some("claude")),
+            "Claude"
+        );
+        assert_eq!(
+            resume_agent_name(None, None, Some("custom-acp")),
+            "custom-acp"
+        );
+    }
+
+    #[test]
+    fn resume_list_scan_runs_on_io_task_pool() {
+        let source = include_str!("chat_page.rs");
+        let handler = source
+            .split("fn on_resume_list_request")
+            .nth(1)
+            .expect("resume-list handler")
+            .split("fn on_resume_session")
+            .next()
+            .expect("resume-list handler body");
+        assert!(handler.contains("IoTaskPool::get().spawn"));
+        assert!(source.contains("fn drain_resume_list_tasks"));
+    }
+
+    #[test]
+    fn composer_resume_menu_remains_escapeable_when_empty() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("let session_menu_open = resume_query.is_some();"));
+        assert!(source.contains("e.key() == Key::Escape && !command_modifier"));
+    }
+
+    #[test]
+    fn composer_resume_selector_supports_prompt_filter_and_keyboard_navigation() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("SelectorMode::Resume"));
+        assert!(source.contains("filter_sessions"));
+        assert!(source.contains("No matching sessions"));
+        assert!(source.contains("menu_direction"));
+        assert!(source.contains("ScrollLogicalPosition::Nearest"));
+        assert!(source.contains("agent-selector-item-{i}"));
+    }
+
+    #[test]
+    fn composer_resume_rows_render_agent_name() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("session.agent_name"));
+        assert!(source.contains("max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"));
+    }
+
+    #[test]
+    fn composer_captures_global_prompt_input_without_stealing_shortcuts() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("install_global_prompt_input"));
+        assert!(source.contains("meta_key() || event.ctrl_key() || event.alt_key()"));
+        assert!(source.contains("PromptEdit::Backspace"));
+        assert!(source.contains("PromptEdit::Delete"));
+        assert!(source.contains("dispatch_keyboard_event"));
+    }
+
+    #[test]
+    fn composer_slash_items_support_mouse_selection() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("onclick: move |_| run_slash_command"));
+        assert!(source.contains("onclick: move |_| select_resume_session"));
+    }
+
+    #[test]
+    fn page_ready_clears_chat_synced_only_for_chat_views() {
+        use bevy::prelude::*;
+        use bevy_cef::prelude::BinReceive;
+        use vmux_core::page::PageReady;
+
+        let mut app = App::new();
+        app.add_observer(reset_chat_synced_on_page_ready);
+
+        let chat = app.world_mut().spawn((AgentChatView, ChatSynced)).id();
+        let other = app.world_mut().spawn(ChatSynced).id();
+
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview: chat,
+            payload: PageReady {},
+        });
+        app.world_mut().trigger(BinReceive::<PageReady> {
+            webview: other,
+            payload: PageReady {},
+        });
+        app.world_mut().flush();
+
+        assert!(
+            app.world().get::<ChatSynced>(chat).is_none(),
+            "a chat view must re-sync (ChatSynced cleared) when the page reloads"
+        );
+        assert!(
+            app.world().get::<ChatSynced>(other).is_some(),
+            "a non-chat view must be left untouched"
+        );
+    }
 }

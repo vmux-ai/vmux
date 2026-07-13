@@ -24,6 +24,8 @@ pub mod events;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod exec;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod handoff;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod launch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;

@@ -2,6 +2,7 @@
 //! and pumps prompts/approvals through it while projecting `session/update` to the UI.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, CreateTerminalRequest, InitializeRequest,
+    CancelNotification, ContentBlock, CreateTerminalRequest, Implementation, InitializeRequest,
     KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption,
     PermissionOptionId, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
     ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
@@ -26,11 +27,15 @@ use vmux_core::ProcessId;
 use super::projector::{AcpProjector, Intent};
 use crate::protocol::{
     AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    compose_agent_prompt,
 };
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
-    User(String),
+    User {
+        text: String,
+        context: Option<String>,
+    },
     Approve {
         call_id: String,
         decision: ApprovalDecision,
@@ -49,12 +54,32 @@ pub struct AcpShared {
     pub projector: Mutex<AcpProjector>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, ProcessId>>,
+    agent_name: Mutex<Option<String>>,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
 }
 
 impl AcpShared {
+    pub fn new(
+        sid: String,
+        cwd: PathBuf,
+        anchor: ProcessId,
+        stream_tx: broadcast::Sender<ServiceMessage>,
+    ) -> Self {
+        Self {
+            sid,
+            cwd,
+            anchor,
+            stream_tx,
+            projector: Mutex::new(AcpProjector::new()),
+            pending_perms: Mutex::new(HashMap::new()),
+            terminals: Mutex::new(HashMap::new()),
+            agent_name: Mutex::new(None),
+            cancel_requested: AtomicBool::new(false),
+        }
+    }
+
     pub fn snapshot_message(&self) -> ServiceMessage {
         let projector = self.projector.lock().unwrap();
         let messages_json =
@@ -63,6 +88,25 @@ impl AcpShared {
             sid: self.sid.clone(),
             messages_json,
         }
+    }
+
+    pub fn agent_info_message(&self) -> Option<ServiceMessage> {
+        self.agent_name
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|name| ServiceMessage::AcpAgentInfo {
+                sid: self.sid.clone(),
+                name: name.clone(),
+            })
+    }
+
+    fn publish_agent_info(&self, name: String) {
+        *self.agent_name.lock().unwrap() = Some(name.clone());
+        self.emit(ServiceMessage::AcpAgentInfo {
+            sid: self.sid.clone(),
+            name,
+        });
     }
 
     fn emit(&self, msg: ServiceMessage) {
@@ -256,43 +300,28 @@ pub async fn run(
             init.client_capabilities.terminal = false;
             let init_resp = cx.send_request(init).block_task().await?;
 
-            // Resume the persisted session when asked and the agent advertises `session/load`;
-            // otherwise start fresh (graceful fallback). Either way `session_id` is what we use for
-            // prompts/cancel and surface to the GUI to persist in the pane url. On load, the agent
-            // replays history as `session/update` notifications through the projector.
-            let session_id: SessionId = match resume
-                .filter(|_| init_resp.agent_capabilities.load_session)
-            {
-                Some(id) => {
-                    let sid = SessionId::new(id);
-                    let mut load = LoadSessionRequest::new(sid.clone(), main_shared.cwd.clone());
+            if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
+                main_shared.publish_agent_info(name);
+            }
+
+            let mut session_id =
+                load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
+                    let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
                     load.mcp_servers = mcp_servers.clone();
-                    // A stale/evicted session id must not error the pane — fall back to a fresh
-                    // session and let the GUI re-persist the new id via `AcpSessionCreated`.
-                    match cx.send_request(load).block_task().await {
-                        Ok(_) => sid,
-                        Err(_) => {
-                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
-                            new_session.mcp_servers = mcp_servers;
-                            cx.send_request(new_session).block_task().await?.session_id
-                        }
-                    }
-                }
-                None => {
-                    let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
-                    new_session.mcp_servers = mcp_servers;
-                    cx.send_request(new_session).block_task().await?.session_id
-                }
-            };
-            main_shared.emit(ServiceMessage::AcpSessionCreated {
-                sid: main_shared.sid.clone(),
-                acp_session_id: session_id.to_string(),
-            });
+                    async { cx.send_request(load).block_task().await.map(|_| ()) }
+                })
+                .await;
+            if let Some(sid) = &session_id {
+                main_shared.emit(ServiceMessage::AcpSessionCreated {
+                    sid: main_shared.sid.clone(),
+                    acp_session_id: sid.to_string(),
+                });
+            }
             main_shared.emit_status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
                 match input {
-                    AcpInput::User(text) => {
+                    AcpInput::User { text, context } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
                         main_shared
                             .projector
@@ -301,13 +330,41 @@ pub async fn run(
                             .push_user(text.clone());
                         main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
+                        let ensured = ensure_session(&mut session_id, || {
+                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                            new_session.mcp_servers = mcp_servers.clone();
+                            async {
+                                cx.send_request(new_session)
+                                    .block_task()
+                                    .await
+                                    .map(|response| response.session_id)
+                            }
+                        })
+                        .await;
+                        let (active_session_id, created) = match ensured {
+                            Ok(value) => value,
+                            Err(err) => {
+                                main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                    "acp session/new failed: {err}"
+                                )));
+                                continue;
+                            }
+                        };
+                        if created {
+                            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                sid: main_shared.sid.clone(),
+                                acp_session_id: active_session_id.to_string(),
+                            });
+                        }
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
-                        let session_id = session_id.clone();
                         cx.spawn(async move {
                             let prompt = PromptRequest::new(
-                                session_id,
-                                vec![ContentBlock::Text(TextContent::new(text))],
+                                active_session_id,
+                                vec![ContentBlock::Text(TextContent::new(compose_agent_prompt(
+                                    &text,
+                                    context.as_deref(),
+                                )))],
                             );
                             let errored = match cx_prompt.send_request(prompt).block_task().await {
                                 Ok(_) => None,
@@ -330,10 +387,14 @@ pub async fn run(
                         for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
                             let _ = tx.send(ApprovalDecision::Deny);
                         }
-                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
+                        if let Some(sid) = &session_id {
+                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                        }
                     }
                     AcpInput::Close => {
-                        let _ = cx.send_notification(CancelNotification::new(session_id.clone()));
+                        if let Some(sid) = &session_id {
+                            let _ = cx.send_notification(CancelNotification::new(sid.clone()));
+                        }
                         break;
                     }
                 }
@@ -348,6 +409,49 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
+}
+
+fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
+    let info = info?;
+    info.title
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            let name = info.name.trim();
+            (!name.is_empty()).then_some(name)
+        })
+        .map(str::to_string)
+}
+
+async fn load_requested_session<F, Fut, E>(
+    resume: Option<String>,
+    load_supported: bool,
+    load: F,
+) -> Option<SessionId>
+where
+    F: FnOnce(SessionId) -> Fut,
+    Fut: Future<Output = Result<(), E>>,
+{
+    let sid = resume.filter(|_| load_supported).map(SessionId::new)?;
+    load(sid.clone()).await.ok()?;
+    Some(sid)
+}
+
+async fn ensure_session<F, Fut, E>(
+    session_id: &mut Option<SessionId>,
+    create: F,
+) -> Result<(SessionId, bool), E>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<SessionId, E>>,
+{
+    if let Some(sid) = session_id.clone() {
+        return Ok((sid, false));
+    }
+    let sid = create().await?;
+    *session_id = Some(sid.clone());
+    Ok((sid, true))
 }
 
 async fn drain_stderr(stderr: tokio::process::ChildStderr) {
@@ -448,10 +552,127 @@ fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::PermissionOptionKind;
+    use agent_client_protocol::schema::v1::{Implementation, PermissionOptionKind};
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[test]
+    fn acp_display_name_prefers_title_then_name() {
+        let titled = Implementation::new("antigravity", "1.0").title("Antigravity");
+        assert_eq!(
+            acp_display_name(Some(&titled)).as_deref(),
+            Some("Antigravity")
+        );
+
+        let named = Implementation::new("claude-code-acp", "1.0");
+        assert_eq!(
+            acp_display_name(Some(&named)).as_deref(),
+            Some("claude-code-acp")
+        );
+    }
+
+    #[test]
+    fn acp_display_name_ignores_blank_metadata() {
+        let blank_title = Implementation::new("codex-acp", "1.0").title("   ");
+        assert_eq!(
+            acp_display_name(Some(&blank_title)).as_deref(),
+            Some("codex-acp")
+        );
+
+        let blank = Implementation::new("   ", "1.0");
+        assert_eq!(acp_display_name(Some(&blank)), None);
+        assert_eq!(acp_display_name(None), None);
+    }
+
+    #[test]
+    fn acp_agent_info_is_replayable_without_a_subscriber() {
+        let (stream_tx, stream_rx) = broadcast::channel(1);
+        drop(stream_rx);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+        );
+
+        shared.publish_agent_info("Antigravity".into());
+
+        match shared.agent_info_message() {
+            Some(ServiceMessage::AcpAgentInfo { sid, name }) => {
+                assert_eq!(sid, "s1");
+                assert_eq!(name, "Antigravity");
+            }
+            other => panic!("expected replayable ACP agent info, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn requested_resume_loads_only_when_supported() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let loaded = load_requested_session(Some("resume-1".into()), true, |sid| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                assert_eq!(sid.to_string(), "resume-1");
+                Ok::<(), ()>(())
+            }
+        })
+        .await;
+        assert_eq!(loaded.unwrap().to_string(), "resume-1");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let skipped = load_requested_session(Some("resume-2".into()), false, |_| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<(), ()>(()) }
+        })
+        .await;
+        assert!(skipped.is_none());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_requested_resume_stays_unassigned() {
+        let loaded = load_requested_session(Some("stale".into()), true, |_| async {
+            Err::<(), &'static str>("missing")
+        })
+        .await;
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn ensure_session_creates_once_then_reuses_id() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut session_id = None;
+        let (created_id, created) = ensure_session(&mut session_id, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<SessionId, ()>(SessionId::new("created")) }
+        })
+        .await
+        .unwrap();
+        assert!(created);
+        assert_eq!(created_id.to_string(), "created");
+
+        let (reused_id, created) = ensure_session(&mut session_id, || {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Ok::<SessionId, ()>(SessionId::new("unexpected")) }
+        })
+        .await
+        .unwrap();
+        assert!(!created);
+        assert_eq!(reused_id.to_string(), "created");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_session_creation_remains_retryable() {
+        let mut session_id = None;
+        let result = ensure_session(&mut session_id, || async {
+            Err::<SessionId, &'static str>("create failed")
+        })
+        .await;
+        assert_eq!(result.unwrap_err(), "create failed");
+        assert!(session_id.is_none());
     }
 
     #[test]
@@ -466,6 +687,16 @@ mod tests {
             status_after_prompt(true, Some("boom".into())),
             AgentRunStatus::Interrupted
         );
+    }
+
+    #[test]
+    fn private_context_wraps_wire_prompt_without_changing_display_text() {
+        let wire = compose_agent_prompt("continue here", Some("prior conversation"));
+
+        assert!(wire.starts_with(crate::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(wire.contains("prior conversation"));
+        assert!(wire.ends_with("continue here"));
+        assert_eq!(compose_agent_prompt("plain", None), "plain");
     }
 
     #[test]
