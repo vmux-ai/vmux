@@ -197,7 +197,7 @@ pub struct TabLayoutSpawnRequest {
     pub main: Entity,
     pub primary_window: Entity,
     pub name: Option<String>,
-    pub startup_dir: Option<String>,
+    pub startup_dir: String,
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,

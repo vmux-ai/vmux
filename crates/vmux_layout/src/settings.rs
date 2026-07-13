@@ -25,6 +25,15 @@ pub struct ConfirmCloseSettings {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct EffectiveStartupUrl(pub String);
 
+#[derive(Resource, Clone, Debug)]
+pub struct EffectiveStartupDir(pub std::path::PathBuf);
+
+impl Default for EffectiveStartupDir {
+    fn default() -> Self {
+        Self(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")))
+    }
+}
+
 impl Default for ConfirmCloseSettings {
     fn default() -> Self {
         Self { enabled: true }

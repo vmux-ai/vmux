@@ -124,6 +124,7 @@ fn handle_tab_commands(
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
@@ -151,7 +152,13 @@ fn handle_tab_commands(
                     main,
                     primary_window: *primary_window,
                     name: Some(name),
-                    startup_dir: None,
+                    startup_dir: effective_startup_dir
+                        .as_deref()
+                        .cloned()
+                        .unwrap_or_default()
+                        .0
+                        .to_string_lossy()
+                        .into_owned(),
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -167,7 +174,13 @@ fn handle_tab_commands(
                             main,
                             primary_window: *primary_window,
                             name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                            startup_dir: None,
+                            startup_dir: effective_startup_dir
+                                .as_deref()
+                                .cloned()
+                                .unwrap_or_default()
+                                .0
+                                .to_string_lossy()
+                                .into_owned(),
                             content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                             clear_pending_stack: true,
                             focus: true,
@@ -187,7 +200,7 @@ fn handle_tab_commands(
                         main,
                         primary_window: *primary_window,
                         name: Some(name),
-                        startup_dir: Some(dir.to_string_lossy().into_owned()),
+                        startup_dir: dir.to_string_lossy().into_owned(),
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
@@ -372,6 +385,7 @@ fn on_tabs_command_emit(
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
@@ -401,7 +415,13 @@ fn on_tabs_command_emit(
                     main,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                    startup_dir: None,
+                    startup_dir: effective_startup_dir
+                        .as_deref()
+                        .cloned()
+                        .unwrap_or_default()
+                        .0
+                        .to_string_lossy()
+                        .into_owned(),
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -754,7 +774,10 @@ mod tests {
                 main,
                 primary_window: window,
                 name: None,
-                startup_dir: None,
+                startup_dir: std::env::current_dir()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,

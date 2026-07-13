@@ -430,6 +430,7 @@ fn request_default_layout(
     tab_q: Query<(), With<Tab>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
@@ -441,7 +442,13 @@ fn request_default_layout(
         main,
         primary_window: *primary_window,
         name: None,
-        startup_dir: None,
+        startup_dir: effective_startup_dir
+            .as_deref()
+            .cloned()
+            .unwrap_or_default()
+            .0
+            .to_string_lossy()
+            .into_owned(),
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
@@ -546,12 +553,10 @@ pub fn spawn_requested_tab_layouts(
             request.primary_window,
             settings.pane.gap,
         );
-        if request.name.is_some() || request.startup_dir.is_some() {
-            commands.entity(tab_e).insert(Tab {
-                name: request.name.clone().unwrap_or_default(),
-                startup_dir: request.startup_dir.clone(),
-            });
-        }
+        commands.entity(tab_e).insert(Tab {
+            name: request.name.clone().unwrap_or_default(),
+            startup_dir: Some(request.startup_dir.clone()),
+        });
 
         if request.clear_pending_stack
             && let Some(old_stack) = new_stack_ctx.stack.take()
@@ -1195,6 +1200,30 @@ mod tests {
         let ctx = app.world().resource::<crate::NewStackContext>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
+    }
+
+    #[test]
+    fn default_tab_stores_workspace_directory() {
+        let _home = HomeEnvGuard::use_temp_home("default-tab-workspace");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .insert_resource(test_settings(0.0))
+            .add_systems(
+                Update,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
+
+        app.world_mut().spawn(PrimaryWindow);
+        app.world_mut().spawn(Main);
+
+        app.update();
+
+        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
+        assert!(tab.startup_dir.is_some());
     }
 
     #[test]

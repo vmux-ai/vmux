@@ -33,6 +33,7 @@ impl Plugin for SettingsPlugin {
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
             )
             .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .init_resource::<crate::appearance::SystemAppearance>()
             .init_resource::<crate::appearance::ResolvedColorScheme>()
             .add_message::<crate::appearance::ColorSchemeChanged>()

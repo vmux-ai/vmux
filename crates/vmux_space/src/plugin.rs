@@ -39,10 +39,19 @@ impl Plugin for SpacePlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "spaces");
         app.init_resource::<ActiveSpace>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
-            .add_systems(Update, sync_active_space_record)
+            .add_systems(
+                Update,
+                (
+                    sync_active_space_record,
+                    update_effective_startup_url,
+                    update_effective_startup_dir,
+                )
+                    .chain(),
+            )
             .add_systems(Update, sync_space_name_to_id)
             .add_systems(Update, prune_orphan_space_dirs)
             .add_systems(
@@ -51,7 +60,12 @@ impl Plugin for SpacePlugin {
                     .after(vmux_setting::SettingsLoadSet)
                     .before(vmux_layout::LayoutStartupSet::Post),
             )
-            .add_systems(Update, update_effective_startup_url)
+            .add_systems(
+                Startup,
+                update_effective_startup_dir
+                    .after(vmux_setting::SettingsLoadSet)
+                    .before(vmux_layout::LayoutStartupSet::DefaultTab),
+            )
             .add_message::<vmux_core::page::SpacesPageSpawnRequest>()
             .add_systems(
                 Update,
@@ -89,6 +103,19 @@ fn update_effective_startup_url(
     };
     if settings.is_changed() || active.is_changed() || effective.0.is_empty() {
         effective.0 = vmux_setting::resolve_startup_url(&settings, &active.record.id);
+    }
+}
+
+fn update_effective_startup_dir(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    active: Option<Res<ActiveSpace>>,
+    mut effective: ResMut<vmux_layout::settings::EffectiveStartupDir>,
+) {
+    let (Some(settings), Some(active)) = (settings, active) else {
+        return;
+    };
+    if settings.is_changed() || active.is_changed() {
+        effective.0 = vmux_setting::resolve_startup_dir(&settings, &active.record.id);
     }
 }
 
@@ -381,6 +408,7 @@ fn on_space_command(
     mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     stack_q: Query<(Entity, &PageMetadata), With<Stack>>,
     child_of_q: Query<&ChildOf>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -532,12 +560,18 @@ fn on_space_command(
                 ChildOf(main),
             ));
             active_id.0 = Some(id.clone());
-            let _ = profile::space_dir(&id);
+            let default_dir = profile::space_dir(&id);
+            let startup_dir = settings
+                .as_deref()
+                .map(|settings| vmux_setting::resolve_startup_dir(settings, &id))
+                .unwrap_or(default_dir)
+                .to_string_lossy()
+                .into_owned();
             layout_requests.write(TabLayoutSpawnRequest {
                 main,
                 primary_window: *primary_window,
                 name: None,
-                startup_dir: None,
+                startup_dir,
                 content: TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string()),
                 clear_pending_stack: true,
                 focus: true,
@@ -554,6 +588,7 @@ fn handle_open_in_new_space(
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
@@ -590,7 +625,13 @@ fn handle_open_in_new_space(
             ChildOf(main),
         ));
         active_id.0 = Some(id.clone());
-        let _ = profile::space_dir(&id);
+        let default_dir = profile::space_dir(&id);
+        let startup_dir = settings
+            .as_deref()
+            .map(|settings| vmux_setting::resolve_startup_dir(settings, &id))
+            .unwrap_or(default_dir)
+            .to_string_lossy()
+            .into_owned();
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
@@ -607,7 +648,7 @@ fn handle_open_in_new_space(
             main,
             primary_window: *primary_window,
             name: None,
-            startup_dir: None,
+            startup_dir,
             content,
             clear_pending_stack: true,
             focus: true,
