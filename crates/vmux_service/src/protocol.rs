@@ -685,11 +685,6 @@ pub enum ServiceMessage {
         sid: String,
         messages_json: String,
     },
-    /// Identity reported by an ACP agent during initialization.
-    AcpAgentInfo {
-        sid: String,
-        name: String,
-    },
     /// An ACP agent created a terminal; the GUI spawns a visible pane bound to `process_id`.
     AcpTerminalCreated {
         sid: String,
@@ -716,6 +711,11 @@ pub enum ServiceMessage {
     AcpSessionCreated {
         sid: String,
         acp_session_id: String,
+    },
+    /// Identity reported by an ACP agent during initialization.
+    AcpAgentInfo {
+        sid: String,
+        name: String,
     },
 }
 

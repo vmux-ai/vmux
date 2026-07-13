@@ -50,12 +50,32 @@ pub struct AcpShared {
     pub projector: Mutex<AcpProjector>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     pub terminals: Mutex<HashMap<String, ProcessId>>,
+    agent_name: Mutex<Option<String>>,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
 }
 
 impl AcpShared {
+    pub fn new(
+        sid: String,
+        cwd: PathBuf,
+        anchor: ProcessId,
+        stream_tx: broadcast::Sender<ServiceMessage>,
+    ) -> Self {
+        Self {
+            sid,
+            cwd,
+            anchor,
+            stream_tx,
+            projector: Mutex::new(AcpProjector::new()),
+            pending_perms: Mutex::new(HashMap::new()),
+            terminals: Mutex::new(HashMap::new()),
+            agent_name: Mutex::new(None),
+            cancel_requested: AtomicBool::new(false),
+        }
+    }
+
     pub fn snapshot_message(&self) -> ServiceMessage {
         let projector = self.projector.lock().unwrap();
         let messages_json =
@@ -64,6 +84,25 @@ impl AcpShared {
             sid: self.sid.clone(),
             messages_json,
         }
+    }
+
+    pub fn agent_info_message(&self) -> Option<ServiceMessage> {
+        self.agent_name
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|name| ServiceMessage::AcpAgentInfo {
+                sid: self.sid.clone(),
+                name: name.clone(),
+            })
+    }
+
+    fn publish_agent_info(&self, name: String) {
+        *self.agent_name.lock().unwrap() = Some(name.clone());
+        self.emit(ServiceMessage::AcpAgentInfo {
+            sid: self.sid.clone(),
+            name,
+        });
     }
 
     fn emit(&self, msg: ServiceMessage) {
@@ -258,10 +297,7 @@ pub async fn run(
             let init_resp = cx.send_request(init).block_task().await?;
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
-                main_shared.emit(ServiceMessage::AcpAgentInfo {
-                    sid: main_shared.sid.clone(),
-                    name,
-                });
+                main_shared.publish_agent_info(name);
             }
 
             let mut session_id =
@@ -541,6 +577,28 @@ mod tests {
         let blank = Implementation::new("   ", "1.0");
         assert_eq!(acp_display_name(Some(&blank)), None);
         assert_eq!(acp_display_name(None), None);
+    }
+
+    #[test]
+    fn acp_agent_info_is_replayable_without_a_subscriber() {
+        let (stream_tx, stream_rx) = broadcast::channel(1);
+        drop(stream_rx);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+        );
+
+        shared.publish_agent_info("Antigravity".into());
+
+        match shared.agent_info_message() {
+            Some(ServiceMessage::AcpAgentInfo { sid, name }) => {
+                assert_eq!(sid, "s1");
+                assert_eq!(name, "Antigravity");
+            }
+            other => panic!("expected replayable ACP agent info, got {other:?}"),
+        }
     }
 
     #[tokio::test]

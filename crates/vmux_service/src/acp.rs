@@ -10,7 +10,7 @@ pub use driver::{AcpInput, AcpShared};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc};
 use vmux_core::ProcessId;
@@ -47,16 +47,7 @@ impl AcpSessionManager {
         }
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let (stream_tx, _) = broadcast::channel(256);
-        let shared = Arc::new(AcpShared {
-            sid: sid.clone(),
-            cwd,
-            anchor,
-            stream_tx,
-            projector: Mutex::new(projector::AcpProjector::new()),
-            pending_perms: Mutex::new(HashMap::new()),
-            terminals: Mutex::new(HashMap::new()),
-            cancel_requested: std::sync::atomic::AtomicBool::new(false),
-        });
+        let shared = Arc::new(AcpShared::new(sid.clone(), cwd, anchor, stream_tx));
         tokio::spawn(driver::run(
             command,
             args,
@@ -88,6 +79,12 @@ impl AcpSessionManager {
             .map(|handle| handle.shared.snapshot_message())
     }
 
+    pub fn agent_info(&self, sid: &str) -> Option<ServiceMessage> {
+        self.sessions
+            .get(sid)
+            .and_then(|handle| handle.shared.agent_info_message())
+    }
+
     pub fn contains(&self, sid: &str) -> bool {
         self.sessions.contains_key(sid)
     }
@@ -113,5 +110,6 @@ mod tests {
         assert!(!mgr.input("nope", AcpInput::User("x".to_string())));
         assert!(mgr.subscribe("nope").is_none());
         assert!(mgr.snapshot("nope").is_none());
+        assert!(mgr.agent_info("nope").is_none());
     }
 }
