@@ -1155,6 +1155,7 @@ struct PollServiceWriters<'w> {
     page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
+    page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
     page_agent_session_created:
         MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
     agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
@@ -1646,6 +1647,11 @@ fn poll_service_messages(
                 writers
                     .page_agent_snapshot
                     .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages_json });
+            }
+            ServiceMessage::AcpAgentInfo { sid, name } => {
+                writers
+                    .page_agent_info
+                    .write(vmux_service::agent_events::PageAgentInfo { sid, name });
             }
             ServiceMessage::AgentCommandResult { request_id, result } => {
                 writers.agent_command_results.write(
@@ -3746,6 +3752,20 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{BrowserSettings, ShortcutSettings};
+
+    #[test]
+    fn service_bridge_routes_acp_agent_info() {
+        let source = include_str!("plugin.rs");
+        let handler = source
+            .split("fn poll_service_messages")
+            .nth(1)
+            .expect("service handler")
+            .split("fn flush_pending_terminal_input")
+            .next()
+            .expect("service handler body");
+        assert!(handler.contains("ServiceMessage::AcpAgentInfo"));
+        assert!(handler.contains(".page_agent_info"));
+    }
 
     #[test]
     fn bracketed_paste_wraps_payload() {

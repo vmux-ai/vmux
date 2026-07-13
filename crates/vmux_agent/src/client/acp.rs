@@ -106,6 +106,7 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AcpInstallChannel>()
             .init_resource::<AcpCatalog>()
+            .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
@@ -115,11 +116,29 @@ impl Plugin for AcpAgentPlugin {
                     send_acp_input,
                     drain_acp_installs,
                     receive_catalog,
+                    apply_acp_agent_info,
                     apply_acp_session_created,
                 ),
             )
             .add_observer(close_acp_session_on_remove)
             .add_observer(auto_allow_acp_approval);
+    }
+}
+
+fn apply_acp_agent_info(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentInfo>,
+    mut sessions: Query<(&AcpSession, &mut vmux_core::team::Profile)>,
+) {
+    for event in reader.read() {
+        let name = event.name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        for (session, mut profile) in &mut sessions {
+            if session.sid == event.sid && profile.name != name {
+                *profile = vmux_core::team::Profile::registry(name, &session.agent_id);
+            }
+        }
     }
 }
 
@@ -456,6 +475,68 @@ mod tests {
                 .find(|(k, _)| k == "PATH")
                 .map(|(_, v)| v.as_str()),
             Some("/managed:/from/login")
+        );
+    }
+
+    #[test]
+    fn live_acp_identity_updates_only_matching_profile() {
+        use vmux_core::team::Profile;
+        use vmux_service::agent_events::PageAgentInfo;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_plugins(AcpAgentPlugin);
+        let matching = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "antigravity".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                Profile::registry("Configured", "antigravity"),
+            ))
+            .id();
+        let unrelated = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s2".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                Profile::registry("Claude", "claude"),
+            ))
+            .id();
+
+        app.world_mut().write_message(PageAgentInfo {
+            sid: "s1".into(),
+            name: "Antigravity".into(),
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Profile>(matching).unwrap().name,
+            "Antigravity"
+        );
+        assert_eq!(
+            app.world().get::<Profile>(unrelated).unwrap().name,
+            "Claude"
+        );
+
+        app.world_mut().write_message(PageAgentInfo {
+            sid: "s1".into(),
+            name: "   ".into(),
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().get::<Profile>(matching).unwrap().name,
+            "Antigravity"
         );
     }
 

@@ -245,6 +245,7 @@ fn push_chat_to_page(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
             Changed<PromptQueue>,
+            Changed<Profile>,
         )>,
     >,
     children: Query<&Children>,
