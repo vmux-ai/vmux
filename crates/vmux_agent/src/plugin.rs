@@ -417,6 +417,23 @@ fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -
         .and_then(|a| a.icon.clone())
 }
 
+fn acp_profile_name(
+    config: &vmux_setting::AcpAgentConfig,
+    catalog: Option<&crate::client::acp::AcpCatalog>,
+) -> String {
+    let registry_id = crate::acp_install::registry_id_alias(&config.id);
+    catalog
+        .and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == registry_id))
+        .map(|agent| agent.name.trim())
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            let name = config.name.trim();
+            (!name.is_empty()).then_some(name)
+        })
+        .unwrap_or(config.id.as_str())
+        .to_string()
+}
+
 #[allow(dead_code)]
 pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     let html = format!(
@@ -2703,10 +2720,11 @@ fn handle_swap_stack_session(
                     .expect("ACP target validated before teardown");
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog.as_deref(), &cfg.id);
+                let name = acp_profile_name(cfg, catalog.as_deref());
                 attach_acp_agent_to_stack(
                     ev.stack,
                     &cfg.id,
-                    &cfg.name,
+                    &name,
                     &routing_sid,
                     &ev.cwd,
                     icon.as_deref(),
@@ -2850,10 +2868,11 @@ fn handle_agent_page_open_task(
             // it as the resume target. Fresh opens mint a routing sid and load nothing.
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &cfg.id);
+            let name = acp_profile_name(cfg, catalog);
             attach_acp_agent_to_stack(
                 task.stack,
                 &cfg.id,
-                &cfg.name,
+                &name,
                 &routing_sid,
                 default_cwd,
                 icon.as_deref(),
@@ -3441,6 +3460,37 @@ mod tests {
         );
         assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
         assert_eq!(acp_icon_for_id(None, "mistral-vibe"), None);
+    }
+
+    #[test]
+    fn acp_profile_name_prefers_registry_then_config_then_id() {
+        use crate::acp_registry::{Distribution, RegistryAgent};
+        use vmux_setting::AcpAgentConfig;
+
+        let mut config = AcpAgentConfig {
+            id: "claude".into(),
+            name: "Configured Claude".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+        };
+        let catalog = crate::client::acp::AcpCatalog {
+            agents: vec![RegistryAgent {
+                id: "claude-acp".into(),
+                name: "Claude".into(),
+                version: None,
+                description: None,
+                icon: None,
+                repository: None,
+                distribution: Distribution::default(),
+            }],
+        };
+
+        assert_eq!(acp_profile_name(&config, Some(&catalog)), "Claude");
+        assert_eq!(acp_profile_name(&config, None), "Configured Claude");
+        config.name = "   ".into();
+        assert_eq!(acp_profile_name(&config, None), "claude");
     }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,

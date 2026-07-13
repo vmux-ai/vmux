@@ -479,7 +479,12 @@ pub fn Page() -> Element {
                                                 id: "agent-selector-item-{i}",
                                                 class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
                                                 onclick: move |_| select_resume_session(&session, draft),
-                                                span { class: "truncate text-sm text-foreground", "{session.title}" }
+                                                div { class: "flex min-w-0 items-baseline gap-2",
+                                                    span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{session.title}" }
+                                                    if !session.agent_name.is_empty() {
+                                                        span { class: "shrink-0 text-xs text-muted-foreground", "{session.agent_name}" }
+                                                    }
+                                                }
                                                 span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
                                             }
                                         }

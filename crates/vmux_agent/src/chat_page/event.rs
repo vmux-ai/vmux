@@ -133,6 +133,8 @@ pub struct ResumableSessionEntry {
     pub title: String,
     /// Native-formatted "2h ago · proj".
     pub subtitle: String,
+    /// Human-readable active ACP agent name.
+    pub agent_name: String,
     pub cross_runtime: bool,
 }
 
@@ -314,6 +316,7 @@ mod tests {
                 cwd: "/w".into(),
                 title: "fix bug".into(),
                 subtitle: "2h ago · w".into(),
+                agent_name: "Claude".into(),
                 cross_runtime: true,
             }],
         };
@@ -321,6 +324,7 @@ mod tests {
         let back = rkyv::from_bytes::<ResumableSessions, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.sessions.len(), 1);
         assert_eq!(back.sessions[0].sid, "sid-9");
+        assert_eq!(back.sessions[0].agent_name, "Claude");
         assert!(back.sessions[0].cross_runtime);
     }
 }

@@ -436,27 +436,44 @@ fn sessions_for_kind(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn resume_agent_name(
+    profile: Option<&Profile>,
+    kind: Option<AgentKind>,
+    acp_id: Option<&str>,
+) -> String {
+    profile
+        .map(|profile| profile.name.trim())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| kind.map(|kind| kind.display_name().to_string()))
+        .or_else(|| acp_id.map(str::to_string))
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn on_resume_list_request(
     trigger: On<BinReceive<ResumeListRequest>>,
     strategies: Option<Res<AgentStrategies>>,
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     agent_sessions: Query<&AgentSession>,
+    profiles: Query<&Profile>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
-    let kind = child_of
-        .get(webview)
-        .ok()
-        .map(ChildOf::parent)
-        .and_then(|stack| {
-            acp_sessions
-                .get(stack)
-                .ok()
-                .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
-                .or_else(|| agent_sessions.get(stack).ok().map(|session| session.kind))
+    let stack = child_of.get(webview).ok().map(ChildOf::parent);
+    let acp = stack.and_then(|stack| acp_sessions.get(stack).ok());
+    let kind = acp
+        .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+        .or_else(|| {
+            stack.and_then(|stack| agent_sessions.get(stack).ok().map(|session| session.kind))
         });
+    let agent_name = resume_agent_name(
+        stack.and_then(|stack| profiles.get(stack).ok()),
+        kind,
+        acp.map(|acp| acp.agent_id.as_str()),
+    );
     let task = IoTaskPool::get().spawn(async move {
         let sessions = kind
             .map(|kind| sessions_for_kind(strategies.list_all_sessions(), kind))
@@ -474,6 +491,7 @@ fn on_resume_list_request(
                     cwd: s.cwd.to_string_lossy().to_string(),
                     title: s.title,
                     subtitle: format!("{} · {}", relative_time(s.mtime), dir),
+                    agent_name: agent_name.clone(),
                     cross_runtime: s.cross_runtime,
                 }
             })
@@ -636,6 +654,23 @@ mod native_tests {
     }
 
     #[test]
+    fn resume_agent_name_prefers_profile_then_kind_then_id() {
+        let profile = Profile::registry("Antigravity", "antigravity");
+        assert_eq!(
+            resume_agent_name(Some(&profile), Some(AgentKind::Claude), Some("claude")),
+            "Antigravity"
+        );
+        assert_eq!(
+            resume_agent_name(None, Some(AgentKind::Claude), Some("claude")),
+            "Claude"
+        );
+        assert_eq!(
+            resume_agent_name(None, None, Some("custom-acp")),
+            "custom-acp"
+        );
+    }
+
+    #[test]
     fn resume_list_scan_runs_on_io_task_pool() {
         let source = include_str!("chat_page.rs");
         let handler = source
@@ -665,6 +700,13 @@ mod native_tests {
         assert!(source.contains("menu_direction"));
         assert!(source.contains("ScrollLogicalPosition::Nearest"));
         assert!(source.contains("agent-selector-item-{i}"));
+    }
+
+    #[test]
+    fn composer_resume_rows_render_agent_name() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("session.agent_name"));
+        assert!(source.contains("shrink-0 text-xs text-muted-foreground"));
     }
 
     #[test]
