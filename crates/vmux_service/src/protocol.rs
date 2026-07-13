@@ -488,11 +488,12 @@ pub enum ClientMessage {
 }
 
 pub const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
+pub const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
 
 pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String {
     match context {
         Some(context) => format!(
-            "{PRIVATE_CONTEXT_PREFIX}\n{context}\n</vmux_handoff_context>\n\nCurrent user prompt:\n{display_text}"
+            "{PRIVATE_CONTEXT_PREFIX}\n{context}\n</vmux_handoff_context>{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}"
         ),
         None => display_text.to_string(),
     }

@@ -98,17 +98,21 @@ pub fn wire_prompt(context: &str, display_text: &str) -> String {
 }
 
 pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option<&str>) {
-    let Some(first_prompt) = first_prompt else {
-        return;
-    };
-    let Some(Message::User { text }) = messages
-        .iter_mut()
-        .find(|message| matches!(message, Message::User { .. }))
-    else {
-        return;
-    };
-    if text.starts_with(HANDOFF_PROMPT_PREFIX) {
-        *text = first_prompt.to_string();
+    let mut fallback = first_prompt;
+    for message in messages {
+        let Message::User { text } = message else {
+            continue;
+        };
+        if !text.starts_with(HANDOFF_PROMPT_PREFIX) {
+            continue;
+        }
+        if let Some((_, display_text)) =
+            text.rsplit_once(vmux_service::protocol::PRIVATE_CONTEXT_PROMPT_MARKER)
+        {
+            *text = display_text.to_string();
+        } else if let Some(display_text) = fallback.take() {
+            *text = display_text.to_string();
+        }
     }
 }
 
@@ -271,6 +275,18 @@ mod tests {
 
         assert_eq!(messages[0], user("continue here"));
         assert_eq!(messages[1], assistant("done"));
+    }
+
+    #[test]
+    fn replay_sanitizes_every_retried_private_prompt_from_its_own_payload() {
+        let mut messages = vec![
+            user(&wire_prompt("prior conversation", "first try")),
+            user(&wire_prompt("prior conversation", "second try")),
+        ];
+
+        sanitize_replayed_messages(&mut messages, Some("stale sidecar text"));
+
+        assert_eq!(messages, vec![user("first try"), user("second try")]);
     }
 
     #[test]
