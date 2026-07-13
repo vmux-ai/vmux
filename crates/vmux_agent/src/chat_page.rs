@@ -30,6 +30,8 @@ use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
+use crate::handoff::{ImportedConversation, visible_messages};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
@@ -130,6 +132,7 @@ fn sync_chat_to_ready_views(
         Option<&Profile>,
         Option<&PageMetadata>,
         &PromptQueue,
+        Option<&ImportedConversation>,
     )>,
     acp_sessions: Query<&AcpSession>,
     browsers: NonSend<Browsers>,
@@ -140,7 +143,7 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, profile, meta, queue)) = sessions.get(stack) else {
+        let Ok((messages, state, profile, meta, queue, imported)) = sessions.get(stack) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -149,7 +152,7 @@ fn sync_chat_to_ready_views(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue),
+            &snapshot_of(messages, state, profile, meta, queue, imported),
         ));
         let cross = acp_sessions
             .get(stack)
@@ -189,8 +192,11 @@ fn snapshot_of(
     profile: Option<&Profile>,
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
+    imported: Option<&ImportedConversation>,
 ) -> ChatSnapshot {
-    let messages_json = serde_json::to_string(&messages.0).unwrap_or_else(|_| "[]".to_string());
+    let display_messages = visible_messages(imported, &messages.0);
+    let messages_json =
+        serde_json::to_string(&display_messages).unwrap_or_else(|_| "[]".to_string());
     let (status, error, call_id, name) = match state {
         AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
         AgentRunState::Installing { pct, message } => {
@@ -223,6 +229,10 @@ fn snapshot_of(
         agent_name,
         agent_icon,
         accent_color,
+        handoff_source: imported
+            .map(|imported| imported.source_agent.clone())
+            .unwrap_or_default(),
+        handoff_truncated: imported.is_some_and(|imported| imported.truncated),
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
     }
@@ -240,12 +250,14 @@ fn push_chat_to_page(
             Option<&Profile>,
             Option<&PageMetadata>,
             &PromptQueue,
+            Option<&ImportedConversation>,
         ),
         Or<(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
             Changed<PromptQueue>,
             Changed<Profile>,
+            Changed<ImportedConversation>,
         )>,
     >,
     children: Query<&Children>,
@@ -253,7 +265,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, profile, meta, queue) in &sessions {
+    for (stack, messages, state, profile, meta, queue, imported) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -266,7 +278,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue),
+            &snapshot_of(messages, state, profile, meta, queue, imported),
         ));
     }
 }

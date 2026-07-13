@@ -367,18 +367,30 @@ fn drain_acp_installs(
 fn apply_acp_session_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentSessionCreated>,
     mut sessions: Query<
-        (Entity, &mut AcpSession, &mut vmux_core::PageMetadata),
+        (
+            Entity,
+            &mut AcpSession,
+            &mut vmux_core::PageMetadata,
+            Option<&ImportedConversation>,
+        ),
         Without<vmux_layout::Browser>,
     >,
     children: Query<&Children>,
     mut browser_meta: Query<&mut vmux_core::PageMetadata, With<vmux_layout::Browser>>,
 ) {
     for ev in reader.read() {
-        for (stack, mut session, mut stack_meta) in &mut sessions {
+        for (stack, mut session, mut stack_meta, imported) in &mut sessions {
             if session.sid != ev.sid {
                 continue;
             }
             session.resume = Some(ev.acp_session_id.clone());
+            if let Some(imported) = imported
+                && imported.first_prompt.is_some()
+                && let Err(err) =
+                    crate::handoff::save(&session.agent_id, &ev.acp_session_id, imported)
+            {
+                bevy::log::warn!("acp: failed to persist handoff metadata: {err}");
+            }
             let url = format!("vmux://agent/{}/{}", session.agent_id, ev.acp_session_id);
             // The stack's PageMetadata is what persists (space.ron) so a restart can resume.
             if stack_meta.url != url {

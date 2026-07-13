@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::{AgentKind, AssistantBlock, Message};
 
@@ -109,6 +110,71 @@ pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option
     if text.starts_with(HANDOFF_PROMPT_PREFIX) {
         *text = first_prompt.to_string();
     }
+}
+
+pub fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -> Vec<Message> {
+    let mut messages = imported
+        .map(|imported| imported.messages.clone())
+        .unwrap_or_default();
+    messages.extend_from_slice(live);
+    messages
+}
+
+pub fn save(
+    agent_id: &str,
+    session_id: &str,
+    imported: &ImportedConversation,
+) -> Result<(), String> {
+    save_in(
+        &vmux_core::profile::profile_dir().join("handoffs"),
+        agent_id,
+        session_id,
+        imported,
+    )
+}
+
+pub fn load(agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
+    load_in(
+        &vmux_core::profile::profile_dir().join("handoffs"),
+        agent_id,
+        session_id,
+    )
+}
+
+fn hex_component(value: &str) -> String {
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn record_path_in(root: &Path, agent_id: &str, session_id: &str) -> PathBuf {
+    root.join(hex_component(agent_id))
+        .join(format!("{}.json", hex_component(session_id)))
+}
+
+fn save_in(
+    root: &Path,
+    agent_id: &str,
+    session_id: &str,
+    imported: &ImportedConversation,
+) -> Result<(), String> {
+    let path = record_path_in(root, agent_id, session_id);
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("invalid handoff path {}", path.display()))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|err| format!("create handoff directory {}: {err}", parent.display()))?;
+    let bytes =
+        serde_json::to_vec(imported).map_err(|err| format!("serialize handoff record: {err}"))?;
+    std::fs::write(&path, bytes)
+        .map_err(|err| format!("write handoff record {}: {err}", path.display()))
+}
+
+fn load_in(root: &Path, agent_id: &str, session_id: &str) -> Option<ImportedConversation> {
+    let bytes = std::fs::read(record_path_in(root, agent_id, session_id)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 #[cfg(test)]
@@ -223,6 +289,69 @@ mod tests {
         assert_eq!(
             pending.context_for_send().as_deref(),
             Some("prior conversation")
+        );
+    }
+
+    #[test]
+    fn imported_conversation_sidecar_round_trips() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-handoff-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let imported = ImportedConversation {
+            source_agent: "Codex".into(),
+            source_kind: AgentKind::Codex,
+            source_sid: "cx/1".into(),
+            messages: vec![user("fix auth"), assistant("working")],
+            truncated: true,
+            first_prompt: Some("continue".into()),
+        };
+
+        save_in(&root, "claude/custom", "target?1", &imported).unwrap();
+        let loaded = load_in(&root, "claude/custom", "target?1").unwrap();
+
+        assert_eq!(loaded, imported);
+        assert!(record_path_in(&root, "claude/custom", "target?1").starts_with(&root));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_or_malformed_sidecar_is_ignored() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-handoff-bad-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        assert!(load_in(&root, "claude", "missing").is_none());
+        let path = record_path_in(&root, "claude", "bad");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "not json").unwrap();
+        assert!(load_in(&root, "claude", "bad").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn visible_messages_prepend_imported_history() {
+        let imported = ImportedConversation {
+            source_agent: "Codex".into(),
+            source_kind: AgentKind::Codex,
+            source_sid: "cx-1".into(),
+            messages: vec![user("old")],
+            truncated: false,
+            first_prompt: Some("new".into()),
+        };
+
+        assert_eq!(
+            visible_messages(Some(&imported), &[assistant("reply")]),
+            vec![user("old"), assistant("reply")]
         );
     }
 }

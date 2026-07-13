@@ -399,6 +399,11 @@ pub fn attach_acp_agent_to_stack(
         },
         vmux_core::AgentWorkingDir(cwd.to_string_lossy().to_string()),
     ));
+    if let Some(resume) = resume
+        && let Some(imported) = crate::handoff::load(agent_id, resume)
+    {
+        commands.entity(stack).insert(imported);
+    }
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     commands.spawn((
         vmux_layout::Browser::new(meshes, webview_mt, &url),

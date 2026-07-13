@@ -5,7 +5,7 @@ use crate::AgentVariant;
 use crate::client::acp::AcpSession;
 use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 use crate::events::{AgentApprovalRequest, AgentDelta};
-use crate::handoff::PendingHandoff;
+use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::message::Message;
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::LastRunStateKind;
@@ -189,13 +189,14 @@ fn consume_page_agent_stream(
         Option<&AgentSession>,
         Option<&AcpSession>,
         Option<&mut PendingHandoff>,
+        Option<&ImportedConversation>,
     )>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
     mut commands: Commands,
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
         .iter()
-        .filter_map(|(e, _, _, _, page, acp, _)| {
+        .filter_map(|(e, _, _, _, page, acp, _, _)| {
             let sid = page
                 .map(|s| s.sid.clone())
                 .or_else(|| acp.map(|s| s.sid.clone()))?;
@@ -213,15 +214,19 @@ fn consume_page_agent_stream(
     }
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
-            && let Ok((_, mut messages, _, _, _, _, _)) = q.get_mut(entity)
-            && let Ok(parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
+            && let Ok((_, mut messages, _, _, _, _, _, imported)) = q.get_mut(entity)
+            && let Ok(mut parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
+            sanitize_replayed_messages(
+                &mut parsed,
+                imported.and_then(|imported| imported.first_prompt.as_deref()),
+            );
             messages.0 = parsed;
         }
     }
     for status in statuses.read() {
         if let Some(&entity) = by_sid.get(&status.sid)
-            && let Ok((_, _, mut state, mut queue, _, _, mut pending)) = q.get_mut(entity)
+            && let Ok((_, _, mut state, mut queue, _, _, mut pending, _)) = q.get_mut(entity)
         {
             let was_streaming = matches!(*state, AgentRunState::Streaming);
             match &status.status {
@@ -262,7 +267,7 @@ fn consume_page_agent_stream(
         };
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
-        if let Ok((_, _, mut state, _, _, _, _)) = q.get_mut(entity) {
+        if let Ok((_, _, mut state, _, _, _, _, _)) = q.get_mut(entity) {
             *state = AgentRunState::AwaitingApproval {
                 call_id: approval.call_id.clone(),
                 name: approval.name.clone(),

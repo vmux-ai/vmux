@@ -152,6 +152,8 @@ pub fn Page() -> Element {
     let mut agent_name = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
+    let mut handoff_source = use_signal(String::new);
+    let mut handoff_truncated = use_signal(|| false);
     let mut draft = use_signal(String::new);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -204,6 +206,8 @@ pub fn Page() -> Element {
         agent_name.set(snap.agent_name.clone());
         agent_icon.set(snap.agent_icon.clone());
         accent.set(snap.accent_color.clone());
+        handoff_source.set(snap.handoff_source.clone());
+        handoff_truncated.set(snap.handoff_truncated);
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -356,6 +360,16 @@ pub fn Page() -> Element {
                     }
                 },
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
+                    if !handoff_source().is_empty() {
+                        div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
+                            span { class: "h-px flex-1 bg-foreground/10" }
+                            span { "Continued from {handoff_source}" }
+                            if handoff_truncated() {
+                                span { class: "text-amber-500/80", "· older context omitted" }
+                            }
+                            span { class: "h-px flex-1 bg-foreground/10" }
+                        }
+                    }
                     if messages.read().is_empty() && status() == "idle" {
                         div { class: "flex flex-col items-center gap-3 py-24 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}

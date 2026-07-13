@@ -36,6 +36,8 @@ pub struct ChatSnapshot {
     pub agent_icon: String,
     /// Agent brand accent color (hex, from the avatar), for loading/status accents.
     pub accent_color: String,
+    pub handoff_source: String,
+    pub handoff_truncated: bool,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -284,6 +286,8 @@ mod tests {
         let v = ChatSnapshot {
             messages_json: "[]".to_string(),
             status: "streaming".to_string(),
+            handoff_source: "Codex".to_string(),
+            handoff_truncated: true,
             queued: vec!["a".into(), "b".into()],
             paused: true,
             ..Default::default()
@@ -293,6 +297,8 @@ mod tests {
         assert_eq!(back.status, "streaming");
         assert_eq!(back.queued, vec!["a".to_string(), "b".to_string()]);
         assert!(back.paused);
+        assert_eq!(back.handoff_source, "Codex");
+        assert!(back.handoff_truncated);
     }
 
     #[test]
