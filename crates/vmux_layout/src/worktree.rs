@@ -118,8 +118,8 @@ fn ensure_worktrees_ignored(repo_root: &Path) {
     let _ = std::fs::write(&exclude, next);
 }
 
-/// After load (or create), drop a [`TabWorktree`] whose checkout directory no longer exists,
-/// so the tab's dir cascades back through the resolver instead of pointing at a dead worktree.
+/// After load (or create), drop stale managed-worktree metadata while retaining the tab's stored
+/// workspace directory.
 fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut commands: Commands) {
     for (entity, tab) in &q {
         let missing = tab
@@ -141,7 +141,7 @@ struct CachedCheckoutInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CheckoutFingerprint {
+struct PathFingerprint {
     len: u64,
     modified: Option<SystemTime>,
     #[cfg(unix)]
@@ -150,15 +150,70 @@ struct CheckoutFingerprint {
     inode: u64,
 }
 
-fn checkout_fingerprint(info: &CheckoutInfo) -> Option<CheckoutFingerprint> {
-    let metadata = std::fs::symlink_metadata(info.root.join(".git")).ok()?;
-    Some(CheckoutFingerprint {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CheckoutFingerprint {
+    dot_git: PathFingerprint,
+    admin_dir: PathBuf,
+    common_dir: PathBuf,
+    commondir: Option<Vec<u8>>,
+    gitdir: Option<Vec<u8>>,
+}
+
+fn path_fingerprint(path: &Path) -> Option<PathFingerprint> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    Some(PathFingerprint {
         len: metadata.len(),
         modified: metadata.modified().ok(),
         #[cfg(unix)]
         device: metadata.dev(),
         #[cfg(unix)]
         inode: metadata.ino(),
+    })
+}
+
+fn git_admin_dir(root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return dot_git.canonicalize().ok();
+    }
+    let contents = std::fs::read_to_string(&dot_git).ok()?;
+    let path = PathBuf::from(contents.strip_prefix("gitdir:")?.trim());
+    let path = if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    };
+    path.canonicalize().ok()
+}
+
+fn checkout_fingerprint(info: &CheckoutInfo) -> Option<CheckoutFingerprint> {
+    let dot_git_path = info.root.join(".git");
+    let dot_git = path_fingerprint(&dot_git_path)?;
+    let admin_dir = git_admin_dir(&info.root)?;
+    let commondir = std::fs::read(admin_dir.join("commondir")).ok();
+    let gitdir = std::fs::read(admin_dir.join("gitdir")).ok();
+    let common_dir = match commondir.as_deref() {
+        Some(bytes) => {
+            let value = std::str::from_utf8(bytes).ok()?.trim();
+            let path = PathBuf::from(value);
+            let path = if path.is_absolute() {
+                path
+            } else {
+                admin_dir.join(path)
+            };
+            path.canonicalize().ok()?
+        }
+        None => admin_dir.clone(),
+    };
+    if common_dir != info.common_dir {
+        return None;
+    }
+    Some(CheckoutFingerprint {
+        dot_git,
+        admin_dir,
+        common_dir,
+        commondir,
+        gitdir,
     })
 }
 
@@ -201,7 +256,7 @@ fn cached_checkout_info(
 }
 
 fn observed_start_dir(path: &Path) -> Option<PathBuf> {
-    if !path.exists() {
+    if !path.is_absolute() || !path.exists() {
         return None;
     }
     let start = if path.is_dir() { path } else { path.parent()? };
@@ -237,9 +292,10 @@ fn rebind_tab_directories(
         let Some(current) = tab.startup_dir.clone() else {
             continue;
         };
-        if let Ok(current_dir) = Path::new(&current).canonicalize()
-            && is_within_checkout_without_nested_git_boundary(&current_dir, &observed_dir)
-        {
+        let Ok(current_dir) = Path::new(&current).canonicalize() else {
+            continue;
+        };
+        if is_within_checkout_without_nested_git_boundary(&current_dir, &observed_dir) {
             continue;
         }
         let Ok(observed_info) = worktree::checkout_info(&observed_dir) else {
@@ -249,6 +305,13 @@ fn rebind_tab_directories(
             cached_checkout_info(&mut checkout_cache, observed.tab, &current, |path| {
                 worktree::checkout_info(path).ok()
             });
+        if current_info.is_none()
+            && current_dir
+                .ancestors()
+                .any(|ancestor| ancestor.join(".git").exists())
+        {
+            continue;
+        }
         if current_info.as_ref().is_some_and(|current_info| {
             is_within_checkout_without_nested_git_boundary(&current_info.root, &observed_dir)
         }) {
@@ -262,7 +325,9 @@ fn rebind_tab_directories(
         if !should_rebind {
             continue;
         }
-        let startup_dir = observed_info.root.to_string_lossy().into_owned();
+        let Some(startup_dir) = observed_info.root.to_str().map(str::to_owned) else {
+            continue;
+        };
         tab.startup_dir = Some(startup_dir.clone());
         store_cached_checkout_info(
             &mut checkout_cache,
@@ -647,12 +712,12 @@ mod tests {
         let tab = Entity::from_bits(1);
         let calls = Cell::new(0);
         let first = vmux_git::worktree::CheckoutInfo {
-            root: repo.path().to_path_buf(),
-            common_dir: repo.path().join(".git"),
+            root: repo.path().canonicalize().unwrap(),
+            common_dir: repo.path().join(".git").canonicalize().unwrap(),
         };
         let second = vmux_git::worktree::CheckoutInfo {
-            root: next_root,
-            common_dir: repo.path().join(".git"),
+            root: next_root.canonicalize().unwrap(),
+            common_dir: repo.path().join(".git").canonicalize().unwrap(),
         };
         let mut cache = HashMap::new();
 
@@ -684,6 +749,101 @@ mod tests {
 
         assert_eq!(resolved, second);
         assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn cached_checkout_info_resolves_again_after_commondir_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let admin = tempfile::tempdir().unwrap();
+        let first_common = tempfile::tempdir().unwrap();
+        let second_common = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join(".git"),
+            format!("gitdir: {}\n", admin.path().display()),
+        )
+        .unwrap();
+        std::fs::write(
+            admin.path().join("commondir"),
+            first_common.path().to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let startup_dir = root.path().to_string_lossy().into_owned();
+        let tab = Entity::from_bits(1);
+        let calls = Cell::new(0);
+        let first = vmux_git::worktree::CheckoutInfo {
+            root: root.path().canonicalize().unwrap(),
+            common_dir: first_common.path().canonicalize().unwrap(),
+        };
+        let second = vmux_git::worktree::CheckoutInfo {
+            root: root.path().canonicalize().unwrap(),
+            common_dir: second_common.path().canonicalize().unwrap(),
+        };
+        let mut cache = HashMap::new();
+
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
+            calls.set(calls.get() + 1);
+            Some(first.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved, first);
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
+            calls.set(calls.get() + 1);
+            Some(second.clone())
+        })
+        .unwrap();
+        assert_eq!(resolved, first);
+        assert_eq!(calls.get(), 1);
+        std::fs::write(
+            admin.path().join("commondir"),
+            second_common.path().to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let resolved = cached_checkout_info(&mut cache, tab, &startup_dir, |_| {
+            calls.set(calls.get() + 1);
+            Some(second.clone())
+        })
+        .unwrap();
+
+        assert_eq!(resolved, second);
+        assert_eq!(calls.get(), 2);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn observation_ignores_non_utf8_checkout_root() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let current = init_repo();
+        let observed_parent = tempfile::tempdir().unwrap();
+        let observed = observed_parent
+            .path()
+            .join(OsString::from_vec(b"repo-\xff".to_vec()));
+        std::fs::create_dir(&observed).unwrap();
+        git(&observed, &["init", "-q", "-b", "main"]);
+        git(&observed, &["config", "user.email", "t@example.com"]);
+        git(&observed, &["config", "user.name", "Test"]);
+        git(&observed, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(observed.join("seed.txt"), "seed\n").unwrap();
+        git(&observed, &["add", "seed.txt"]);
+        git(&observed, &["commit", "-qm", "init"]);
+        let original = current.path().to_string_lossy().into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe_edit(&mut app, tab, &observed.join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
     }
 
     #[test]
@@ -792,6 +952,35 @@ mod tests {
             .id();
 
         observe(&mut app, tab, &observed.path().join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
+    }
+
+    #[test]
+    fn relative_observation_is_ignored() {
+        assert_eq!(observed_start_dir(Path::new(".")), None);
+    }
+
+    #[test]
+    fn observation_keeps_missing_current_directory_on_edit() {
+        let current = tempfile::tempdir().unwrap();
+        let original = current.path().to_string_lossy().into_owned();
+        drop(current);
+        let observed = init_repo();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
 
         assert_eq!(
             app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),

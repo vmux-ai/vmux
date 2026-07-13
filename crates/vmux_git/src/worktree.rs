@@ -29,36 +29,43 @@ pub struct CheckoutInfo {
     pub common_dir: PathBuf,
 }
 
-/// Resolve checkout root and shared Git directory with one `git rev-parse` call.
-pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
-    let (stdout, stderr, ok) = git(
-        dir,
-        &[
-            "rev-parse",
-            "--path-format=absolute",
-            "--show-toplevel",
-            "--git-common-dir",
-        ],
-    )?;
+fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitError> {
+    let (stdout, stderr, ok) = git(dir, &["rev-parse", "--path-format=absolute", flag])?;
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
-    let mut lines = stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty());
-    let root = lines
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| GitError("git checkout root is empty".to_string()))?;
-    let common_dir = lines
-        .next()
-        .map(PathBuf::from)
-        .ok_or_else(|| GitError("git common dir is empty".to_string()))?;
-    Ok(CheckoutInfo {
-        root: root.canonicalize().unwrap_or(root),
-        common_dir: common_dir.canonicalize().unwrap_or(common_dir),
-    })
+    let value = stdout
+        .strip_suffix("\r\n")
+        .or_else(|| stdout.strip_suffix('\n'))
+        .unwrap_or(&stdout);
+    if value.is_empty() {
+        return Err(GitError(format!("{label} is empty")));
+    }
+    Ok(PathBuf::from(value))
+}
+
+/// Resolve checkout root and shared Git directory.
+pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
+    let input_dir = dir
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid checkout directory: {error}")))?;
+    if !input_dir.is_dir() {
+        return Err(GitError("checkout path is not a directory".to_string()));
+    }
+    let root = rev_parse_path(&input_dir, "--show-toplevel", "git checkout root")?;
+    let common_dir = rev_parse_path(&input_dir, "--git-common-dir", "git common dir")?;
+    let root = root
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid checkout root: {error}")))?;
+    if !root.is_dir() || !input_dir.starts_with(&root) {
+        return Err(GitError(
+            "git checkout root does not contain the input directory".to_string(),
+        ));
+    }
+    let common_dir = common_dir
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
+    Ok(CheckoutInfo { root, common_dir })
 }
 
 /// The repo root containing `dir` (`git rev-parse --show-toplevel`). `dir` must exist.
@@ -217,25 +224,13 @@ pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
 /// True if `dir` is a *linked* worktree (its git-dir differs from the repo's common git-dir),
 /// i.e. not the repo's main working tree. False for the main worktree or a non-repo.
 pub fn is_linked_worktree(dir: &Path) -> bool {
-    let Ok((stdout, _, ok)) = git(
-        dir,
-        &[
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-dir",
-            "--git-common-dir",
-        ],
-    ) else {
+    let Ok(git_dir) = rev_parse_path(dir, "--git-dir", "git directory") else {
         return false;
     };
-    if !ok {
+    let Ok(common_dir) = rev_parse_path(dir, "--git-common-dir", "git common directory") else {
         return false;
-    }
-    let mut lines = stdout.lines().map(str::trim).filter(|l| !l.is_empty());
-    match (lines.next(), lines.next()) {
-        (Some(git_dir), Some(common)) => git_dir != common,
-        _ => false,
-    }
+    };
+    git_dir != common_dir
 }
 
 #[cfg(test)]
@@ -407,5 +402,37 @@ mod tests {
         assert_eq!(main.root, repo.path().canonicalize().unwrap());
         assert_eq!(linked.root, wt.canonicalize().unwrap());
         assert_eq!(linked.common_dir, main.common_dir);
+    }
+
+    #[test]
+    fn checkout_info_handles_newline_in_checkout_path() {
+        let repo = tempfile::Builder::new()
+            .prefix("vmux\ncheckout-")
+            .tempdir()
+            .unwrap();
+        test_repo::run(repo.path(), &["init", "-q", "-b", "main"]);
+        test_repo::run(repo.path(), &["config", "user.email", "t@example.com"]);
+        test_repo::run(repo.path(), &["config", "user.name", "Test"]);
+        test_repo::run(repo.path(), &["config", "commit.gpgsign", "false"]);
+
+        let info = checkout_info(repo.path()).unwrap();
+
+        assert_eq!(info.root, repo.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn checkout_info_rejects_root_outside_input_directory() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().to_string_lossy();
+        let (_, stderr, ok) = git(
+            repo.path(),
+            &["config", "core.worktree", outside_path.as_ref()],
+        )
+        .unwrap();
+        assert!(ok, "git config failed: {stderr}");
+
+        assert!(checkout_info(repo.path()).is_err());
     }
 }

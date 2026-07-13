@@ -278,6 +278,41 @@ pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path:
     resolve_startup_dir_for_tab(settings, space_id, None)
 }
 
+pub fn validate_tab_workspace_dir(tab_dir: &str) -> Result<std::path::PathBuf, String> {
+    let trimmed = tab_dir.trim();
+    if trimmed.is_empty() {
+        return Err("tab workspace directory is empty".to_string());
+    }
+    let path = std::path::PathBuf::from(trimmed);
+    if !path.is_absolute() {
+        return Err(format!(
+            "tab workspace directory is not absolute: {}",
+            path.display()
+        ));
+    }
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("invalid tab workspace directory: {error}"))?;
+    if !path.is_dir() {
+        return Err(format!(
+            "tab workspace path is not a directory: {}",
+            path.display()
+        ));
+    }
+    Ok(path)
+}
+
+pub fn resolve_tab_workspace_dir(
+    settings: &AppSettings,
+    space_id: &str,
+    tab_dir: Option<&str>,
+) -> Result<std::path::PathBuf, String> {
+    match tab_dir {
+        Some(tab_dir) => validate_tab_workspace_dir(tab_dir),
+        None => Ok(resolve_startup_dir(settings, space_id)),
+    }
+}
+
 /// Which level of the `tab → space → global → builtin` chain supplied a resolved startup dir.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirSource {
@@ -1653,6 +1688,30 @@ mod tests {
             resolve_startup_dir_for_tab(&s, "work", Some("/no/such/tab/xyz-vmux")),
             per.path()
         );
+    }
+
+    #[test]
+    fn resolve_tab_workspace_dir_rejects_invalid_stored_path_without_fallback() {
+        let per = tempfile::tempdir().unwrap();
+        let mut s = base_settings();
+        s.spaces.insert(
+            "work".into(),
+            SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(per.path().to_string_lossy().into()),
+            },
+        );
+
+        assert!(resolve_tab_workspace_dir(&s, "work", Some("/no/such/tab/xyz-vmux")).is_err());
+        assert_eq!(
+            resolve_tab_workspace_dir(&s, "work", None).unwrap(),
+            per.path()
+        );
+    }
+
+    #[test]
+    fn validate_tab_workspace_dir_rejects_relative_path() {
+        assert!(validate_tab_workspace_dir(".").is_err());
     }
 
     #[test]

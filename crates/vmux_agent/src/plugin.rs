@@ -1039,6 +1039,14 @@ fn handle_agent_file_touch(
         else {
             continue;
         };
+        if let CommandOrigin::Agent {
+            anchor: Some(origin_anchor),
+            ..
+        } = &request.origin
+            && origin_anchor != anchor
+        {
+            continue;
+        }
         let Some(agent_pane) = resolve.agent_pane(*anchor) else {
             continue;
         };
@@ -1705,10 +1713,13 @@ fn run_terminal_candidates(
     let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
         return Vec::new();
     };
+    let desired_cwd = desired_cwd
+        .canonicalize()
+        .unwrap_or_else(|_| desired_cwd.to_path_buf());
     terminals
         .iter()
         .filter_map(|(terminal, pid, launch, agent_run)| {
-            if !agent_run || !run_terminal_launch_matches_cwd(&launch.cwd, desired_cwd) {
+            if !agent_run {
                 return None;
             }
             let stack = child_of_q.get(terminal).ok()?.get();
@@ -1717,6 +1728,9 @@ fn run_terminal_candidates(
                 return None;
             }
             if tab_of_run_pane(pane, child_of_q, tab_q) != Some(agent_tab) {
+                return None;
+            }
+            if !run_terminal_launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
                 return None;
             }
             Some(RunTerminalCandidate {
@@ -1800,11 +1814,17 @@ fn append_pending_run_terminal_input(
     anchor: ProcessId,
     pending_spawns: &std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
     terminal_spawns: &mut [TerminalStackSpawnRequest],
+    desired_cwd: &Path,
     command: &str,
     token: Option<&str>,
 ) -> Option<ProcessId> {
     let pending = pending_spawns.get(&anchor)?;
     let request = terminal_spawns.get_mut(pending.request_index)?;
+    let request_cwd = request.cwd.as_deref()?.canonicalize().ok()?;
+    let desired_cwd = desired_cwd.canonicalize().ok()?;
+    if request_cwd != desired_cwd {
+        return None;
+    }
     let data = run_command_input(command, token, &pending.shell);
     match &mut request.pending_input {
         Some(input) => input.extend(data),
@@ -2028,30 +2048,42 @@ fn validate_agent_terminal_shell(shell: &str) -> Result<(), String> {
     }
 }
 
+fn stored_tab_cwd(tab_cwd: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(tab_cwd) = tab_cwd else {
+        return Ok(None);
+    };
+    vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
+}
+
 fn run_terminal_cwd(
     tab_cwd: Option<&str>,
     agent_launch_cwd: Option<&str>,
     active_space: Option<&ActiveSpace>,
-) -> PathBuf {
-    if let Some(Ok(Some(path))) = tab_cwd.map(valid_cwd) {
-        return path;
+) -> Result<PathBuf, String> {
+    if let Some(path) = stored_tab_cwd(tab_cwd)? {
+        return Ok(path);
     }
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
-        return path;
+        return Ok(path);
     }
-    active_space
+    Ok(active_space
         .map(|s| space_dir(&s.record.id))
-        .unwrap_or_else(default_space_dir)
+        .unwrap_or_else(default_space_dir))
 }
 
+#[cfg(test)]
 fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+    let desired_cwd = desired_cwd
+        .canonicalize()
+        .unwrap_or_else(|_| desired_cwd.to_path_buf());
+    run_terminal_launch_matches_canonical_cwd(launch_cwd, &desired_cwd)
+}
+
+fn run_terminal_launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
     let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
         return false;
     };
     let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
-    let desired_cwd = desired_cwd
-        .canonicalize()
-        .unwrap_or_else(|_| desired_cwd.to_path_buf());
     launch_cwd == desired_cwd
 }
 
@@ -2187,11 +2219,14 @@ fn handle_agent_self_commands(
                             }
                         };
                         let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
-                        let cwd = run_terminal_cwd(
+                        let cwd = match run_terminal_cwd(
                             tab_cwd.as_deref(),
                             agent_cwd.as_deref(),
                             active_space.as_deref(),
-                        );
+                        ) {
+                            Ok(cwd) => cwd,
+                            Err(message) => break 'spawn AgentCommandResult::Error(message),
+                        };
                         let candidates = run_terminal_candidates(
                             self_pane,
                             &run_terms,
@@ -2216,6 +2251,7 @@ fn handle_agent_self_commands(
                                 *anchor,
                                 &pending_run_spawns,
                                 &mut terminal_spawns,
+                                &cwd,
                                 command,
                                 done_marker.as_deref(),
                             )
@@ -2387,12 +2423,17 @@ fn handle_agent_self_commands(
                                 if tab_worktrees.get(tab_e).is_ok()
                                     || worktree_created_this_batch.contains(&tab_e) =>
                             {
-                                let dir = tabs
-                                    .get(tab_e)
-                                    .ok()
-                                    .and_then(|t| t.startup_dir.clone())
-                                    .unwrap_or_default();
-                                AgentCommandResult::Text(dir)
+                                let tab_dir =
+                                    tabs.get(tab_e).ok().and_then(|t| t.startup_dir.clone());
+                                match stored_tab_cwd(tab_dir.as_deref()) {
+                                    Ok(Some(path)) => AgentCommandResult::Text(
+                                        path.to_string_lossy().into_owned(),
+                                    ),
+                                    Ok(None) => AgentCommandResult::Error(
+                                        "tab workspace directory is missing".to_string(),
+                                    ),
+                                    Err(message) => AgentCommandResult::Error(message),
+                                }
                             }
                             Some(tab_e) => {
                                 let tab_dir =
@@ -2403,33 +2444,36 @@ fn handle_agent_self_commands(
                                     .as_deref()
                                     .map(|s| s.record.id.clone())
                                     .unwrap_or_default();
-                                let base_dir = vmux_setting::resolve_startup_dir_for_tab(
-                                    &settings,
-                                    &space_id,
-                                    tab_dir.as_deref(),
-                                );
-                                match vmux_layout::worktree::create_worktree_blocking(
-                                    &base_dir, &name,
-                                ) {
-                                    Ok(info) => {
-                                        let path = info.path.to_string_lossy().into_owned();
-                                        if let Ok(mut t) = tabs.get_mut(tab_e) {
-                                            t.startup_dir = Some(path.clone());
+                                match stored_tab_cwd(tab_dir.as_deref()) {
+                                    Err(message) => AgentCommandResult::Error(message),
+                                    Ok(stored) => {
+                                        let base_dir = stored.unwrap_or_else(|| {
+                                            vmux_setting::resolve_startup_dir(&settings, &space_id)
+                                        });
+                                        match vmux_layout::worktree::create_worktree_blocking(
+                                            &base_dir, &name,
+                                        ) {
+                                            Ok(info) => {
+                                                let path = info.path.to_string_lossy().into_owned();
+                                                if let Ok(mut t) = tabs.get_mut(tab_e) {
+                                                    t.startup_dir = Some(path.clone());
+                                                }
+                                                commands.entity(tab_e).insert(
+                                                    vmux_layout::tab::TabWorktree {
+                                                        repo_root: info
+                                                            .repo_root
+                                                            .to_string_lossy()
+                                                            .into_owned(),
+                                                        branch: info.branch.clone(),
+                                                        base_ref: info.base_ref.clone(),
+                                                    },
+                                                );
+                                                worktree_created_this_batch.insert(tab_e);
+                                                AgentCommandResult::Text(path)
+                                            }
+                                            Err(e) => AgentCommandResult::Error(e),
                                         }
-                                        commands.entity(tab_e).insert(
-                                            vmux_layout::tab::TabWorktree {
-                                                repo_root: info
-                                                    .repo_root
-                                                    .to_string_lossy()
-                                                    .into_owned(),
-                                                branch: info.branch.clone(),
-                                                base_ref: info.base_ref.clone(),
-                                            },
-                                        );
-                                        worktree_created_this_batch.insert(tab_e);
-                                        AgentCommandResult::Text(path)
                                     }
-                                    Err(e) => AgentCommandResult::Error(e),
                                 }
                             }
                         }
@@ -2845,16 +2889,17 @@ fn handle_agent_page_open(
             continue;
         }
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
-        let default_cwd = active_space
-            .as_deref()
-            .map(|s| {
-                vmux_setting::resolve_startup_dir_for_tab(
-                    &settings,
-                    &s.record.id,
-                    tab_dir.as_deref(),
-                )
-            })
-            .unwrap_or_else(default_space_dir);
+        let default_cwd = match stored_tab_cwd(tab_dir.as_deref()) {
+            Ok(Some(path)) => path,
+            Ok(None) => active_space
+                .as_deref()
+                .map(|s| vmux_setting::resolve_startup_dir(&settings, &s.record.id))
+                .unwrap_or_else(default_space_dir),
+            Err(message) => {
+                commands.entity(entity).insert(PageOpenError { message });
+                continue;
+            }
+        };
         match handle_agent_page_open_task(
             task,
             &children_q,
@@ -3890,7 +3935,78 @@ mod tests {
     }
 
     #[test]
+    fn file_touch_rejects_command_anchor_mismatched_with_origin() {
+        let mut settings = test_settings();
+        settings.agent.follow_files = false;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
+            .insert_resource(settings)
+            .add_systems(Update, handle_agent_file_touch);
+
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        let command_anchor = ProcessId::new();
+        app.world_mut().spawn((command_anchor, ChildOf(stack)));
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(ProcessId::new()),
+                },
+                command: ServiceAgentCommand::FileTouched {
+                    anchor: command_anchor,
+                    path: std::env::temp_dir()
+                        .join("vmux-mismatched-anchor.rs")
+                        .to_string_lossy()
+                        .into_owned(),
+                    line: None,
+                    col: None,
+                    end_col: None,
+                    kind: vmux_service::protocol::FileTouchKind::Read,
+                },
+            });
+
+        app.update();
+
+        let messages = app
+            .world()
+            .resource::<Messages<vmux_layout::worktree::TabDirectoryObserved>>();
+        let mut cursor = messages.get_cursor();
+        assert_eq!(cursor.read(messages).count(), 0);
+    }
+
+    #[test]
     fn edit_file_touch_rebinds_tab_in_same_frame() {
+        #[derive(Resource)]
+        struct RunTab(Entity);
+
+        #[derive(Resource, Default)]
+        struct CapturedRunCwd(Option<PathBuf>);
+
+        fn capture_run_cwd(
+            mut reader: MessageReader<AgentCommandRequest>,
+            run_tab: Res<RunTab>,
+            tabs: Query<&vmux_layout::tab::Tab>,
+            mut captured: ResMut<CapturedRunCwd>,
+        ) {
+            for request in reader.read() {
+                if matches!(request.command, ServiceAgentCommand::Run { .. }) {
+                    let tab = tabs.get(run_tab.0).unwrap();
+                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None, None).ok();
+                }
+            }
+        }
+
         struct TestRepo(PathBuf);
 
         impl TestRepo {
@@ -3954,10 +4070,14 @@ mod tests {
             .add_message::<AgentCommandRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .init_resource::<CapturedRunCwd>()
             .insert_resource(settings)
             .add_systems(
                 Update,
-                handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                (
+                    handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                    capture_run_cwd.after(vmux_layout::worktree::TabDirectoryRebindSet),
+                ),
             );
         let tab = app
             .world_mut()
@@ -3966,6 +4086,7 @@ mod tests {
                 startup_dir: Some(current.path().to_string_lossy().into_owned()),
             })
             .id();
+        app.insert_resource(RunTab(tab));
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
         let stack = app
             .world_mut()
@@ -3994,6 +4115,25 @@ mod tests {
                     kind: vmux_service::protocol::FileTouchKind::Edit,
                 },
             });
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::Run {
+                    anchor,
+                    command: "pwd".into(),
+                    direction: vmux_service::protocol::AgentPaneDirection::Right,
+                    focus: false,
+                    beside: None,
+                    mode: vmux_service::protocol::PlacementMode::Auto,
+                    terminal: None,
+                    done_marker: None,
+                },
+            });
 
         app.update();
 
@@ -4004,6 +4144,10 @@ mod tests {
                 .startup_dir
                 .as_deref(),
             Some(expected.as_str())
+        );
+        assert_eq!(
+            app.world().resource::<CapturedRunCwd>().0.as_deref(),
+            Some(observed.path().canonicalize().unwrap().as_path())
         );
     }
 
@@ -4753,13 +4897,57 @@ mod tests {
             .resource_mut::<Messages<SpawnAgentInStackRequest>>()
             .drain()
             .collect();
+        let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         let _ = std::fs::remove_dir_all(&space_dir);
         let _ = std::fs::remove_dir_all(&tab_dir);
         assert_eq!(spawns.len(), 1);
         assert_eq!(
-            spawns[0].cwd, tab_dir,
+            spawns[0].cwd, canonical_tab_dir,
             "claude page cwd resolves to ancestor tab startup_dir"
         );
+    }
+
+    #[test]
+    fn fresh_claude_page_rejects_invalid_stored_tab_startup_dir() {
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "t".into(),
+                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://agent/claude/".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        let spawns: Vec<SpawnAgentInStackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert!(spawns.is_empty());
+        assert!(app.world().get::<PageOpenError>(task).is_some());
     }
 
     #[test]
@@ -4810,13 +4998,15 @@ mod tests {
         let agent_dir = std::env::temp_dir().join(format!("vmux-agent-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&tab_dir).unwrap();
         std::fs::create_dir_all(&agent_dir).unwrap();
+        let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
             run_terminal_cwd(
                 Some(tab_dir.to_string_lossy().as_ref()),
                 Some(agent_dir.to_string_lossy().as_ref()),
                 None,
-            ),
-            tab_dir.clone()
+            )
+            .unwrap(),
+            canonical_tab_dir
         );
         let _ = std::fs::remove_dir_all(&agent_dir);
         let _ = std::fs::remove_dir_all(&tab_dir);
@@ -4844,15 +5034,40 @@ mod tests {
     fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy()), None);
+        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy()), None).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
     fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
-        assert_eq!(run_terminal_cwd(None, Some(""), None), default_space_dir());
-        assert_eq!(run_terminal_cwd(None, None, None), default_space_dir());
+        assert_eq!(
+            run_terminal_cwd(None, Some(""), None).unwrap(),
+            default_space_dir()
+        );
+        assert_eq!(
+            run_terminal_cwd(None, None, None).unwrap(),
+            default_space_dir()
+        );
+    }
+
+    #[test]
+    fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
+        let agent_dir = std::env::temp_dir();
+
+        assert!(
+            run_terminal_cwd(
+                Some("/no/such/vmux-tab-workspace"),
+                agent_dir.to_str(),
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
+        assert!(run_terminal_cwd(Some("."), None, None).is_err());
     }
 
     #[test]
@@ -5143,18 +5358,6 @@ mod tests {
             non_test_source[start..]
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
-        );
-        assert!(
-            non_test_source.contains(
-                "handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet)"
-            ),
-            "file observations must run before tab directory rebinding"
-        );
-        assert!(
-            non_test_source.contains(
-                "handle_agent_self_commands\n                        .after(vmux_layout::worktree::TabDirectoryRebindSet)"
-            ),
-            "run commands must resolve cwd after tab directory rebinding"
         );
     }
 
@@ -5470,7 +5673,7 @@ mod tests {
         );
         let mut terminal_spawns = vec![TerminalStackSpawnRequest {
             pane,
-            cwd: None,
+            cwd: Some(std::env::temp_dir()),
             shell: Some("/opt/homebrew/bin/nu".to_string()),
             agent_run: true,
             pending_input: Some(b"one\r".to_vec()),
@@ -5482,6 +5685,7 @@ mod tests {
             anchor,
             &pending_spawns,
             &mut terminal_spawns,
+            &std::env::temp_dir(),
             "pwd",
             Some("tok2"),
         );
@@ -5492,6 +5696,51 @@ mod tests {
         assert!(input.contains("try { pwd;"), "got: {input}");
         assert!(input.contains("]6973;tok2;"), "got: {input}");
         assert_eq!(terminal_spawns.len(), 1);
+    }
+
+    #[test]
+    fn pending_run_terminal_spawn_rejects_changed_cwd() {
+        let old_cwd = std::env::temp_dir().join(format!("vmux-old-cwd-{}", std::process::id()));
+        let new_cwd = std::env::temp_dir().join(format!("vmux-new-cwd-{}", std::process::id()));
+        std::fs::create_dir_all(&old_cwd).unwrap();
+        std::fs::create_dir_all(&new_cwd).unwrap();
+        let anchor = ProcessId::new();
+        let terminal = ProcessId::new();
+        let mut pending_spawns = std::collections::HashMap::new();
+        pending_spawns.insert(
+            anchor,
+            PendingRunTerminalSpawn {
+                pid: terminal,
+                request_index: 0,
+                shell: "/opt/homebrew/bin/nu".to_string(),
+            },
+        );
+        let mut terminal_spawns = vec![TerminalStackSpawnRequest {
+            pane: Entity::from_bits(20),
+            cwd: Some(old_cwd.clone()),
+            shell: Some("/opt/homebrew/bin/nu".to_string()),
+            agent_run: true,
+            pending_input: Some(b"one\r".to_vec()),
+            process_id: Some(terminal),
+            activate: false,
+        }];
+
+        let picked = append_pending_run_terminal_input(
+            anchor,
+            &pending_spawns,
+            &mut terminal_spawns,
+            &new_cwd,
+            "pwd",
+            Some("tok2"),
+        );
+
+        let _ = std::fs::remove_dir_all(&old_cwd);
+        let _ = std::fs::remove_dir_all(&new_cwd);
+        assert_eq!(picked, None);
+        assert_eq!(
+            terminal_spawns[0].pending_input.as_deref(),
+            Some(&b"one\r"[..])
+        );
     }
 
     #[derive(Resource)]

@@ -1,5 +1,8 @@
 # Dynamic Tab Directory Rebinding
 
+> Superseded by `2026-07-13-tab-owned-workspace-design.md`. The later design expands rebinding to
+> cross-repository edits and defines the tab-owned workspace contract.
+
 ## Problem
 
 When vmux creates a worktree for an agent, it stores that checkout in `Tab.startup_dir` and marks

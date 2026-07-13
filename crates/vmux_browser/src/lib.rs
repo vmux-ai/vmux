@@ -2779,8 +2779,26 @@ fn push_pane_tree_emit(
     *last = ron_body;
 }
 
-fn stored_tab_dir(tab: &Tab) -> Option<std::path::PathBuf> {
-    tab.startup_dir.as_deref().map(std::path::PathBuf::from)
+fn tab_boundary_dir(
+    tab: &Tab,
+    settings: &AppSettings,
+    active_space: Option<&vmux_space::spaces::ActiveSpace>,
+) -> Option<(std::path::PathBuf, vmux_setting::DirSource)> {
+    match tab.startup_dir.as_deref() {
+        Some(path) => Some((
+            vmux_setting::validate_tab_workspace_dir(path)
+                .unwrap_or_else(|_| std::path::PathBuf::from(path)),
+            vmux_setting::DirSource::Tab,
+        )),
+        None => {
+            let active_space = active_space?;
+            Some(vmux_setting::resolve_startup_dir_for_tab_with_source(
+                settings,
+                &active_space.record.id,
+                None,
+            ))
+        }
+    }
 }
 
 fn abbreviate_home(path: &std::path::Path) -> String {
@@ -2806,6 +2824,8 @@ fn push_tab_boundary_emit(
     focus: Res<vmux_layout::stack::FocusedStack>,
     tabs: Query<&Tab>,
     worktrees: Query<&TabWorktree>,
+    settings: Res<AppSettings>,
+    active_space: Option<Res<vmux_space::spaces::ActiveSpace>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last: Local<String>,
@@ -2820,7 +2840,7 @@ fn push_tab_boundary_emit(
     }
     let boundary = focus.tab.and_then(|tab_e| {
         let tab = tabs.get(tab_e).ok()?;
-        let path = stored_tab_dir(tab)?;
+        let (path, source) = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
         // Auto-detect git status for the tab dir, cached by dir + refreshed every ~3s. This only
         // runs when the loop wakes (Reactive mode), so it never polls git while idle.
         let dir_key = path.to_string_lossy().to_string();
@@ -2836,7 +2856,13 @@ fn push_tab_boundary_emit(
         collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
         Some(TabBoundary {
             effective_dir: abbreviate_home(&path),
-            source: "tab".to_string(),
+            source: match source {
+                vmux_setting::DirSource::Tab => "tab",
+                vmux_setting::DirSource::Space => "space",
+                vmux_setting::DirSource::Global => "global",
+                vmux_setting::DirSource::Default => "default",
+            }
+            .to_string(),
             is_git_repo: info.is_some(),
             is_worktree: info.as_ref().is_some_and(|i| i.is_worktree),
             branch,
@@ -3947,11 +3973,41 @@ mod tests {
             name: "test".into(),
             startup_dir: Some("/tmp/agent-checkout".into()),
         };
+        let settings = test_app_settings_with_radius(0.0);
 
         assert_eq!(
-            stored_tab_dir(&tab),
-            Some(std::path::PathBuf::from("/tmp/agent-checkout"))
+            tab_boundary_dir(&tab, &settings, None),
+            Some((
+                std::path::PathBuf::from("/tmp/agent-checkout"),
+                vmux_setting::DirSource::Tab,
+            ))
         );
+    }
+
+    #[test]
+    fn legacy_tab_boundary_uses_space_fallback_without_migration() {
+        let dir = std::env::temp_dir();
+        let record = vmux_space::model::bootstrap_space_record();
+        let mut settings = test_app_settings_with_radius(0.0);
+        settings.spaces.insert(
+            record.id.clone(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(dir.to_string_lossy().into_owned()),
+            },
+        );
+        let tab = Tab::default();
+
+        let (path, source) = tab_boundary_dir(
+            &tab,
+            &settings,
+            Some(&vmux_space::spaces::ActiveSpace { record }),
+        )
+        .unwrap();
+
+        assert_eq!(path, dir);
+        assert_eq!(source, vmux_setting::DirSource::Space);
+        assert_eq!(tab.startup_dir, None);
     }
 
     #[test]
