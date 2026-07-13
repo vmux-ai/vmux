@@ -61,8 +61,6 @@ use vmux_layout::{
     },
 };
 use vmux_setting::AppSettings;
-use vmux_setting::{DirSource, resolve_startup_dir_for_tab_with_source};
-use vmux_space::ActiveSpace;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
@@ -2781,13 +2779,8 @@ fn push_pane_tree_emit(
     *last = ron_body;
 }
 
-fn dir_source_label(source: DirSource) -> &'static str {
-    match source {
-        DirSource::Tab => "tab",
-        DirSource::Space => "space",
-        DirSource::Global => "global",
-        DirSource::Default => "default",
-    }
+fn stored_tab_dir(tab: &Tab) -> Option<std::path::PathBuf> {
+    tab.startup_dir.as_deref().map(std::path::PathBuf::from)
 }
 
 fn abbreviate_home(path: &std::path::Path) -> String {
@@ -2810,8 +2803,6 @@ fn push_tab_boundary_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    settings: Res<AppSettings>,
-    active_space: Option<Res<ActiveSpace>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tabs: Query<&Tab>,
     worktrees: Query<&TabWorktree>,
@@ -2827,15 +2818,9 @@ fn push_tab_boundary_emit(
     if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
         return;
     }
-    let boundary = focus.tab.map(|tab_e| {
-        let tab = tabs.get(tab_e).ok();
-        let tab_dir = tab.and_then(|t| t.startup_dir.clone());
-        let space_id = active_space
-            .as_deref()
-            .map(|s| s.record.id.clone())
-            .unwrap_or_default();
-        let (path, source) =
-            resolve_startup_dir_for_tab_with_source(&settings, &space_id, tab_dir.as_deref());
+    let boundary = focus.tab.and_then(|tab_e| {
+        let tab = tabs.get(tab_e).ok()?;
+        let path = stored_tab_dir(tab)?;
         // Auto-detect git status for the tab dir, cached by dir + refreshed every ~3s. This only
         // runs when the loop wakes (Reactive mode), so it never polls git while idle.
         let dir_key = path.to_string_lossy().to_string();
@@ -2849,9 +2834,9 @@ fn push_tab_boundary_emit(
         let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
         let mut leaves = Vec::new();
         collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut leaves);
-        TabBoundary {
+        Some(TabBoundary {
             effective_dir: abbreviate_home(&path),
-            source: dir_source_label(source).to_string(),
+            source: "tab".to_string(),
             is_git_repo: info.is_some(),
             is_worktree: info.as_ref().is_some_and(|i| i.is_worktree),
             branch,
@@ -2859,7 +2844,7 @@ fn push_tab_boundary_emit(
             uncommitted: info.as_ref().map(|i| i.uncommitted).unwrap_or(0),
             ahead: info.as_ref().map(|i| i.ahead).unwrap_or(0),
             pane_count: leaves.len() as u32,
-        }
+        })
     });
     let payload = TabBoundaryEvent { boundary };
     let ron_body = ron::ser::to_string(&payload).unwrap_or_default();
@@ -3955,6 +3940,19 @@ fn cef_root_cache_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_tab_dir_is_sidebar_source_of_truth() {
+        let tab = Tab {
+            name: "test".into(),
+            startup_dir: Some("/tmp/agent-checkout".into()),
+        };
+
+        assert_eq!(
+            stored_tab_dir(&tab),
+            Some(std::path::PathBuf::from("/tmp/agent-checkout"))
+        );
+    }
 
     #[test]
     fn normalize_vmux_url_adds_trailing_slash_to_bare_host() {
