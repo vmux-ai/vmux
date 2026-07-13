@@ -219,21 +219,34 @@ impl AcpProjector {
         failed: bool,
     ) -> Vec<Intent> {
         let mut intents = Vec::new();
+        let mut has_terminal = false;
         for item in content {
-            if let ToolCallContent::Diff(diff) = item {
-                let path = diff.path.to_string_lossy().into_owned();
-                self.upsert_diff(call_id, &path, diff.old_text.clone(), diff.new_text.clone());
-                intents.push(Intent::ProposedDiff {
-                    call_id: call_id.to_string(),
-                    path,
-                    old_text: diff.old_text.clone(),
-                    new_text: diff.new_text.clone(),
-                });
+            match item {
+                ToolCallContent::Diff(diff) => {
+                    let path = diff.path.to_string_lossy().into_owned();
+                    self.upsert_diff(call_id, &path, diff.old_text.clone(), diff.new_text.clone());
+                    intents.push(Intent::ProposedDiff {
+                        call_id: call_id.to_string(),
+                        path,
+                        old_text: diff.old_text.clone(),
+                        new_text: diff.new_text.clone(),
+                    });
+                }
+                // An embedded ACP terminal renders as a live pane; point the transcript card at it.
+                // Real captured text (if the agent also sends `Content`) overwrites this below.
+                ToolCallContent::Terminal(_) => has_terminal = true,
+                _ => {}
             }
         }
         let output = tool_output_text(content);
         if !output.is_empty() {
             self.upsert_tool_result(call_id, output, failed);
+        } else if has_terminal {
+            self.upsert_tool_result(
+                call_id,
+                "[terminal output shown in the attached pane]".to_string(),
+                failed,
+            );
         }
         intents
     }
@@ -359,7 +372,7 @@ fn tool_output_text(content: &[ToolCallContent]) -> String {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent,
+        ContentChunk, Diff, SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent,
     };
 
     fn chunk(text: &str) -> SessionUpdate {
@@ -530,6 +543,37 @@ mod tests {
             m,
             Message::ToolResult { call_id, content, is_error: false }
                 if call_id == "c1" && content == "hello output"
+        )));
+    }
+
+    #[test]
+    fn tool_call_with_terminal_folds_to_pane_pointer_result() {
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("c1", "Run")
+            .content(vec![ToolCallContent::Terminal(Terminal::new("t1"))]);
+        p.apply(SessionUpdate::ToolCall(tc));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, .. }
+                if call_id == "c1" && content.contains("pane")
+        )));
+    }
+
+    #[test]
+    fn tool_call_with_terminal_and_text_prefers_text_output() {
+        use agent_client_protocol::schema::v1::Content;
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("c1", "Run").content(vec![
+            ToolCallContent::Terminal(Terminal::new("t1")),
+            ToolCallContent::Content(Content::new(ContentBlock::Text(TextContent::new(
+                "real output",
+            )))),
+        ]);
+        p.apply(SessionUpdate::ToolCall(tc));
+        assert!(p.messages().iter().any(|m| matches!(
+            m,
+            Message::ToolResult { call_id, content, .. }
+                if call_id == "c1" && content == "real output"
         )));
     }
 }

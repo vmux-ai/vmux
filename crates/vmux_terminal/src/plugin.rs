@@ -34,7 +34,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::processes_monitor::ProcessesMonitor;
-use crate::{ProcessExited, Terminal};
+use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
@@ -277,6 +277,8 @@ pub struct RunShellRequest {
 pub struct TerminalStackSpawnRequest {
     pub pane: Entity,
     pub cwd: Option<PathBuf>,
+    pub shell: Option<String>,
+    pub agent_run: bool,
     pub pending_input: Option<Vec<u8>>,
     /// Pin this `ProcessId` on the spawned terminal (so the caller can address
     /// it later); `None` lets the bundle mint a fresh one.
@@ -445,7 +447,9 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(
             Update,
-            handle_terminal_reinput_requests.after(poll_service_messages),
+            handle_terminal_reinput_requests
+                .after(poll_service_messages)
+                .before(flush_pending_terminal_input),
         )
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
@@ -705,11 +709,23 @@ pub fn new_terminal_bundle_with_cwd(
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
 ) -> impl Bundle {
-    let shell = settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(default_shell);
+    new_terminal_bundle_with_cwd_and_shell(meshes, webview_mt, settings, cwd, None)
+}
+
+fn new_terminal_bundle_with_cwd_and_shell(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+    cwd: Option<&std::path::Path>,
+    shell: Option<&str>,
+) -> impl Bundle {
+    let shell = shell.map(str::to_string).unwrap_or_else(|| {
+        settings
+            .terminal
+            .as_ref()
+            .map(|t| t.resolve_theme(&t.default_theme).shell)
+            .unwrap_or_else(default_shell)
+    });
 
     let cwd_str = cwd
         .filter(|d| !d.to_string_lossy().contains("://"))
@@ -800,16 +816,20 @@ pub fn respond_terminal_stack_spawn(
         });
         let terminal = commands
             .spawn((
-                new_terminal_bundle_with_cwd(
+                new_terminal_bundle_with_cwd_and_shell(
                     &mut meshes,
                     &mut webview_mt,
                     &settings,
                     request.cwd.as_deref(),
+                    request.shell.as_deref(),
                 ),
                 ChildOf(stack),
             ))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
+        if request.agent_run {
+            commands.entity(terminal).insert(crate::AgentRunTerminal);
+        }
         if let Some(pid) = request.process_id {
             commands.entity(terminal).insert(pid);
         }
@@ -904,6 +924,14 @@ fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
 /// Marker: CreateProcess was sent, waiting for ProcessCreated response.
 #[derive(Component)]
 pub struct AwaitingProcessCreated;
+
+/// Resets prompt readiness while retaining any queued terminal input for the replacement process.
+pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
+    commands
+        .entity(entity)
+        .remove::<ShellOutputSeen>()
+        .insert(AwaitingProcessCreated);
+}
 
 pub fn apply_process_created(
     commands: &mut Commands,
@@ -1158,6 +1186,8 @@ struct PollServiceWriters<'w> {
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
     page_agent_session_created:
         MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
+    page_agent_acp_terminal_created:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentAcpTerminalCreated>,
     agent_command_results: MessageWriter<'w, vmux_service::agent_events::AgentCommandResultEvent>,
     agent_query_results: MessageWriter<'w, vmux_service::agent_events::AgentQueryResultEvent>,
     process_exited: MessageWriter<'w, ProcessExitedEvent>,
@@ -1238,7 +1268,12 @@ fn sync_agent_focus(
 
 fn poll_service_messages(
     pending_create: Query<
-        (Entity, &ProcessId, &crate::launch::TerminalLaunch),
+        (
+            Entity,
+            &ProcessId,
+            &crate::launch::TerminalLaunch,
+            Has<crate::AgentRunTerminal>,
+        ),
         (With<Terminal>, With<PendingServiceCreate>),
     >,
     pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
@@ -1247,12 +1282,8 @@ fn poll_service_messages(
         (With<Terminal>, With<AwaitingProcessCreated>),
     >,
     terminals: Query<
-        (Entity, &ProcessId, &ChildOf),
-        (
-            With<Terminal>,
-            Without<ProcessExited>,
-            Without<AwaitingProcessCreated>,
-        ),
+        (Entity, &ProcessId, &ChildOf, Has<RetainOnProcessExit>),
+        ServiceTerminalFilter,
     >,
     service: Option<Res<ServiceClient>>,
     browsers: NonSend<Browsers>,
@@ -1276,13 +1307,13 @@ fn poll_service_messages(
         awaiting_create.iter().count(),
         MAX_CONCURRENT_PROCESS_CREATES,
     );
-    for (entity, process_id, launch) in pending_create.iter().take(create_budget) {
+    for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         // Agents run as bare executables and don't load the user's shell config
         // the way a terminal does, so merge in the login-shell env (API keys
         // etc.). Done here (at spawn) rather than at launch-build time so it
         // also covers agents restored from a persisted space or restarted.
         let mut env = launch.env.clone();
-        if agent_sessions.contains(entity) {
+        if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
         service.0.send(ClientMessage::CreateProcess {
@@ -1358,7 +1389,7 @@ fn poll_service_messages(
                 mouse,
                 evicted_total,
             } => {
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !output_seen.contains(entity) {
                             let has_content =
@@ -1407,7 +1438,7 @@ fn poll_service_messages(
                     process_id,
                     title: title.clone(),
                 });
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
                             continue;
@@ -1429,7 +1460,7 @@ fn poll_service_messages(
                 cols,
                 rows,
             } => {
-                for (entity, pid, _) in &terminals {
+                for (entity, pid, _, _) in &terminals {
                     if *pid == process_id {
                         if !output_seen.contains(entity) {
                             let has_content = lines.iter().any(line_has_content);
@@ -1478,7 +1509,7 @@ fn poll_service_messages(
                 mode_map.modes.remove(&process_id);
                 set_local_copy_mode(&mut local_copy_mode, process_id, false);
                 mouse_state.per_process.remove(&process_id);
-                for (entity, pid, child_of) in &terminals {
+                for (entity, pid, child_of, retain_on_exit) in &terminals {
                     if *pid == process_id {
                         commands
                             .entity(entity)
@@ -1503,7 +1534,7 @@ fn poll_service_messages(
                         // terminals are closed by the agent crate (it
                         // force-closes the whole pane), so skip the stack close
                         // here to avoid a double close collapsing the wrong pane.
-                        if !is_agent {
+                        if should_close_terminal_stack_on_exit(is_agent, retain_on_exit) {
                             let tab = child_of.get();
                             commands.entity(tab).insert(LastActivatedAt::now());
                             writers
@@ -1524,7 +1555,7 @@ fn poll_service_messages(
                 if let Some(stale_pid) = missing_process_id(&message)
                     && !restarted_missing_processes.contains(&stale_pid)
                 {
-                    let candidates = terminals.iter().map(|(entity, terminal_pid, _)| {
+                    let candidates = terminals.iter().map(|(entity, terminal_pid, _, _)| {
                         let launch = launches.get(entity).cloned().unwrap_or_else(|_| {
                             crate::launch::TerminalLaunch {
                                 command: terminal_shell(&settings),
@@ -1544,15 +1575,16 @@ fn poll_service_messages(
                         let new_id = restart.new_id;
                         let entity = restart.entity;
                         service.0.send(restart.command);
-                        let mut ec = commands.entity(entity);
-                        ec.insert(new_id);
-                        ec.insert(AwaitingProcessCreated);
+                        commands.entity(entity).insert(new_id);
+                        mark_terminal_restarting(&mut commands, entity);
                         if let Some(kind) = agent_kind {
-                            ec.insert(vmux_core::agent::PendingAgentSession {
-                                kind,
-                                spawn_time: std::time::SystemTime::now(),
-                                cwd: std::path::PathBuf::from(&cwd),
-                            });
+                            commands
+                                .entity(entity)
+                                .insert(vmux_core::agent::PendingAgentSession {
+                                    kind,
+                                    spawn_time: std::time::SystemTime::now(),
+                                    cwd: std::path::PathBuf::from(&cwd),
+                                });
                         }
                     }
                 }
@@ -1679,9 +1711,42 @@ fn poll_service_messages(
                     },
                 );
             }
+            ServiceMessage::AcpTerminalCreated {
+                sid,
+                terminal_id,
+                process_id,
+                command,
+                args,
+                cwd,
+            } => {
+                writers.page_agent_acp_terminal_created.write(
+                    vmux_service::agent_events::PageAgentAcpTerminalCreated {
+                        sid,
+                        terminal_id,
+                        process_id,
+                        command,
+                        args,
+                        cwd,
+                    },
+                );
+            }
             _ => {}
         }
     }
+}
+
+fn should_merge_login_shell_env(agent_session: bool, agent_run: bool) -> bool {
+    agent_session || agent_run
+}
+
+type ServiceTerminalFilter = (
+    With<Terminal>,
+    Or<(Without<ProcessExited>, With<RetainOnProcessExit>)>,
+    Without<AwaitingProcessCreated>,
+);
+
+fn should_close_terminal_stack_on_exit(is_agent: bool, retain_on_exit: bool) -> bool {
+    !is_agent && !retain_on_exit
 }
 
 fn flush_pending_terminal_input(
@@ -1711,15 +1776,27 @@ fn flush_pending_terminal_input(
 fn handle_terminal_reinput_requests(
     mut requests: MessageReader<TerminalReinputRequest>,
     terminals: Query<(Entity, &ProcessId), With<Terminal>>,
+    mut pending_inputs: Query<&mut PendingTerminalInput>,
     mut commands: Commands,
 ) {
+    let mut queued = std::collections::HashMap::<Entity, Vec<u8>>::new();
     for req in requests.read() {
         for (entity, pid) in &terminals {
             if *pid == req.process_id {
-                commands.entity(entity).insert(PendingTerminalInput {
-                    data: req.data.clone(),
-                });
+                queued
+                    .entry(entity)
+                    .or_default()
+                    .extend_from_slice(&req.data);
             }
+        }
+    }
+    for (entity, data) in queued {
+        if let Ok(mut pending) = pending_inputs.get_mut(entity) {
+            pending.data.extend(data);
+        } else {
+            commands
+                .entity(entity)
+                .insert(PendingTerminalInput { data });
         }
     }
 }
@@ -3458,6 +3535,7 @@ fn on_restart_pty(
         Option<&mut crate::launch::TerminalLaunch>,
         Option<&vmux_core::agent::AgentSession>,
         Option<&TerminalGridSize>,
+        Has<crate::AgentRunTerminal>,
     )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
@@ -3466,7 +3544,8 @@ fn on_restart_pty(
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut pid, mut meta, mut launch, agent_session, grid)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta, mut launch, agent_session, grid, agent_run)) = q.get_mut(entity)
+    else {
         return;
     };
 
@@ -3479,7 +3558,7 @@ fn on_restart_pty(
         .0
         .send(ClientMessage::KillProcess { process_id: *pid });
 
-    let (command, args, cwd, env) = match launch.as_deref() {
+    let (command, args, cwd, mut env) = match launch.as_deref() {
         Some(l) => (
             l.command.clone(),
             l.args.clone(),
@@ -3495,6 +3574,9 @@ fn on_restart_pty(
             (shell, vec![], String::new(), Vec::new())
         }
     };
+    if should_merge_login_shell_env(false, agent_run) {
+        crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
+    }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
     let new_id = ProcessId::new();
@@ -3509,7 +3591,7 @@ fn on_restart_pty(
     });
 
     *pid = new_id;
-    commands.entity(entity).insert(AwaitingProcessCreated);
+    mark_terminal_restarting(&mut commands, entity);
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
@@ -3733,6 +3815,8 @@ pub fn handle_run_shell_requests(
             terminal_stack_spawns.write(TerminalStackSpawnRequest {
                 pane,
                 cwd: cwd_path,
+                shell: None,
+                agent_run: false,
                 pending_input: Some(input),
                 process_id: None,
                 activate: true,
@@ -3792,6 +3876,73 @@ mod tests {
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    #[test]
+    fn terminal_reinput_appends_to_existing_pending_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalReinputRequest>()
+            .add_systems(Update, handle_terminal_reinput_requests);
+        let pid = process_id(7);
+        let terminal = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                pid,
+                PendingTerminalInput {
+                    data: b"initial\r".to_vec(),
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"next\r".to_vec(),
+            });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(terminal)
+                .unwrap()
+                .data,
+            b"initial\rnext\r"
+        );
+    }
+
+    #[test]
+    fn terminal_reinput_preserves_multiple_messages_in_order() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalReinputRequest>()
+            .add_systems(Update, handle_terminal_reinput_requests);
+        let pid = process_id(8);
+        let terminal = app.world_mut().spawn((Terminal, pid)).id();
+
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"one\r".to_vec(),
+            });
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"two\r".to_vec(),
+            });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(terminal)
+                .unwrap()
+                .data,
+            b"one\rtwo\r"
+        );
     }
 
     #[test]
@@ -3886,6 +4037,42 @@ mod tests {
             .get::<PendingTerminalInput>(terminal)
             .expect("input routed to terminal by process id uuid");
         assert_eq!(pending.data, b"hi".to_vec());
+    }
+
+    #[test]
+    fn terminal_stack_spawn_uses_requested_shell() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalStackSpawnRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, respond_terminal_stack_spawn);
+
+        let pane = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<TerminalStackSpawnRequest>>()
+            .write(TerminalStackSpawnRequest {
+                pane,
+                cwd: None,
+                shell: Some("/bin/agent-sh".to_string()),
+                agent_run: true,
+                pending_input: None,
+                process_id: None,
+                activate: false,
+            });
+        app.update();
+
+        let mut launches = app
+            .world_mut()
+            .query_filtered::<(Entity, &crate::launch::TerminalLaunch), With<Terminal>>();
+        let (terminal, launch) = launches.iter(app.world()).next().expect("terminal spawned");
+        assert_eq!(launch.command, "/bin/agent-sh");
+        assert!(
+            app.world()
+                .get::<crate::AgentRunTerminal>(terminal)
+                .is_some()
+        );
     }
 
     #[test]
@@ -4654,6 +4841,41 @@ mod tests {
     }
 
     #[test]
+    fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                ShellOutputSeen,
+                PendingTerminalInput {
+                    data: b"queued\r".to_vec(),
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_cached_with(
+                |In(entity): In<Entity>, mut commands: Commands| {
+                    mark_terminal_restarting(&mut commands, entity);
+                },
+                entity,
+            )
+            .unwrap();
+
+        assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
+        assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(entity)
+                .unwrap()
+                .data,
+            b"queued\r"
+        );
+    }
+
+    #[test]
     fn process_created_matches_by_id_not_by_position() {
         use crate::launch::{TerminalKind, TerminalLaunch};
 
@@ -5107,6 +5329,29 @@ mod tests {
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
         assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+    }
+
+    #[test]
+    fn retained_terminal_stays_in_service_query_after_exit() {
+        let mut world = World::new();
+        let entity = world
+            .spawn((Terminal, ProcessExited, RetainOnProcessExit))
+            .id();
+        let mut query = world.query_filtered::<Entity, ServiceTerminalFilter>();
+
+        assert!(query.get(&world, entity).is_ok());
+    }
+
+    #[test]
+    fn retained_terminal_does_not_close_stack_on_exit() {
+        assert!(!should_close_terminal_stack_on_exit(false, true));
+    }
+
+    #[test]
+    fn agent_run_terminal_inherits_login_shell_environment() {
+        assert!(should_merge_login_shell_env(false, true));
+        assert!(should_merge_login_shell_env(true, false));
+        assert!(!should_merge_login_shell_env(false, false));
     }
 
     fn term_theme(font_size: f32) -> vmux_setting::TerminalTheme {

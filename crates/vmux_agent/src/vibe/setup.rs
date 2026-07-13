@@ -209,6 +209,8 @@ fn on_agent_install_run(
     spawn.write(vmux_terminal::TerminalStackSpawnRequest {
         pane: install_pane,
         cwd: None,
+        shell: None,
+        agent_run: false,
         pending_input: Some(input),
         process_id: Some(process_id),
         activate: true,

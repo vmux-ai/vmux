@@ -594,6 +594,13 @@ name=<feature> to drop a demo straight into the repo."
 }
 
 pub fn tool_definitions() -> Vec<ToolDefinition> {
+    tool_definitions_filtered(false)
+}
+
+/// Build the MCP tool list. When `acp_terminals` is set (ACP sessions, which get terminals through
+/// the ACP terminal methods), `run` + `read_terminal` are omitted; `terminal_send` (no ACP
+/// equivalent for keystrokes/TUIs) is always kept.
+pub fn tool_definitions_filtered(acp_terminals: bool) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
@@ -611,9 +618,13 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.push(open_file_definition());
     defs.push(read_file_definition());
     defs.push(grep_definition());
-    defs.push(run_definition());
+    if !acp_terminals {
+        defs.push(run_definition());
+    }
     defs.push(create_worktree_definition());
-    defs.push(read_terminal_definition());
+    if !acp_terminals {
+        defs.push(read_terminal_definition());
+    }
     defs.push(screenshot_definition());
     defs.push(browser_snapshot_definition());
     defs.push(browser_scroll_definition());
@@ -1296,6 +1307,18 @@ mod tests {
     fn list_tools_includes_terminal_send() {
         let names = tool_names();
         assert!(names.contains(&"terminal_send".to_string()));
+    }
+
+    #[test]
+    fn acp_terminals_toolset_hides_run_and_read_terminal_keeps_send() {
+        let names: Vec<String> = tool_definitions_filtered(true)
+            .into_iter()
+            .map(|def| def.name)
+            .collect();
+        assert!(!names.contains(&"run".to_string()));
+        assert!(!names.contains(&"read_terminal".to_string()));
+        assert!(names.contains(&"terminal_send".to_string()));
+        assert!(names.contains(&"open_page".to_string()));
     }
 
     #[test]

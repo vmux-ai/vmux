@@ -9,6 +9,7 @@ use vmux_service::protocol::{
 /// How long `run` waits for a command to finish before returning a partial
 /// result. Kept under vibe's 60s default MCP tool timeout.
 const RUN_BLOCK_TIMEOUT: Duration = Duration::from_secs(50);
+const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Interval between terminal reads while waiting for the completion marker.
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -23,14 +24,17 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
     Ok(Some(value))
 }
 
-pub async fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io::Result<()> {
+pub async fn run_stdio(
+    anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
+) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let stdout = io::stdout();
     let mut writer = stdout.lock();
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(message, anchor).await {
+        if let Some(response) = handle_message(message, anchor, acp_terminals).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -42,6 +46,7 @@ pub async fn run_stdio(anchor: Option<vmux_service::protocol::ProcessId>) -> io:
 async fn handle_message(
     message: Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
 ) -> Option<Value> {
     let id = message.get("id").cloned()?;
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
@@ -49,8 +54,10 @@ async fn handle_message(
 
     let result = match method {
         "initialize" => Ok(initialize_result(&params)),
-        "tools/list" => Ok(json!({ "tools": crate::tools::tool_definitions() })),
-        "tools/call" => tool_call_result(&params, anchor).await,
+        "tools/list" => {
+            Ok(json!({ "tools": crate::tools::tool_definitions_filtered(acp_terminals) }))
+        }
+        "tools/call" => tool_call_result(&params, anchor, acp_terminals).await,
         _ => {
             return Some(json!({
                 "jsonrpc": "2.0",
@@ -97,11 +104,15 @@ fn initialize_result(params: &Value) -> Value {
 async fn tool_call_result(
     params: &Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_terminals: bool,
 ) -> Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "tools/call missing name".to_string())?;
+    if acp_terminals && matches!(name, "run" | "read_terminal") {
+        return Err(format!("tool {name} is unavailable for ACP sessions"));
+    }
     let arguments = params
         .get("arguments")
         .cloned()
@@ -406,6 +417,30 @@ fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Va
     json!({ "content": [{"type": "text", "text": text}] })
 }
 
+fn run_completion_exit(
+    result: AgentQueryResult,
+    token: &str,
+    process_id: vmux_service::protocol::ProcessId,
+    allow_missing_process: bool,
+) -> Result<Option<i32>, String> {
+    match result {
+        AgentQueryResult::RunCompletion {
+            token: Some(done_token),
+            exit: Some(exit),
+        } if done_token == token => Ok(Some(exit)),
+        AgentQueryResult::RunCompletion { .. } => Ok(None),
+        AgentQueryResult::Error(message)
+            if allow_missing_process && message == format!("process not found: {process_id}") =>
+        {
+            Ok(None)
+        }
+        AgentQueryResult::Error(message) => Err(message),
+        other => Err(format!(
+            "run: unexpected run-completion result for {process_id}: {other:?}"
+        )),
+    }
+}
+
 /// Send `run`, then block (polling `RunCompletion`) until the invisible OSC
 /// completion escape for this run's token is seen, returning the output + exit
 /// code in one response.
@@ -458,19 +493,18 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
     let start = Instant::now();
     let baseline_text = read_full_text(&connection, process_id).await;
     let deadline = start + RUN_BLOCK_TIMEOUT;
+    let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
+    let mut process_materialized = false;
     loop {
-        match agent_query(&connection, AgentQuery::RunCompletion { process_id }).await? {
-            AgentQueryResult::RunCompletion {
-                token: Some(done_token),
-                exit: Some(exit),
-            } if done_token == token => {
-                let final_text = read_full_text(&connection, process_id).await;
-                let output = output_since(&baseline_text, &final_text);
-                return Ok(run_result(&pid, Some(exit), &output, false));
-            }
-            AgentQueryResult::RunCompletion { .. } => {}
-            AgentQueryResult::Error(message) => return Err(message),
-            other => return Err(format!("run: unexpected run-completion result: {other:?}")),
+        let result = agent_query(&connection, AgentQuery::RunCompletion { process_id }).await?;
+        let materialized_now = matches!(&result, AgentQueryResult::RunCompletion { .. });
+        let allow_missing_process = !process_materialized && Instant::now() < materialize_deadline;
+        let exit = run_completion_exit(result, &token, process_id, allow_missing_process)?;
+        process_materialized |= materialized_now;
+        if let Some(exit) = exit {
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
+            return Ok(run_result(&pid, Some(exit), &output, false));
         }
         if Instant::now() >= deadline {
             let final_text = read_full_text(&connection, process_id).await;
@@ -755,6 +789,30 @@ mod tests {
         assert_eq!(request["method"], "tools/list");
     }
 
+    #[tokio::test]
+    async fn acp_tools_call_rejects_hidden_terminal_tools() {
+        for name in ["run", "read_terminal"] {
+            let response = handle_message(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": { "name": name, "arguments": {} }
+                }),
+                None,
+                true,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(response["result"]["isError"], true);
+            assert_eq!(
+                response["result"]["content"][0]["text"],
+                format!("tool {name} is unavailable for ACP sessions")
+            );
+        }
+    }
+
     #[test]
     fn image_query_result_maps_to_text_and_image_blocks() {
         use vmux_service::protocol::AgentQueryResult;
@@ -874,5 +932,28 @@ mod tests {
             }
             _ => panic!("expected run placement override command"),
         }
+    }
+
+    #[test]
+    fn blocking_run_waits_for_new_terminal_process_to_materialize() {
+        let process_id = vmux_service::protocol::ProcessId::new();
+        let result = AgentQueryResult::Error(format!("process not found: {process_id}"));
+
+        assert_eq!(
+            run_completion_exit(result, "token", process_id, true).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn blocking_run_surfaces_process_missing_after_startup_grace() {
+        let process_id = vmux_service::protocol::ProcessId::new();
+        let message = format!("process not found: {process_id}");
+        let result = AgentQueryResult::Error(message.clone());
+
+        assert_eq!(
+            run_completion_exit(result, "token", process_id, false),
+            Err(message)
+        );
     }
 }

@@ -92,3 +92,15 @@ pub struct PageAgentSessionCreated {
     pub sid: String,
     pub acp_session_id: String,
 }
+
+/// An ACP agent created a terminal (`terminal/create`); the GUI opens a visible pane beside the
+/// agent (`sid`) bound to the daemon-spawned `process_id` (attach only — the PTY already exists).
+#[derive(Message)]
+pub struct PageAgentAcpTerminalCreated {
+    pub sid: String,
+    pub terminal_id: String,
+    pub process_id: ProcessId,
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+}

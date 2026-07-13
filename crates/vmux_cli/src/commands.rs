@@ -21,6 +21,10 @@ pub enum Command {
         anchor: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        /// Serve the ACP toolset: hide `run` + `read_terminal` (ACP sessions use ACP-native
+        /// terminals instead); `terminal_send` stays.
+        #[arg(long)]
+        acp_terminals: bool,
     },
     Notify {
         #[arg(long)]

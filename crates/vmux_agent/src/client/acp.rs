@@ -4,10 +4,16 @@
 //! `consume_page_agent_stream` system (ACP reuses the Page stream messages).
 
 use bevy::prelude::*;
+use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use crossbeam_channel::{Receiver, Sender};
+use vmux_core::LastActivatedAt;
+use vmux_layout::event::TERMINAL_PAGE_URL;
+use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
+use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
 use vmux_setting::AppSettings;
+use vmux_terminal::reattach_terminal_bundle;
 
 use crate::components::{AgentApprovalPolicy, PromptQueue};
 use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
@@ -109,6 +115,7 @@ impl Plugin for AcpAgentPlugin {
             .init_resource::<AcpCatalog>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
+            .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
             .add_systems(
                 Update,
@@ -119,6 +126,7 @@ impl Plugin for AcpAgentPlugin {
                     receive_catalog,
                     apply_acp_agent_info,
                     apply_acp_session_created,
+                    apply_acp_terminal_created,
                 ),
             )
             .add_observer(close_acp_session_on_remove)
@@ -224,14 +232,20 @@ fn install_acp_session_when_focused(
                     sid,
                     command: r.command,
                     args: r.args,
-                    env: build_agent_env(r.env, login_env, r.path_prepend),
+                    env: apply_agent_compatibility_env(
+                        &agent_id,
+                        build_agent_env(r.env, login_env, r.path_prepend),
+                    ),
                 },
                 Err(reg_err) => match fallback {
                     Some(cfg) => InstallMsg::Ready {
                         sid,
                         command: cfg.command,
                         args: cfg.args,
-                        env: build_agent_env(cfg.env, login_env, None),
+                        env: apply_agent_compatibility_env(
+                            &agent_id,
+                            build_agent_env(cfg.env, login_env, None),
+                        ),
                     },
                     None => InstallMsg::Failed {
                         sid,
@@ -299,6 +313,115 @@ fn build_agent_env(
     apply_path_prepend(base, path_prepend)
 }
 
+fn apply_agent_compatibility_env(
+    agent_id: &str,
+    mut env: Vec<(String, String)>,
+) -> Vec<(String, String)> {
+    if agent_id != "codex" {
+        return env;
+    }
+
+    let existing = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "CODEX_CONFIG")
+        .map(|(_, value)| value.as_str());
+    let (mut config, warning) = parse_codex_config(existing);
+    if let Some(warning) = warning {
+        bevy::log::warn!("{warning}");
+    }
+
+    let features = config
+        .entry("features")
+        .or_insert_with(|| serde_json::json!({}));
+    if !features.is_object() {
+        *features = serde_json::json!({});
+    }
+    let features = features.as_object_mut().unwrap();
+    features.insert("shell_tool".to_string(), serde_json::Value::Bool(false));
+    features.insert("unified_exec".to_string(), serde_json::Value::Bool(false));
+    let code_mode = features
+        .entry("code_mode")
+        .or_insert_with(|| serde_json::json!({}));
+    if !code_mode.is_object() {
+        *code_mode = serde_json::json!({});
+    }
+    code_mode.as_object_mut().unwrap().insert(
+        "direct_only_tool_namespaces".to_string(),
+        serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE]),
+    );
+
+    let tools = config
+        .entry("tools")
+        .or_insert_with(|| serde_json::json!({}));
+    if !tools.is_object() {
+        *tools = serde_json::json!({});
+    }
+    tools
+        .as_object_mut()
+        .unwrap()
+        .insert("web_search".to_string(), serde_json::Value::Bool(false));
+
+    let instructions = config
+        .get("developer_instructions")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let instructions = if instructions.contains("mcp__vmux__run") {
+        instructions.to_string()
+    } else if instructions.is_empty() {
+        crate::client::cli::codex::RUN_STEER_PROMPT.to_string()
+    } else {
+        format!(
+            "{instructions}\n\n{}",
+            crate::client::cli::codex::RUN_STEER_PROMPT
+        )
+    };
+    config.insert(
+        "developer_instructions".to_string(),
+        serde_json::Value::String(instructions),
+    );
+
+    env.retain(|(key, _)| key != "CODEX_CONFIG");
+    env.push((
+        "CODEX_CONFIG".to_string(),
+        serde_json::Value::Object(config).to_string(),
+    ));
+    env
+}
+
+fn parse_codex_config(
+    value: Option<&str>,
+) -> (serde_json::Map<String, serde_json::Value>, Option<String>) {
+    let Some(value) = value else {
+        return (serde_json::Map::new(), None);
+    };
+    match serde_json::from_str::<serde_json::Value>(value) {
+        Ok(serde_json::Value::Object(config)) => (config, None),
+        Ok(value) => {
+            let kind = match value {
+                serde_json::Value::Null => "null",
+                serde_json::Value::Bool(_) => "boolean",
+                serde_json::Value::Number(_) => "number",
+                serde_json::Value::String(_) => "string",
+                serde_json::Value::Array(_) => "array",
+                serde_json::Value::Object(_) => unreachable!(),
+            };
+            (
+                serde_json::Map::new(),
+                Some(format!(
+                    "acp: existing CODEX_CONFIG is not a JSON object ({kind}); discarding it"
+                )),
+            )
+        }
+        Err(err) => (
+            serde_json::Map::new(),
+            Some(format!(
+                "acp: existing CODEX_CONFIG is invalid JSON ({err}); discarding it"
+            )),
+        ),
+    }
+}
+
 /// Drain background-install updates: reflect progress/failure onto the session run-state, and on
 /// a resolved spec send `SpawnAcpAgent` (success run-state is then driven by the daemon stream).
 fn drain_acp_installs(
@@ -335,13 +458,17 @@ fn drain_acp_installs(
                     continue;
                 };
                 if let Some((session, _)) = q.iter().find(|(s, _)| s.sid == sid) {
-                    let mcp = crate::mcp::resolve(&session.cwd, session.anchor)
-                        .inspect_err(|err| {
-                            bevy::log::warn!(
-                                "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
-                            );
-                        })
-                        .ok();
+                    let mcp = crate::mcp::resolve_acp(
+                        &session.cwd,
+                        session.anchor,
+                        &session.agent_id,
+                    )
+                    .inspect_err(|err| {
+                        bevy::log::warn!(
+                            "acp: vmux_mcp sidecar unresolved; agent runs without vmux tools: {err}"
+                        );
+                    })
+                    .ok();
                     service.0.send(ClientMessage::SpawnAcpAgent {
                         sid,
                         agent_id: session.agent_id.clone(),
@@ -407,6 +534,50 @@ fn apply_acp_session_created(
                 }
             }
         }
+    }
+}
+
+/// An ACP agent created a terminal (`terminal/create`): the daemon already spawned the PTY, so open
+/// a visible pane beside the agent and **attach** it to `process_id` (never create a second PTY).
+/// Reuses an existing terminal region when present (stacks over splits) and keeps keyboard focus on
+/// the agent.
+#[allow(clippy::too_many_arguments)]
+fn apply_acp_terminal_created(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentAcpTerminalCreated>,
+    sessions: Query<(Entity, &AcpSession)>,
+    ctx: PlacementCtx,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut commands: Commands,
+) {
+    let mut split_batch = std::collections::HashSet::new();
+    for ev in reader.read() {
+        let Some(stack) = sessions
+            .iter()
+            .find(|(_, session)| session.sid == ev.sid)
+            .map(|(entity, _)| entity)
+        else {
+            continue;
+        };
+        let Ok(agent_pane) = ctx.child_of_q.get(stack).map(|child_of| child_of.parent()) else {
+            continue;
+        };
+        let target_pane = resolve_spiral_pane(
+            &mut commands,
+            agent_pane,
+            TERMINAL_PAGE_URL,
+            false,
+            &mut split_batch,
+            &ctx,
+        );
+        let tab = commands
+            .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))
+            .id();
+        commands.spawn((
+            reattach_terminal_bundle(&mut meshes, &mut webview_mt, ev.process_id),
+            vmux_terminal::RetainOnProcessExit,
+            ChildOf(tab),
+        ));
     }
 }
 
@@ -514,7 +685,9 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin);
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         let matching = app
             .world_mut()
             .spawn((
@@ -570,10 +743,139 @@ mod tests {
     }
 
     #[test]
+    fn acp_terminal_stack_does_not_take_focus_from_agent() {
+        use vmux_layout::pane::leaf_pane_bundle;
+        use vmux_layout::stack::Stack;
+        use vmux_layout::tab::tab_bundle;
+        use vmux_service::agent_events::PageAgentAcpTerminalCreated;
+
+        let mut app = App::new();
+        app.add_message::<PageAgentAcpTerminalCreated>()
+            .add_systems(Update, apply_acp_terminal_created)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let tab = app.world_mut().spawn(tab_bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), ChildOf(tab)))
+            .id();
+        let agent = app
+            .world_mut()
+            .spawn((
+                stack_bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(agent)
+            .insert(vmux_core::PageMetadata {
+                url: "vmux://agent/claude".into(),
+                ..default()
+            });
+        app.world_mut().write_message(PageAgentAcpTerminalCreated {
+            sid: "s1".into(),
+            terminal_id: "terminal-1".into(),
+            process_id: vmux_core::ProcessId::new(),
+            command: "echo".into(),
+            args: vec!["hi".into()],
+            cwd: Some("/tmp".into()),
+        });
+
+        app.update();
+
+        let stack_times = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            query
+                .iter(world)
+                .map(|(entity, activated)| (entity, activated.0))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity == agent)
+                .map(|(_, activated)| *activated),
+            Some(10)
+        );
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity != agent)
+                .map(|(_, activated)| *activated),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn codex_acp_routes_shell_commands_through_vmux_run() {
+        let env = apply_agent_compatibility_env("codex", Vec::new());
+        let config = env
+            .iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .expect("codex ACP compatibility config");
+
+        assert_eq!(config["features"]["shell_tool"], false);
+        assert_eq!(config["features"]["unified_exec"], false);
+        assert_eq!(config["tools"]["web_search"], false);
+        assert_eq!(
+            config["features"]["code_mode"]["direct_only_tool_namespaces"],
+            serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
+        );
+        assert!(
+            config["developer_instructions"]
+                .as_str()
+                .unwrap()
+                .contains("mcp__vmux__run")
+        );
+    }
+
+    #[test]
+    fn codex_acp_preserves_existing_config() {
+        let env = apply_agent_compatibility_env(
+            "codex",
+            vec![s(
+                "CODEX_CONFIG",
+                r#"{"model":"gpt-test","features":{"custom_feature":true,"code_mode":{"custom_setting":"keep"}}}"#,
+            )],
+        );
+        let config = env
+            .iter()
+            .find(|(key, _)| key == "CODEX_CONFIG")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .unwrap();
+
+        assert_eq!(config["model"], "gpt-test");
+        assert_eq!(config["features"]["custom_feature"], true);
+        assert_eq!(config["features"]["code_mode"]["custom_setting"], "keep");
+        assert_eq!(config["features"]["shell_tool"], false);
+    }
+
+    #[test]
+    fn codex_acp_reports_discarded_invalid_config() {
+        let (_, invalid_json) = parse_codex_config(Some("{not-json"));
+        assert!(invalid_json.unwrap().contains("invalid JSON"));
+
+        let (_, non_object) = parse_codex_config(Some("[]"));
+        assert!(non_object.unwrap().contains("not a JSON object"));
+    }
+
+    #[test]
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin);
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn(AcpSession {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),
