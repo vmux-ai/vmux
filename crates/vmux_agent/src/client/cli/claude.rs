@@ -4,7 +4,9 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
-use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
+use crate::client::cli::strategy::{
+    CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
+};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
@@ -286,7 +288,7 @@ pub(crate) fn load_claude_transcript(
     root: &Path,
     session_id: &str,
 ) -> Result<Vec<Message>, String> {
-    use std::io::{BufRead, BufReader};
+    use std::io::BufReader;
 
     let mut path = None;
     let projects = std::fs::read_dir(root)
@@ -302,7 +304,7 @@ pub(crate) fn load_claude_transcript(
     let file = std::fs::File::open(&path)
         .map_err(|err| format!("open Claude session {}: {err}", path.display()))?;
     let mut messages = Vec::new();
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    for line in lines_skipping_invalid_utf8(BufReader::new(file)) {
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -608,6 +610,35 @@ mod tests {
                 },
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn claude_transcript_skips_invalid_utf8_line() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("claude-transcript-invalid-utf8");
+        let proj = tmp.join("project");
+        std::fs::create_dir_all(&proj).unwrap();
+        let mut transcript = b"{\"type\":\"user\",\"message\":{\"content\":\"before\"}}\n".to_vec();
+        transcript.extend_from_slice(b"\xff\n");
+        transcript
+            .extend_from_slice(b"{\"type\":\"assistant\",\"message\":{\"content\":\"after\"}}\n");
+        std::fs::write(proj.join("cl-1.jsonl"), transcript).unwrap();
+
+        let messages = load_claude_transcript(&tmp, "cl-1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "before".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("after".into())]
                 }
             ]
         );

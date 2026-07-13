@@ -2,7 +2,9 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
+use crate::client::cli::strategy::{
+    CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
+};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
@@ -313,7 +315,7 @@ pub(crate) fn load_codex_transcript(root: &Path, session_id: &str) -> Result<Vec
     let file = std::fs::File::open(&path)
         .map_err(|err| format!("open Codex session {}: {err}", path.display()))?;
     let mut messages = Vec::new();
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    for line in lines_skipping_invalid_utf8(BufReader::new(file)) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
@@ -614,6 +616,41 @@ mod tests {
                 },
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn codex_transcript_skips_invalid_utf8_line() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("codex-transcript-invalid-utf8");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        let mut transcript =
+            b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n"
+                .to_vec();
+        transcript.extend_from_slice(
+            b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"before\"}}\n",
+        );
+        transcript.extend_from_slice(b"\xff\n");
+        transcript.extend_from_slice(
+            b"{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"after\"}}\n",
+        );
+        std::fs::write(day.join("sess.jsonl"), transcript).unwrap();
+
+        let messages = load_codex_transcript(&tmp, "cx-1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "before".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("after".into())]
                 }
             ]
         );

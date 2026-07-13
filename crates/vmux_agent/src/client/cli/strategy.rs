@@ -22,6 +22,20 @@ pub struct ResumableSession {
     pub cross_runtime: bool,
 }
 
+/// Reads valid UTF-8 lines, skips isolated decode failures, and stops on other I/O errors.
+pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
+    reader: R,
+) -> impl Iterator<Item = String> {
+    reader
+        .lines()
+        .map_while(|line| match line {
+            Ok(line) => Some(Some(line)),
+            Err(err) if err.kind() == std::io::ErrorKind::InvalidData => Some(None),
+            Err(_) => None,
+        })
+        .flatten()
+}
+
 pub trait CliAgentStrategy: AgentStrategy {
     fn sessions_root(&self) -> PathBuf;
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;

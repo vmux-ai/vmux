@@ -104,6 +104,10 @@ Prompt transport distinguishes display text from optional private context. The A
 records the display text as the visible user turn while the driver composes the actual ACP prompt
 from private context plus display text.
 
+The wire prompt length-delimits the private context before the closing tag. Replay parsing uses
+that byte length to locate the display prompt without interpreting marker-like text inside either
+payload. Legacy marker-delimited prompts remain readable for sessions created before this framing.
+
 The private context is attached only to the first submitted prompt. A failed dispatch retains the
 pending handoff and imported transcript so the user can retry without reselecting the source
 session. Successful dispatch consumes the pending context exactly once.

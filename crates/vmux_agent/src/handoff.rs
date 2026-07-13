@@ -103,14 +103,13 @@ pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option
         let Message::User { text } = message else {
             continue;
         };
-        if !text.starts_with(HANDOFF_PROMPT_PREFIX) {
-            continue;
-        }
-        if let Some((_, display_text)) =
-            text.rsplit_once(vmux_service::protocol::PRIVATE_CONTEXT_PROMPT_MARKER)
+        if let Some(display_text) =
+            vmux_service::protocol::extract_display_prompt(text).map(str::to_string)
         {
-            *text = display_text.to_string();
-        } else if let Some(display_text) = fallback.take() {
+            *text = display_text;
+        } else if vmux_service::protocol::has_private_context_envelope(text)
+            && let Some(display_text) = fallback.take()
+        {
             *text = display_text.to_string();
         }
     }
@@ -302,6 +301,16 @@ mod tests {
         sanitize_replayed_messages(&mut messages, Some("stale sidecar text"));
 
         assert_eq!(messages, vec![user("first try"), user("second try")]);
+    }
+
+    #[test]
+    fn replay_preserves_plain_prompt_starting_with_private_prefix() {
+        let text = format!("{HANDOFF_PROMPT_PREFIX} ordinary user text");
+        let mut messages = vec![user(&text)];
+
+        sanitize_replayed_messages(&mut messages, Some("fallback"));
+
+        assert_eq!(messages, vec![user(&text)]);
     }
 
     #[test]

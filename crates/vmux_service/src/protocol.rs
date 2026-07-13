@@ -489,14 +489,50 @@ pub enum ClientMessage {
 
 pub const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
 pub const PRIVATE_CONTEXT_PROMPT_MARKER: &str = "\n\nCurrent user prompt:\n";
+const PRIVATE_CONTEXT_LENGTH_PREFIX: &str = "Context bytes: ";
+const PRIVATE_CONTEXT_CLOSING_TAG: &str = "\n</vmux_handoff_context>";
 
 pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String {
     match context {
         Some(context) => format!(
-            "{PRIVATE_CONTEXT_PREFIX}\n{context}\n</vmux_handoff_context>{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}"
+            "{PRIVATE_CONTEXT_PREFIX}\n{PRIVATE_CONTEXT_LENGTH_PREFIX}{}\n{context}{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}{display_text}",
+            context.len()
         ),
         None => display_text.to_string(),
     }
+}
+
+/// Returns the visible user prompt from a vmux private-context envelope.
+pub fn extract_display_prompt(prompt: &str) -> Option<&str> {
+    extract_length_delimited_display_prompt(prompt).or_else(|| {
+        let body = prompt
+            .strip_prefix(PRIVATE_CONTEXT_PREFIX)?
+            .strip_prefix('\n')?;
+        let separator = format!("{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}");
+        body.rsplit_once(&separator).map(|(_, display)| display)
+    })
+}
+
+/// Returns whether text contains a complete vmux private-context envelope.
+pub fn has_private_context_envelope(prompt: &str) -> bool {
+    prompt
+        .strip_prefix(PRIVATE_CONTEXT_PREFIX)
+        .and_then(|body| body.strip_prefix('\n'))
+        .is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
+}
+
+fn extract_length_delimited_display_prompt(prompt: &str) -> Option<&str> {
+    let body = prompt
+        .strip_prefix(PRIVATE_CONTEXT_PREFIX)?
+        .strip_prefix('\n')?;
+    let (length, body) = body.split_once('\n')?;
+    let context_len = length
+        .strip_prefix(PRIVATE_CONTEXT_LENGTH_PREFIX)?
+        .parse::<usize>()
+        .ok()?;
+    body.get(context_len..)?
+        .strip_prefix(PRIVATE_CONTEXT_CLOSING_TAG)?
+        .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -747,6 +783,24 @@ pub struct ProcessInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
+        let display = format!("before{PRIVATE_CONTEXT_PROMPT_MARKER}after");
+        let wire = compose_agent_prompt(&display, Some("context"));
+
+        assert!(wire.contains("Context bytes: 7\ncontext"));
+        assert_eq!(extract_display_prompt(&wire), Some(display.as_str()));
+    }
+
+    #[test]
+    fn legacy_composed_agent_prompt_remains_decodable() {
+        let wire = format!(
+            "{PRIVATE_CONTEXT_PREFIX}\ncontext\n</vmux_handoff_context>{PRIVATE_CONTEXT_PROMPT_MARKER}display"
+        );
+
+        assert_eq!(extract_display_prompt(&wire), Some("display"));
+    }
 
     #[test]
     fn agent_request_id_roundtrips() {

@@ -4,7 +4,9 @@ use std::time::SystemTime;
 
 use serde::Serialize;
 
-use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
+use crate::client::cli::strategy::{
+    CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
+};
 use crate::strategy::AgentStrategy;
 use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
@@ -379,7 +381,7 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
 }
 
 pub(crate) fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
-    use std::io::{BufRead, BufReader};
+    use std::io::BufReader;
 
     let entries = std::fs::read_dir(root)
         .map_err(|err| format!("read Vibe session root {}: {err}", root.display()))?;
@@ -398,7 +400,7 @@ pub(crate) fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<
     let file = std::fs::File::open(&path)
         .map_err(|err| format!("open Vibe session {}: {err}", path.display()))?;
     let mut messages = Vec::new();
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    for line in lines_skipping_invalid_utf8(BufReader::new(file)) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
@@ -857,6 +859,37 @@ mod tests {
                 },
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn vibe_transcript_skips_invalid_utf8_line() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("vibe-transcript-invalid-utf8");
+        let session = tmp.join("session_20260713_120000_vb1");
+        std::fs::create_dir_all(&session).unwrap();
+        let mut transcript =
+            b"{\"role\":\"user\",\"content\":\"before\",\"injected\":false}\n".to_vec();
+        transcript.extend_from_slice(b"\xff\n");
+        transcript.extend_from_slice(
+            b"{\"role\":\"assistant\",\"content\":\"after\",\"injected\":false}\n",
+        );
+        std::fs::write(session.join("messages.jsonl"), transcript).unwrap();
+
+        let messages = load_vibe_transcript(&tmp, "vb1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "before".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("after".into())]
                 }
             ]
         );
