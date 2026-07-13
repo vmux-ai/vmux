@@ -93,3 +93,7 @@ This change does not alter CLI sessions, `/resume` filtering, ACP provider stora
 ## Resume Selector Loading State
 
 Opening `/resume` starts an asynchronous native session scan. The selector tracks that request separately from the returned session vector. Before the first request is sent and while its response is pending, the menu shows `Loading sessions…`. After the response arrives, the menu shows results, `No matching sessions`, or `No resumable sessions found` as appropriate. No timer or delayed empty-state heuristic is used.
+
+## Resume Session Prefetch
+
+The session scan starts as soon as slash-command filtering leaves `/resume` as the only selectable command. Prefetching does not change the prompt text, execute `/resume`, or replace the command selector. If the user presses Enter or types the separating space while the scan is pending, the resume selector reuses that request and shows its loading state. If the response already arrived, the selector shows the cached results immediately. Queries with zero matches, multiple matches, or one non-resume match do not fetch sessions.
