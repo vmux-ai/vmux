@@ -190,6 +190,7 @@ impl Plugin for AgentPlugin {
             .add_message::<PageAgentSpawnDefaultRequest>()
             .add_message::<PageAgentAttachDefaultRequest>()
             .add_message::<TerminalStackSpawnRequest>()
+            .add_message::<vmux_terminal::TerminalReinputRequest>()
             .add_message::<ProcessStackSpawnRequest>()
             .add_message::<RestartAgentPty>()
             .add_message::<vmux_core::agent::SwapStackSession>()
