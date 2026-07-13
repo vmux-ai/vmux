@@ -62,7 +62,7 @@ pub fn build_context(messages: &[Message], limit: usize) -> BuiltContext {
     for segment in segments.iter().rev() {
         let len = segment.chars().count() + usize::from(!kept.is_empty());
         if len > remaining {
-            continue;
+            break;
         }
         remaining -= len;
         kept.push(segment.clone());
@@ -225,6 +225,21 @@ mod tests {
         let third = built.text.find("third").unwrap();
         assert!(first < second && second < third);
         assert!(!built.truncated);
+    }
+
+    #[test]
+    fn context_budget_keeps_a_contiguous_newest_suffix() {
+        let messages = vec![
+            user("old-small"),
+            assistant(&"middle-large".repeat(20)),
+            user("new-small"),
+        ];
+
+        let built = build_context(&messages, 120);
+
+        assert!(built.text.contains("new-small"));
+        assert!(!built.text.contains("middle-large"));
+        assert!(!built.text.contains("old-small"));
     }
 
     #[test]
