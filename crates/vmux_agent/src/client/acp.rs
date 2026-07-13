@@ -571,7 +571,7 @@ fn apply_acp_terminal_created(
             &ctx,
         );
         let tab = commands
-            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(target_pane)))
+            .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))
             .id();
         commands.spawn((
             reattach_terminal_bundle(&mut meshes, &mut webview_mt, ev.process_id),
@@ -739,6 +739,79 @@ mod tests {
         assert_eq!(
             app.world().get::<Profile>(matching).unwrap().name,
             "Antigravity"
+        );
+    }
+
+    #[test]
+    fn acp_terminal_stack_does_not_take_focus_from_agent() {
+        use vmux_layout::pane::leaf_pane_bundle;
+        use vmux_layout::stack::Stack;
+        use vmux_layout::tab::tab_bundle;
+        use vmux_service::agent_events::PageAgentAcpTerminalCreated;
+
+        let mut app = App::new();
+        app.add_message::<PageAgentAcpTerminalCreated>()
+            .add_systems(Update, apply_acp_terminal_created)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let tab = app.world_mut().spawn(tab_bundle()).id();
+        let pane = app
+            .world_mut()
+            .spawn((leaf_pane_bundle(), ChildOf(tab)))
+            .id();
+        let agent = app
+            .world_mut()
+            .spawn((
+                stack_bundle(),
+                LastActivatedAt(10),
+                ChildOf(pane),
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(agent)
+            .insert(vmux_core::PageMetadata {
+                url: "vmux://agent/claude".into(),
+                ..default()
+            });
+        app.world_mut().write_message(PageAgentAcpTerminalCreated {
+            sid: "s1".into(),
+            terminal_id: "terminal-1".into(),
+            process_id: vmux_core::ProcessId::new(),
+            command: "echo".into(),
+            args: vec!["hi".into()],
+            cwd: Some("/tmp".into()),
+        });
+
+        app.update();
+
+        let stack_times = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<(Entity, &LastActivatedAt), With<Stack>>();
+            query
+                .iter(world)
+                .map(|(entity, activated)| (entity, activated.0))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity == agent)
+                .map(|(_, activated)| *activated),
+            Some(10)
+        );
+        assert_eq!(
+            stack_times
+                .iter()
+                .find(|(entity, _)| *entity != agent)
+                .map(|(_, activated)| *activated),
+            Some(0)
         );
     }
 
