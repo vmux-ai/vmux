@@ -706,7 +706,7 @@ mod native_tests {
     fn composer_resume_rows_render_agent_name() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("session.agent_name"));
-        assert!(source.contains("shrink-0 text-xs text-muted-foreground"));
+        assert!(source.contains("max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"));
     }
 
     #[test]

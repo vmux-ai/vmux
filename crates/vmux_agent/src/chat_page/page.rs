@@ -482,7 +482,7 @@ pub fn Page() -> Element {
                                                 div { class: "flex min-w-0 items-baseline gap-2",
                                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{session.title}" }
                                                     if !session.agent_name.is_empty() {
-                                                        span { class: "shrink-0 text-xs text-muted-foreground", "{session.agent_name}" }
+                                                        span { class: "max-w-[40%] shrink-0 truncate text-xs text-muted-foreground", "{session.agent_name}" }
                                                     }
                                                 }
                                                 span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
