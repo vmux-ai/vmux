@@ -117,6 +117,10 @@ pub(crate) fn move_selection(current: usize, len: usize, direction: MenuDirectio
     }
 }
 
+pub(crate) fn is_handoff_boundary(message_index: usize, imported_message_count: u32) -> bool {
+    imported_message_count != 0 && message_index + 1 == imported_message_count as usize
+}
+
 pub(crate) fn edit_prompt(
     value: &str,
     selection_start: u32,
@@ -277,5 +281,13 @@ mod tests {
             edit_prompt("a🙂b", 1, 1, PromptEdit::Delete),
             ("ab".into(), 1)
         );
+    }
+
+    #[test]
+    fn handoff_divider_appears_after_last_imported_message() {
+        assert!(!is_handoff_boundary(0, 2));
+        assert!(is_handoff_boundary(1, 2));
+        assert!(!is_handoff_boundary(2, 2));
+        assert!(!is_handoff_boundary(0, 0));
     }
 }

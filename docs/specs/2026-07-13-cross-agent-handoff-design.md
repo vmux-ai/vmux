@@ -69,14 +69,14 @@ transcript leaves the current pane unchanged and surfaces an inline error.
 1. The user selects a foreign session from `/resume`.
 2. Native code loads and normalizes the source transcript.
 3. The current pane keeps its configured target ACP agent and adopts the source session's cwd.
-4. The pane displays a `Continued from <source agent>` marker followed by the imported messages.
+4. The pane displays the imported messages followed by a `Continued from <source agent>` marker.
 5. The target stack receives a `PendingHandoff` containing source identity, source session id,
    imported display messages, and the bounded private context payload.
 6. No target ACP session is created at selection time.
 7. The user's next submitted prompt creates the target session and sends the bounded handoff
    context together with that prompt.
-8. The visible transcript appends only the real user prompt. The private context is never rendered
-   as a user bubble.
+8. The visible transcript appends only the real user prompt after the handoff marker. The private
+   context is never rendered as a user bubble.
 9. After successful dispatch, subsequent prompts use the normal target-agent flow.
 
 The private context clearly identifies imported user and assistant turns and instructs the target

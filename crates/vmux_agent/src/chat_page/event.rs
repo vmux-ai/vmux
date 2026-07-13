@@ -38,6 +38,7 @@ pub struct ChatSnapshot {
     pub accent_color: String,
     pub handoff_source: String,
     pub handoff_truncated: bool,
+    pub handoff_message_count: u32,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -288,6 +289,7 @@ mod tests {
             status: "streaming".to_string(),
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
+            handoff_message_count: 2,
             queued: vec!["a".into(), "b".into()],
             paused: true,
             ..Default::default()
@@ -299,6 +301,7 @@ mod tests {
         assert!(back.paused);
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);
+        assert_eq!(back.handoff_message_count, 2);
     }
 
     #[test]

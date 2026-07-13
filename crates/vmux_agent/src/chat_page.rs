@@ -245,6 +245,9 @@ fn snapshot_of(
             .map(|imported| imported.source_agent.clone())
             .unwrap_or_default(),
         handoff_truncated: imported.is_some_and(|imported| imported.truncated),
+        handoff_message_count: imported
+            .map(|imported| u32::try_from(imported.messages.len()).unwrap_or(u32::MAX))
+            .unwrap_or_default(),
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
     }
@@ -786,6 +789,33 @@ mod native_tests {
             foreign_handoff_target("custom-acp", None, AgentKind::Codex),
             Some("vmux://agent/custom-acp".to_string())
         );
+    }
+
+    #[test]
+    fn snapshot_reports_imported_message_boundary() {
+        let imported = ImportedConversation {
+            source_agent: "Codex".into(),
+            source_kind: AgentKind::Codex,
+            source_sid: "codex-1".into(),
+            messages: vec![
+                crate::Message::User { text: "one".into() },
+                crate::Message::Assistant {
+                    blocks: vec![crate::AssistantBlock::Text("two".into())],
+                },
+            ],
+            truncated: false,
+            first_prompt: None,
+        };
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::Idle,
+            None,
+            None,
+            &PromptQueue::default(),
+            Some(&imported),
+        );
+
+        assert_eq!(snapshot.handoff_message_count, 2);
     }
 
     #[test]

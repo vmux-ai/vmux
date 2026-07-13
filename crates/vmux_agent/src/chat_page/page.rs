@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::chat_page::composer::{
-    PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, menu_direction,
-    move_selection, resume_menu_state, selector_mode, should_fetch_resume,
+    PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, is_handoff_boundary,
+    menu_direction, move_selection, resume_menu_state, selector_mode, should_fetch_resume,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
@@ -154,6 +154,7 @@ pub fn Page() -> Element {
     let mut accent = use_signal(String::new);
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
+    let mut handoff_message_count = use_signal(|| 0u32);
     let mut draft = use_signal(String::new);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -208,6 +209,7 @@ pub fn Page() -> Element {
         accent.set(snap.accent_color.clone());
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
+        handoff_message_count.set(snap.handoff_message_count);
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -360,16 +362,6 @@ pub fn Page() -> Element {
                     }
                 },
                 div { class: "mx-auto flex max-w-3xl flex-col gap-4",
-                    if !handoff_source().is_empty() {
-                        div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
-                            span { class: "h-px flex-1 bg-foreground/10" }
-                            span { "Continued from {handoff_source}" }
-                            if handoff_truncated() {
-                                span { class: "text-amber-500/80", "· older context omitted" }
-                            }
-                            span { class: "h-px flex-1 bg-foreground/10" }
-                        }
-                    }
                     if messages.read().is_empty() && status() == "idle" {
                         div { class: "flex flex-col items-center gap-3 py-24 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
@@ -381,6 +373,18 @@ pub fn Page() -> Element {
                     }
                     for (i , msg) in messages.read().iter().enumerate() {
                         {render_message(i, msg)}
+                        if !handoff_source().is_empty()
+                            && is_handoff_boundary(i, handoff_message_count())
+                        {
+                            div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
+                                span { class: "h-px flex-1 bg-foreground/10" }
+                                span { "Continued from {handoff_source}" }
+                                if handoff_truncated() {
+                                    span { class: "text-amber-500/80", "· older context omitted" }
+                                }
+                                span { class: "h-px flex-1 bg-foreground/10" }
+                            }
+                        }
                     }
                     if status() == "streaming" {
                         div { class: "flex items-center gap-2.5 text-sm",
