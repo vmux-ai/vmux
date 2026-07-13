@@ -299,16 +299,24 @@ fn push_chat_to_page(
 fn on_chat_submit(
     trigger: On<BinReceive<ChatSubmit>>,
     child_of: Query<&ChildOf>,
-    mut queues: Query<&mut PromptQueue>,
+    mut sessions: Query<(&mut PromptQueue, &mut AgentRunState)>,
 ) {
     let webview = trigger.event().webview;
     let text = trigger.event().payload.text.clone();
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
-        queue.items.push_back(text);
-        queue.paused = false;
+    if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
+        enqueue_prompt(&mut queue, &mut state, text);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn enqueue_prompt(queue: &mut PromptQueue, state: &mut AgentRunState, text: String) {
+    queue.items.push_back(text);
+    queue.paused = false;
+    if matches!(state, AgentRunState::Errored(_)) {
+        *state = AgentRunState::Idle;
     }
 }
 
@@ -778,6 +786,18 @@ mod native_tests {
             foreign_handoff_target("custom-acp", None, AgentKind::Codex),
             Some("vmux://agent/custom-acp".to_string())
         );
+    }
+
+    #[test]
+    fn submitting_after_error_rearms_prompt_dispatch() {
+        let mut queue = PromptQueue::default();
+        let mut state = AgentRunState::Errored("failed".into());
+
+        enqueue_prompt(&mut queue, &mut state, "retry".into());
+
+        assert!(matches!(state, AgentRunState::Idle));
+        assert_eq!(queue.items.front().map(String::as_str), Some("retry"));
+        assert!(!queue.paused);
     }
 
     #[test]
