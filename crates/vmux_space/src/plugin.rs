@@ -49,6 +49,7 @@ impl Plugin for SpacePlugin {
                     sync_active_space_record,
                     update_effective_startup_url,
                     update_effective_startup_dir,
+                    materialize_tab_startup_dirs,
                 )
                     .chain(),
             )
@@ -116,6 +117,28 @@ fn update_effective_startup_dir(
     };
     if settings.is_changed() || active.is_changed() {
         effective.0 = vmux_setting::resolve_startup_dir(&settings, &active.record.id);
+    }
+}
+
+fn materialize_tab_startup_dirs(
+    settings: Res<vmux_setting::AppSettings>,
+    active: Res<ActiveSpace>,
+    spaces: Query<&vmux_layout::space::SpaceId, With<vmux_layout::space::Space>>,
+    mut tabs: Query<(&ChildOf, &mut vmux_layout::tab::Tab)>,
+) {
+    for (parent, mut tab) in &mut tabs {
+        if tab.startup_dir.is_some() {
+            continue;
+        }
+        let space_id = spaces
+            .get(parent.parent())
+            .map(|id| id.0.as_str())
+            .unwrap_or(active.record.id.as_str());
+        tab.startup_dir = Some(
+            vmux_setting::resolve_startup_dir(&settings, space_id)
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
 }
 
@@ -794,6 +817,66 @@ mod tests {
                 .resource::<vmux_layout::settings::EffectiveStartupUrl>()
                 .0,
             "https://work.example"
+        );
+    }
+
+    #[test]
+    fn legacy_tab_materializes_space_startup_dir_once() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            "work".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(first.path().to_string_lossy().into_owned()),
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .insert_resource(ActiveSpace {
+                record: work_space_record(),
+            })
+            .add_systems(Update, materialize_tab_startup_dirs);
+        let space = app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId("work".into()),
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((vmux_layout::tab::Tab::default(), ChildOf(space)))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir
+                .as_deref(),
+            first.path().to_str()
+        );
+        app.world_mut()
+            .resource_mut::<vmux_setting::AppSettings>()
+            .spaces
+            .get_mut("work")
+            .unwrap()
+            .startup_dir = Some(second.path().to_string_lossy().into_owned());
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir
+                .as_deref(),
+            first.path().to_str()
         );
     }
 
