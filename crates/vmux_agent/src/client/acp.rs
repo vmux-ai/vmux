@@ -11,6 +11,7 @@ use vmux_setting::AppSettings;
 
 use crate::components::{AgentApprovalPolicy, PromptQueue};
 use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
+use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
 /// Marks a stack entity as an ACP agent session. vmux is ACP-only, so this is the agent
@@ -398,22 +399,38 @@ fn apply_acp_session_created(
 }
 
 fn send_acp_input(
-    mut q: Query<(&AcpSession, &mut AgentRunState, &mut PromptQueue)>,
+    mut q: Query<(
+        &AcpSession,
+        &mut AgentRunState,
+        &mut PromptQueue,
+        Option<&mut PendingHandoff>,
+        Option<&mut ImportedConversation>,
+    )>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    for (session, mut state, mut queue) in &mut q {
+    for (session, mut state, mut queue, mut pending, mut imported) in &mut q {
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
         let Some(text) = queue.items.pop_front() else {
             continue;
         };
+        let context = pending
+            .as_deref_mut()
+            .and_then(PendingHandoff::context_for_send);
+        if context.is_some()
+            && let Some(imported) = imported.as_deref_mut()
+            && imported.first_prompt.is_none()
+        {
+            imported.first_prompt = Some(text.clone());
+        }
         service.0.send(ClientMessage::AgentInput {
             sid: session.sid.clone(),
             text,
+            context,
         });
         *state = AgentRunState::Streaming;
     }

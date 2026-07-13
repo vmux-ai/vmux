@@ -448,6 +448,7 @@ pub enum ClientMessage {
     AgentInput {
         sid: String,
         text: String,
+        context: Option<String>,
     },
     /// Interrupt the session's in-flight turn without tearing the session down.
     AgentCancel {
@@ -484,6 +485,17 @@ pub enum ClientMessage {
         resume_acp_session_id: Option<String>,
     },
     Status,
+}
+
+pub const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
+
+pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String {
+    match context {
+        Some(context) => format!(
+            "{PRIVATE_CONTEXT_PREFIX}\n{context}\n</vmux_handoff_context>\n\nCurrent user prompt:\n{display_text}"
+        ),
+        None => display_text.to_string(),
+    }
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -1183,6 +1195,7 @@ mod tests {
             ClientMessage::AgentInput {
                 sid: "s".into(),
                 text: "hi".into(),
+                context: Some("prior conversation".into()),
             },
             ClientMessage::AgentApprove {
                 sid: "s".into(),

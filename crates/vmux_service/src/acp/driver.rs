@@ -27,11 +27,15 @@ use vmux_core::ProcessId;
 use super::projector::{AcpProjector, Intent};
 use crate::protocol::{
     AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    compose_agent_prompt,
 };
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
-    User(String),
+    User {
+        text: String,
+        context: Option<String>,
+    },
     Approve {
         call_id: String,
         decision: ApprovalDecision,
@@ -317,7 +321,7 @@ pub async fn run(
 
             while let Some(input) = input_rx.recv().await {
                 match input {
-                    AcpInput::User(text) => {
+                    AcpInput::User { text, context } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
                         main_shared
                             .projector
@@ -357,7 +361,10 @@ pub async fn run(
                         cx.spawn(async move {
                             let prompt = PromptRequest::new(
                                 active_session_id,
-                                vec![ContentBlock::Text(TextContent::new(text))],
+                                vec![ContentBlock::Text(TextContent::new(compose_agent_prompt(
+                                    &text,
+                                    context.as_deref(),
+                                )))],
                             );
                             let errored = match cx_prompt.send_request(prompt).block_task().await {
                                 Ok(_) => None,
@@ -680,6 +687,16 @@ mod tests {
             status_after_prompt(true, Some("boom".into())),
             AgentRunStatus::Interrupted
         );
+    }
+
+    #[test]
+    fn private_context_wraps_wire_prompt_without_changing_display_text() {
+        let wire = compose_agent_prompt("continue here", Some("prior conversation"));
+
+        assert!(wire.starts_with(crate::protocol::PRIVATE_CONTEXT_PREFIX));
+        assert!(wire.contains("prior conversation"));
+        assert!(wire.ends_with("continue here"));
+        assert_eq!(compose_agent_prompt("plain", None), "plain");
     }
 
     #[test]

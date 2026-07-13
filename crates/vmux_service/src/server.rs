@@ -766,12 +766,12 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AgentInput { sid, text } => {
+            ClientMessage::AgentInput { sid, text, context } => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
                         .await
-                        .input(&sid, crate::acp::AcpInput::User(text));
+                        .input(&sid, crate::acp::AcpInput::User { text, context });
                 } else {
                     agent_manager
                         .lock()

@@ -3,12 +3,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{AgentKind, AssistantBlock, Message};
 
-pub const HANDOFF_PROMPT_PREFIX: &str = "<vmux_handoff_context>";
+pub const HANDOFF_PROMPT_PREFIX: &str = vmux_service::protocol::PRIVATE_CONTEXT_PREFIX;
 pub const OMITTED_MARKER: &str = "[Older source turns omitted]";
 pub const DEFAULT_CONTEXT_LIMIT: usize = 64 * 1024;
 
 const CONTEXT_INTRO: &str = "Conversation imported from another agent:\n";
-const HANDOFF_PROMPT_SUFFIX: &str = "</vmux_handoff_context>";
 
 #[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ImportedConversation {
@@ -24,6 +23,20 @@ pub struct ImportedConversation {
 pub struct PendingHandoff {
     pub context: String,
     pub sent: bool,
+}
+
+impl PendingHandoff {
+    pub fn context_for_send(&mut self) -> Option<String> {
+        if self.sent {
+            return None;
+        }
+        self.sent = true;
+        Some(self.context.clone())
+    }
+
+    pub fn retry(&mut self) {
+        self.sent = false;
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,9 +93,7 @@ fn context_segment(message: &Message) -> Option<String> {
 }
 
 pub fn wire_prompt(context: &str, display_text: &str) -> String {
-    format!(
-        "{HANDOFF_PROMPT_PREFIX}\n{context}\n{HANDOFF_PROMPT_SUFFIX}\n\nCurrent user prompt:\n{display_text}"
-    )
+    vmux_service::protocol::compose_agent_prompt(display_text, Some(context))
 }
 
 pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option<&str>) {
@@ -194,5 +205,24 @@ mod tests {
 
         assert_eq!(messages[0], user("continue here"));
         assert_eq!(messages[1], assistant("done"));
+    }
+
+    #[test]
+    fn pending_context_sends_once_and_can_retry_after_error() {
+        let mut pending = PendingHandoff {
+            context: "prior conversation".into(),
+            sent: false,
+        };
+
+        assert_eq!(
+            pending.context_for_send().as_deref(),
+            Some("prior conversation")
+        );
+        assert!(pending.context_for_send().is_none());
+        pending.retry();
+        assert_eq!(
+            pending.context_for_send().as_deref(),
+            Some("prior conversation")
+        );
     }
 }
