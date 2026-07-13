@@ -25,6 +25,7 @@ the sidebar must show the same directory future agents and terminals will use.
 - Treating a plain terminal `cd` as a tab workspace change.
 - Changing the working directory of running agents or terminals.
 - Polling process working directories.
+- Creating directories or worktrees when a tab is created.
 - Deleting or pruning worktrees that a tab leaves.
 
 ## Directory Ownership
@@ -39,9 +40,10 @@ When creating a tab, vmux resolves the directory through the existing chain:
 3. Global terminal startup directory.
 4. Per-space default under `~/.vmux/spaces/<space-id>`.
 
-The resolved existing directory is stored immediately in `Tab.startup_dir`. Later settings changes
-affect newly created tabs, not existing tabs. Restored legacy tabs without a stored directory are
-materialized once from the same chain and persisted.
+The resolved existing directory path is stored immediately in `Tab.startup_dir`. This only records
+which existing directory the tab owns; tab creation does not call `mkdir`, create a checkout, or
+create a worktree. Later settings changes affect newly created tabs, not existing tabs. Restored
+legacy tabs without a stored directory are materialized once from the same chain and persisted.
 
 The sidebar reads the stored tab directory. Agent creation, terminal creation, and automatic
 `vmux run` placement also resolve from that same stored value. Existing running processes remain in
@@ -119,4 +121,3 @@ unchanged. File preview behavior is independent and continues when rebinding can
   automatically reused.
 - Persistence tests verify tab-directory changes and `TabWorktree` removal mark the store dirty.
 - CLI hook and ACP projector tests verify touch kinds and paths reach the shared observation flow.
-
