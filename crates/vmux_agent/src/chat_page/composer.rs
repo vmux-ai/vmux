@@ -20,6 +20,14 @@ pub(crate) enum PromptEdit<'a> {
     Delete,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResumeMenuState {
+    Loading,
+    Empty,
+    NoMatch,
+    Results,
+}
+
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     let Some(token) = draft.strip_prefix('/') else {
         return SelectorMode::None;
@@ -53,6 +61,23 @@ pub(crate) fn filter_sessions(
         })
         .cloned()
         .collect()
+}
+
+pub(crate) fn resume_menu_state(
+    requested: bool,
+    loading: bool,
+    session_count: usize,
+    filtered_count: usize,
+) -> ResumeMenuState {
+    if !requested || loading {
+        ResumeMenuState::Loading
+    } else if session_count == 0 {
+        ResumeMenuState::Empty
+    } else if filtered_count == 0 {
+        ResumeMenuState::NoMatch
+    } else {
+        ResumeMenuState::Results
+    }
 }
 
 pub(crate) fn menu_direction(key: &str, ctrl: bool) -> Option<MenuDirection> {
@@ -166,6 +191,27 @@ mod tests {
         assert_eq!(filter_sessions(&sessions, "AUTH")[0].sid, "SID-ABC");
         assert_eq!(filter_sessions(&sessions, "SITE")[0].sid, "sid-def");
         assert!(filter_sessions(&sessions, "missing").is_empty());
+    }
+
+    #[test]
+    fn resume_menu_distinguishes_loading_from_loaded_empty() {
+        assert_eq!(
+            resume_menu_state(false, false, 0, 0),
+            ResumeMenuState::Loading
+        );
+        assert_eq!(
+            resume_menu_state(true, true, 0, 0),
+            ResumeMenuState::Loading
+        );
+        assert_eq!(resume_menu_state(true, false, 0, 0), ResumeMenuState::Empty);
+        assert_eq!(
+            resume_menu_state(true, false, 2, 0),
+            ResumeMenuState::NoMatch
+        );
+        assert_eq!(
+            resume_menu_state(true, false, 2, 1),
+            ResumeMenuState::Results
+        );
     }
 
     #[test]

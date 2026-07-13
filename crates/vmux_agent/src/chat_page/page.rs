@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::chat_page::composer::{
-    PromptEdit, SelectorMode, edit_prompt, filter_sessions, menu_direction, move_selection,
-    selector_mode,
+    PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, menu_direction,
+    move_selection, resume_menu_state, selector_mode,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
@@ -162,6 +162,7 @@ pub fn Page() -> Element {
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
+    let mut resume_loading = use_signal(|| false);
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
 
@@ -220,12 +221,16 @@ pub fn Page() -> Element {
         use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
             sessions.set(s.sessions.clone());
             menu_sel.set(0);
+            resume_loading.set(false);
         });
 
     use_effect(move || {
         let in_resume_selector = matches!(selector_mode(&draft()), SelectorMode::Resume(_));
         if in_resume_selector && !resume_requested() {
-            let _ = try_cef_bin_emit_rkyv(&ResumeListRequest);
+            resume_loading.set(true);
+            if try_cef_bin_emit_rkyv(&ResumeListRequest).is_err() {
+                resume_loading.set(false);
+            }
             resume_requested.set(true);
         } else if !in_resume_selector && resume_requested() {
             resume_requested.set(false);
@@ -287,6 +292,14 @@ pub fn Page() -> Element {
         .unwrap_or_default();
     let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
     let session_menu_open = resume_query.is_some();
+    let resume_state = resume_query.map(|_| {
+        resume_menu_state(
+            resume_requested(),
+            resume_loading(),
+            sessions.read().len(),
+            filtered_sessions.len(),
+        )
+    });
 
     use_effect(move || {
         let selected = menu_sel();
@@ -449,9 +462,11 @@ pub fn Page() -> Element {
                     }
                     if session_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
-                            if sessions.read().is_empty() {
+                            if resume_state == Some(ResumeMenuState::Loading) {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading sessions…" }
+                            } else if resume_state == Some(ResumeMenuState::Empty) {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
-                            } else if filtered_sessions.is_empty() {
+                            } else if resume_state == Some(ResumeMenuState::NoMatch) {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching sessions" }
                             } else {
                                 for (i , session) in filtered_sessions.iter().enumerate() {

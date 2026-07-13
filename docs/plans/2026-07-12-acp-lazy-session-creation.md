@@ -334,7 +334,115 @@ Present the exact candidate list and total count. Do not delete anything until t
 
 Use `rm` only for exact approved files or directories. Do not use globs. Re-run the dry-run afterward; expected candidate count is zero.
 
-### Task 5: Finish branch state
+### Task 5: Show resume loading state while fetching
+
+**Files:**
+- Modify: `crates/vmux_agent/src/chat_page/composer.rs`
+- Modify: `crates/vmux_agent/src/chat_page/page.rs`
+- Test: `crates/vmux_agent/src/chat_page/composer.rs`
+
+- [ ] **Step 1: Write the failing menu-state test**
+
+Add:
+
+```rust
+#[test]
+fn resume_menu_distinguishes_loading_from_loaded_empty() {
+    assert_eq!(
+        resume_menu_state(false, false, 0, 0),
+        ResumeMenuState::Loading
+    );
+    assert_eq!(
+        resume_menu_state(true, true, 0, 0),
+        ResumeMenuState::Loading
+    );
+    assert_eq!(
+        resume_menu_state(true, false, 0, 0),
+        ResumeMenuState::Empty
+    );
+    assert_eq!(
+        resume_menu_state(true, false, 2, 0),
+        ResumeMenuState::NoMatch
+    );
+    assert_eq!(
+        resume_menu_state(true, false, 2, 1),
+        ResumeMenuState::Results
+    );
+}
+```
+
+- [ ] **Step 2: Run the test and verify it fails**
+
+```bash
+cargo test -p vmux_agent chat_page::composer::tests::resume_menu_distinguishes_loading_from_loaded_empty -- --exact
+```
+
+Expected: compilation fails because `resume_menu_state` and `ResumeMenuState` do not exist.
+
+- [ ] **Step 3: Add the menu-state model**
+
+Add to `composer.rs`:
+
+```rust
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ResumeMenuState {
+    Loading,
+    Empty,
+    NoMatch,
+    Results,
+}
+
+pub(crate) fn resume_menu_state(
+    requested: bool,
+    loading: bool,
+    session_count: usize,
+    filtered_count: usize,
+) -> ResumeMenuState {
+    if !requested || loading {
+        ResumeMenuState::Loading
+    } else if session_count == 0 {
+        ResumeMenuState::Empty
+    } else if filtered_count == 0 {
+        ResumeMenuState::NoMatch
+    } else {
+        ResumeMenuState::Results
+    }
+}
+```
+
+- [ ] **Step 4: Wire request state into the page**
+
+Import `ResumeMenuState` and `resume_menu_state`. Add `resume_loading`, set it before emitting `ResumeListRequest`, clear it when `ResumableSessions` arrives, and clear it when emitting fails. Derive menu state with:
+
+```rust
+let resume_state = resume_query.map(|_| {
+    resume_menu_state(
+        resume_requested(),
+        resume_loading(),
+        sessions.read().len(),
+        filtered_sessions.len(),
+    )
+});
+```
+
+Render `Loading sessions…` for `ResumeMenuState::Loading`, then the existing empty, no-match, and result branches.
+
+- [ ] **Step 5: Run targeted tests**
+
+```bash
+cargo test -p vmux_agent chat_page::composer::tests
+```
+
+Expected: all composer tests pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add docs/specs/2026-07-12-acp-lazy-session-creation-design.md docs/plans/2026-07-12-acp-lazy-session-creation.md crates/vmux_agent/src/chat_page/composer.rs crates/vmux_agent/src/chat_page/page.rs
+git commit -m "fix(agent): show resume loading state"
+```
+
+### Task 6: Finish branch state
 
 **Files:**
 - Delete: `docs/plans/2026-07-12-acp-lazy-session-creation.md`

@@ -89,3 +89,7 @@ The dry-run prints provider, session ID, file path, and classification evidence.
 ## Scope
 
 This change does not alter CLI sessions, `/resume` filtering, ACP provider storage formats, or session retention after a genuine user prompt.
+
+## Resume Selector Loading State
+
+Opening `/resume` starts an asynchronous native session scan. The selector tracks that request separately from the returned session vector. Before the first request is sent and while its response is pending, the menu shows `Loading sessions…`. After the response arrives, the menu shows results, `No matching sessions`, or `No resumable sessions found` as appropriate. No timer or delayed empty-state heuristic is used.
