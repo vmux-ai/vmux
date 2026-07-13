@@ -6,6 +6,7 @@ use bevy::prelude::Resource;
 use crate::AgentKind;
 use crate::AgentVariant;
 use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
+use crate::message::Message;
 
 pub trait AgentStrategy: Send + Sync + 'static {
     fn kind(&self) -> AgentKind;
@@ -37,6 +38,12 @@ impl AgentStrategies {
             .flat_map(|s| s.list_sessions())
             .collect();
         sort_sessions(all)
+    }
+
+    pub fn load_transcript(&self, kind: AgentKind, sid: &str) -> Result<Vec<Message>, String> {
+        self.get_cli(kind)
+            .ok_or_else(|| format!("no session strategy registered for {}", kind.display_name()))?
+            .load_transcript(sid)
     }
 }
 

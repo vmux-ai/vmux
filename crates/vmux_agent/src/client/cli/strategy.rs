@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use vmux_core::agent::AgentKind;
+use vmux_service::message::Message;
 
 use crate::McpServerConfig;
 use crate::strategy::AgentStrategy;
@@ -39,5 +40,8 @@ pub trait CliAgentStrategy: AgentStrategy {
     /// (the collector sorts newest-first). Default: none.
     fn list_sessions(&self) -> Vec<ResumableSession> {
         Vec::new()
+    }
+    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        Err(format!("transcript loading unsupported for {session_id}"))
     }
 }
