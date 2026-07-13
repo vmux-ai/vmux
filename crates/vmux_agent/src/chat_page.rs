@@ -30,7 +30,9 @@ use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::handoff::{ImportedConversation, visible_messages};
+use crate::handoff::{
+    DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context, visible_messages,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]
@@ -38,7 +40,7 @@ use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::PageMetadata;
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_core::agent::{AgentKind, SwapStackSession};
+use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::team::Profile;
 #[cfg(not(target_arch = "wasm32"))]
@@ -87,6 +89,7 @@ impl Plugin for AgentChatPagePlugin {
                     push_chat_to_page,
                     sync_chat_to_ready_views,
                     drain_resume_list_tasks,
+                    drain_resume_handoff_tasks,
                 ),
             );
     }
@@ -108,6 +111,15 @@ struct ChatSynced;
 struct ResumeListTask {
     webview: Entity,
     task: Task<ResumableSessions>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ResumeHandoffTask {
+    stack: Entity,
+    target_url: String,
+    cwd: std::path::PathBuf,
+    task: Task<Result<StackSessionHandoff, String>>,
 }
 
 /// Push the current transcript + slash commands to any chat webview that is ready but not yet
@@ -437,14 +449,50 @@ fn runtime_switch_target(
 
 /// Page → native: `/resume` was opened — reply with the on-disk session list.
 #[cfg(not(target_arch = "wasm32"))]
-fn sessions_for_kind(
+fn resume_entries(
     sessions: Vec<crate::client::cli::strategy::ResumableSession>,
-    kind: AgentKind,
-) -> Vec<crate::client::cli::strategy::ResumableSession> {
+    active_kind: Option<AgentKind>,
+    active_name: &str,
+) -> Vec<ResumableSessionEntry> {
     sessions
         .into_iter()
-        .filter(|session| session.kind == kind)
+        .map(|session| {
+            let dir = session
+                .cwd
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| session.cwd.to_string_lossy().to_string());
+            let agent_name = if Some(session.kind) == active_kind && !active_name.is_empty() {
+                active_name.to_string()
+            } else {
+                session.kind.display_name().to_string()
+            };
+            ResumableSessionEntry {
+                kind: session.kind.as_url_segment().to_string(),
+                sid: session.sid,
+                cwd: session.cwd.to_string_lossy().to_string(),
+                title: session.title,
+                subtitle: format!("{} · {}", relative_time(session.mtime), dir),
+                agent_name,
+                cross_runtime: session.cross_runtime,
+            }
+        })
         .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn foreign_handoff_target(
+    active_agent_id: &str,
+    active_kind: Option<AgentKind>,
+    source_kind: AgentKind,
+) -> Option<String> {
+    (active_kind != Some(source_kind)).then(|| {
+        crate::AgentUrl::Acp {
+            id: active_agent_id.to_string(),
+            sid: None,
+        }
+        .format()
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -487,27 +535,7 @@ fn on_resume_list_request(
         acp.map(|acp| acp.agent_id.as_str()),
     );
     let task = IoTaskPool::get().spawn(async move {
-        let sessions = kind
-            .map(|kind| sessions_for_kind(strategies.list_all_sessions(), kind))
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| {
-                let dir = s
-                    .cwd
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| s.cwd.to_string_lossy().to_string());
-                ResumableSessionEntry {
-                    kind: s.kind.as_url_segment().to_string(),
-                    sid: s.sid,
-                    cwd: s.cwd.to_string_lossy().to_string(),
-                    title: s.title,
-                    subtitle: format!("{} · {}", relative_time(s.mtime), dir),
-                    agent_name: agent_name.clone(),
-                    cross_runtime: s.cross_runtime,
-                }
-            })
-            .collect();
+        let sessions = resume_entries(strategies.list_all_sessions(), kind, &agent_name);
         ResumableSessions { sessions }
     });
     commands.spawn(ResumeListTask { webview, task });
@@ -531,6 +559,36 @@ fn drain_resume_list_tasks(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_resume_handoff_tasks(
+    mut tasks: Query<(Entity, &mut ResumeHandoffTask)>,
+    mut states: Query<&mut AgentRunState>,
+    mut swap: MessageWriter<SwapStackSession>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        match result {
+            Ok(handoff) => {
+                swap.write(SwapStackSession {
+                    stack: pending.stack,
+                    target_url: pending.target_url.clone(),
+                    cwd: pending.cwd.clone(),
+                    handoff: Some(handoff),
+                });
+            }
+            Err(message) => {
+                if let Ok(mut state) = states.get_mut(pending.stack) {
+                    *state = AgentRunState::Errored(message);
+                }
+            }
+        }
+    }
+}
+
 /// Page → native: resume a picked session on this stack, in the current runtime.
 #[cfg(not(target_arch = "wasm32"))]
 fn on_resume_session(
@@ -538,6 +596,8 @@ fn on_resume_session(
     child_of: Query<&ChildOf>,
     acp_sessions: Query<&AcpSession>,
     settings: Res<vmux_setting::AppSettings>,
+    strategies: Option<Res<AgentStrategies>>,
+    mut commands: Commands,
     mut swap: MessageWriter<SwapStackSession>,
 ) {
     let payload = &trigger.event().payload;
@@ -548,6 +608,41 @@ fn on_resume_session(
     let Some(kind) = AgentKind::from_url_segment(&payload.kind) else {
         return;
     };
+    if let Ok(acp) = acp_sessions.get(stack)
+        && let Some(target_url) = foreign_handoff_target(
+            &acp.agent_id,
+            AgentKind::from_url_segment(&acp.agent_id),
+            kind,
+        )
+    {
+        let strategies = strategies
+            .map(|strategies| (*strategies).clone())
+            .unwrap_or_default();
+        let source_sid = payload.sid.clone();
+        let source_agent = kind.display_name().to_string();
+        let cwd = std::path::PathBuf::from(&payload.cwd);
+        let task = IoTaskPool::get().spawn(async move {
+            let messages = strategies.load_transcript(kind, &source_sid)?;
+            let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
+            let messages_json = serde_json::to_string(&messages)
+                .map_err(|err| format!("serialize imported conversation: {err}"))?;
+            Ok(StackSessionHandoff {
+                source_agent,
+                source_kind: kind,
+                source_sid,
+                messages_json,
+                context: built.text,
+                truncated: built.truncated,
+            })
+        });
+        commands.spawn(ResumeHandoffTask {
+            stack,
+            target_url,
+            cwd,
+            task,
+        });
+        return;
+    }
     let prefer_acp = acp_sessions.get(stack).is_ok();
     let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
     let target = crate::AgentUrl::for_session(kind, &payload.sid, prefer_acp, &acp_ids);
@@ -555,6 +650,7 @@ fn on_resume_session(
         stack,
         target_url: target.format(),
         cwd: std::path::PathBuf::from(&payload.cwd),
+        handoff: None,
     });
 }
 
@@ -594,6 +690,7 @@ fn on_runtime_switch_request(
         stack,
         target_url,
         cwd,
+        handoff: None,
     });
 }
 
@@ -642,7 +739,7 @@ mod native_tests {
     }
 
     #[test]
-    fn resume_results_only_include_current_agent_kind() {
+    fn resume_results_include_all_agent_kinds_with_source_labels() {
         use crate::client::cli::strategy::ResumableSession;
         use std::time::SystemTime;
 
@@ -654,15 +751,33 @@ mod native_tests {
             title: sid.into(),
             cross_runtime: kind_supports_cross_runtime(kind),
         };
-        let filtered = sessions_for_kind(
+        let entries = resume_entries(
             vec![
                 session(AgentKind::Claude, "claude-1"),
                 session(AgentKind::Codex, "codex-1"),
             ],
-            AgentKind::Claude,
+            Some(AgentKind::Claude),
+            "Antigravity",
         );
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].sid, "claude-1");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].agent_name, "Antigravity");
+        assert_eq!(entries[1].agent_name, "Codex");
+    }
+
+    #[test]
+    fn foreign_resume_keeps_active_acp_agent_fresh() {
+        assert_eq!(
+            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Codex,),
+            Some("vmux://agent/claude".to_string())
+        );
+        assert_eq!(
+            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Claude,),
+            None
+        );
+        assert_eq!(
+            foreign_handoff_target("custom-acp", None, AgentKind::Codex),
+            Some("vmux://agent/custom-acp".to_string())
+        );
     }
 
     #[test]

@@ -2688,6 +2688,35 @@ fn handle_swap_stack_session(
             bevy::log::warn!("swap: no ACP agent configured for '{id}'");
             continue;
         }
+        if ev.handoff.is_some() && !matches!(target, crate::AgentUrl::Acp { .. }) {
+            bevy::log::warn!("swap: cross-agent handoff requires an ACP target");
+            continue;
+        }
+        let imported = match ev.handoff.as_ref() {
+            Some(handoff) => {
+                let Ok(messages) =
+                    serde_json::from_str::<Vec<crate::Message>>(&handoff.messages_json)
+                else {
+                    bevy::log::warn!("swap: invalid handoff transcript");
+                    continue;
+                };
+                Some((
+                    crate::handoff::ImportedConversation {
+                        source_agent: handoff.source_agent.clone(),
+                        source_kind: handoff.source_kind,
+                        source_sid: handoff.source_sid.clone(),
+                        messages,
+                        truncated: handoff.truncated,
+                        first_prompt: None,
+                    },
+                    crate::handoff::PendingHandoff {
+                        context: handoff.context.clone(),
+                        sent: false,
+                    },
+                ))
+            }
+            None => None,
+        };
 
         // Removing AcpSession fires close_acp_session_on_remove → the daemon session is closed.
         // Children (the Browser/terminal pane) are despawned; a CLI terminal despawn kills its
@@ -2700,6 +2729,8 @@ fn handle_swap_stack_session(
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
             .remove::<crate::AgentRunState>()
+            .remove::<crate::handoff::ImportedConversation>()
+            .remove::<crate::handoff::PendingHandoff>()
             .remove::<vmux_core::AgentWorkingDir>()
             .remove::<vmux_core::team::Agent>()
             .remove::<vmux_core::team::Profile>();
@@ -2738,6 +2769,9 @@ fn handle_swap_stack_session(
                     &mut meshes,
                     &mut webview_mt,
                 );
+                if let Some((imported, pending)) = imported {
+                    commands.entity(ev.stack).insert((imported, pending));
+                }
             }
             _ => unreachable!(),
         }
@@ -3379,6 +3413,7 @@ mod tests {
                 stack,
                 target_url: "not-an-agent-url".to_string(),
                 cwd: std::path::PathBuf::from("/work"),
+                handoff: None,
             });
 
         app.update();
@@ -3396,11 +3431,55 @@ mod tests {
                 stack,
                 target_url: "vmux://agent/not-configured/sid-1".to_string(),
                 cwd: std::path::PathBuf::from("/work"),
+                handoff: None,
             });
 
         app.update();
 
         assert!(app.world().get_entity(child).is_ok());
+    }
+
+    #[test]
+    fn cross_agent_swap_attaches_fresh_target_with_imported_history() {
+        let mut app = swap_test_app();
+        let (stack, _child) = spawn_stack_child(&mut app);
+        let messages = vec![crate::Message::User {
+            text: "fix auth".into(),
+        }];
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "vmux://agent/claude".to_string(),
+                cwd: std::path::PathBuf::from("/source/work"),
+                handoff: Some(vmux_core::agent::StackSessionHandoff {
+                    source_agent: "Codex".into(),
+                    source_kind: AgentKind::Codex,
+                    source_sid: "cx-1".into(),
+                    messages_json: serde_json::to_string(&messages).unwrap(),
+                    context: "prior conversation".into(),
+                    truncated: false,
+                }),
+            });
+
+        app.update();
+
+        let session = app.world().get::<crate::AcpSession>(stack).unwrap();
+        assert_eq!(session.agent_id, "claude");
+        assert_eq!(session.cwd, std::path::PathBuf::from("/source/work"));
+        assert!(session.resume.is_none());
+        let imported = app
+            .world()
+            .get::<crate::handoff::ImportedConversation>(stack)
+            .unwrap();
+        assert_eq!(imported.source_agent, "Codex");
+        assert_eq!(imported.messages, messages);
+        let pending = app
+            .world()
+            .get::<crate::handoff::PendingHandoff>(stack)
+            .unwrap();
+        assert_eq!(pending.context, "prior conversation");
+        assert!(!pending.sent);
     }
 
     #[test]
