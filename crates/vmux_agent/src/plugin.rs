@@ -25,8 +25,8 @@ use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
 use vmux_terminal::{
-    AwaitingProcessCreated, ProcessExited, ServiceMessageSet, Terminal, TerminalGridSize,
-    TerminalStackSpawnRequest, new_terminal_bundle_with_cwd,
+    AgentRunTerminal, AwaitingProcessCreated, ProcessExited, ServiceMessageSet, Terminal,
+    TerminalGridSize, TerminalStackSpawnRequest, new_terminal_bundle_with_cwd,
 };
 
 use crate::AgentVariant;
@@ -49,6 +49,7 @@ pub use vmux_space::cwd::{default_space_dir, space_dir, valid_cwd};
 
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
+const AGENT_RUN_SHELL: &str = "/bin/sh";
 
 /// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
 /// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
@@ -1399,6 +1400,8 @@ fn handle_agent_commands(
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane,
                                 cwd: Some(cwd_path),
+                                shell: None,
+                                agent_run: false,
                                 pending_input: None,
                                 process_id: None,
                                 activate,
@@ -1644,7 +1647,7 @@ fn tab_of_run_pane(
 fn run_terminal_candidates(
     agent_pane: Entity,
     terminals: &Query<
-        (Entity, &ProcessId),
+        (Entity, &ProcessId, Has<AgentRunTerminal>),
         (
             With<Terminal>,
             Without<AgentSession>,
@@ -1661,7 +1664,10 @@ fn run_terminal_candidates(
     };
     terminals
         .iter()
-        .filter_map(|(terminal, pid)| {
+        .filter_map(|(terminal, pid, agent_run)| {
+            if !agent_run {
+                return None;
+            }
             let stack = child_of_q.get(terminal).ok()?.get();
             let pane = child_of_q.get(stack).ok()?.get();
             if pane == agent_pane {
@@ -1890,9 +1896,9 @@ fn pager_env_prefix(base: &str) -> &'static str {
     }
 }
 
-fn run_command_line(command: &str, token: Option<&str>, settings: &AppSettings) -> String {
+fn run_command_line(command: &str, token: Option<&str>, shell: &str) -> String {
     match token {
-        Some(token) => command_with_marker(&agent_terminal_shell(settings), command, token),
+        Some(token) => command_with_marker(shell, command, token),
         None => command.to_string(),
     }
 }
@@ -1911,6 +1917,12 @@ fn validate_run_placement_policy(
     }
 }
 
+fn run_command_input(command: &str, token: Option<&str>, shell: &str) -> Vec<u8> {
+    let mut data = run_command_line(command, token, shell).into_bytes();
+    data.push(b'\r');
+    data
+}
+
 fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&ActiveSpace>) -> PathBuf {
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return path;
@@ -1926,7 +1938,7 @@ fn handle_agent_self_commands(
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
     run_terms: Query<
-        (Entity, &ProcessId),
+        (Entity, &ProcessId, Has<AgentRunTerminal>),
         (
             With<Terminal>,
             Without<AgentSession>,
@@ -2011,18 +2023,33 @@ fn handle_agent_self_commands(
                     break 'run AgentCommandResult::Error(error.to_string());
                 }
                 let focus = requested_focus_for_origin(&request.origin, *focus);
-                let mut data =
-                    run_command_line(command, done_marker.as_deref(), &settings).into_bytes();
-                data.push(b'\r');
                 match terminal {
                     Some(pid) => {
-                        service.0.send(ClientMessage::ProcessInput {
-                            process_id: *pid,
-                            data,
-                        });
-                        AgentCommandResult::Text(pid.to_string())
+                        match term_pids.iter().find_map(|(entity, candidate_pid)| {
+                            (*candidate_pid == *pid)
+                                .then(|| launch_q.get(entity).ok())
+                                .flatten()
+                        }) {
+                            Some(launch) => {
+                                let data = run_command_input(
+                                    command,
+                                    done_marker.as_deref(),
+                                    &launch.command,
+                                );
+                                service.0.send(ClientMessage::ProcessInput {
+                                    process_id: *pid,
+                                    data,
+                                });
+                                AgentCommandResult::Text(pid.to_string())
+                            }
+                            None => AgentCommandResult::Error(format!(
+                                "run.terminal page not found: {pid}"
+                            )),
+                        }
                     }
                     None => 'spawn: {
+                        let data =
+                            run_command_input(command, done_marker.as_deref(), AGENT_RUN_SHELL);
                         let Some((agent_term, self_pane)) =
                             resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q)
                         else {
@@ -2168,6 +2195,8 @@ fn handle_agent_self_commands(
                         terminal_spawns.push(TerminalStackSpawnRequest {
                             pane: target_pane,
                             cwd: Some(cwd),
+                            shell: Some(AGENT_RUN_SHELL.to_string()),
+                            agent_run: true,
                             pending_input: Some(data),
                             process_id: Some(new_pid),
                             activate: focus,
@@ -4482,19 +4511,86 @@ mod tests {
 
     #[test]
     fn run_command_line_noop_when_token_absent() {
-        let settings = test_settings();
-        assert_eq!(run_command_line("ls -la", None, &settings), "ls -la");
+        assert_eq!(run_command_line("ls -la", None, AGENT_RUN_SHELL), "ls -la");
     }
 
     #[test]
     fn run_command_line_embeds_marker_when_token_present() {
-        let settings = test_settings();
-        let out = run_command_line("ls -la", Some("tok9"), &settings);
+        let out = run_command_line("ls -la", Some("tok9"), AGENT_RUN_SHELL);
         assert!(out.contains("ls -la"), "got: {out}");
         assert!(out.contains("]6973;tok9;"), "got: {out}");
         assert!(
             !out.contains("__VMUX_DONE_"),
             "marker must be invisible: {out}"
+        );
+    }
+
+    #[test]
+    fn agent_run_uses_persistent_posix_shell_under_nushell_settings() {
+        let mut settings = test_settings();
+        settings.terminal = Some(vmux_setting::TerminalSettings {
+            default_theme: "default".to_string(),
+            themes: vec![vmux_setting::TerminalTheme {
+                name: "default".to_string(),
+                color_scheme: "catppuccin-mocha".to_string(),
+                font_family: "JetBrainsMono Nerd Font".to_string(),
+                font_size: 14.0,
+                line_height: 1.2,
+                padding: 4.0,
+                cursor_style: "block".to_string(),
+                cursor_blink: true,
+                shell: "/opt/homebrew/bin/nu".to_string(),
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(agent_terminal_shell(&settings), "/opt/homebrew/bin/nu");
+        assert_eq!(
+            run_command_line("cd /tmp", Some("tok9"), AGENT_RUN_SHELL),
+            "export GIT_PAGER=cat PAGER=cat LESS=FRX; cd /tmp; __vmux_status=\"$?\"; printf '\\033]6973;tok9;%s\\007' \"$__vmux_status\""
+        );
+    }
+
+    #[test]
+    fn agent_run_terminal_spawn_requests_posix_shell() {
+        let source = include_str!("plugin.rs");
+        let non_test_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("non-test source");
+
+        assert!(
+            non_test_source.contains("shell: Some(AGENT_RUN_SHELL.to_string())")
+                && non_test_source.contains("agent_run: true"),
+            "agent run terminal spawn must pin the persistent POSIX shell"
+        );
+    }
+
+    #[test]
+    fn explicit_run_terminal_uses_its_launch_shell() {
+        let source = include_str!("plugin.rs");
+        let non_test_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("non-test source");
+        let handler = non_test_source
+            .split("fn handle_agent_self_commands")
+            .nth(1)
+            .expect("agent self command handler");
+        let run_handler = handler
+            .split("ServiceAgentCommand::Run {")
+            .nth(1)
+            .expect("run handler");
+        let explicit_terminal_arm = run_handler
+            .split("Some(pid) =>")
+            .nth(1)
+            .and_then(|source| source.split("None => 'spawn").next())
+            .expect("explicit terminal arm");
+
+        assert!(
+            explicit_terminal_arm.contains("run_command_input")
+                && explicit_terminal_arm.contains("&launch.command"),
+            "explicit run terminal must use its own shell marker syntax"
         );
     }
 
@@ -4606,7 +4702,7 @@ mod tests {
     fn collect_run_terminal_candidates(
         input: Res<RunTerminalCandidateInput>,
         terminals: Query<
-            (Entity, &ProcessId),
+            (Entity, &ProcessId, Has<AgentRunTerminal>),
             (
                 With<Terminal>,
                 Without<AgentSession>,
@@ -4637,8 +4733,18 @@ mod tests {
             .world_mut()
             .spawn((vmux_layout::stack::stack_bundle(), ChildOf(terminal_pane)))
             .id();
-        app.world_mut()
-            .spawn((Terminal, ProcessId::new(), ChildOf(stack)));
+        app.world_mut().spawn((
+            Terminal,
+            ProcessId::new(),
+            TerminalLaunch {
+                command: AGENT_RUN_SHELL.to_string(),
+                args: vec![],
+                cwd: String::new(),
+                env: vec![],
+                kind: vmux_terminal::launch::TerminalKind::Plain,
+            },
+            ChildOf(stack),
+        ));
         let agent_pane = app
             .world_mut()
             .spawn((Pane, vmux_layout::pane::SpawnSeq(9)))
@@ -4654,6 +4760,59 @@ mod tests {
                 .is_empty(),
             "unresolved agent tab must not match terminals from other tabs"
         );
+    }
+
+    #[test]
+    fn run_terminal_candidates_require_agent_run_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<RunTerminalCandidateOutput>()
+            .add_systems(Update, collect_run_terminal_candidates);
+
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let agent_pane = app
+            .world_mut()
+            .spawn((Pane, vmux_layout::pane::SpawnSeq(1), ChildOf(tab)))
+            .id();
+        let agent_pid = ProcessId::new();
+        let user_pid = ProcessId::new();
+        for (sequence, pid, agent_run) in [(2, agent_pid, true), (3, user_pid, false)] {
+            let pane = app
+                .world_mut()
+                .spawn((Pane, vmux_layout::pane::SpawnSeq(sequence), ChildOf(tab)))
+                .id();
+            let stack = app
+                .world_mut()
+                .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+                .id();
+            let terminal = app
+                .world_mut()
+                .spawn((
+                    Terminal,
+                    pid,
+                    TerminalLaunch {
+                        command: AGENT_RUN_SHELL.to_string(),
+                        args: vec![],
+                        cwd: String::new(),
+                        env: vec![],
+                        kind: vmux_terminal::launch::TerminalKind::Plain,
+                    },
+                    ChildOf(stack),
+                ))
+                .id();
+            if agent_run {
+                app.world_mut()
+                    .entity_mut(terminal)
+                    .insert(AgentRunTerminal);
+            }
+        }
+
+        app.insert_resource(RunTerminalCandidateInput { agent_pane });
+        app.update();
+
+        let candidates = &app.world().resource::<RunTerminalCandidateOutput>().0;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].pid, agent_pid);
     }
 
     #[derive(Resource)]
@@ -4738,6 +4897,8 @@ mod tests {
         let mut terminal_spawns = vec![TerminalStackSpawnRequest {
             pane,
             cwd: None,
+            shell: None,
+            agent_run: false,
             pending_input: Some(b"one\r".to_vec()),
             process_id: Some(terminal),
             activate: false,

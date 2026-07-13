@@ -277,6 +277,8 @@ pub struct RunShellRequest {
 pub struct TerminalStackSpawnRequest {
     pub pane: Entity,
     pub cwd: Option<PathBuf>,
+    pub shell: Option<String>,
+    pub agent_run: bool,
     pub pending_input: Option<Vec<u8>>,
     /// Pin this `ProcessId` on the spawned terminal (so the caller can address
     /// it later); `None` lets the bundle mint a fresh one.
@@ -705,11 +707,23 @@ pub fn new_terminal_bundle_with_cwd(
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
 ) -> impl Bundle {
-    let shell = settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(default_shell);
+    new_terminal_bundle_with_cwd_and_shell(meshes, webview_mt, settings, cwd, None)
+}
+
+fn new_terminal_bundle_with_cwd_and_shell(
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    settings: &AppSettings,
+    cwd: Option<&std::path::Path>,
+    shell: Option<&str>,
+) -> impl Bundle {
+    let shell = shell.map(str::to_string).unwrap_or_else(|| {
+        settings
+            .terminal
+            .as_ref()
+            .map(|t| t.resolve_theme(&t.default_theme).shell)
+            .unwrap_or_else(default_shell)
+    });
 
     let cwd_str = cwd
         .filter(|d| !d.to_string_lossy().contains("://"))
@@ -800,16 +814,20 @@ pub fn respond_terminal_stack_spawn(
         });
         let terminal = commands
             .spawn((
-                new_terminal_bundle_with_cwd(
+                new_terminal_bundle_with_cwd_and_shell(
                     &mut meshes,
                     &mut webview_mt,
                     &settings,
                     request.cwd.as_deref(),
+                    request.shell.as_deref(),
                 ),
                 ChildOf(stack),
             ))
             .id();
         commands.entity(terminal).insert(CefKeyboardTarget);
+        if request.agent_run {
+            commands.entity(terminal).insert(crate::AgentRunTerminal);
+        }
         if let Some(pid) = request.process_id {
             commands.entity(terminal).insert(pid);
         }
@@ -1240,7 +1258,12 @@ fn sync_agent_focus(
 
 fn poll_service_messages(
     pending_create: Query<
-        (Entity, &ProcessId, &crate::launch::TerminalLaunch),
+        (
+            Entity,
+            &ProcessId,
+            &crate::launch::TerminalLaunch,
+            Has<crate::AgentRunTerminal>,
+        ),
         (With<Terminal>, With<PendingServiceCreate>),
     >,
     pending_attach: Query<(Entity, &ProcessId), (With<Terminal>, With<PendingServiceAttach>)>,
@@ -1274,13 +1297,13 @@ fn poll_service_messages(
         awaiting_create.iter().count(),
         MAX_CONCURRENT_PROCESS_CREATES,
     );
-    for (entity, process_id, launch) in pending_create.iter().take(create_budget) {
+    for (entity, process_id, launch, agent_run) in pending_create.iter().take(create_budget) {
         // Agents run as bare executables and don't load the user's shell config
         // the way a terminal does, so merge in the login-shell env (API keys
         // etc.). Done here (at spawn) rather than at launch-build time so it
         // also covers agents restored from a persisted space or restarted.
         let mut env = launch.env.clone();
-        if agent_sessions.contains(entity) {
+        if should_merge_login_shell_env(agent_sessions.contains(entity), agent_run) {
             crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
         }
         service.0.send(ClientMessage::CreateProcess {
@@ -1699,6 +1722,10 @@ fn poll_service_messages(
             _ => {}
         }
     }
+}
+
+fn should_merge_login_shell_env(agent_session: bool, agent_run: bool) -> bool {
+    agent_session || agent_run
 }
 
 type ServiceTerminalFilter = (
@@ -3485,6 +3512,7 @@ fn on_restart_pty(
         Option<&mut crate::launch::TerminalLaunch>,
         Option<&vmux_core::agent::AgentSession>,
         Option<&TerminalGridSize>,
+        Has<crate::AgentRunTerminal>,
     )>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
@@ -3493,7 +3521,8 @@ fn on_restart_pty(
 ) {
     let entity = trigger.event().entity;
     let Some(service) = service else { return };
-    let Ok((mut pid, mut meta, mut launch, agent_session, grid)) = q.get_mut(entity) else {
+    let Ok((mut pid, mut meta, mut launch, agent_session, grid, agent_run)) = q.get_mut(entity)
+    else {
         return;
     };
 
@@ -3506,7 +3535,7 @@ fn on_restart_pty(
         .0
         .send(ClientMessage::KillProcess { process_id: *pid });
 
-    let (command, args, cwd, env) = match launch.as_deref() {
+    let (command, args, cwd, mut env) = match launch.as_deref() {
         Some(l) => (
             l.command.clone(),
             l.args.clone(),
@@ -3522,6 +3551,9 @@ fn on_restart_pty(
             (shell, vec![], String::new(), Vec::new())
         }
     };
+    if should_merge_login_shell_env(false, agent_run) {
+        crate::shell_env::merge_login_shell_env(&mut env, &terminal_shell(&settings));
+    }
 
     let (cols, rows) = grid.map(|g| (g.cols, g.rows)).unwrap_or((80, 24));
     let new_id = ProcessId::new();
@@ -3760,6 +3792,8 @@ pub fn handle_run_shell_requests(
             terminal_stack_spawns.write(TerminalStackSpawnRequest {
                 pane,
                 cwd: cwd_path,
+                shell: None,
+                agent_run: false,
                 pending_input: Some(input),
                 process_id: None,
                 activate: true,
@@ -3913,6 +3947,42 @@ mod tests {
             .get::<PendingTerminalInput>(terminal)
             .expect("input routed to terminal by process id uuid");
         assert_eq!(pending.data, b"hi".to_vec());
+    }
+
+    #[test]
+    fn terminal_stack_spawn_uses_requested_shell() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalStackSpawnRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, respond_terminal_stack_spawn);
+
+        let pane = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<TerminalStackSpawnRequest>>()
+            .write(TerminalStackSpawnRequest {
+                pane,
+                cwd: None,
+                shell: Some("/bin/agent-sh".to_string()),
+                agent_run: true,
+                pending_input: None,
+                process_id: None,
+                activate: false,
+            });
+        app.update();
+
+        let mut launches = app
+            .world_mut()
+            .query_filtered::<(Entity, &crate::launch::TerminalLaunch), With<Terminal>>();
+        let (terminal, launch) = launches.iter(app.world()).next().expect("terminal spawned");
+        assert_eq!(launch.command, "/bin/agent-sh");
+        assert!(
+            app.world()
+                .get::<crate::AgentRunTerminal>(terminal)
+                .is_some()
+        );
     }
 
     #[test]
@@ -5150,6 +5220,13 @@ mod tests {
     #[test]
     fn retained_terminal_does_not_close_stack_on_exit() {
         assert!(!should_close_terminal_stack_on_exit(false, true));
+    }
+
+    #[test]
+    fn agent_run_terminal_inherits_login_shell_environment() {
+        assert!(should_merge_login_shell_env(false, true));
+        assert!(should_merge_login_shell_env(true, false));
+        assert!(!should_merge_login_shell_env(false, false));
     }
 
     fn term_theme(font_size: f32) -> vmux_setting::TerminalTheme {

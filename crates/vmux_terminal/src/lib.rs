@@ -25,7 +25,7 @@ mod link;
 pub mod pid;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use component::{ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
+pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]

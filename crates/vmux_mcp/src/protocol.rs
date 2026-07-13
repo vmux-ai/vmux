@@ -9,6 +9,7 @@ use vmux_service::protocol::{
 /// How long `run` waits for a command to finish before returning a partial
 /// result. Kept under vibe's 60s default MCP tool timeout.
 const RUN_BLOCK_TIMEOUT: Duration = Duration::from_secs(50);
+const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Interval between terminal reads while waiting for the completion marker.
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -416,6 +417,30 @@ fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Va
     json!({ "content": [{"type": "text", "text": text}] })
 }
 
+fn run_completion_exit(
+    result: AgentQueryResult,
+    token: &str,
+    process_id: vmux_service::protocol::ProcessId,
+    allow_missing_process: bool,
+) -> Result<Option<i32>, String> {
+    match result {
+        AgentQueryResult::RunCompletion {
+            token: Some(done_token),
+            exit: Some(exit),
+        } if done_token == token => Ok(Some(exit)),
+        AgentQueryResult::RunCompletion { .. } => Ok(None),
+        AgentQueryResult::Error(message)
+            if allow_missing_process && message == format!("process not found: {process_id}") =>
+        {
+            Ok(None)
+        }
+        AgentQueryResult::Error(message) => Err(message),
+        other => Err(format!(
+            "run: unexpected run-completion result for {process_id}: {other:?}"
+        )),
+    }
+}
+
 /// Send `run`, then block (polling `RunCompletion`) until the invisible OSC
 /// completion escape for this run's token is seen, returning the output + exit
 /// code in one response.
@@ -468,19 +493,18 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
     let start = Instant::now();
     let baseline_text = read_full_text(&connection, process_id).await;
     let deadline = start + RUN_BLOCK_TIMEOUT;
+    let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
+    let mut process_materialized = false;
     loop {
-        match agent_query(&connection, AgentQuery::RunCompletion { process_id }).await? {
-            AgentQueryResult::RunCompletion {
-                token: Some(done_token),
-                exit: Some(exit),
-            } if done_token == token => {
-                let final_text = read_full_text(&connection, process_id).await;
-                let output = output_since(&baseline_text, &final_text);
-                return Ok(run_result(&pid, Some(exit), &output, false));
-            }
-            AgentQueryResult::RunCompletion { .. } => {}
-            AgentQueryResult::Error(message) => return Err(message),
-            other => return Err(format!("run: unexpected run-completion result: {other:?}")),
+        let result = agent_query(&connection, AgentQuery::RunCompletion { process_id }).await?;
+        let materialized_now = matches!(&result, AgentQueryResult::RunCompletion { .. });
+        let allow_missing_process = !process_materialized && Instant::now() < materialize_deadline;
+        let exit = run_completion_exit(result, &token, process_id, allow_missing_process)?;
+        process_materialized |= materialized_now;
+        if let Some(exit) = exit {
+            let final_text = read_full_text(&connection, process_id).await;
+            let output = output_since(&baseline_text, &final_text);
+            return Ok(run_result(&pid, Some(exit), &output, false));
         }
         if Instant::now() >= deadline {
             let final_text = read_full_text(&connection, process_id).await;
@@ -908,5 +932,28 @@ mod tests {
             }
             _ => panic!("expected run placement override command"),
         }
+    }
+
+    #[test]
+    fn blocking_run_waits_for_new_terminal_process_to_materialize() {
+        let process_id = vmux_service::protocol::ProcessId::new();
+        let result = AgentQueryResult::Error(format!("process not found: {process_id}"));
+
+        assert_eq!(
+            run_completion_exit(result, "token", process_id, true).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn blocking_run_surfaces_process_missing_after_startup_grace() {
+        let process_id = vmux_service::protocol::ProcessId::new();
+        let message = format!("process not found: {process_id}");
+        let result = AgentQueryResult::Error(message.clone());
+
+        assert_eq!(
+            run_completion_exit(result, "token", process_id, false),
+            Err(message)
+        );
     }
 }
