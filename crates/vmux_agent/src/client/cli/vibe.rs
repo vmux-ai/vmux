@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, McpServerConfig};
+use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 pub struct VibeStrategy;
 
@@ -101,6 +101,10 @@ impl CliAgentStrategy for VibeStrategy {
 
     fn list_sessions(&self) -> Vec<ResumableSession> {
         list_vibe_sessions(&self.sessions_root())
+    }
+
+    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        load_vibe_transcript(&self.sessions_root(), session_id)
     }
 }
 
@@ -372,6 +376,58 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
         });
     }
     out
+}
+
+pub(crate) fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
+    use std::io::{BufRead, BufReader};
+
+    let entries = std::fs::read_dir(root)
+        .map_err(|err| format!("read Vibe session root {}: {err}", root.display()))?;
+    let mut path = None;
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        let Some(dirname) = entry_path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if dirname.starts_with("session_") && dirname.rsplit('_').next() == Some(session_id) {
+            path = Some(entry_path.join("messages.jsonl"));
+            break;
+        }
+    }
+    let path = path.ok_or_else(|| format!("Vibe session '{session_id}' not found"))?;
+    let file = std::fs::File::open(&path)
+        .map_err(|err| format!("open Vibe session {}: {err}", path.display()))?;
+    let mut messages = Vec::new();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if value.get("injected").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+        let Some(text) = value
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        match value.get("role").and_then(|v| v.as_str()) {
+            Some("user") => messages.push(Message::User { text }),
+            Some("assistant") => messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(text)],
+            }),
+            _ => {}
+        }
+    }
+    if messages.is_empty() {
+        return Err(format!(
+            "Vibe session '{session_id}' has no usable conversation"
+        ));
+    }
+    Ok(messages)
 }
 
 #[cfg(test)]
@@ -769,6 +825,53 @@ mod tests {
         let out = list_vibe_sessions(&tmp);
 
         assert!(out.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn vibe_transcript_extracts_non_injected_user_and_assistant_text() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("vibe-transcript");
+        let session = tmp.join("session_20260713_120000_vb1");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(
+            session.join("messages.jsonl"),
+            concat!(
+                "{bad}\n",
+                "{\"role\":\"user\",\"content\":\"fix auth\",\"injected\":false}\n",
+                "{\"role\":\"assistant\",\"content\":\"working\",\"reasoning_content\":\"secret\",\"injected\":false}\n",
+                "{\"role\":\"user\",\"content\":\"injected\",\"injected\":true}\n",
+                "{\"role\":\"tool\",\"content\":\"tool output\",\"injected\":false}\n"
+            ),
+        )
+        .unwrap();
+
+        let messages = load_vibe_transcript(&tmp, "vb1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "fix auth".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn vibe_transcript_rejects_unknown_or_empty_session() {
+        let tmp = unique_tmp("vibe-transcript-empty");
+        let session = tmp.join("session_20260713_120000_vb1");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("messages.jsonl"), "{\"role\":\"tool\"}\n").unwrap();
+
+        assert!(load_vibe_transcript(&tmp, "missing").is_err());
+        assert!(load_vibe_transcript(&tmp, "vb1").is_err());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

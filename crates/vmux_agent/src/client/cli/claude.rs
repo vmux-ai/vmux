@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use crate::client::cli::strategy::{CliAgentStrategy, ResumableSession};
 use crate::strategy::AgentStrategy;
-use crate::{AgentKind, AgentVariant, McpServerConfig};
+use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
 const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
@@ -77,6 +77,10 @@ impl CliAgentStrategy for ClaudeStrategy {
 
     fn list_sessions(&self) -> Vec<ResumableSession> {
         list_claude_sessions(&self.sessions_root())
+    }
+
+    fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
+        load_claude_transcript(&self.sessions_root(), session_id)
     }
 }
 
@@ -259,21 +263,69 @@ fn claude_cwd_and_title(path: &Path, stem: &str) -> (PathBuf, String) {
 
 /// Extract plain text from a claude `message.content` (string, or an array of `{type,text}`).
 fn user_message_text(v: &Value) -> Option<String> {
+    message_text(v).map(|text| text.chars().take(80).collect())
+}
+
+fn message_text(v: &Value) -> Option<String> {
     let content = v.get("message")?.get("content")?;
     let text = match content {
-        Value::String(s) => s.clone(),
+        Value::String(text) => text.clone(),
         Value::Array(parts) => parts
             .iter()
-            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+            .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
             .collect::<Vec<_>>()
-            .join(" "),
+            .join("\n"),
         _ => return None,
     };
     let text = text.trim();
-    if text.is_empty() {
-        return None;
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+pub(crate) fn load_claude_transcript(
+    root: &Path,
+    session_id: &str,
+) -> Result<Vec<Message>, String> {
+    use std::io::{BufRead, BufReader};
+
+    let mut path = None;
+    let projects = std::fs::read_dir(root)
+        .map_err(|err| format!("read Claude session root {}: {err}", root.display()))?;
+    for project in projects.flatten() {
+        let candidate = project.path().join(format!("{session_id}.jsonl"));
+        if candidate.is_file() {
+            path = Some(candidate);
+            break;
+        }
     }
-    Some(text.chars().take(80).collect())
+    let path = path.ok_or_else(|| format!("Claude session '{session_id}' not found"))?;
+    let file = std::fs::File::open(&path)
+        .map_err(|err| format!("open Claude session {}: {err}", path.display()))?;
+    let mut messages = Vec::new();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if value.get("isMeta").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let Some(text) = message_text(&value) else {
+            continue;
+        };
+        match value.get("type").and_then(Value::as_str) {
+            Some("user") => messages.push(Message::User { text }),
+            Some("assistant") => messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(text)],
+            }),
+            _ => {}
+        }
+    }
+    if messages.is_empty() {
+        return Err(format!(
+            "Claude session '{session_id}' has no usable conversation"
+        ));
+    }
+    Ok(messages)
 }
 
 #[cfg(test)]
@@ -524,6 +576,53 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].cwd, PathBuf::from("/work/after-bad-line"));
         assert_eq!(out[0].title, "still readable");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn claude_transcript_extracts_non_meta_user_and_assistant_text() {
+        use crate::{AssistantBlock, Message};
+
+        let tmp = unique_tmp("claude-transcript");
+        let proj = tmp.join("project");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(
+            proj.join("cl-1.jsonl"),
+            concat!(
+                "{bad}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"fix auth\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"secret\"},{\"type\":\"text\",\"text\":\"working\"},{\"type\":\"tool_use\",\"name\":\"run\"}]}}\n",
+                "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"injected\"}]}}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"content\":\"tool output\"}]}}\n"
+            ),
+        )
+        .unwrap();
+
+        let messages = load_claude_transcript(&tmp, "cl-1").unwrap();
+
+        assert_eq!(
+            messages,
+            vec![
+                Message::User {
+                    text: "fix auth".into()
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("working".into())]
+                }
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn claude_transcript_rejects_unknown_or_empty_session() {
+        let tmp = unique_tmp("claude-transcript-empty");
+        let proj = tmp.join("project");
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::write(proj.join("cl-1.jsonl"), "{\"type\":\"summary\"}\n").unwrap();
+
+        assert!(load_claude_transcript(&tmp, "missing").is_err());
+        assert!(load_claude_transcript(&tmp, "cl-1").is_err());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
