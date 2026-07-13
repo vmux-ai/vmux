@@ -62,6 +62,7 @@ fn edit_tool_kind(kind: ToolKind) -> bool {
     matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
 }
 
+const ACTIVE_FILE_TOUCH_LIMIT: usize = 1024;
 const FINALIZED_FILE_TOUCH_LIMIT: usize = 1024;
 
 #[derive(Default)]
@@ -119,6 +120,7 @@ fn project_file_touches(
 pub struct AcpProjector {
     messages: Vec<Message>,
     file_touches: HashMap<String, FileTouchState>,
+    file_touch_order: VecDeque<String>,
     finalized_file_touches: HashSet<String>,
     finalized_file_touch_order: VecDeque<String>,
 }
@@ -254,18 +256,46 @@ impl AcpProjector {
         if !should_track {
             return Vec::new();
         }
+        self.track_file_touch(call_id);
         let (intents, finalized) = project_file_touches(
-            self.file_touches.entry(call_id.to_string()).or_default(),
+            self.file_touches
+                .get_mut(call_id)
+                .expect("tracked file touch state"),
             kind,
             locations,
             status,
             full_update,
         );
         if finalized {
-            self.file_touches.remove(call_id);
+            self.remove_file_touch(call_id);
             self.mark_file_touch_finalized(call_id);
         }
         intents
+    }
+
+    fn track_file_touch(&mut self, call_id: &str) {
+        if self.file_touches.contains_key(call_id) {
+            return;
+        }
+        self.file_touches
+            .insert(call_id.to_string(), FileTouchState::default());
+        self.file_touch_order.push_back(call_id.to_string());
+        while self.file_touch_order.len() > ACTIVE_FILE_TOUCH_LIMIT {
+            if let Some(expired) = self.file_touch_order.pop_front() {
+                self.file_touches.remove(&expired);
+            }
+        }
+    }
+
+    fn remove_file_touch(&mut self, call_id: &str) {
+        self.file_touches.remove(call_id);
+        if let Some(index) = self
+            .file_touch_order
+            .iter()
+            .position(|tracked| tracked == call_id)
+        {
+            self.file_touch_order.remove(index);
+        }
     }
 
     fn mark_file_touch_finalized(&mut self, call_id: &str) {
@@ -600,6 +630,39 @@ mod tests {
     }
 
     #[test]
+    fn failed_edit_clears_pending_and_suppresses_future_touches() {
+        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
+
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Write file")
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        ));
+
+        let failed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Failed),
+        )));
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .kind(ToolKind::Edit)
+                .locations(vec![ToolCallLocation::new("/repo/new.rs")]),
+        )));
+
+        assert!(
+            failed
+                .iter()
+                .chain(&completed)
+                .all(|intent| !matches!(intent, Intent::FileTouched { .. }))
+        );
+        assert!(!p.file_touches.contains_key("c1"));
+        assert!(!p.file_touch_order.iter().any(|call_id| call_id == "c1"));
+    }
+
+    #[test]
     fn locations_only_update_uses_initial_edit_kind() {
         use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
 
@@ -780,6 +843,22 @@ mod tests {
         }
 
         assert!(p.finalized_file_touches.len() <= 1024);
+    }
+
+    #[test]
+    fn in_progress_file_touches_are_bounded() {
+        let mut p = AcpProjector::new();
+        for index in 0..1025 {
+            p.apply(SessionUpdate::ToolCall(
+                ToolCall::new(format!("c{index}"), "Read file")
+                    .kind(ToolKind::Read)
+                    .locations(vec![ToolCallLocation::new(format!("/repo/{index}.rs"))]),
+            ));
+        }
+
+        assert!(p.file_touches.len() <= 1024);
+        assert!(!p.file_touches.contains_key("c0"));
+        assert!(p.file_touches.contains_key("c1024"));
     }
 
     #[test]

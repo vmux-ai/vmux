@@ -87,7 +87,8 @@ preventing nested unrelated repositories from being mistaken for the current che
    the tab entity, path, and kind.
    ACP edit locations are emitted again on the first successful tool completion when that update
    omits replacement kind and location fields, because the initial ACP tool call may arrive before
-   a newly created file exists.
+   a newly created file exists. In-progress file-touch state and finalized-call tombstones are
+   independently bounded so abandoned ACP tool calls cannot grow projector memory indefinitely.
 3. The layout rebind system runs before same-frame agent commands.
 4. It resolves the observed repository root and compares it with the current tab workspace using
    the policy above.
