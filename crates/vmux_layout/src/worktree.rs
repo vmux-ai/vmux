@@ -21,10 +21,17 @@ pub struct WorktreePlugin;
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TabDirectoryRebindSet;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabDirectoryObservationKind {
+    Read,
+    Edit,
+}
+
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub struct TabDirectoryObserved {
     pub tab: Entity,
     pub path: PathBuf,
+    pub kind: TabDirectoryObservationKind,
 }
 
 impl Plugin for WorktreePlugin {
@@ -235,22 +242,24 @@ fn rebind_tab_directories(
         {
             continue;
         }
-        let Some(current_info) =
-            cached_checkout_info(&mut checkout_cache, observed.tab, &current, |path| {
-                worktree::checkout_info(path).ok()
-            })
-        else {
-            continue;
-        };
-        if is_within_checkout_without_nested_git_boundary(&current_info.root, &observed_dir) {
-            continue;
-        }
         let Ok(observed_info) = worktree::checkout_info(&observed_dir) else {
             continue;
         };
-        if current_info.common_dir != observed_info.common_dir
-            || current_info.root == observed_info.root
-        {
+        let current_info =
+            cached_checkout_info(&mut checkout_cache, observed.tab, &current, |path| {
+                worktree::checkout_info(path).ok()
+            });
+        if current_info.as_ref().is_some_and(|current_info| {
+            is_within_checkout_without_nested_git_boundary(&current_info.root, &observed_dir)
+        }) {
+            continue;
+        }
+        let should_rebind = match current_info.as_ref() {
+            Some(current_info) if current_info.root == observed_info.root => false,
+            Some(current_info) if current_info.common_dir == observed_info.common_dir => true,
+            Some(_) | None => observed.kind == TabDirectoryObservationKind::Edit,
+        };
+        if !should_rebind {
             continue;
         }
         let startup_dir = observed_info.root.to_string_lossy().into_owned();
@@ -290,6 +299,7 @@ mod tests {
         observations.write(TabDirectoryObserved {
             tab: input.tab,
             path: input.path.clone(),
+            kind: TabDirectoryObservationKind::Read,
         });
     }
 
@@ -328,11 +338,25 @@ mod tests {
     }
 
     fn observe(app: &mut App, tab: Entity, path: &Path) {
+        observe_with_kind(app, tab, path, TabDirectoryObservationKind::Read);
+    }
+
+    fn observe_edit(app: &mut App, tab: Entity, path: &Path) {
+        observe_with_kind(app, tab, path, TabDirectoryObservationKind::Edit);
+    }
+
+    fn observe_with_kind(
+        app: &mut App,
+        tab: Entity,
+        path: &Path,
+        kind: TabDirectoryObservationKind,
+    ) {
         app.world_mut()
             .resource_mut::<Messages<TabDirectoryObserved>>()
             .write(TabDirectoryObserved {
                 tab,
                 path: path.to_path_buf(),
+                kind,
             });
         app.update();
     }
@@ -439,7 +463,7 @@ mod tests {
             ))
             .id();
 
-        observe(&mut app, tab, &touched);
+        observe_edit(&mut app, tab, &touched);
 
         assert_eq!(
             app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
@@ -684,6 +708,90 @@ mod tests {
         observe(&mut app, tab, &other.path().join("seed.txt"));
         observe(&mut app, tab, &non_git_file);
         observe(&mut app, tab, &missing);
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(original.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_rebinds_to_different_repo_on_edit() {
+        let current = init_repo();
+        let observed = init_repo();
+        let expected = observed
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(current.path().to_string_lossy().into_owned()),
+            })
+            .id();
+
+        observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_rebinds_from_non_git_directory_on_edit() {
+        let current = tempfile::tempdir().unwrap();
+        let observed = init_repo();
+        let expected = observed
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(current.path().to_string_lossy().into_owned()),
+            })
+            .id();
+
+        observe_edit(&mut app, tab, &observed.path().join("seed.txt"));
+
+        assert_eq!(
+            app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
+    fn observation_keeps_non_git_directory_on_read() {
+        let current = tempfile::tempdir().unwrap();
+        let observed = init_repo();
+        let original = current
+            .path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
+            .world_mut()
+            .spawn(Tab {
+                name: "tab".into(),
+                startup_dir: Some(original.clone()),
+            })
+            .id();
+
+        observe(&mut app, tab, &observed.path().join("seed.txt"));
 
         assert_eq!(
             app.world().get::<Tab>(tab).unwrap().startup_dir.as_deref(),

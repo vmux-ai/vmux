@@ -1034,7 +1034,7 @@ fn handle_agent_file_touch(
             line,
             col,
             end_col,
-            ..
+            kind,
         } = &request.command
         else {
             continue;
@@ -1043,11 +1043,20 @@ fn handle_agent_file_touch(
             continue;
         };
         if let Some(tab) = resolve.ancestor_tab(agent_pane) {
+            let kind = match kind {
+                vmux_service::protocol::FileTouchKind::Read => {
+                    vmux_layout::worktree::TabDirectoryObservationKind::Read
+                }
+                vmux_service::protocol::FileTouchKind::Edit => {
+                    vmux_layout::worktree::TabDirectoryObservationKind::Edit
+                }
+            };
             resolve
                 .observations
                 .write(vmux_layout::worktree::TabDirectoryObserved {
                     tab,
                     path: PathBuf::from(path),
+                    kind,
                 });
         }
         if !settings.agent.follow_files {
@@ -3863,7 +3872,11 @@ mod tests {
         let observations: Vec<_> = cursor.read(messages).cloned().collect();
         assert_eq!(
             observations,
-            vec![vmux_layout::worktree::TabDirectoryObserved { tab, path }]
+            vec![vmux_layout::worktree::TabDirectoryObserved {
+                tab,
+                path,
+                kind: vmux_layout::worktree::TabDirectoryObservationKind::Read,
+            }]
         );
         let previews = app
             .world()
