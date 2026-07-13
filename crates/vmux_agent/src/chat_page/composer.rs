@@ -1,4 +1,4 @@
-use super::event::ResumableSessionEntry;
+use super::event::{ResumableSessionEntry, SlashCommandEntry};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SelectorMode<'a> {
@@ -41,6 +41,23 @@ pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
         SelectorMode::None
     } else {
         SelectorMode::Commands(token)
+    }
+}
+
+pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -> bool {
+    match selector_mode(draft) {
+        SelectorMode::Resume(_) => true,
+        SelectorMode::Commands(query) => {
+            let query = query.to_lowercase();
+            let mut matches = commands
+                .iter()
+                .filter(|command| command.name.starts_with(&query));
+            matches
+                .next()
+                .is_some_and(|command| command.name == "resume")
+                && matches.next().is_none()
+        }
+        SelectorMode::None => false,
     }
 }
 
@@ -158,6 +175,7 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chat_page::event::SlashCommandEntry;
 
     fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
         ResumableSessionEntry {
@@ -212,6 +230,26 @@ mod tests {
             resume_menu_state(true, false, 2, 1),
             ResumeMenuState::Results
         );
+    }
+
+    #[test]
+    fn resume_prefetch_starts_only_for_resume_as_the_sole_match() {
+        let commands = vec![
+            SlashCommandEntry {
+                name: "resume".into(),
+                ..Default::default()
+            },
+            SlashCommandEntry {
+                name: "cli".into(),
+                ..Default::default()
+            },
+        ];
+        assert!(should_fetch_resume("/r", &commands));
+        assert!(should_fetch_resume("/resume", &commands));
+        assert!(should_fetch_resume("/resume ", &commands));
+        assert!(!should_fetch_resume("/", &commands));
+        assert!(!should_fetch_resume("/c", &commands));
+        assert!(!should_fetch_resume("hello", &commands));
     }
 
     #[test]

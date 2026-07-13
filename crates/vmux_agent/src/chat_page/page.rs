@@ -2,7 +2,7 @@
 
 use crate::chat_page::composer::{
     PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, menu_direction,
-    move_selection, resume_menu_state, selector_mode,
+    move_selection, resume_menu_state, selector_mode, should_fetch_resume,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
@@ -225,15 +225,16 @@ pub fn Page() -> Element {
         });
 
     use_effect(move || {
-        let in_resume_selector = matches!(selector_mode(&draft()), SelectorMode::Resume(_));
-        if in_resume_selector && !resume_requested() {
+        let should_fetch = should_fetch_resume(&draft(), &slash_cmds.read());
+        if should_fetch && !resume_requested() {
             resume_loading.set(true);
             if try_cef_bin_emit_rkyv(&ResumeListRequest).is_err() {
                 resume_loading.set(false);
             }
             resume_requested.set(true);
-        } else if !in_resume_selector && resume_requested() {
+        } else if !should_fetch && resume_requested() {
             resume_requested.set(false);
+            resume_loading.set(false);
         }
     });
 
