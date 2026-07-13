@@ -925,6 +925,14 @@ fn shell_prompt_ready(has_content: bool, cursor_col: u16) -> bool {
 #[derive(Component)]
 pub struct AwaitingProcessCreated;
 
+/// Resets prompt readiness while retaining any queued terminal input for the replacement process.
+pub fn mark_terminal_restarting(commands: &mut Commands, entity: Entity) {
+    commands
+        .entity(entity)
+        .remove::<ShellOutputSeen>()
+        .insert(AwaitingProcessCreated);
+}
+
 pub fn apply_process_created(
     commands: &mut Commands,
     entity: Entity,
@@ -1567,15 +1575,16 @@ fn poll_service_messages(
                         let new_id = restart.new_id;
                         let entity = restart.entity;
                         service.0.send(restart.command);
-                        let mut ec = commands.entity(entity);
-                        ec.insert(new_id);
-                        ec.insert(AwaitingProcessCreated);
+                        commands.entity(entity).insert(new_id);
+                        mark_terminal_restarting(&mut commands, entity);
                         if let Some(kind) = agent_kind {
-                            ec.insert(vmux_core::agent::PendingAgentSession {
-                                kind,
-                                spawn_time: std::time::SystemTime::now(),
-                                cwd: std::path::PathBuf::from(&cwd),
-                            });
+                            commands
+                                .entity(entity)
+                                .insert(vmux_core::agent::PendingAgentSession {
+                                    kind,
+                                    spawn_time: std::time::SystemTime::now(),
+                                    cwd: std::path::PathBuf::from(&cwd),
+                                });
                         }
                     }
                 }
@@ -3582,7 +3591,7 @@ fn on_restart_pty(
     });
 
     *pid = new_id;
-    commands.entity(entity).insert(AwaitingProcessCreated);
+    mark_terminal_restarting(&mut commands, entity);
     if let Some(l) = launch.as_mut() {
         l.args = args;
     } else {
@@ -4829,6 +4838,41 @@ mod tests {
         }
 
         assert!(!local_copy_mode.active.contains(&process_id));
+    }
+
+    #[test]
+    fn restart_state_clears_shell_output_seen_and_preserves_pending_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let entity = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                ShellOutputSeen,
+                PendingTerminalInput {
+                    data: b"queued\r".to_vec(),
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .run_system_cached_with(
+                |In(entity): In<Entity>, mut commands: Commands| {
+                    mark_terminal_restarting(&mut commands, entity);
+                },
+                entity,
+            )
+            .unwrap();
+
+        assert!(app.world().get::<ShellOutputSeen>(entity).is_none());
+        assert!(app.world().get::<AwaitingProcessCreated>(entity).is_some());
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(entity)
+                .unwrap()
+                .data,
+            b"queued\r"
+        );
     }
 
     #[test]
