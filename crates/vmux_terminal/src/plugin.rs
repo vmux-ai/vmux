@@ -447,7 +447,9 @@ fn add_terminal_update_systems(app: &mut App) -> &mut App {
         .add_message::<vmux_core::notify::BellReceived>()
         .add_systems(
             Update,
-            handle_terminal_reinput_requests.after(poll_service_messages),
+            handle_terminal_reinput_requests
+                .after(poll_service_messages)
+                .before(flush_pending_terminal_input),
         )
         .add_systems(Update, apply_osc_title.after(poll_service_messages))
         .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
@@ -1765,15 +1767,27 @@ fn flush_pending_terminal_input(
 fn handle_terminal_reinput_requests(
     mut requests: MessageReader<TerminalReinputRequest>,
     terminals: Query<(Entity, &ProcessId), With<Terminal>>,
+    mut pending_inputs: Query<&mut PendingTerminalInput>,
     mut commands: Commands,
 ) {
+    let mut queued = std::collections::HashMap::<Entity, Vec<u8>>::new();
     for req in requests.read() {
         for (entity, pid) in &terminals {
             if *pid == req.process_id {
-                commands.entity(entity).insert(PendingTerminalInput {
-                    data: req.data.clone(),
-                });
+                queued
+                    .entry(entity)
+                    .or_default()
+                    .extend_from_slice(&req.data);
             }
+        }
+    }
+    for (entity, data) in queued {
+        if let Ok(mut pending) = pending_inputs.get_mut(entity) {
+            pending.data.extend(data);
+        } else {
+            commands
+                .entity(entity)
+                .insert(PendingTerminalInput { data });
         }
     }
 }
@@ -3853,6 +3867,73 @@ mod tests {
 
     fn process_id(byte: u8) -> ProcessId {
         ProcessId([byte; 16])
+    }
+
+    #[test]
+    fn terminal_reinput_appends_to_existing_pending_input() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalReinputRequest>()
+            .add_systems(Update, handle_terminal_reinput_requests);
+        let pid = process_id(7);
+        let terminal = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                pid,
+                PendingTerminalInput {
+                    data: b"initial\r".to_vec(),
+                },
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"next\r".to_vec(),
+            });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(terminal)
+                .unwrap()
+                .data,
+            b"initial\rnext\r"
+        );
+    }
+
+    #[test]
+    fn terminal_reinput_preserves_multiple_messages_in_order() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<TerminalReinputRequest>()
+            .add_systems(Update, handle_terminal_reinput_requests);
+        let pid = process_id(8);
+        let terminal = app.world_mut().spawn((Terminal, pid)).id();
+
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"one\r".to_vec(),
+            });
+        app.world_mut()
+            .resource_mut::<Messages<TerminalReinputRequest>>()
+            .write(TerminalReinputRequest {
+                process_id: pid,
+                data: b"two\r".to_vec(),
+            });
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<PendingTerminalInput>(terminal)
+                .unwrap()
+                .data,
+            b"one\rtwo\r"
+        );
     }
 
     #[test]

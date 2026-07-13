@@ -1935,6 +1935,19 @@ fn terminal_run_command_input(
     run_command_input(command, token, &launch.command)
 }
 
+fn queue_terminal_run_command_input(
+    writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
+    process_id: ProcessId,
+    command: &str,
+    token: Option<&str>,
+    launch: &TerminalLaunch,
+) {
+    writer.write(vmux_terminal::TerminalReinputRequest {
+        process_id,
+        data: terminal_run_command_input(command, token, launch),
+    });
+}
+
 fn new_run_terminal_command(
     settings: &AppSettings,
     command: &str,
@@ -1954,6 +1967,13 @@ fn run_terminal_cwd(agent_launch_cwd: Option<&str>, active_space: Option<&Active
         .unwrap_or_else(default_space_dir)
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentSelfCommandWriters<'w> {
+    open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
+    terminal_stack_spawn: MessageWriter<'w, TerminalStackSpawnRequest>,
+    terminal_reinput: MessageWriter<'w, vmux_terminal::TerminalReinputRequest>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
@@ -1969,8 +1989,7 @@ fn handle_agent_self_commands(
     >,
     launch_q: Query<&TerminalLaunch>,
     ctx: vmux_layout::pane::PlacementCtx,
-    mut open_beside_writer: MessageWriter<vmux_layout::OpenBesideRequest>,
-    mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
+    mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
     active_space: Option<Res<ActiveSpace>>,
@@ -2005,7 +2024,7 @@ fn handle_agent_self_commands(
                 None => AgentCommandResult::Error("self process not found".to_string()),
                 Some((_, pane)) => {
                     let focus = requested_focus_for_origin(&request.origin, *focus);
-                    open_beside_writer.write(vmux_layout::OpenBesideRequest {
+                    writers.open_beside.write(vmux_layout::OpenBesideRequest {
                         pane,
                         direction: direction.as_ref().map(to_pane_direction),
                         url: url.clone(),
@@ -2053,15 +2072,13 @@ fn handle_agent_self_commands(
                                 .flatten()
                         }) {
                             Some(launch) => {
-                                let data = terminal_run_command_input(
+                                queue_terminal_run_command_input(
+                                    &mut writers.terminal_reinput,
+                                    *pid,
                                     command,
                                     done_marker.as_deref(),
                                     launch,
                                 );
-                                service.0.send(ClientMessage::ProcessInput {
-                                    process_id: *pid,
-                                    data,
-                                });
                                 AgentCommandResult::Text(pid.to_string())
                             }
                             None => AgentCommandResult::Error(format!(
@@ -2121,8 +2138,13 @@ fn handle_agent_self_commands(
                                     candidate.pid
                                 ));
                             };
-                            let data =
-                                terminal_run_command_input(command, done_marker.as_deref(), launch);
+                            queue_terminal_run_command_input(
+                                &mut writers.terminal_reinput,
+                                candidate.pid,
+                                command,
+                                done_marker.as_deref(),
+                                launch,
+                            );
                             regions.run_terminals.insert(*anchor, candidate.pid);
                             regions.run_panes.insert(*anchor, candidate.pane);
                             touch_reused_run_pane_spawn_seq(
@@ -2139,10 +2161,6 @@ fn handle_agent_self_commands(
                                     &ctx.tab_q,
                                 );
                             }
-                            service.0.send(ClientMessage::ProcessInput {
-                                process_id: candidate.pid,
-                                data,
-                            });
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
                         // Resolve an explicit `beside` anchor up front (errors if stale).
@@ -2326,7 +2344,7 @@ fn handle_agent_self_commands(
         });
     }
     for spawn in terminal_spawns {
-        terminal_stack_spawn_writer.write(spawn);
+        writers.terminal_stack_spawn.write(spawn);
     }
 }
 
@@ -4605,16 +4623,63 @@ mod tests {
     }
 
     #[test]
-    fn agent_run_source_has_no_fixed_shell() {
-        let source = include_str!("plugin.rs");
-        let non_test_source = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("non-test source");
+    fn existing_agent_run_terminal_routes_input_through_terminal_queue() {
+        #[derive(Resource)]
+        struct Input {
+            process_id: ProcessId,
+            launch: TerminalLaunch,
+        }
 
-        assert!(!non_test_source.contains("AGENT_RUN_SHELL"));
-        assert!(non_test_source.contains("new_run_terminal_command"));
-        assert!(non_test_source.contains("terminal_run_command_input"));
+        #[derive(Resource, Default)]
+        struct Captured(Vec<vmux_terminal::TerminalReinputRequest>);
+
+        fn emit(
+            input: Res<Input>,
+            mut writer: MessageWriter<vmux_terminal::TerminalReinputRequest>,
+        ) {
+            queue_terminal_run_command_input(
+                &mut writer,
+                input.process_id,
+                "pwd",
+                Some("tok4"),
+                &input.launch,
+            );
+        }
+
+        fn capture(
+            mut reader: MessageReader<vmux_terminal::TerminalReinputRequest>,
+            mut captured: ResMut<Captured>,
+        ) {
+            captured.0.extend(reader.read().cloned());
+        }
+
+        let process_id = ProcessId::new();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_terminal::TerminalReinputRequest>()
+            .insert_resource(Input {
+                process_id,
+                launch: TerminalLaunch {
+                    command: "/usr/local/bin/fish".to_string(),
+                    args: vec![],
+                    cwd: String::new(),
+                    env: vec![],
+                    kind: vmux_terminal::launch::TerminalKind::Plain,
+                },
+            })
+            .init_resource::<Captured>()
+            .add_systems(Update, (emit, capture).chain());
+
+        app.update();
+
+        let captured = &app.world().resource::<Captured>().0;
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].process_id, process_id);
+        let input = String::from_utf8(captured[0].data.clone()).unwrap();
+
+        assert!(input.contains("set __vmux_status $status"), "got: {input}");
+        assert!(input.contains("]6973;tok4;"), "got: {input}");
+        assert!(input.ends_with('\r'));
     }
 
     #[test]
