@@ -1541,6 +1541,23 @@ struct LayoutHoverRefreshState {
     in_region: bool,
 }
 
+fn reset_layout_cef_hover(
+    browsers: &Browsers,
+    buttons: &ButtonInput<MouseButton>,
+    layout: Entity,
+    state: &mut LayoutHoverRefreshState,
+) {
+    if state.in_region {
+        browsers.send_mouse_move(
+            &layout,
+            buttons.get_pressed(),
+            state.position.unwrap_or_default(),
+            true,
+        );
+    }
+    *state = LayoutHoverRefreshState::default();
+}
+
 fn refresh_layout_cef_hover(
     browsers: NonSend<Browsers>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -1559,28 +1576,23 @@ fn refresh_layout_cef_hover(
     };
     if suppress.0 || !modal_pointer_targets.is_empty() {
         clear_native_layout_pointer_regions();
-        if state.in_region {
-            browsers.send_mouse_move(
-                &layout,
-                buttons.get_pressed(),
-                state.position.unwrap_or_default(),
-                true,
-            );
-        }
-        *state = LayoutHoverRefreshState::default();
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
     let Some(window_entity) = primary_window.single().ok() else {
         clear_native_layout_pointer_regions();
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
         clear_native_layout_pointer_regions();
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     };
     let scale = window.resolution.scale_factor();
     if !scale.is_finite() || scale <= 0.0 {
         clear_native_layout_pointer_regions();
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
     set_native_layout_pointer_regions(
@@ -1598,6 +1610,7 @@ fn refresh_layout_cef_hover(
     );
     let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
     else {
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     };
     let position = cursor_px / scale;
@@ -5417,6 +5430,7 @@ mod tests {
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
         assert!(refresh_fn.contains("set_native_layout_pointer_regions"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
+        assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
     }
 
     #[test]

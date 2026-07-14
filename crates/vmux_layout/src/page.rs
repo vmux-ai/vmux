@@ -841,7 +841,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 }
             }
             if folded() {
-                if let Some(stack) = folded_stack.clone() {
+                if let Some(stack) = folded_stack {
                     SideSheetStackRow { stack, pane_id }
                 }
             } else {

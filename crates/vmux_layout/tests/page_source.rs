@@ -95,7 +95,7 @@ fn folded_pane_shows_its_active_stack() {
 
     assert!(pane.contains(".find(|stack| stack.is_active"));
     assert!(pane.contains("if folded()"));
-    assert!(pane.contains("if let Some(stack) = folded_stack.clone()"));
+    assert!(pane.contains("if let Some(stack) = folded_stack"));
     assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
 }
 
