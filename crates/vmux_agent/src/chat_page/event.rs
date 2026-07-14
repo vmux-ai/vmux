@@ -73,7 +73,7 @@ pub struct ChatApproval {
     pub decision: u8,
 }
 
-/// Page → native: interrupt the in-flight turn (Esc / Ctrl+C / Stop).
+/// Page → native: interrupt the in-flight turn from Ctrl+C or Stop.
 #[derive(
     Clone,
     Debug,
@@ -111,6 +111,19 @@ pub struct ChatResume;
     rkyv::Deserialize,
 )]
 pub struct ChatClearQueue;
+
+/// Page → native: apply Escape to the authoritative native queue and run state.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatEscape;
 
 /// Bin-event id: native → page, the resumable-session list (answer to [`ResumeListRequest`]).
 pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";

@@ -121,6 +121,14 @@ pub(crate) fn is_handoff_boundary(message_index: usize, imported_message_count: 
     imported_message_count != 0 && message_index + 1 == imported_message_count as usize
 }
 
+pub(crate) fn should_clear_draft_on_escape(
+    streaming: bool,
+    queue_empty: bool,
+    draft_empty: bool,
+) -> bool {
+    !streaming && queue_empty && !draft_empty
+}
+
 pub(crate) fn edit_prompt(
     value: &str,
     selection_start: u32,
@@ -265,6 +273,14 @@ mod tests {
         assert_eq!(menu_direction("p", true), Some(MenuDirection::Previous));
         assert_eq!(menu_direction("n", false), None);
         assert_eq!(menu_direction("ArrowDown", true), None);
+    }
+
+    #[test]
+    fn escape_clears_only_idle_unqueued_draft() {
+        assert!(should_clear_draft_on_escape(false, true, false));
+        assert!(!should_clear_draft_on_escape(true, true, false));
+        assert!(!should_clear_draft_on_escape(false, false, false));
+        assert!(!should_clear_draft_on_escape(false, true, true));
     }
 
     #[test]
