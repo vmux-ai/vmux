@@ -1,3 +1,4 @@
+mod bridge;
 mod capability;
 mod download;
 mod install;
