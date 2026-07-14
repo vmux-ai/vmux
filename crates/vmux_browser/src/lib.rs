@@ -318,6 +318,15 @@ struct CefPointerHitRect {
     interactive: bool,
 }
 
+#[derive(Default)]
+struct NativeLayoutPointerState {
+    regions: Vec<CefPointerHitRect>,
+    pointer_inside: bool,
+}
+
+static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
+    LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
+
 fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
     if !rect.interactive {
         return false;
@@ -326,6 +335,50 @@ fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
     let min = rect.center - half;
     let max = rect.center + half;
     point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
+}
+
+fn physical_cef_pointer_hit_rect(mut rect: CefPointerHitRect, scale: f32) -> CefPointerHitRect {
+    rect.center *= scale;
+    rect.size *= scale;
+    rect
+}
+
+fn set_native_layout_pointer_regions(regions: impl IntoIterator<Item = CefPointerHitRect>) {
+    let mut state = NATIVE_LAYOUT_POINTER_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.regions.clear();
+    state.regions.extend(regions);
+}
+
+fn clear_native_layout_pointer_regions() {
+    let mut state = NATIVE_LAYOUT_POINTER_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.regions.clear();
+    state.pointer_inside = false;
+}
+
+fn layout_pointer_move_should_wake(was_inside: bool, inside: bool) -> bool {
+    was_inside || inside
+}
+
+/// Returns whether native pointer motion needs a layout hover update.
+pub fn native_layout_pointer_move_should_wake(x_px: f32, y_px: f32) -> bool {
+    if !x_px.is_finite() || !y_px.is_finite() {
+        return false;
+    }
+    let mut state = NATIVE_LAYOUT_POINTER_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let inside = state
+        .regions
+        .iter()
+        .copied()
+        .any(|rect| cef_pointer_hit_rect_contains(rect, Vec2::new(x_px, y_px)));
+    let should_wake = layout_pointer_move_should_wake(state.pointer_inside, inside);
+    state.pointer_inside = inside;
+    should_wake
 }
 
 fn cef_pointer_hit_rect(
@@ -1500,10 +1553,12 @@ fn refresh_layout_cef_hover(
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
+        clear_native_layout_pointer_regions();
         *state = LayoutHoverRefreshState::default();
         return;
     };
     if suppress.0 || !modal_pointer_targets.is_empty() {
+        clear_native_layout_pointer_regions();
         if state.in_region {
             browsers.send_mouse_move(
                 &layout,
@@ -1516,19 +1571,35 @@ fn refresh_layout_cef_hover(
         return;
     }
     let Some(window_entity) = primary_window.single().ok() else {
+        clear_native_layout_pointer_regions();
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
-        return;
-    };
-    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
-    else {
+        clear_native_layout_pointer_regions();
         return;
     };
     let scale = window.resolution.scale_factor();
     if !scale.is_finite() || scale <= 0.0 {
+        clear_native_layout_pointer_regions();
         return;
     }
+    set_native_layout_pointer_regions(
+        cef_regions
+            .iter()
+            .map(
+                |(header, side_sheet, node, computed, transform, visibility, open)| {
+                    cef_pointer_hit_rect(
+                        header, side_sheet, node, computed, transform, visibility, open,
+                    )
+                },
+            )
+            .filter(|rect| rect.interactive)
+            .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
+    );
+    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
+    else {
+        return;
+    };
     let position = cursor_px / scale;
     let in_region = cef_pointer_regions_contains(position, &cef_regions);
     if state.position == Some(position) && state.in_region == in_region {
@@ -5344,7 +5415,31 @@ mod tests {
         assert!(refresh_fn.contains("pane_hover_cursor_position"));
         assert!(refresh_fn.contains("cef_pointer_regions_contains"));
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
+        assert!(refresh_fn.contains("set_native_layout_pointer_regions"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
+    }
+
+    #[test]
+    fn native_layout_pointer_regions_use_physical_coordinates() {
+        let rect = physical_cef_pointer_hit_rect(
+            CefPointerHitRect {
+                center: Vec2::new(50.0, 25.0),
+                size: Vec2::new(20.0, 10.0),
+                interactive: true,
+            },
+            2.0,
+        );
+
+        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(100.0, 50.0)));
+        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(79.0, 50.0)));
+    }
+
+    #[test]
+    fn native_layout_pointer_wakes_inside_and_once_on_exit() {
+        assert!(!layout_pointer_move_should_wake(false, false));
+        assert!(layout_pointer_move_should_wake(false, true));
+        assert!(layout_pointer_move_should_wake(true, true));
+        assert!(layout_pointer_move_should_wake(true, false));
     }
 
     #[test]

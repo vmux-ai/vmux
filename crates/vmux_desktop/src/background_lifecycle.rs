@@ -75,6 +75,10 @@ static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 
+fn native_mouse_move_should_wake(layout_should_wake: bool, pane_should_wake: bool) -> bool {
+    layout_should_wake || pane_should_wake
+}
+
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
@@ -279,7 +283,13 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
             }
             let should_wake = location
-                .map(|(x, y)| vmux_layout::pane::wake_on_move(x, y))
+                .map(|(x, y)| {
+                    let layout_should_wake =
+                        vmux_browser::native_layout_pointer_move_should_wake(x, y);
+                    let pane_should_wake =
+                        !layout_should_wake && vmux_layout::pane::wake_on_move(x, y);
+                    native_mouse_move_should_wake(layout_should_wake, pane_should_wake)
+                })
                 .unwrap_or(false);
             if should_wake {
                 local_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
@@ -791,6 +801,15 @@ mod tests {
         assert!(monitor.contains("NSEventMask::MouseMoved"));
         assert!(monitor.contains("NSEventMask::LeftMouseDown"));
         assert!(monitor.contains("WinitUserEvent::WakeUp"));
+        assert!(monitor.contains("vmux_browser::native_layout_pointer_move_should_wake"));
+        assert!(monitor.contains("vmux_layout::pane::wake_on_move"));
+    }
+
+    #[test]
+    fn native_mouse_motion_skips_active_page_without_layout() {
+        assert!(native_mouse_move_should_wake(true, false));
+        assert!(native_mouse_move_should_wake(false, true));
+        assert!(!native_mouse_move_should_wake(false, false));
     }
 
     #[test]

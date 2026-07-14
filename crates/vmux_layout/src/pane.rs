@@ -2161,12 +2161,14 @@ mod hover_wake {
             .iter()
             .find(|region| region_contains(region, x, y))
             .map(|(entity, ..)| *entity);
-        if let Some(entity) = hit
-            && Some(entity) != regions.active
-        {
-            PENDING.store(entity, Ordering::Relaxed);
+        match hit {
+            Some(entity) if Some(entity) == regions.active => false,
+            Some(entity) => {
+                PENDING.store(entity, Ordering::Relaxed);
+                true
+            }
+            None => true,
         }
-        true
     }
 
     pub fn cursor_over_pane(x: f32, y: f32) -> bool {
@@ -5402,12 +5404,12 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn wake_on_move_wakes_without_retargeting_active_pane() {
+    fn wake_on_move_suppresses_active_pane() {
         super::hover_wake::publish(
             vec![(1, 0.0, 0.0, 100.0, 100.0), (2, 200.0, 0.0, 300.0, 100.0)],
             Some(1),
         );
-        assert!(super::wake_on_move(50.0, 50.0));
+        assert!(!super::wake_on_move(50.0, 50.0));
         assert_eq!(super::hover_wake::take_pending_target(), None);
         assert!(super::wake_on_move(250.0, 50.0));
         assert_eq!(super::hover_wake::take_pending_target(), Some(2));
