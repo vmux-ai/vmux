@@ -76,13 +76,15 @@ fn inactive_tabs_add_horizontal_padding_on_hover() {
 }
 
 #[test]
-fn side_sheet_close_button_uses_stack_row_hover_selector() {
+fn side_sheet_close_button_tracks_stack_row_hover() {
     let row = side_sheet_stack_row_component_source();
-    let css = include_str!("../../vmux_server/assets/index.css");
 
-    assert_eq!(row.matches("side-sheet-stack-row").count(), 2);
-    assert!(row.contains("side-sheet-stack-close"));
-    assert!(css.contains(".side-sheet-stack-row:hover > .side-sheet-stack-close"));
+    assert!(row.contains("let mut hovered = use_signal(|| false)"));
+    assert!(row.contains("onmouseenter: move |_| hovered.set(true)"));
+    assert!(row.contains("onmouseleave: move |_| hovered.set(false)"));
+    assert!(row.contains("class: if hovered()"));
+    assert!(row.contains("opacity-100"));
+    assert!(row.contains("opacity-0"));
     assert!(!row.contains("group-hover:opacity-100"));
     assert!(!row.contains("group-hover/stack:opacity-100"));
 }
