@@ -598,7 +598,7 @@ fn send_acp_input(
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
-        let Some(text) = queue.items.pop_front() else {
+        let Some(text) = queue.take_next() else {
             continue;
         };
         let context = pending

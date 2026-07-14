@@ -126,7 +126,7 @@ fn send_page_agent_input(
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
-        let Some(text) = queue.items.pop_front() else {
+        let Some(text) = queue.take_next() else {
             continue;
         };
         service.0.send(ClientMessage::AgentInput {
@@ -239,10 +239,16 @@ fn consume_page_agent_stream(
                 AgentRunStatus::Streaming => *state = AgentRunState::Streaming,
                 AgentRunStatus::Interrupted => {
                     *state = AgentRunState::Idle;
-                    queue.paused = true;
+                    if !queue.flush_pending() {
+                        queue.paused = true;
+                    }
                 }
                 AgentRunStatus::Errored(message) => {
-                    *state = AgentRunState::Errored(message.clone());
+                    if queue.flush_pending() {
+                        *state = AgentRunState::Idle;
+                    } else {
+                        *state = AgentRunState::Errored(message.clone());
+                    }
                     if let Some(pending) = pending.as_deref_mut() {
                         pending.retry();
                     }
@@ -346,6 +352,118 @@ mod tests {
         let q = world.get::<PromptQueue>(e).unwrap();
         assert!(q.paused, "queue must pause after interrupt");
         assert_eq!(q.items.len(), 1, "held item must not auto-advance");
+    }
+
+    #[test]
+    fn flush_pending_interrupt_does_not_pause() {
+        use crate::client::acp::AcpSession;
+        use crate::components::PromptQueue;
+        use vmux_service::agent_events::{
+            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+        };
+        use vmux_service::protocol::AgentRunStatus;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("a".into());
+        queue.items.push_back("b".into());
+        assert!(queue.request_flush());
+        let e = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "a".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AgentMessages::default(),
+                AgentRunState::Streaming,
+                queue,
+            ))
+            .id();
+        app.world_mut().write_message(PageAgentRunStatus {
+            sid: "s1".into(),
+            status: AgentRunStatus::Interrupted,
+        });
+        app.update();
+
+        let world = app.world();
+        assert!(matches!(
+            world.get::<AgentRunState>(e),
+            Some(AgentRunState::Idle)
+        ));
+        let q = world.get::<PromptQueue>(e).unwrap();
+        assert!(
+            !q.paused,
+            "flush interrupt must leave the queue running to drain"
+        );
+        assert_eq!(
+            q.items.len(),
+            2,
+            "items wait for the idle drain to batch them"
+        );
+    }
+
+    #[test]
+    fn flush_pending_error_rearms_queue() {
+        use crate::client::acp::AcpSession;
+        use crate::components::PromptQueue;
+        use vmux_service::agent_events::{
+            PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+        };
+        use vmux_service::protocol::AgentRunStatus;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("retry".into());
+        assert!(queue.request_flush());
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "a".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AgentMessages::default(),
+                AgentRunState::Streaming,
+                queue,
+            ))
+            .id();
+        app.world_mut().write_message(PageAgentRunStatus {
+            sid: "s1".into(),
+            status: AgentRunStatus::Errored("cancel race".into()),
+        });
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::Idle)
+        ));
+        let queue = app.world().get::<PromptQueue>(entity).unwrap();
+        assert!(queue.flush_pending());
+        assert!(!queue.paused);
+        assert_eq!(queue.items.front().map(String::as_str), Some("retry"));
     }
 
     #[test]

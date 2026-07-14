@@ -2,13 +2,14 @@
 
 use crate::chat_page::composer::{
     PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, is_handoff_boundary,
-    menu_direction, move_selection, resume_menu_state, selector_mode, should_fetch_resume,
+    menu_direction, move_selection, resume_menu_state, selector_mode, should_clear_draft_on_escape,
+    should_fetch_resume,
 };
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatMessage,
-    ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
-    SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatEscape,
+    ChatMessage, ChatResume, ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::favicon_src_for_url;
@@ -555,6 +556,10 @@ pub fn Page() -> Element {
                                     }
                                 }
                             }
+                            div { class: "flex items-center gap-2 pr-1 text-[10px] text-foreground/40",
+                                kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60 shadow-sm", "Esc" }
+                                span { "send all now" }
+                            }
                         }
                     }
                     div { class: "flex items-end gap-2",
@@ -646,15 +651,17 @@ pub fn Page() -> Element {
                                     e.prevent_default();
                                     do_submit(draft, at_bottom);
                                 } else if e.key() == Key::Escape {
-                                    if streaming {
-                                        e.prevent_default();
-                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                    } else if !draft.peek().is_empty() {
+                                    e.prevent_default();
+                                    let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+                                    if should_clear_draft_on_escape(
+                                        streaming,
+                                        queued.peek().is_empty(),
+                                        draft.peek().is_empty(),
+                                    ) {
                                         draft.set(String::new());
                                     }
                                 } else if e.modifiers().ctrl()
                                     && matches!(e.key(), Key::Character(c) if c == "c")
-                                    && streaming
                                     && !has_text_selection()
                                 {
                                     e.prevent_default();
@@ -663,17 +670,38 @@ pub fn Page() -> Element {
                             },
                         }
                         if matches!(status().as_str(), "streaming" | "awaiting") {
-                            button {
-                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
-                                title: "Interrupt (Esc)",
-                                onclick: move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                },
-                                svg {
-                                    class: "h-4 w-4",
-                                    view_box: "0 0 24 24",
-                                    fill: "currentColor",
-                                    rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                            if queued.read().is_empty() {
+                                button {
+                                    class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                    title: "Stop",
+                                    onclick: move |_| {
+                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                    },
+                                    svg {
+                                        class: "h-4 w-4",
+                                        view_box: "0 0 24 24",
+                                        fill: "currentColor",
+                                        rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
+                                    }
+                                }
+                            } else {
+                                button {
+                                    class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                    title: "Send all queued prompts now (Esc)",
+                                    onclick: move |_| {
+                                        let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+                                    },
+                                    svg {
+                                        class: "h-4 w-4",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "M12 19V5" }
+                                        path { d: "M5 12l7-7 7 7" }
+                                    }
                                 }
                             }
                         } else {

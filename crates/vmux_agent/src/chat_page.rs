@@ -18,8 +18,8 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatResume, ChatSnapshot,
-    ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatEscape, ChatResume,
+    ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
     ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
     SlashCommandEntry, SlashCommands,
 };
@@ -70,6 +70,7 @@ impl Plugin for AgentChatPagePlugin {
             ChatCancel,
             ChatResume,
             ChatClearQueue,
+            ChatEscape,
             ResumeListRequest,
             ResumeSession,
             RuntimeSwitchRequest,
@@ -79,6 +80,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_resume)
             .add_observer(on_chat_clear_queue)
+            .add_observer(on_chat_escape)
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
@@ -316,36 +318,47 @@ fn on_chat_submit(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn enqueue_prompt(queue: &mut PromptQueue, state: &mut AgentRunState, text: String) {
-    queue.items.push_back(text);
-    queue.paused = false;
+    queue.enqueue(text);
     if matches!(state, AgentRunState::Errored(_)) {
         *state = AgentRunState::Idle;
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn on_chat_cancel(
-    trigger: On<BinReceive<ChatCancel>>,
-    child_of: Query<&ChildOf>,
-    sessions: Query<(Option<&AcpSession>, Option<&AgentSession>)>,
-    service: Option<Res<ServiceClient>>,
+fn cancel_session(
+    service: Option<&ServiceClient>,
+    acp: Option<&AcpSession>,
+    page: Option<&AgentSession>,
 ) {
     let Some(service) = service else {
         return;
     };
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let Ok((acp, page)) = sessions.get(parent.parent()) else {
-        return;
-    };
     let Some(sid) = acp
-        .map(|s| s.sid.clone())
-        .or_else(|| page.map(|s| s.sid.clone()))
+        .map(|session| session.sid.clone())
+        .or_else(|| page.map(|session| session.sid.clone()))
     else {
         return;
     };
     service.0.send(ClientMessage::AgentCancel { sid });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_cancel(
+    trigger: On<BinReceive<ChatCancel>>,
+    child_of: Query<&ChildOf>,
+    mut sessions: Query<(&mut PromptQueue, Option<&AcpSession>, Option<&AgentSession>)>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((mut queue, acp, page)) = sessions.get_mut(parent.parent()) else {
+        return;
+    };
+    if queue.flush_pending() {
+        queue.cancel_flush();
+    }
+    cancel_session(service.as_deref(), acp, page);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -358,7 +371,7 @@ fn on_chat_resume(
         return;
     };
     if let Ok(mut queue) = queues.get_mut(parent.parent()) {
-        queue.paused = false;
+        queue.resume();
     }
 }
 
@@ -372,8 +385,45 @@ fn on_chat_clear_queue(
         return;
     };
     if let Ok(mut queue) = queues.get_mut(parent.parent()) {
-        queue.items.clear();
-        queue.paused = false;
+        queue.clear();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_escape(
+    trigger: On<BinReceive<ChatEscape>>,
+    child_of: Query<&ChildOf>,
+    mut sessions: Query<(
+        &mut PromptQueue,
+        &mut AgentRunState,
+        Option<&AcpSession>,
+        Option<&AgentSession>,
+    )>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((mut queue, mut state, acp, page)) = sessions.get_mut(parent.parent()) else {
+        return;
+    };
+    let running = matches!(
+        *state,
+        AgentRunState::Streaming | AgentRunState::AwaitingApproval { .. }
+    );
+    let flush = if queue.items.is_empty() {
+        if queue.flush_pending() {
+            queue.cancel_flush();
+        }
+        false
+    } else {
+        queue.request_flush()
+    };
+    if flush && matches!(*state, AgentRunState::Errored(_)) {
+        *state = AgentRunState::Idle;
+    }
+    if running {
+        cancel_session(service.as_deref(), acp, page);
     }
 }
 
@@ -831,6 +881,92 @@ mod native_tests {
     }
 
     #[test]
+    fn normal_cancel_overrides_pending_flush() {
+        use bevy_cef::prelude::BinReceive;
+
+        let mut app = App::new();
+        app.add_observer(on_chat_cancel);
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("queued".into());
+        assert!(queue.request_flush());
+        let stack = app.world_mut().spawn(queue).id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive::<ChatCancel> {
+            webview,
+            payload: ChatCancel,
+        });
+        app.world_mut().flush();
+
+        assert!(
+            !app.world()
+                .get::<PromptQueue>(stack)
+                .unwrap()
+                .flush_pending()
+        );
+    }
+
+    #[test]
+    fn escape_flush_rearms_errored_queue() {
+        use bevy_cef::prelude::BinReceive;
+
+        let mut app = App::new();
+        app.add_observer(on_chat_escape);
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("retry".into());
+        queue.paused = true;
+        let stack = app
+            .world_mut()
+            .spawn((queue, AgentRunState::Errored("failed".into())))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive::<ChatEscape> {
+            webview,
+            payload: ChatEscape,
+        });
+        app.world_mut().flush();
+
+        assert!(matches!(
+            app.world().get::<AgentRunState>(stack),
+            Some(AgentRunState::Idle)
+        ));
+        let queue = app.world().get::<PromptQueue>(stack).unwrap();
+        assert!(queue.flush_pending());
+        assert!(!queue.paused);
+    }
+
+    #[test]
+    fn escape_without_queue_clears_stale_flush() {
+        use bevy_cef::prelude::BinReceive;
+
+        let mut app = App::new();
+        app.add_observer(on_chat_escape);
+        let mut queue = PromptQueue::default();
+        queue.items.push_back("queued".into());
+        assert!(queue.request_flush());
+        queue.items.clear();
+        let stack = app
+            .world_mut()
+            .spawn((queue, AgentRunState::Streaming))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive::<ChatEscape> {
+            webview,
+            payload: ChatEscape,
+        });
+        app.world_mut().flush();
+
+        assert!(
+            !app.world()
+                .get::<PromptQueue>(stack)
+                .unwrap()
+                .flush_pending()
+        );
+    }
+
+    #[test]
     fn resume_agent_name_prefers_profile_then_kind_then_id() {
         let profile = Profile::registry("Antigravity", "antigravity");
         assert_eq!(
@@ -901,6 +1037,38 @@ mod native_tests {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("onclick: move |_| run_slash_command"));
         assert!(source.contains("onclick: move |_| select_resume_session"));
+    }
+
+    #[test]
+    fn composer_escape_defers_queue_state_to_native() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("try_cef_bin_emit_rkyv(&ChatEscape)"));
+        assert!(!source.contains("ChatFlush"));
+    }
+
+    #[test]
+    fn queued_flush_controls_repurpose_composer_button() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("kbd {"));
+        assert!(source.contains("if queued.read().is_empty()"));
+        assert!(source.contains("title: \"Stop\""));
+        assert!(source.contains("rect { x: \"6\", y: \"6\""));
+        assert!(source.contains("\"Send all queued prompts now (Esc)\""));
+        assert!(source.contains("path { d: \"M12 19V5\" }"));
+    }
+
+    #[test]
+    fn composer_ctrl_c_cancel_does_not_use_streaming_snapshot() {
+        let source = include_str!("chat_page/page.rs");
+        let handler = source
+            .split("} else if e.modifiers().ctrl()")
+            .nth(1)
+            .expect("ctrl-c handler")
+            .split("},")
+            .next()
+            .expect("ctrl-c handler body");
+        assert!(handler.contains("try_cef_bin_emit_rkyv(&ChatCancel)"));
+        assert!(!handler.contains("&& streaming"));
     }
 
     #[test]
