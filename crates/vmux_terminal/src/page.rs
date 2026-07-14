@@ -420,7 +420,7 @@ pub fn Page() -> Element {
                                             }
                                             div {
                                                 class: "mt-1 text-[10px] text-muted-foreground/70",
-                                                "type a prompt · runs when ready · Esc skips"
+                                                "type a command · runs when ready · Esc skips"
                                             }
                                         }
                                     }
@@ -1005,10 +1005,10 @@ const AGENT_PROMPT_EXAMPLES: &[&str] = &[
 ];
 
 const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
-    "Fix the failing tests in this project",
-    "Find and explain the cause of this error",
-    "Refactor this module without changing behavior",
-    "Open a PR for my staged changes",
+    "git status --short",
+    "rg \"TODO|FIXME\" .",
+    "find . -type f -size +100M",
+    "git log --oneline -10",
 ];
 
 /// Placeholder that types example prompts one character at a time with a blinking caret.
