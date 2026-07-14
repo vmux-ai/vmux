@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_cef::prelude::{WebviewMaxFrameRate, WebviewSize, WebviewSource};
+use bevy_cef::prelude::{PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource};
 
-use super::bridge::ExtensionBridgeServer;
+use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
 use super::load::PreparedExtensions;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -19,30 +19,55 @@ pub fn spawn_extension_bridge_pages(
     if primary_window.is_empty() {
         return;
     }
+    let conformance = super::broker::extension_conformance_enabled();
     for runtime in &prepared.0 {
         let identity = server
             .identity(&runtime.extension_id)
             .unwrap_or_else(|| panic!("missing bridge identity for {}", runtime.extension_id));
-        let mut url = url::Url::parse(&format!(
+        let url = format!(
             "chrome-extension://{}/vmux_bridge.html",
             runtime.extension_id
-        ))
-        .expect("valid extension bridge URL");
-        url.query_pairs_mut()
-            .append_pair("endpoint", server.endpoint())
-            .append_pair("token", &identity.token)
-            .append_pair("extension", &identity.extension_id)
-            .append_pair("profile", &identity.profile_id);
+        );
         commands.spawn((
             ExtensionBridgeWebview {
                 extension_id: runtime.extension_id.clone(),
             },
-            WebviewSource::new(url.to_string()),
+            WebviewSource::new(url),
+            PrivatePreloadScripts::from([bridge_config_source(&server, identity, conformance)]),
             WebviewSize(Vec2::ONE),
             WebviewMaxFrameRate(1),
             Visibility::Hidden,
         ));
+        if conformance {
+            commands.spawn((
+                ExtensionBridgeWebview {
+                    extension_id: runtime.extension_id.clone(),
+                },
+                WebviewSource::new(format!(
+                    "chrome-extension://{}/echo.html",
+                    runtime.extension_id
+                )),
+                WebviewSize(Vec2::ONE),
+                WebviewMaxFrameRate(1),
+                Visibility::Hidden,
+            ));
+        }
     }
+}
+
+fn bridge_config_source(
+    server: &ExtensionBridgeServer,
+    identity: &BridgeIdentity,
+    conformance: bool,
+) -> String {
+    let config = serde_json::json!({
+        "endpoint": server.endpoint(),
+        "extension": identity.extension_id,
+        "profile": identity.profile_id,
+        "token": identity.token,
+        "conformance": conformance,
+    });
+    format!("globalThis.__vmuxBridgeConfig = {config};\n")
 }
 
 #[cfg(test)]
@@ -52,7 +77,9 @@ mod tests {
     use crate::extensions::load::PreparedExtensions;
     use crate::extensions::runtime::PreparedRuntime;
     use bevy::window::PrimaryWindow;
-    use bevy_cef::prelude::{WebviewMaxFrameRate, WebviewSize, WebviewSource};
+    use bevy_cef::prelude::{
+        PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
+    };
 
     const EXTENSION_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -66,6 +93,7 @@ mod tests {
             source_hash: "source-hash".into(),
         };
         let bridge = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
+        let identity = bridge.identity(EXTENSION_ID).unwrap().clone();
         app.insert_resource(PreparedExtensions(vec![runtime]))
             .insert_resource(bridge)
             .add_systems(Update, spawn_extension_bridge_pages);
@@ -77,16 +105,33 @@ mod tests {
             Entity,
             &ExtensionBridgeWebview,
             &WebviewSource,
+            &PrivatePreloadScripts,
             &WebviewSize,
             &WebviewMaxFrameRate,
             &Visibility,
         )>();
-        let (entity, bridge, source, size, frame_rate, visibility) =
+        let (entity, bridge, source, preload, size, frame_rate, visibility) =
             query.single(app.world()).unwrap();
         assert_eq!(bridge.extension_id, EXTENSION_ID);
         assert!(
-            matches!(source, WebviewSource::Url(url) if url.starts_with(&format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html?")))
+            matches!(source, WebviewSource::Url(url) if url == &format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html"))
         );
+        let [config] = preload.0.as_slice() else {
+            panic!("expected one bridge preload script");
+        };
+        let config = config
+            .strip_prefix("globalThis.__vmuxBridgeConfig = ")
+            .and_then(|source| source.strip_suffix(";\n"))
+            .unwrap();
+        let config: serde_json::Value = serde_json::from_str(config).unwrap();
+        assert_eq!(
+            config["endpoint"],
+            app.world().resource::<ExtensionBridgeServer>().endpoint()
+        );
+        assert_eq!(config["extension"], identity.extension_id);
+        assert_eq!(config["profile"], identity.profile_id);
+        assert_eq!(config["token"], identity.token);
+        assert_eq!(config["conformance"], false);
         assert_eq!(size.0, Vec2::ONE);
         assert_eq!(frame_rate.0, 1);
         assert_eq!(*visibility, Visibility::Hidden);

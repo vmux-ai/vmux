@@ -397,6 +397,9 @@ blindly retried; deduplication by request ID permits safe response recovery.
 
 - The loopback listener accepts no non-loopback connections.
 - Tokens are random, scoped to one launch, profile, and extension, and rotated on relaunch.
+- Bridge credentials are injected through a non-reflectable native preload scoped to the hidden
+  bridge page's initial main-frame URL. They never appear in extension resources, page URLs,
+  process arguments, subframes, later navigations, or logs.
 - The broker derives authority from the installed manifest, never from request claims.
 - Profile and extension IDs are validated before dispatch.
 - The bridge exposes no arbitrary filesystem, process, shell, or raw ECS access.

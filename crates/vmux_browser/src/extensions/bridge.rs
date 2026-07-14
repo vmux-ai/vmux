@@ -175,6 +175,7 @@ fn handle_connection(
     let Some((extension_id, context_id)) = authenticate(&mut socket, identities, shutdown)? else {
         return Ok(());
     };
+    bevy::log::info!("extension bridge authenticated");
     let (outbound_tx, outbound_rx) = crossbeam_channel::unbounded();
     sessions
         .lock()

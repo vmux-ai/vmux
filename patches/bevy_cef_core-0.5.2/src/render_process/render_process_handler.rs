@@ -44,9 +44,15 @@ pub(crate) static BRP_PROMISES: LazyLock<Mutex<HashMap<String, V8Value>>> =
 pub(crate) static LISTEN_EVENTS: LazyLock<Mutex<HashMap<String, V8Value>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static INIT_SCRIPTS: LazyLock<Mutex<HashMap<c_int, String>>> =
+struct InitScript {
+    source: String,
+    url: String,
+}
+
+static INIT_SCRIPTS: LazyLock<Mutex<HashMap<c_int, InitScript>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 pub const INIT_SCRIPT_KEY: &str = "init_script";
+pub const INIT_SCRIPT_URL_KEY: &str = "init_script_url";
 
 pub const PROCESS_MESSAGE_BRP: &str = "brp";
 pub const PROCESS_MESSAGE_HOST_EMIT: &str = "host-emit";
@@ -111,12 +117,21 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
             if script.is_empty() {
                 return;
             }
+            let url = extra
+                .string(Some(&INIT_SCRIPT_URL_KEY.into()))
+                .into_string();
             let id = browser.identifier();
             crate::util::webview_debug_log(format!(
                 "render on_browser_created id={id} init_script_len={}",
                 script.len()
             ));
-            INIT_SCRIPTS.lock().unwrap().insert(id, script);
+            INIT_SCRIPTS.lock().unwrap().insert(
+                id,
+                InitScript {
+                    source: script,
+                    url,
+                },
+            );
         }
     }
 
@@ -186,9 +201,11 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
 
 fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, frame: &mut Frame) {
     let id = browser.identifier();
+    let frame_url = frame.url().into_string();
     if let Some(script) = INIT_SCRIPTS.lock().ok().and_then(|scripts| {
         let script = scripts.get(&id)?;
-        Some(CefString::from(script.as_str()))
+        should_inject_init_script(&script.url, &frame_url, frame.is_main() != 0)
+            .then(|| CefString::from(script.source.as_str()))
     }) {
         context.enter();
         let mut retval: Option<V8Value> = None;
@@ -216,6 +233,27 @@ fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, fra
             crate::util::webview_debug_log(format!("render init_script eval ok id={id}"));
         }
         context.exit();
+    }
+}
+
+fn should_inject_init_script(expected_url: &str, frame_url: &str, is_main: bool) -> bool {
+    is_main && expected_url == frame_url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_inject_init_script;
+
+    #[test]
+    fn init_script_is_scoped_to_initial_main_frame() {
+        let expected = "chrome-extension://aaaaaaaa/vmux_bridge.html";
+        assert!(should_inject_init_script(expected, expected, true));
+        assert!(!should_inject_init_script(expected, expected, false));
+        assert!(!should_inject_init_script(
+            expected,
+            "https://example.com/",
+            true
+        ));
     }
 }
 

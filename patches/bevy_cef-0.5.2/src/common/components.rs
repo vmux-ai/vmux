@@ -224,6 +224,20 @@ where
     }
 }
 
+/// Native-only preload scripts excluded from Bevy reflection and remote inspection.
+#[derive(Component, Debug, Clone, PartialEq, Default)]
+pub struct PrivatePreloadScripts(pub Vec<String>);
+
+impl<L, S> From<L> for PrivatePreloadScripts
+where
+    L: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    fn from(scripts: L) -> Self {
+        Self(scripts.into_iter().map(Into::into).collect())
+    }
+}
+
 /// Holds the webview surface texture handle for alpha hit-testing.
 ///
 /// This component is automatically inserted and updated by the render systems.

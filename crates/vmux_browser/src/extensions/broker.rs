@@ -1,5 +1,8 @@
 use bevy::prelude::*;
-use std::collections::{BTreeMap, HashMap};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use crossbeam_channel::RecvTimeoutError;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use vmux_core::extension::protocol::{
@@ -51,6 +54,8 @@ impl Default for PendingBridgeEvents {
 pub struct ConformanceWakeTimer {
     delay: Duration,
     deadlines: HashMap<String, Instant>,
+    scheduled: HashSet<String>,
+    scheduler: Option<crossbeam_channel::Sender<Instant>>,
 }
 
 impl Default for ConformanceWakeTimer {
@@ -58,6 +63,8 @@ impl Default for ConformanceWakeTimer {
         Self {
             delay: Duration::from_secs(35),
             deadlines: HashMap::new(),
+            scheduled: HashSet::new(),
+            scheduler: None,
         }
     }
 }
@@ -68,6 +75,7 @@ pub fn drain_bridge_requests(
     mut pending: ResMut<PendingBridgeEvents>,
     model: Res<ChromeModel>,
     mut wake_timer: Option<ResMut<ConformanceWakeTimer>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
     while let Ok(inbound) = server.try_recv() {
         let BridgeInbound {
@@ -88,7 +96,8 @@ pub fn drain_bridge_requests(
                 }
             }
             BridgeClientMessage::Subscribe(subscription) => {
-                if subscription.namespace != CONFORMANCE_NAMESPACE
+                if wake_timer.is_none()
+                    || subscription.namespace != CONFORMANCE_NAMESPACE
                     || subscription.event != MODEL_CHANGED_EVENT
                 {
                     send_fatal(
@@ -116,8 +125,72 @@ pub fn drain_bridge_requests(
                 }
                 resend_pending(&server, &pending, &extension_id);
                 if let Some(timer) = wake_timer.as_mut() {
+                    if timer.scheduled.contains(&extension_id) {
+                        continue;
+                    }
                     let delay = timer.delay;
-                    timer.deadlines.insert(extension_id, Instant::now() + delay);
+                    let deadline = Instant::now() + delay;
+                    if timer.scheduler.is_none() {
+                        let Some(proxy) = proxy.as_deref() else {
+                            bevy::log::warn!("extension conformance wake has no event-loop proxy");
+                            continue;
+                        };
+                        let (sender, receiver) = crossbeam_channel::unbounded();
+                        let proxy = (**proxy).clone();
+                        match std::thread::Builder::new()
+                            .name("extension-conformance-wake".into())
+                            .spawn(move || {
+                                let mut deadlines = BinaryHeap::<Reverse<Instant>>::new();
+                                loop {
+                                    let result = deadlines.peek().map_or_else(
+                                        || {
+                                            receiver
+                                                .recv()
+                                                .map_err(|_| RecvTimeoutError::Disconnected)
+                                        },
+                                        |deadline| {
+                                            receiver.recv_timeout(
+                                                deadline
+                                                    .0
+                                                    .saturating_duration_since(Instant::now()),
+                                            )
+                                        },
+                                    );
+                                    match result {
+                                        Ok(deadline) => deadlines.push(Reverse(deadline)),
+                                        Err(RecvTimeoutError::Timeout) => {
+                                            let now = Instant::now();
+                                            while deadlines
+                                                .peek()
+                                                .is_some_and(|deadline| deadline.0 <= now)
+                                            {
+                                                deadlines.pop();
+                                            }
+                                            let _ = proxy.send_event(WinitUserEvent::WakeUp);
+                                        }
+                                        Err(RecvTimeoutError::Disconnected) => break,
+                                    }
+                                }
+                            }) {
+                            Ok(_) => timer.scheduler = Some(sender),
+                            Err(error) => {
+                                bevy::log::warn!(
+                                    "failed to start extension conformance wake scheduler: {error}"
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    let Some(scheduler) = timer.scheduler.as_ref() else {
+                        continue;
+                    };
+                    if let Err(error) = scheduler.send(deadline) {
+                        timer.scheduler = None;
+                        bevy::log::warn!("failed to schedule extension conformance wake: {error}");
+                        continue;
+                    }
+                    timer.scheduled.insert(extension_id.clone());
+                    timer.deadlines.insert(extension_id, deadline);
                 }
             }
             BridgeClientMessage::Ack { sequence } => {
@@ -324,7 +397,8 @@ fn send_fatal(server: &ExtensionBridgeServer, extension_id: &str, code: &str, me
 }
 
 pub(crate) fn extension_conformance_enabled() -> bool {
-    std::env::var("VMUX_EXTENSION_CONFORMANCE").ok().as_deref() == Some("1")
+    cfg!(feature = "conformance")
+        && std::env::var("VMUX_EXTENSION_CONFORMANCE").ok().as_deref() == Some("1")
 }
 
 pub(crate) const fn current_platform() -> &'static str {
@@ -532,6 +606,7 @@ mod tests {
             .insert_resource(pending)
             .init_resource::<BridgeSubscriptions>()
             .init_resource::<ChromeModel>()
+            .init_resource::<ConformanceWakeTimer>()
             .add_systems(Update, drain_bridge_requests);
         pump(&mut app);
 
@@ -554,6 +629,46 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_subscription_schedules_one_wake() {
+        let server = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
+        let mut socket = connect_bridge(&server);
+        let subscribe = || {
+            BridgeClientMessage::Subscribe(EventSubscribe {
+                subscription_id: "model".into(),
+                namespace: CONFORMANCE_NAMESPACE.into(),
+                event: MODEL_CHANGED_EVENT.into(),
+            })
+        };
+        send_client(&mut socket, &subscribe());
+        let (scheduler, scheduled) = crossbeam_channel::unbounded();
+        let mut app = App::new();
+        app.insert_resource(server)
+            .init_resource::<BridgeSubscriptions>()
+            .init_resource::<PendingBridgeEvents>()
+            .init_resource::<ChromeModel>()
+            .insert_resource(ConformanceWakeTimer {
+                scheduler: Some(scheduler),
+                ..Default::default()
+            })
+            .add_systems(Update, drain_bridge_requests);
+        pump(&mut app);
+        let first_deadline = app.world().resource::<ConformanceWakeTimer>().deadlines[EXTENSION_ID];
+        assert_eq!(scheduled.try_recv().unwrap(), first_deadline);
+
+        send_client(&mut socket, &subscribe());
+        pump(&mut app);
+
+        let timer = app.world().resource::<ConformanceWakeTimer>();
+        assert_eq!(timer.scheduled.len(), 1);
+        assert_eq!(timer.deadlines.len(), 1);
+        assert_eq!(timer.deadlines[EXTENSION_ID], first_deadline);
+        assert_eq!(
+            scheduled.try_recv(),
+            Err(crossbeam_channel::TryRecvError::Empty)
+        );
+    }
+
+    #[test]
     fn wake_timer_delivers_snapshot_event() {
         let server = ExtensionBridgeServer::start("personal", [EXTENSION_ID]).unwrap();
         let mut socket = connect_bridge(&server);
@@ -561,6 +676,8 @@ mod tests {
         let mut timer = ConformanceWakeTimer {
             delay: Duration::ZERO,
             deadlines: HashMap::new(),
+            scheduled: HashSet::new(),
+            scheduler: None,
         };
         timer.deadlines.insert(EXTENSION_ID.into(), Instant::now());
         let mut app = App::new();

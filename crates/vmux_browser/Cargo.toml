@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
+[features]
+conformance = []
+
 [lib]
 path = "src/lib.rs"
 
@@ -16,13 +19,13 @@ bevy_cef_core = { workspace = true }
 chrono = { workspace = true }
 crossbeam-channel = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
+libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
 tungstenite = { workspace = true }
-url = { workspace = true }
 uuid = { workspace = true }
 tempfile = "3"
 vmux_command = { path = "../vmux_command" }

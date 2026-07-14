@@ -7,6 +7,7 @@ publish = false
 
 [features]
 default = ["player-mode"]
+conformance = ["bevy_cef/debug", "vmux_browser/conformance"]
 dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
 player-mode = ["vmux_layout/player-mode"]
 

@@ -400,7 +400,7 @@ impl Browsers {
                 background_color: background_color.unwrap_or(CEF_OSR_BACKGROUND_COLOR_ARGB),
                 ..Default::default()
             }),
-            Self::create_extra_info(initialize_scripts).as_mut(),
+            Self::create_extra_info(initialize_scripts, _uri).as_mut(),
             context_for_browser,
         )
         .expect("Failed to create browser");
@@ -2067,7 +2067,7 @@ impl Browsers {
         }
     }
 
-    fn create_extra_info(scripts: &[String]) -> Option<DictionaryValue> {
+    fn create_extra_info(scripts: &[String], uri: &str) -> Option<DictionaryValue> {
         if scripts.is_empty() {
             return None;
         }
@@ -2075,6 +2075,10 @@ impl Browsers {
         extra.set_string(
             Some(&CefString::from(INIT_SCRIPT_KEY)),
             Some(&CefString::from(scripts.join(";").as_str())),
+        );
+        extra.set_string(
+            Some(&CefString::from(INIT_SCRIPT_URL_KEY)),
+            Some(&CefString::from(uri)),
         );
         Some(extra)
     }

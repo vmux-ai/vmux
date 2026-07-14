@@ -1,7 +1,22 @@
 (() => {
   const CHANNEL = "__vmux_extension_bridge_v1";
-  const params = new URLSearchParams(location.search);
-  const socket = new WebSocket(params.get("endpoint"));
+  const config = globalThis.__vmuxBridgeConfig;
+  delete globalThis.__vmuxBridgeConfig;
+  if (
+    !config ||
+    typeof config.endpoint !== "string" ||
+    typeof config.extension !== "string" ||
+    typeof config.profile !== "string" ||
+    typeof config.token !== "string" ||
+    !config.endpoint ||
+    !config.extension ||
+    !config.profile ||
+    !config.token
+  ) {
+    throw new Error("missing vmux bridge configuration");
+  }
+  let token = config.token;
+  const socket = new WebSocket(config.endpoint);
   const pendingFrames = [];
   const pendingCallbacks = new Map();
 
@@ -16,15 +31,16 @@
       type: "hello",
       payload: {
         protocol_version: 1,
-        extension_id: params.get("extension"),
-        profile_id: params.get("profile"),
-        token: params.get("token"),
+        extension_id: config.extension,
+        profile_id: config.profile,
+        token,
         context_id: "bridge-page",
         context_kind: "bridge_page",
       },
     });
+    token = "";
     while (pendingFrames.length) socket.send(pendingFrames.shift());
-  });
+  }, { once: true });
 
   socket.addEventListener("message", async (event) => {
     const message = JSON.parse(event.data);

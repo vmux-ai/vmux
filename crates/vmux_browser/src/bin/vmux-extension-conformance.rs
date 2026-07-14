@@ -14,6 +14,10 @@ const FIXTURE_MANIFEST: &str =
     include_str!("../../tests/fixtures/extension_conformance/manifest.json");
 const FIXTURE_BACKGROUND: &str =
     include_str!("../../tests/fixtures/extension_conformance/background.js");
+const FIXTURE_ECHO_HTML: &str =
+    include_str!("../../tests/fixtures/extension_conformance/echo.html");
+const FIXTURE_ECHO_SOURCE: &str =
+    include_str!("../../tests/fixtures/extension_conformance/echo.js");
 const FIXTURE_PUBLIC_KEY: &[u8] =
     include_bytes!("../../tests/fixtures/extension_conformance/test_public_key.der");
 
@@ -23,6 +27,7 @@ struct Observation {
     value: Value,
 }
 
+#[cfg(test)]
 impl Observation {
     fn new(key: impl Into<String>, value: Value) -> Self {
         Self {
@@ -73,7 +78,8 @@ fn run() -> Result<(), String> {
             browser,
             output,
         } => {
-            let capture = capture(&target, &browser)?;
+            let diagnostics = output.parent().unwrap_or_else(|| Path::new("."));
+            let capture = capture(&target, &browser, diagnostics)?;
             if let Some(parent) = output.parent() {
                 std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
             }
@@ -148,7 +154,7 @@ fn usage() -> String {
     "usage: vmux-extension-conformance capture --target <chrome|vmux> --browser <path> --output <path> | compare --baseline <path> --candidate <path>".into()
 }
 
-fn capture(target: &str, browser: &Path) -> Result<Capture, String> {
+fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, String> {
     if target == "chrome" {
         verify_chromium_major(browser)?;
     }
@@ -160,10 +166,14 @@ fn capture(target: &str, browser: &Path) -> Result<Capture, String> {
         "http://{}/capture",
         listener.local_addr().map_err(|error| error.to_string())?
     );
-    let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let temp = tempfile::Builder::new()
+        .prefix("vc")
+        .tempdir_in("/tmp")
+        .map_err(|error| error.to_string())?;
     let extension = prepare_fixture(temp.path(), target, &collector)?;
     let extension_id = crx::extension_id_from_key(FIXTURE_PUBLIC_KEY);
     let mut command = Command::new(browser);
+    let mut vmux_home = None;
     if target == "chrome" {
         let profile = temp.path().join("chrome-profile");
         command.args([
@@ -171,15 +181,22 @@ fn capture(target: &str, browser: &Path) -> Result<Capture, String> {
             format!("--load-extension={}", extension.display()),
             "--no-first-run".into(),
             "--no-default-browser-check".into(),
-            "about:blank".into(),
+            "--use-mock-keychain".into(),
+            format!("chrome-extension://{extension_id}/echo.html"),
         ]);
     } else {
         let home = temp.path().join("home");
+        let tmp = home.join("tmp");
+        std::fs::create_dir_all(&tmp).map_err(|error| error.to_string())?;
+        link_debug_cef_framework(&home)?;
         install_vmux_fixture(&home, &extension, &extension_id)?;
         command
             .env("VMUX_EXTENSION_CONFORMANCE", "1")
+            .env("VMUX_TEST", "1")
             .env("HOME", home)
+            .env("TMPDIR", tmp)
             .env("VMUX_PROFILE", "extension-conformance");
+        vmux_home = Some(temp.path().join("home"));
     }
     let stderr_path = temp.path().join("browser.stderr.log");
     let stderr_file = std::fs::File::create(&stderr_path).map_err(|error| error.to_string())?;
@@ -195,8 +212,228 @@ fn capture(target: &str, browser: &Path) -> Result<Capture, String> {
     } else {
         Duration::from_secs(30)
     };
-    let captures = collect_captures(listener, child, expected, timeout, &stderr_path)?;
+    let captures = collect_captures(listener, child, expected, timeout, &stderr_path);
+    let service_result = vmux_home.as_deref().map(terminate_vmux_service).transpose();
+    let diagnostics_result =
+        persist_diagnostics(target, diagnostics, &stderr_path, vmux_home.as_deref());
+    let mut errors = Vec::new();
+    let captures = match captures {
+        Ok(captures) => Some(captures),
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    };
+    if let Err(error) = service_result {
+        errors.push(format!("service cleanup failed: {error}"));
+    }
+    if let Err(error) = diagnostics_result {
+        errors.push(format!("diagnostics persistence failed: {error}"));
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+    let captures = captures.expect("captures exist when no errors were recorded");
     merge_captures(target, captures)
+}
+
+fn persist_diagnostics(
+    target: &str,
+    root: &Path,
+    stderr_path: &Path,
+    vmux_home: Option<&Path>,
+) -> Result<(), String> {
+    let destination = root.join("diagnostics").join(target);
+    if destination.exists() {
+        std::fs::remove_dir_all(&destination).map_err(|error| error.to_string())?;
+    }
+    std::fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+    secure_directory(&destination)?;
+    copy_diagnostic_file(stderr_path, &destination.join("stderr.log"))?;
+    if let Some(home) = vmux_home {
+        let data = vmux_data_dir(home)?;
+        let copied_data = destination.join(vmux_data_suffix()?);
+        copy_diagnostic_directory(&data.join("logs"), &copied_data.join("logs"))?;
+        copy_diagnostic_file(
+            &data.join("profiles/extension-conformance/chrome_debug.log"),
+            &copied_data.join("profiles/extension-conformance/chrome_debug.log"),
+        )?;
+    }
+    Ok(())
+}
+
+fn vmux_data_suffix() -> Result<PathBuf, String> {
+    Ok(match vmux_build_profile()?.as_str() {
+        "release" | "local" => PathBuf::from("Vmux"),
+        profile => PathBuf::from("Vmux").join(profile),
+    })
+}
+
+fn vmux_build_profile() -> Result<String, String> {
+    let profile = std::env::var("VMUX_CONFORMANCE_BUILD_PROFILE").unwrap_or_else(|_| "dev".into());
+    if profile.is_empty()
+        || !profile
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err(format!("invalid vmux build profile: {profile:?}"));
+    }
+    Ok(profile)
+}
+
+#[cfg(target_os = "macos")]
+fn vmux_data_dir(home: &Path) -> Result<PathBuf, String> {
+    Ok(home
+        .join("Library/Application Support")
+        .join(vmux_data_suffix()?))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn vmux_data_dir(home: &Path) -> Result<PathBuf, String> {
+    Ok(home.join("tmp").join(vmux_data_suffix()?))
+}
+
+#[cfg(unix)]
+fn terminate_vmux_service(home: &Path) -> Result<(), String> {
+    let pid_path = vmux_data_dir(home)?.join(format!(
+        "services/vmux-{}-extension-conformance.pid",
+        vmux_build_profile()?
+    ));
+    let started = Instant::now();
+    let pid = loop {
+        match std::fs::read_to_string(&pid_path) {
+            Ok(pid) => break pid,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::NotFound
+                    && started.elapsed() < Duration::from_secs(1) =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.to_string()),
+        }
+    };
+    let pid = pid
+        .trim()
+        .parse::<i32>()
+        .map_err(|error| format!("invalid vmux service PID: {error}"))?;
+    if pid <= 1 {
+        return Err(format!("invalid vmux service PID: {pid}"));
+    }
+    signal_process(pid, libc::SIGTERM)?;
+    let started = Instant::now();
+    while process_exists(pid) && started.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if process_exists(pid) {
+        return Err(format!("vmux service {pid} did not exit after SIGTERM"));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_vmux_service(_home: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn signal_process(pid: i32, signal: i32) -> Result<(), String> {
+    if unsafe { libc::kill(pid, signal) } == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(error.to_string())
+    }
+}
+
+#[cfg(unix)]
+fn process_exists(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn copy_diagnostic_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    let entries = match std::fs::read_dir(source) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        if file_type.is_file() {
+            copy_diagnostic_file(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_diagnostic_file(source: &Path, destination: &Path) -> Result<(), String> {
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        secure_directory(parent)?;
+    }
+    match std::fs::copy(source, destination) {
+        Ok(_) => secure_file(destination),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(unix)]
+fn secure_directory(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(unix))]
+fn secure_directory(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn secure_file(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(unix))]
+fn secure_file(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn link_debug_cef_framework(home: &Path) -> Result<(), String> {
+    let real_home = std::env::var_os("HOME").ok_or("HOME is not set")?;
+    let source =
+        PathBuf::from(real_home).join(".local/share/Chromium Embedded Framework.framework");
+    if !source.is_dir() {
+        return Err(format!(
+            "CEF framework not found at {}; run make setup-cef",
+            source.display()
+        ));
+    }
+    let destination = home.join(".local/share/Chromium Embedded Framework.framework");
+    let parent = destination.parent().ok_or("CEF link has no parent")?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    std::os::unix::fs::symlink(source, destination).map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn link_debug_cef_framework(_home: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn verify_chromium_major(browser: &Path) -> Result<(), String> {
@@ -236,6 +473,10 @@ fn prepare_fixture(root: &Path, target: &str, collector: &str) -> Result<PathBuf
     )
     .map_err(|error| error.to_string())?;
     std::fs::write(extension.join("background.js"), FIXTURE_BACKGROUND)
+        .map_err(|error| error.to_string())?;
+    std::fs::write(extension.join("echo.html"), FIXTURE_ECHO_HTML)
+        .map_err(|error| error.to_string())?;
+    std::fs::write(extension.join("echo.js"), FIXTURE_ECHO_SOURCE)
         .map_err(|error| error.to_string())?;
     std::fs::write(
         extension.join("config.js"),
@@ -298,7 +539,18 @@ fn collect_captures(
     while captures.len() < expected {
         match listener.accept() {
             Ok((stream, _)) => match read_capture(stream) {
-                Ok(capture) => captures.push(capture),
+                Ok(capture) => {
+                    if let Some(error) = capture
+                        .internal_observations
+                        .iter()
+                        .find(|observation| observation.key == "worker.error")
+                        .map(|observation| observation.value.to_string())
+                    {
+                        failure = Some(format!("extension worker failed: {error}"));
+                        break;
+                    }
+                    captures.push(capture);
+                }
                 Err(error) => {
                     failure = Some(error);
                     break;
@@ -316,8 +568,9 @@ fn collect_captures(
         }
         if started.elapsed() >= timeout {
             failure = Some(format!(
-                "capture timed out after {} seconds",
-                timeout.as_secs()
+                "capture timed out after {} seconds with {} of {expected} captures",
+                timeout.as_secs(),
+                captures.len(),
             ));
             break;
         }
