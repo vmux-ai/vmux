@@ -5,8 +5,12 @@
     if (!message || message.channel !== CHANNEL) return undefined;
     if (message.type === "event") {
       const handlers = listeners.get(`${message.namespace}.${message.event}`) || [];
-      for (const handler of handlers) handler(...message.arguments);
-      sendResponse({ ok: true, sequence: message.sequence });
+      const deliveries = handlers.map((handler) =>
+        Promise.resolve().then(() => handler(...message.arguments)),
+      );
+      Promise.allSettled(deliveries).then(() => {
+        sendResponse({ ok: true, sequence: message.sequence });
+      });
       return true;
     }
     return undefined;

@@ -1,0 +1,10 @@
+{
+  "target": "chrome",
+  "chromium_major": 148,
+  "observations": [
+    { "key": "runtime.id.length", "value": 32 },
+    { "key": "storage.local.roundTrip", "value": "value" },
+    { "key": "runtime.message.roundTrip", "value": "pong" }
+  ],
+  "internal_observations": []
+}

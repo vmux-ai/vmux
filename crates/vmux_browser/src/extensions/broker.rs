@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use vmux_core::extension::protocol::{
     ApiEvent, ApiRequest, ApiResponse, BridgeClientMessage, BridgeServerMessage, ChromeError,
@@ -12,6 +13,13 @@ use super::model::{ChromeModel, ChromeModelEvent};
 const CONFORMANCE_NAMESPACE: &str = "__vmux_conformance";
 const MODEL_CHANGED_EVENT: &str = "modelChanged";
 const MAX_PENDING_EVENTS: usize = 256;
+static CAPABILITY_MATRIX: LazyLock<CapabilityMatrix> = LazyLock::new(|| {
+    let matrix = CapabilityMatrix::embedded().expect("valid embedded capability matrix");
+    matrix
+        .validate()
+        .expect("valid extension capability matrix");
+    matrix
+});
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BridgeSubscription {
@@ -61,7 +69,6 @@ pub fn drain_bridge_requests(
     model: Res<ChromeModel>,
     mut wake_timer: Option<ResMut<ConformanceWakeTimer>>,
 ) {
-    let matrix = CapabilityMatrix::embedded().expect("valid embedded capability matrix");
     while let Ok(inbound) = server.try_recv() {
         let BridgeInbound {
             extension_id,
@@ -70,8 +77,12 @@ pub fn drain_bridge_requests(
         } = inbound;
         match message {
             BridgeClientMessage::ApiRequest(request) => {
-                let response =
-                    dispatch_api_request(&matrix, request, &model, extension_conformance_enabled());
+                let response = dispatch_api_request(
+                    &CAPABILITY_MATRIX,
+                    request,
+                    &model,
+                    extension_conformance_enabled(),
+                );
                 if let Err(error) = server.send(&extension_id, response) {
                     bevy::log::warn!("failed to send extension bridge response: {error}");
                 }

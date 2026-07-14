@@ -24,6 +24,7 @@ sha2 = "0.10"
 tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+tempfile = "3"
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
@@ -36,6 +37,5 @@ vmux_terminal = { path = "../vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [dev-dependencies]
-tempfile = "3"
 vmux_agent = { path = "../vmux_agent" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
