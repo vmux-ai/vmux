@@ -616,7 +616,10 @@ pub fn Page() -> Element {
                         div { class: "relative min-w-0 flex-1 overflow-hidden",
                             if installing && draft.read().is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1",
-                                    PromptGhost { accent_bg: agent_accent.accent_bg.to_string() }
+                                    PromptGhost {
+                                        accent_bg: agent_accent.accent_bg.to_string(),
+                                        terminal: false,
+                                    }
                                 }
                             }
                             textarea {

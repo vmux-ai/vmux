@@ -1248,6 +1248,7 @@ mod native_tests {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("MatrixRain {"));
         assert!(source.contains("PromptGhost {"));
+        assert!(source.contains("terminal: false"));
         assert!(source.contains("absolute inset-0 z-20 flex items-center justify-center"));
         assert!(source.contains("type a prompt · runs when ready"));
     }
