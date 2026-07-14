@@ -228,7 +228,10 @@ impl Plugin for BrowserPlugin {
                     .after(UiSystems::Layout)
                     .before(render_standard_materials),
             )
-            .add_systems(Last, refresh_active_windowed_hover)
+            .add_systems(
+                Last,
+                (refresh_layout_cef_hover, refresh_active_windowed_hover),
+            )
             .init_resource::<HostFocusIntent>()
             .init_resource::<PendingNavSnapshots>()
             .init_resource::<HostSpawnRegistry>()
@@ -1477,6 +1480,67 @@ fn windowed_hover_refresh_position(
         (cursor_px.x - frame.left_px) / frame.scale,
         (cursor_px.y - frame.top_px) / frame.scale,
     ))
+}
+
+#[derive(Default)]
+struct LayoutHoverRefreshState {
+    position: Option<Vec2>,
+    in_region: bool,
+}
+
+fn refresh_layout_cef_hover(
+    browsers: NonSend<Browsers>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    suppress: Res<CefSuppressPointerInput>,
+    layout_q: Query<Entity, With<LayoutCef>>,
+    cef_regions: CefPointerRegionQuery<'_, '_>,
+    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    mut state: Local<LayoutHoverRefreshState>,
+) {
+    let Ok(layout) = layout_q.single() else {
+        *state = LayoutHoverRefreshState::default();
+        return;
+    };
+    if suppress.0 || !modal_pointer_targets.is_empty() {
+        if state.in_region {
+            browsers.send_mouse_move(
+                &layout,
+                buttons.get_pressed(),
+                state.position.unwrap_or_default(),
+                true,
+            );
+        }
+        *state = LayoutHoverRefreshState::default();
+        return;
+    }
+    let Some(window_entity) = primary_window.single().ok() else {
+        return;
+    };
+    let Ok(window) = windows.get(window_entity) else {
+        return;
+    };
+    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
+    else {
+        return;
+    };
+    let scale = window.resolution.scale_factor();
+    if !scale.is_finite() || scale <= 0.0 {
+        return;
+    }
+    let position = cursor_px / scale;
+    let in_region = cef_pointer_regions_contains(position, &cef_regions);
+    if state.position == Some(position) && state.in_region == in_region {
+        return;
+    }
+    if in_region {
+        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
+    } else if state.in_region {
+        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
+    }
+    state.position = Some(position);
+    state.in_region = in_region;
 }
 
 fn refresh_active_windowed_hover(
@@ -5260,10 +5324,26 @@ mod tests {
             .and_then(|tail| tail.split("fn sync_windowed_layout").next())
             .unwrap_or_default();
 
-        assert!(plugin_build.contains("add_systems(Last, refresh_active_windowed_hover)"));
+        assert!(plugin_build.contains("refresh_layout_cef_hover"));
+        assert!(plugin_build.contains("refresh_active_windowed_hover"));
         assert!(refresh_fn.contains("With<CefKeyboardTarget>"));
         assert!(refresh_fn.contains("With<WebviewWindowed>"));
         assert!(refresh_fn.contains("vmux_layout::pane::pane_hover_cursor_position"));
+        assert!(refresh_fn.contains("browsers.send_mouse_move"));
+    }
+
+    #[test]
+    fn browser_plugin_refreshes_layout_hover_from_native_cursor() {
+        let source = include_str!("lib.rs");
+        let refresh_fn = source
+            .split("fn refresh_layout_cef_hover")
+            .nth(1)
+            .and_then(|tail| tail.split("fn refresh_active_windowed_hover").next())
+            .unwrap_or_default();
+
+        assert!(refresh_fn.contains("pane_hover_cursor_position"));
+        assert!(refresh_fn.contains("cef_pointer_regions_contains"));
+        assert!(refresh_fn.contains("window.resolution.scale_factor()"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
     }
 
