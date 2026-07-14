@@ -7,11 +7,13 @@ use crate::{parse, runner};
 pub enum JobKind {
     Status {
         path: PathBuf,
+        dirty: bool,
     },
     Diff {
         path: PathBuf,
         top_line: u32,
         rows: u32,
+        content: Option<String>,
     },
     Stage {
         path: PathBuf,
@@ -84,15 +86,29 @@ fn mutate(
 
 pub fn run_job(job: JobKind) -> Vec<Emit> {
     match job {
-        JobKind::Status { path } => match runner::status(&path) {
-            Ok(ev) => vec![Emit::Status(ev)],
+        JobKind::Status { path, dirty } => match runner::status(&path) {
+            Ok(mut ev) => {
+                if dirty {
+                    ev.file_status = match ev.file_status {
+                        FileStatus::Clean => FileStatus::Modified,
+                        FileStatus::Staged => FileStatus::StagedModified,
+                        status => status,
+                    };
+                }
+                vec![Emit::Status(ev)]
+            }
             Err(e) => vec![Emit::Error(GitErrorEvent { message: e.0 })],
         },
         JobKind::Diff {
             path,
             top_line,
             rows,
-        } => match runner::diff_lines(&path) {
+            content,
+        } => match content
+            .as_deref()
+            .map(|content| runner::diff_lines_with_content(&path, content))
+            .unwrap_or_else(|| runner::diff_lines(&path))
+        {
             Ok(lines) => {
                 let (total, win) = parse::window(&lines, top_line, rows);
                 vec![
@@ -153,7 +169,10 @@ mod tests {
     #[test]
     fn status_job_emits_status() {
         let (_repo, file) = dirty_repo();
-        let emits = run_job(JobKind::Status { path: file });
+        let emits = run_job(JobKind::Status {
+            path: file,
+            dirty: false,
+        });
         assert!(matches!(emits.as_slice(), [Emit::Status(_)]));
     }
 
@@ -164,6 +183,7 @@ mod tests {
             path: file,
             top_line: 0,
             rows: 50,
+            content: None,
         });
         assert!(matches!(emits[0], Emit::DiffMeta(_)));
         assert!(matches!(emits[1], Emit::DiffViewport(_)));
@@ -186,7 +206,31 @@ mod tests {
     fn job_on_non_repo_emits_error() {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
-        let emits = run_job(JobKind::Status { path: file });
+        let emits = run_job(JobKind::Status {
+            path: file,
+            dirty: false,
+        });
         assert!(matches!(emits.as_slice(), [Emit::Error(_)]));
+    }
+
+    #[test]
+    fn dirty_buffer_changes_clean_status_to_modified() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "a.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+
+        let emits = run_job(JobKind::Status {
+            path: file,
+            dirty: true,
+        });
+
+        assert!(matches!(
+            emits.as_slice(),
+            [Emit::Status(GitStatusEvent {
+                file_status: FileStatus::Modified,
+                ..
+            })]
+        ));
     }
 }

@@ -31,3 +31,19 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("ExplorerChromeEvent"));
     assert!(s.contains("ExplorerPanelWidth"));
 }
+
+#[test]
+fn page_wires_shared_editor_diff_toggle() {
+    let s = page_source();
+    assert!(s.contains("FileViewModeEvent"));
+    assert!(s.contains("FileViewModeSet"));
+    assert!(s.contains("Show diffs in all open files"));
+    assert!(s.contains("file_view_mode.set(next)"));
+    assert!(s.contains("if next == FileViewMode::Diff"));
+    assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
+    assert!(s.contains("markers: git_line_markers"));
+    assert!(s.contains("diff_marker_class(marker)"));
+    assert!(s.contains("schedule_git_refresh(git_refresh_generation, git_nonce)"));
+    assert!(s.contains("transition-transform duration-150"));
+    assert!(s.contains("if git_path() != m.abs_path"));
+}

@@ -41,6 +41,8 @@ pub const FILE_KEY_EVENT: &str = "file_key";
 pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
 pub const FILE_DIRTY_EVENT: &str = "file_dirty";
+pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
+pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
 /// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 /// File page → host: the user's choice on the tidy prompt banner.
@@ -1608,6 +1610,60 @@ pub struct FileDirtyEvent {
     pub dirty: bool,
 }
 
+/// Shared rendering mode for all open file editors.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileViewMode {
+    #[default]
+    Editor,
+    Diff,
+}
+
+/// Host → file page: update the shared rendering mode.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileViewModeEvent {
+    pub mode: FileViewMode,
+}
+
+/// File page → host: set the shared rendering mode.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileViewModeSet {
+    pub mode: FileViewMode,
+}
+
 /// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.
 #[derive(
     Debug,
@@ -1919,6 +1975,16 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();
         let back = rkyv::from_bytes::<FileCursorEvent, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, e);
+    }
+
+    #[test]
+    fn file_view_mode_event_roundtrips() {
+        let event = FileViewModeEvent {
+            mode: FileViewMode::Diff,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+        let back = rkyv::from_bytes::<FileViewModeEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, event);
     }
 
     fn patch(changed_rows: Vec<u32>, cols: u16, rows: u16, full: bool) -> TermViewportPatch {

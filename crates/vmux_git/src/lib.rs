@@ -2,6 +2,7 @@
 //! to the `files://` editor page.
 
 pub mod event;
+pub mod view;
 
 #[cfg(target_arch = "wasm32")]
 pub mod ui;
@@ -19,6 +20,13 @@ pub mod worktree;
 
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug, Default)]
+pub struct GitDiffSource {
+    pub content: String,
+    pub dirty: bool,
+}
 
 pub const FILES_HOST: &str = "files";
 

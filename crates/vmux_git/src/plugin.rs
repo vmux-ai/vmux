@@ -6,7 +6,7 @@ use crate::event::{
     GitCommitRequest, GitDiffRequest, GitDiscardRequest, GitHunkRequest, GitPushRequest,
     GitStageRequest, GitStatusRequest, GitUnstageRequest,
 };
-use crate::job::{emit_event_name, run_job, Emit, JobKind};
+use crate::job::{Emit, JobKind, emit_event_name, run_job};
 
 pub type OutboxQueue = Vec<(Entity, Vec<Emit>)>;
 
@@ -52,18 +52,34 @@ fn spawn_job(outbox: &GitOutbox, webview: Entity, job: JobKind) {
     });
 }
 
-fn on_status_request(trigger: On<BinReceive<GitStatusRequest>>, outbox: Res<GitOutbox>) {
+fn on_status_request(
+    trigger: On<BinReceive<GitStatusRequest>>,
+    sources: Query<&GitDiffSource>,
+    outbox: Res<GitOutbox>,
+) {
     spawn_job(&outbox, trigger.event().webview, JobKind::Status {
         path: trigger.event().payload.path.clone().into(),
+        dirty: sources
+            .get(trigger.event().webview)
+            .is_ok_and(|source| source.dirty),
     });
 }
 
-fn on_diff_request(trigger: On<BinReceive<GitDiffRequest>>, outbox: Res<GitOutbox>) {
+fn on_diff_request(
+    trigger: On<BinReceive<GitDiffRequest>>,
+    sources: Query<&GitDiffSource>,
+    outbox: Res<GitOutbox>,
+) {
     let p = &trigger.event().payload;
     spawn_job(&outbox, trigger.event().webview, JobKind::Diff {
         path: p.path.clone().into(),
         top_line: p.top_line,
         rows: p.rows,
+        content: sources
+            .get(trigger.event().webview)
+            .ok()
+            .filter(|source| source.dirty)
+            .map(|source| source.content.clone()),
     });
 }
 

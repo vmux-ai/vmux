@@ -16,6 +16,7 @@ path = "src/lib.rs"
 serde = { workspace = true }
 rkyv = { workspace = true }
 vmux_core = { path = "../vmux_core" }
+vmux_git = { path = "../vmux_git" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
@@ -54,7 +55,6 @@ url = { workspace = true }
 dioxus = { workspace = true }
 js-sys = "0.3"
 unicode-width = "0.2"
-vmux_git = { path = "../vmux_git" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [

@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
+use similar::{ChangeTag, TextDiff};
+
 use crate::event::*;
 use crate::parse;
 
@@ -245,6 +247,71 @@ fn staged_only_lines(
             }
         })
         .collect();
+    Ok(lines)
+}
+
+fn index_text(root: &Path, target: &str) -> Result<String, GitError> {
+    let spec = format!(":{target}");
+    let (out, _, ok) = git(root, &["show", &spec])?;
+    if ok { Ok(out) } else { Ok(String::new()) }
+}
+
+pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLine>, GitError> {
+    let root = repo_root(file)?;
+    let target = rel(&root, file);
+    let baseline = index_text(&root, &target)?;
+    let staged = staged_lineset(&root, &target);
+    let new_spans = crate::highlight::highlight_file(content, file);
+    let mut old_no = 1u32;
+    let mut new_no = 1u32;
+    let mut lines = Vec::new();
+
+    for change in TextDiff::from_lines(baseline.as_str(), content).iter_all_changes() {
+        let text = change.value().trim_end_matches(['\n', '\r']);
+        match change.tag() {
+            ChangeTag::Equal => {
+                lines.push(DiffLine {
+                    kind: if staged.contains(&old_no) {
+                        DiffKind::Staged
+                    } else {
+                        DiffKind::Context
+                    },
+                    old_no: Some(old_no),
+                    new_no: Some(new_no),
+                    hunk: None,
+                    spans: new_spans
+                        .get(new_no.saturating_sub(1) as usize)
+                        .cloned()
+                        .unwrap_or_else(|| crate::highlight::highlight_line(text, file)),
+                });
+                old_no += 1;
+                new_no += 1;
+            }
+            ChangeTag::Delete => {
+                lines.push(DiffLine {
+                    kind: DiffKind::Remove,
+                    old_no: Some(old_no),
+                    new_no: None,
+                    hunk: None,
+                    spans: crate::highlight::highlight_line(text, file),
+                });
+                old_no += 1;
+            }
+            ChangeTag::Insert => {
+                lines.push(DiffLine {
+                    kind: DiffKind::Add,
+                    old_no: None,
+                    new_no: Some(new_no),
+                    hunk: None,
+                    spans: new_spans
+                        .get(new_no.saturating_sub(1) as usize)
+                        .cloned()
+                        .unwrap_or_else(|| crate::highlight::highlight_line(text, file)),
+                });
+                new_no += 1;
+            }
+        }
+    }
     Ok(lines)
 }
 
@@ -510,6 +577,28 @@ mod tests {
         let lines = diff_lines(&file).unwrap();
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Add)));
         assert!(lines.iter().any(|l| matches!(l.kind, DiffKind::Remove)));
+    }
+
+    #[test]
+    fn diff_lines_with_content_reads_unsaved_buffer() {
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\ntwo\nthree\n");
+        test_repo::run(repo.path(), &["add", "a.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+
+        let lines = diff_lines_with_content(&file, "one\nchanged\nthree\n").unwrap();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| { matches!(line.kind, DiffKind::Remove) && line.old_no == Some(2) })
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| { matches!(line.kind, DiffKind::Add) && line.new_no == Some(2) })
+        );
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "one\ntwo\nthree\n");
     }
 
     #[test]
