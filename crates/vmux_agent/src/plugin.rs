@@ -1047,6 +1047,11 @@ fn handle_agent_file_touch(
         {
             continue;
         }
+        if *kind == vmux_service::protocol::FileTouchKind::Read
+            && Path::new(path).file_name().and_then(|name| name.to_str()) == Some("SKILL.md")
+        {
+            continue;
+        }
         let Some(agent_pane) = resolve.agent_pane(*anchor) else {
             continue;
         };
@@ -3865,6 +3870,58 @@ mod tests {
             file_touch_url("/a/b.rs", Some(10), Some(5), Some(12)),
             "file:///a/b.rs#L10:5-12"
         );
+    }
+
+    #[test]
+    fn skill_file_read_does_not_open_follow_pane() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_agent_file_touch);
+
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((anchor, ChildOf(stack)));
+
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::FileTouched {
+                    anchor,
+                    path: "/Users/me/.agents/skills/caveman/SKILL.md".into(),
+                    line: None,
+                    col: None,
+                    end_col: None,
+                    kind: vmux_service::protocol::FileTouchKind::Read,
+                },
+            });
+
+        app.update();
+
+        let previews = app
+            .world()
+            .resource::<Messages<vmux_layout::OpenBesideRequest>>();
+        let mut preview_cursor = previews.get_cursor();
+        assert_eq!(preview_cursor.read(previews).count(), 0);
+        let observations = app
+            .world()
+            .resource::<Messages<vmux_layout::worktree::TabDirectoryObserved>>();
+        let mut observation_cursor = observations.get_cursor();
+        assert_eq!(observation_cursor.read(observations).count(), 0);
     }
 
     #[test]
