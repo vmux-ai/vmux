@@ -26,6 +26,7 @@ pub struct ChatSnapshot {
     /// Populated when `status == "awaiting"`.
     pub approval_call_id: String,
     pub approval_name: String,
+    pub approval_args_json: String,
     /// Prompts queued behind the running turn (FIFO), oldest first. View-only on the page.
     pub queued: Vec<String>,
     /// True after an interrupt: the queue is held (not auto-advancing) until resume/clear/submit.

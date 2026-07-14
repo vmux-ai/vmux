@@ -62,6 +62,20 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: false,
 };
 
+#[cfg(any(test, target_arch = "wasm32"))]
+fn approval_details_text(args_json: &str) -> String {
+    let Ok(args) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return args_json.to_string();
+    };
+    if let Some(command) = args.get("command").and_then(serde_json::Value::as_str) {
+        return command.to_string();
+    }
+    if args.is_null() || args.as_object().is_some_and(serde_json::Map::is_empty) {
+        return String::new();
+    }
+    serde_json::to_string_pretty(&args).unwrap_or_else(|_| args_json.to_string())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentChatPagePlugin;
 
@@ -247,22 +261,26 @@ fn snapshot_of(
     let running = matches!(state, AgentRunState::Streaming);
     let items = group_turns(&display_messages, durations, running);
     let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
-    let (status, error, call_id, name) = match state {
-        AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
+    let (status, error) = match state {
+        AgentRunState::Idle => ("idle", String::new()),
         AgentRunState::Installing { pct, message } => {
             let text = match pct {
                 Some(p) => format!("{message} ({p}%)"),
                 None => message.clone(),
             };
-            ("installing", text, String::new(), String::new())
+            ("installing", text)
         }
-        AgentRunState::Streaming => ("streaming", String::new(), String::new(), String::new()),
-        AgentRunState::AwaitingApproval { call_id, name, .. } => {
-            ("awaiting", String::new(), call_id.clone(), name.clone())
-        }
-        AgentRunState::Errored(message) => {
-            ("errored", message.clone(), String::new(), String::new())
-        }
+        AgentRunState::Streaming => ("streaming", String::new()),
+        AgentRunState::AwaitingApproval { .. } => ("awaiting", String::new()),
+        AgentRunState::Errored(message) => ("errored", message.clone()),
+    };
+    let (call_id, name, args_json) = match state {
+        AgentRunState::AwaitingApproval {
+            call_id,
+            name,
+            args,
+        } => (call_id.clone(), name.clone(), args.to_string()),
+        _ => (String::new(), String::new(), String::new()),
     };
     let (agent_name, accent_color) = profile
         .map(|p| (p.name.clone(), p.avatar.color.clone()))
@@ -276,6 +294,7 @@ fn snapshot_of(
         error,
         approval_call_id: call_id,
         approval_name: name,
+        approval_args_json: args_json,
         agent_name,
         agent_icon,
         accent_color,
@@ -916,6 +935,45 @@ mod native_tests {
         );
 
         assert_eq!(snapshot.handoff_message_count, 2);
+    }
+
+    #[test]
+    fn snapshot_includes_approval_tool_and_input() {
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::AwaitingApproval {
+                call_id: "call-1".into(),
+                name: "vmux.run".into(),
+                args: serde_json::json!({"command": "echo hi", "focus": true}),
+            },
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+        );
+
+        assert_eq!(snapshot.approval_name, "vmux.run");
+        assert_eq!(
+            snapshot.approval_args_json,
+            r#"{"command":"echo hi","focus":true}"#
+        );
+    }
+
+    #[test]
+    fn approval_prompt_renders_tool_input() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("snap.approval_args_json.clone()"));
+        assert!(source.contains("whitespace-pre-wrap"));
+    }
+
+    #[test]
+    fn approval_details_prefers_command_text() {
+        assert_eq!(
+            approval_details_text(r#"{"command":"echo hi\necho bye","focus":true}"#),
+            "echo hi\necho bye"
+        );
+        assert_eq!(approval_details_text("{}"), "");
     }
 
     #[test]

@@ -135,6 +135,26 @@ impl AcpProjector {
         &self.messages
     }
 
+    /// Returns the projected title and raw input for a tool call.
+    pub fn tool_call_details(&self, call_id: &str) -> Option<(String, String)> {
+        self.messages.iter().find_map(|message| {
+            let Message::Assistant { blocks } = message else {
+                return None;
+            };
+            blocks.iter().find_map(|block| {
+                let AssistantBlock::ToolUse {
+                    call_id: existing,
+                    name,
+                    args,
+                } = block
+                else {
+                    return None;
+                };
+                (existing == call_id).then(|| (name.clone(), args.clone()))
+            })
+        })
+    }
+
     /// Record the user's prompt as its own turn. ACP never echoes the prompt back as a
     /// `session/update`, so without this the transcript the chat renders would omit it and
     /// the optimistic user bubble would vanish on the next snapshot.
@@ -591,6 +611,23 @@ mod tests {
             )),
             other => panic!("expected assistant message, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tool_call_details_returns_projected_title_and_input() {
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "vmux.run")
+                .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
+        ));
+
+        assert_eq!(
+            p.tool_call_details("c1"),
+            Some((
+                "vmux.run".to_string(),
+                r#"{"command":"echo hi","focus":true}"#.to_string(),
+            ))
+        );
     }
 
     #[test]

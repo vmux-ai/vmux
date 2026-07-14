@@ -149,7 +149,7 @@ pub fn Page() -> Element {
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "idle".to_string());
     let mut error = use_signal(String::new);
-    let mut approval = use_signal(|| Option::<(String, String)>::None);
+    let mut approval = use_signal(|| Option::<(String, String, String)>::None);
     let mut agent_name = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
@@ -227,6 +227,7 @@ pub fn Page() -> Element {
             approval.set(Some((
                 snap.approval_call_id.clone(),
                 snap.approval_name.clone(),
+                snap.approval_args_json.clone(),
             )));
         } else {
             approval.set(None);
@@ -424,37 +425,49 @@ pub fn Page() -> Element {
                 }
             }
 
-            if let Some((call_id, name)) = approval() {
-                div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
-                    div { class: "mx-auto flex max-w-3xl items-center gap-3",
-                        span { class: "flex-1 text-sm text-foreground",
-                            "Allow "
-                            code { class: "font-mono text-amber-500", "{name}" }
-                            "?"
-                        }
-                        button {
-                            class: "rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/10",
-                            onclick: {
-                                let call_id = call_id.clone();
-                                move |_| send_approval(call_id.clone(), 0)
-                            },
-                            "Deny"
-                        }
-                        button {
-                            class: "rounded-lg bg-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/20",
-                            onclick: {
-                                let call_id = call_id.clone();
-                                move |_| send_approval(call_id.clone(), 2)
-                            },
-                            "Allow always"
-                        }
-                        button {
-                            class: "rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background",
-                            onclick: {
-                                let call_id = call_id.clone();
-                                move |_| send_approval(call_id.clone(), 1)
-                            },
-                            "Allow"
+            if let Some((call_id, name, args_json)) = approval() {
+                {
+                    let details = super::approval_details_text(&args_json);
+                    rsx! {
+                        div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
+                            div { class: "mx-auto flex max-w-3xl flex-col gap-3",
+                                div { class: "min-w-0",
+                                    div { class: "text-sm text-foreground",
+                                        "Allow "
+                                        code { class: "font-mono text-amber-500", "{name}" }
+                                        "?"
+                                    }
+                                    if !details.is_empty() {
+                                        pre { class: "mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-foreground/[0.05] px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground ring-1 ring-inset ring-foreground/10", "{details}" }
+                                    }
+                                }
+                                div { class: "flex justify-end gap-2",
+                                    button {
+                                        class: "rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/10",
+                                        onclick: {
+                                            let call_id = call_id.clone();
+                                            move |_| send_approval(call_id.clone(), 0)
+                                        },
+                                        "Deny"
+                                    }
+                                    button {
+                                        class: "rounded-lg bg-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/20",
+                                        onclick: {
+                                            let call_id = call_id.clone();
+                                            move |_| send_approval(call_id.clone(), 2)
+                                        },
+                                        "Allow always"
+                                    }
+                                    button {
+                                        class: "rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background",
+                                        onclick: {
+                                            let call_id = call_id.clone();
+                                            move |_| send_approval(call_id.clone(), 1)
+                                        },
+                                        "Allow"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
