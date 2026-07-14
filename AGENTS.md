@@ -53,8 +53,7 @@ When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Pro
 1. Check if a worktree already exists: `git worktree list`
 2. Create worktree if needed: `git worktree add .worktrees/vmx-<number> -b <branch-name>` — always name the worktree directory using the `vmx-<number>` convention matching the Linear issue (e.g., `.worktrees/vmx-88`).
 3. `cd` into the worktree directory and make all edits there.
-4. When done, merge to main, then remove: `git worktree remove .worktrees/<short-name>`
-5. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
+4. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
 
 Worktree directory: `.worktrees/` (already in `.gitignore`).
 
