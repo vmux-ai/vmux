@@ -491,11 +491,13 @@ fn spawn_layout_requested_content(
         match request {
             LayoutSpawnRequest::Terminal { stack } => {
                 let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(*stack, &child_of, &tabs);
-                let cwd = vmux_setting::resolve_startup_dir_for_tab(
+                let Ok(cwd) = vmux_setting::resolve_tab_workspace_dir(
                     &settings,
                     &active_space.record.id,
                     tab_dir.as_deref(),
-                );
+                ) else {
+                    continue;
+                };
                 let terminal = commands
                     .spawn((
                         new_terminal_bundle_with_cwd(
@@ -604,11 +606,11 @@ fn open_terminal_page(
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
-        Some(vmux_setting::resolve_startup_dir_for_tab(
+        Some(vmux_setting::resolve_tab_workspace_dir(
             settings,
             &active_space.record.id,
             tab_dir.as_deref(),
-        ))
+        )?)
     };
     clear_stack_children(task.stack, children_q, commands);
     let title = cwd
@@ -4199,7 +4201,112 @@ mod tests {
             .world_mut()
             .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
         let launch = launches.iter(app.world()).next().expect("terminal spawned");
-        assert_eq!(launch.cwd, tab_dir.path().to_string_lossy());
+        assert_eq!(
+            launch.cwd,
+            tab_dir.path().canonicalize().unwrap().to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn open_terminal_page_rejects_invalid_ancestor_tab_startup_dir() {
+        let fallback_dir = tempfile::tempdir().unwrap();
+        let record = vmux_space::model::bootstrap_space_record();
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            record.id.clone(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(settings)
+            .insert_resource(vmux_space::spaces::ActiveSpace { record })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_terminal_page_open);
+
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "t".into(),
+                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://terminal".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenError>(task).is_some());
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Terminal>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn layout_terminal_rejects_invalid_ancestor_tab_startup_dir() {
+        let fallback_dir = tempfile::tempdir().unwrap();
+        let record = vmux_space::model::bootstrap_space_record();
+        let mut settings = test_settings();
+        settings.spaces.insert(
+            record.id.clone(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(fallback_dir.path().to_string_lossy().into()),
+            },
+        );
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LayoutSpawnRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_space::spaces::ActiveSpace { record })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, spawn_layout_requested_content);
+
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "t".into(),
+                startup_dir: Some("/no/such/vmux-tab-workspace".into()),
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<LayoutSpawnRequest>>()
+            .write(LayoutSpawnRequest::Terminal { stack });
+
+        app.update();
+
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Terminal>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
     }
 
     #[test]

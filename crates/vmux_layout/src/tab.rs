@@ -2,7 +2,6 @@ use crate::event::TabsCommandEvent;
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    window::Main as MainNode,
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -38,7 +37,8 @@ impl Plugin for TabPlugin {
                 Update,
                 handle_tab_commands
                     .in_set(ReadAppCommands)
-                    .in_set(TabCommandSet),
+                    .in_set(TabCommandSet)
+                    .after(crate::settings::EffectiveStartupDirSet),
             )
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
             .add_systems(PostUpdate, sync_tab_order);
@@ -119,11 +119,11 @@ fn handle_tab_commands(
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
-    main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut commands: Commands,
 ) {
@@ -132,7 +132,12 @@ fn handle_tab_commands(
 
         match cmd {
             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewTab { url })) => {
-                let Ok(main) = main_q.single() else { continue };
+                let Some((space, startup_dir)) = effective_startup_dir
+                    .as_deref()
+                    .and_then(|effective| effective.0.clone())
+                else {
+                    continue;
+                };
                 let count = tabs.iter().count();
                 let name = format!("Tab {}", count + 1);
                 let content = url
@@ -148,10 +153,10 @@ fn handle_tab_commands(
                     })
                     .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
                 layout_requests.write(TabLayoutSpawnRequest {
-                    main,
+                    space,
                     primary_window: *primary_window,
                     name: Some(name),
-                    startup_dir: None,
+                    startup_dir,
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -162,12 +167,17 @@ fn handle_tab_commands(
                     let Some(active) = active_tab else { continue };
                     let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
                     if siblings.len() <= 1 {
-                        let Ok(main) = main_q.single() else { continue };
+                        let Some((space, startup_dir)) = effective_startup_dir
+                            .as_deref()
+                            .and_then(|effective| effective.0.clone())
+                        else {
+                            continue;
+                        };
                         layout_requests.write(TabLayoutSpawnRequest {
-                            main,
+                            space,
                             primary_window: *primary_window,
                             name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                            startup_dir: None,
+                            startup_dir,
                             content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                             clear_pending_stack: true,
                             focus: true,
@@ -178,16 +188,21 @@ fn handle_tab_commands(
                     commands.entity(active).despawn();
                 }
                 TabCommand::New => {
-                    let Ok(main) = main_q.single() else { continue };
+                    let Some((space, _)) = effective_startup_dir
+                        .as_deref()
+                        .and_then(|effective| effective.0.clone())
+                    else {
+                        continue;
+                    };
                     let Some(dir) = rfd::FileDialog::new().pick_folder() else {
                         continue;
                     };
                     let name = format!("Tab {}", tabs.iter().count() + 1);
                     layout_requests.write(TabLayoutSpawnRequest {
-                        main,
+                        space,
                         primary_window: *primary_window,
                         name: Some(name),
-                        startup_dir: Some(dir.to_string_lossy().into_owned()),
+                        startup_dir: dir,
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
@@ -365,13 +380,13 @@ fn on_tabs_command_emit(
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
-    main_q: Query<Entity, With<MainNode>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
@@ -396,12 +411,17 @@ fn on_tabs_command_emit(
             let Some(target) = target else { return };
             let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
             if siblings.len() <= 1 {
-                let Ok(main) = main_q.single() else { return };
+                let Some((space, startup_dir)) = effective_startup_dir
+                    .as_deref()
+                    .and_then(|effective| effective.0.clone())
+                else {
+                    return;
+                };
                 layout_requests.write(TabLayoutSpawnRequest {
-                    main,
+                    space,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                    startup_dir: None,
+                    startup_dir,
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -441,6 +461,7 @@ mod tests {
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
+    use crate::window::Main as MainNode;
     use vmux_command::CommandPlugin;
     use vmux_core::PageOpenRequest;
 
@@ -662,13 +683,21 @@ mod tests {
     fn build_main_and_tab(app: &mut App) -> Entity {
         let window = app.world_mut().spawn(PrimaryWindow).id();
         let main = app.world_mut().spawn(MainNode).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            std::env::current_dir().unwrap(),
+        ))));
         app.world_mut().spawn((
             Tab {
                 name: "Tab 1".into(),
                 startup_dir: None,
             },
             LastActivatedAt::now(),
-            ChildOf(main),
+            ChildOf(space),
         ));
         let _ = window;
         main
@@ -751,10 +780,10 @@ mod tests {
         app.world_mut()
             .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
             .write(crate::TabLayoutSpawnRequest {
-                main,
+                space,
                 primary_window: window,
                 name: None,
-                startup_dir: None,
+                startup_dir: std::env::current_dir().unwrap(),
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,

@@ -133,8 +133,11 @@ fn mark_dirty_on_change(
     added_stacks: Query<(), Added<Stack>>,
     added_panes: Query<(), Added<Pane>>,
     added_tabs: Query<(), Added<Tab>>,
+    changed_tabs: Query<(), Changed<Tab>>,
+    changed_tab_worktrees: Query<(), Changed<TabWorktree>>,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
+    mut removed_tab_worktrees: RemovedComponents<TabWorktree>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
@@ -146,8 +149,11 @@ fn mark_dirty_on_change(
     if !added_stacks.is_empty()
         || !added_panes.is_empty()
         || !added_tabs.is_empty()
+        || !changed_tabs.is_empty()
+        || !changed_tab_worktrees.is_empty()
         || !removed_stacks.is_empty()
         || !removed_panes.is_empty()
+        || removed_tab_worktrees.read().count() > 0
         || !changed_meta.is_empty()
         || !changed_size.is_empty()
         || !changed_children.is_empty()
@@ -712,6 +718,58 @@ mod tests {
         app.world_mut().resource_mut::<AutoSave>().dirty = false;
         app.world_mut().spawn(vmux_history::Visit);
         app.update();
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
+
+    #[test]
+    fn changing_tab_startup_dir_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .entity_mut(tab)
+            .get_mut::<Tab>()
+            .unwrap()
+            .startup_dir = Some("/tmp/rebound".into());
+
+        app.update();
+
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
+
+    #[test]
+    fn removing_tab_worktree_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                TabWorktree {
+                    repo_root: "/tmp/repo".into(),
+                    branch: "vmux/test".into(),
+                    base_ref: "main".into(),
+                },
+            ))
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut().entity_mut(tab).remove::<TabWorktree>();
+
+        app.update();
+
         assert!(app.world().resource::<AutoSave>().dirty);
     }
 

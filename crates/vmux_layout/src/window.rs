@@ -426,22 +426,27 @@ fn setup(
 }
 
 fn request_default_layout(
-    main_q: Query<Entity, With<Main>>,
     tab_q: Query<(), With<Tab>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
         return;
     }
 
-    let Ok(main) = main_q.single() else { return };
+    let Some((space, startup_dir)) = effective_startup_dir
+        .as_deref()
+        .and_then(|effective| effective.0.clone())
+    else {
+        return;
+    };
     requests.write(TabLayoutSpawnRequest {
-        main,
+        space,
         primary_window: *primary_window,
         name: None,
-        startup_dir: None,
+        startup_dir,
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
@@ -522,36 +527,36 @@ pub fn spawn_requested_tab_layouts(
     mut new_stack_ctx: ResMut<crate::NewStackContext>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
-    active_space: Query<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>,
-    any_space: Query<Entity, With<crate::space::Space>>,
+    spaces: Query<(), With<crate::space::Space>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
-        // Parent the tab under the active space; on a fresh start no space is
-        // marked active yet (ensure_active runs later), so fall back to any
-        // existing space so the tab is adopted into a space container (becomes
-        // active + visible) instead of being orphaned under Main.
-        let parent = active_space
-            .iter()
-            .next()
-            .or_else(|| any_space.iter().next())
-            .unwrap_or(request.main);
+        if spaces.get(request.space).is_err() {
+            continue;
+        }
+        let Ok(startup_dir) = request.startup_dir.canonicalize() else {
+            continue;
+        };
+        if !startup_dir.is_dir() {
+            continue;
+        }
+        let Some(startup_dir) = startup_dir.to_str().map(str::to_string) else {
+            continue;
+        };
         let TabScaffold {
             tab: tab_e,
             pane: leaf,
             stack,
         } = spawn_tab_scaffold_in_space(
             &mut commands,
-            parent,
+            request.space,
             request.primary_window,
             settings.pane.gap,
         );
-        if request.name.is_some() || request.startup_dir.is_some() {
-            commands.entity(tab_e).insert(Tab {
-                name: request.name.clone().unwrap_or_default(),
-                startup_dir: request.startup_dir.clone(),
-            });
-        }
+        commands.entity(tab_e).insert(Tab {
+            name: request.name.clone().unwrap_or_default(),
+            startup_dir: Some(startup_dir),
+        });
 
         if request.clear_pending_stack
             && let Some(old_stack) = new_stack_ctx.stack.take()
@@ -1169,6 +1174,7 @@ mod tests {
     #[test]
     fn default_tab_requests_command_bar_open() {
         let _home = HomeEnvGuard::use_temp_home("default-tab");
+        let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<crate::NewStackContext>()
@@ -1188,7 +1194,15 @@ mod tests {
             );
 
         app.world_mut().spawn(PrimaryWindow);
-        app.world_mut().spawn(Main);
+        let main = app.world_mut().spawn(Main).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            startup_dir.path().to_path_buf(),
+        ))));
 
         app.update();
 
@@ -1198,8 +1212,99 @@ mod tests {
     }
 
     #[test]
+    fn default_tab_stores_workspace_directory() {
+        let _home = HomeEnvGuard::use_temp_home("default-tab-workspace");
+        let startup_dir = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .insert_resource(test_settings(0.0))
+            .add_systems(
+                Update,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
+
+        app.world_mut().spawn(PrimaryWindow);
+        let main = app.world_mut().spawn(Main).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            startup_dir.path().to_path_buf(),
+        ))));
+
+        app.update();
+
+        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
+        assert_eq!(
+            tab.startup_dir.as_deref(),
+            startup_dir.path().canonicalize().unwrap().to_str()
+        );
+    }
+
+    #[test]
+    fn tab_request_keeps_space_active_when_request_was_created() {
+        let startup_dir = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .insert_resource(test_settings(0.0))
+            .add_systems(Update, spawn_requested_tab_layouts);
+        let window = app.world_mut().spawn(PrimaryWindow).id();
+        let main = app.world_mut().spawn(Main).id();
+        let requested_space = app
+            .world_mut()
+            .spawn((crate::space::Space, vmux_core::Active, ChildOf(main)))
+            .id();
+        let later_space = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<crate::TabLayoutSpawnRequest>>()
+            .write(crate::TabLayoutSpawnRequest {
+                space: requested_space,
+                primary_window: window,
+                name: None,
+                startup_dir: startup_dir.path().to_path_buf(),
+                content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
+                clear_pending_stack: false,
+                focus: true,
+            });
+        app.world_mut()
+            .entity_mut(requested_space)
+            .remove::<vmux_core::Active>();
+        app.world_mut()
+            .entity_mut(later_space)
+            .insert(vmux_core::Active);
+
+        app.update();
+
+        let tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(tab)
+                .map(|parent| parent.parent()),
+            Some(requested_space)
+        );
+    }
+
+    #[test]
     fn cold_start_seeds_exactly_one_default_tab() {
         let _home = HomeEnvGuard::use_temp_home("cold-start-one-tab");
+        let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<crate::NewStackContext>()
@@ -1228,7 +1333,15 @@ mod tests {
             .add_systems(Update, spawn_requested_tab_layouts);
 
         app.world_mut().spawn(PrimaryWindow);
-        app.world_mut().spawn(Main);
+        let main = app.world_mut().spawn(Main).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            startup_dir.path().to_path_buf(),
+        ))));
 
         app.update();
 
@@ -1244,6 +1357,7 @@ mod tests {
     fn default_tab_adopts_existing_space_when_none_active() {
         use bevy::ecs::relationship::Relationship;
         let _home = HomeEnvGuard::use_temp_home("default-tab-adopts-space");
+        let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<crate::NewStackContext>()
@@ -1271,6 +1385,10 @@ mod tests {
         // Update, after this Startup). The default tab must still be adopted into
         // the space so it becomes active + visible — not orphaned under Main.
         let space = app.world_mut().spawn(crate::space::Space).id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            startup_dir.path().to_path_buf(),
+        ))));
 
         app.update();
 

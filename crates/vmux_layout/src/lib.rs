@@ -194,10 +194,10 @@ pub enum TabLayoutSpawnContent {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message, Clone, Debug)]
 pub struct TabLayoutSpawnRequest {
-    pub main: Entity,
+    pub space: Entity,
     pub primary_window: Entity,
     pub name: Option<String>,
-    pub startup_dir: Option<String>,
+    pub startup_dir: std::path::PathBuf,
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,
