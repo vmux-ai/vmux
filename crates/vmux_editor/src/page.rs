@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::media::MediaKind;
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
+use vmux_git::view::EditorDiffMarker;
 use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -21,6 +22,7 @@ const MEASURE_ID: &str = "file-measure";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
+const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -83,6 +85,25 @@ fn open_path(path: String) {
     let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
 }
 
+fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
+    let next = generation().wrapping_add(1);
+    generation.set(next);
+    let Some(window) = web_sys::window() else {
+        nonce.set(nonce().wrapping_add(1));
+        return;
+    };
+    let closure = Closure::once(move || {
+        if generation() == next {
+            nonce.set(nonce().wrapping_add(1));
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        GIT_REFRESH_DEBOUNCE_MS,
+    );
+    closure.forget();
+}
+
 fn parent_of(path: &str) -> String {
     match path.trim_end_matches('/').rsplit_once('/') {
         Some(("", _)) => "/".to_string(),
@@ -118,6 +139,15 @@ fn row_class(selected: bool) -> String {
         )
     } else {
         format!("{base} text-foreground/75 hover:bg-foreground/[0.05]")
+    }
+}
+
+fn diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "bg-ansi-2",
+        EditorDiffMarker::Modified => "bg-cyan-400",
+        EditorDiffMarker::Deleted => "bg-ansi-1",
+        EditorDiffMarker::Staged => "bg-ansi-2/60",
     }
 }
 
@@ -280,8 +310,11 @@ pub fn Page() -> Element {
     let mut theme_style = use_signal(String::new);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
     let mut git_path = use_signal(String::new);
-    let show_diff = use_signal(|| false);
+    let mut git_has_diff = use_signal(|| false);
+    let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
+    let mut file_view_mode = use_signal(|| FileViewMode::Editor);
     let mut git_nonce = use_signal(|| 0u32);
+    let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
     let git_branch = use_signal(String::new);
     let git_ahead = use_signal(|| 0u32);
@@ -334,6 +367,10 @@ pub fn Page() -> Element {
         diagnostics.set(Vec::new());
         hover_diag.set(None);
         lsp_status.set(None);
+        if git_path() != m.abs_path {
+            git_has_diff.set(false);
+            git_line_markers.set(HashMap::new());
+        }
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
@@ -361,7 +398,13 @@ pub fn Page() -> Element {
 
     let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
+        schedule_git_refresh(git_refresh_generation, git_nonce);
     });
+
+    let _view_mode =
+        use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
+            file_view_mode.set(event.mode);
+        });
 
     let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
         lsp_hover.set(Some(h));
@@ -414,6 +457,10 @@ pub fn Page() -> Element {
             doc.set_title(&name);
         }
         parent_path.set(d.parent_path);
+        if git_path() != d.abs_path {
+            git_has_diff.set(false);
+            git_line_markers.set(HashMap::new());
+        }
         git_path.set(d.abs_path);
         git_nonce.set(git_nonce() + 1);
         mode.set(Mode::Dir);
@@ -762,6 +809,37 @@ pub fn Page() -> Element {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: "unsaved" }
                 }
                 div { class: "flex-1" }
+                if mode() == Mode::Text && git_has_diff() {
+                    button {
+                        class: "relative grid shrink-0 grid-cols-2 overflow-hidden rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
+                        title: if file_view_mode() == FileViewMode::Diff { "Show editor in all open files" } else { "Show diffs in all open files" },
+                        aria_pressed: file_view_mode() == FileViewMode::Diff,
+                        onclick: move |_| {
+                            let next = if file_view_mode() == FileViewMode::Diff {
+                                FileViewMode::Editor
+                            } else {
+                                FileViewMode::Diff
+                            };
+                            file_view_mode.set(next);
+                            if next == FileViewMode::Diff {
+                                git_nonce.set(git_nonce().wrapping_add(1));
+                            }
+                            let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: next });
+                        },
+                        span {
+                            class: if file_view_mode() == FileViewMode::Diff { "pointer-events-none absolute inset-y-0.5 left-0.5 translate-x-full rounded bg-cyan-400/15 shadow-sm transition-transform duration-150 ease-out" } else { "pointer-events-none absolute inset-y-0.5 left-0.5 translate-x-0 rounded bg-background/80 shadow-sm transition-transform duration-150 ease-out" },
+                            style: "width:calc(50% - 0.125rem);",
+                        }
+                        span {
+                            class: if file_view_mode() == FileViewMode::Editor { "relative z-[1] rounded px-1.5 py-0.5 text-foreground transition-colors duration-150" } else { "relative z-[1] rounded px-1.5 py-0.5 text-foreground/45 transition-colors duration-150" },
+                            "Editor"
+                        }
+                        span {
+                            class: if file_view_mode() == FileViewMode::Diff { "relative z-[1] rounded px-1.5 py-0.5 text-cyan-700 transition-colors duration-150 dark:text-cyan-200" } else { "relative z-[1] rounded px-1.5 py-0.5 text-foreground/45 transition-colors duration-150" },
+                            "Diff"
+                        }
+                    }
+                }
                 {
                     let lbl = ed_label();
                     (!lbl.is_empty() && mode() == Mode::Text).then(|| rsx! {
@@ -813,7 +891,7 @@ pub fn Page() -> Element {
 
             GitBar {
                 path: git_path,
-                show_diff,
+                has_diff: git_has_diff,
                 nonce: git_nonce,
                 display_path: git_display,
                 branch: git_branch,
@@ -930,9 +1008,15 @@ pub fn Page() -> Element {
                     }
                 },
                 Mode::Text => rsx! {
-                    if show_diff() {
-                        DiffView { path: git_path, nonce: git_nonce }
-                    } else {
+                    if git_has_diff() {
+                        DiffView {
+                            path: git_path,
+                            nonce: git_nonce,
+                            visible: file_view_mode() == FileViewMode::Diff,
+                            markers: git_line_markers,
+                        }
+                    }
+                    if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
                         {
                             let (cw, ch) = cell_dims();
                             let gutter = gw as f64 * cw + 36.0;
@@ -977,6 +1061,7 @@ pub fn Page() -> Element {
                                                 let fold = line.fold;
                                                 let diags = diagnostics();
                                                 let sev = line_severity(&diags, ln);
+                                                let diff_marker = git_line_markers().get(&(ln + 1)).copied();
                                                 let line_diags: Vec<FileDiagnostic> = diags
                                                     .iter()
                                                     .filter(|d| d.line == ln)
@@ -1081,6 +1166,12 @@ pub fn Page() -> Element {
                                                         span {
                                                             class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
                                                             style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                                            if let Some(marker) = diff_marker {
+                                                                span {
+                                                                    class: "pointer-events-none absolute inset-y-0 left-0 w-0.5 {diff_marker_class(marker)}",
+                                                                    title: "Changed line",
+                                                                }
+                                                            }
                                                             if let Some(s) = sev {
                                                                 span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }

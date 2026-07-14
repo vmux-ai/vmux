@@ -116,6 +116,12 @@ struct ExplorerChrome {
 #[derive(Resource, Default)]
 struct ExplorerChromeSynced(bool);
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SharedFileViewMode(FileViewMode);
+
+#[derive(Component)]
+struct FileViewModeSent;
+
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -130,6 +136,16 @@ type ReadyUnsentMeta = (
 type ReadyUnsentTheme = (
     With<FileView>,
     Without<FileThemeSent>,
+    With<vmux_core::page::PageReady>,
+);
+type ReadyUnsentViewMode = (
+    With<FileView>,
+    Without<FileViewModeSent>,
+    With<vmux_core::page::PageReady>,
+);
+type ReadySentViewMode = (
+    With<FileView>,
+    With<FileViewModeSent>,
     With<vmux_core::page::PageReady>,
 );
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
@@ -352,9 +368,14 @@ fn load_file_buffers(
             folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
-        commands
-            .entity(entity)
-            .insert((EditState { core, hl, folds }, EditorKeymap(kind.make())));
+        commands.entity(entity).insert((
+            EditState { core, hl, folds },
+            EditorKeymap(kind.make()),
+            vmux_git::GitDiffSource {
+                content: text,
+                dirty: false,
+            },
+        ));
     }
 }
 
@@ -489,6 +510,39 @@ fn send_file_theme(
             },
         ));
         commands.entity(entity).insert(FileThemeSent);
+    }
+}
+
+fn send_file_view_mode(
+    mode: Res<SharedFileViewMode>,
+    pending: Query<Entity, ReadyUnsentViewMode>,
+    sent: Query<Entity, ReadySentViewMode>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let event = FileViewModeEvent { mode: mode.0 };
+    for entity in &pending {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_VIEW_MODE_EVENT,
+            &event,
+        ));
+        commands.entity(entity).insert(FileViewModeSent);
+    }
+    if mode.is_changed() {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                FILE_VIEW_MODE_EVENT,
+                &event,
+            ));
+        }
     }
 }
 
@@ -629,6 +683,7 @@ fn reset_file_sent_markers_on_page_ready(
         .entity(entity)
         .remove::<FileInitialMetaSent>()
         .remove::<FileThemeSent>()
+        .remove::<FileViewModeSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
         .remove::<crate::lsp::manager::DiagSent>()
         .remove::<ExplorerChromeSent>()
@@ -636,6 +691,16 @@ fn reset_file_sent_markers_on_page_ready(
         .insert(OpenEditorsDirty);
     if crate::explorer_model::is_markdown(&fv.path) {
         commands.entity(entity).insert(OutlineDirty);
+    }
+}
+
+fn on_file_view_mode_set(
+    trigger: On<BinReceive<FileViewModeSet>>,
+    views: Query<(), With<FileView>>,
+    mut mode: ResMut<SharedFileViewMode>,
+) {
+    if views.contains(trigger.event().webview) {
+        mode.0 = trigger.event().payload.mode;
     }
 }
 
@@ -1006,6 +1071,7 @@ fn navigate_file_view(
         .remove::<FileBuffer>()
         .remove::<FileMedia>()
         .remove::<EditState>()
+        .remove::<vmux_git::GitDiffSource>()
         .remove::<EditorKeymap>()
         .remove::<LspEditDirty>()
         .remove::<FileInitialMetaSent>()
@@ -1203,6 +1269,7 @@ fn reload_changed_files(
         commands
             .entity(entity)
             .remove::<EditState>()
+            .remove::<vmux_git::GitDiffSource>()
             .remove::<FileBuffer>()
             .remove::<FileInitialMetaSent>()
             .remove::<crate::lsp::manager::LintRan>();
@@ -1255,6 +1322,7 @@ fn run_commands(
     entity: Entity,
     cmds: Vec<EditCommand>,
     edit: &mut EditState,
+    diff_source: &mut vmux_git::GitDiffSource,
     keymap: &dyn Keymap,
     vp: &mut FileViewport,
     clipboard: &mut ClipboardHandle,
@@ -1419,7 +1487,9 @@ fn run_commands(
     if fold_changed {
         commands.entity(entity).insert(FoldsDirty);
     }
-    if dirty_changed {
+    if text_changed || dirty_changed {
+        diff_source.content = edit.core.buffer.text();
+        diff_source.dirty = edit.core.dirty;
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_DIRTY_EVENT,
@@ -1439,7 +1509,12 @@ fn run_commands(
 
 fn on_file_key(
     trigger: On<BinReceive<FileKeyEvent>>,
-    mut q: Query<(&mut EditState, &mut EditorKeymap, &mut FileViewport)>,
+    mut q: Query<(
+        &mut EditState,
+        &mut EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
@@ -1448,7 +1523,7 @@ fn on_file_key(
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut edit, mut keymap, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     let input = KeyInput {
@@ -1469,6 +1544,7 @@ fn on_file_key(
         entity,
         cmds,
         &mut edit,
+        &mut diff_source,
         keymap.0.as_ref(),
         &mut vp,
         &mut clipboard,
@@ -1481,7 +1557,12 @@ fn on_file_key(
 
 fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
-    mut q: Query<(&mut EditState, &EditorKeymap, &mut FileViewport)>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
@@ -1493,7 +1574,7 @@ fn on_file_text_input(
     if text.is_empty() {
         return;
     }
-    let Ok((mut edit, keymap, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     if !keymap.0.mode().accepts_text() {
@@ -1503,6 +1584,7 @@ fn on_file_text_input(
         entity,
         vec![EditCommand::InsertText(text)],
         &mut edit,
+        &mut diff_source,
         keymap.0.as_ref(),
         &mut vp,
         &mut clipboard,
@@ -1646,7 +1728,12 @@ fn on_file_goto_request(
 
 fn on_file_completion_commit(
     trigger: On<BinReceive<FileCompletionCommit>>,
-    mut q: Query<(&mut EditState, &EditorKeymap, &mut FileViewport)>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
@@ -1655,7 +1742,7 @@ fn on_file_completion_commit(
 ) {
     let entity = trigger.event().webview;
     let req = trigger.event().payload.clone();
-    let Ok((mut edit, keymap, mut vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     let start = edit
@@ -1672,6 +1759,7 @@ fn on_file_completion_commit(
             EditCommand::InsertText(req.text),
         ],
         &mut edit,
+        &mut diff_source,
         keymap.0.as_ref(),
         &mut vp,
         &mut clipboard,
@@ -1746,6 +1834,7 @@ fn apply_goto(
             commands
                 .entity(g.entity)
                 .remove::<EditState>()
+                .remove::<vmux_git::GitDiffSource>()
                 .remove::<FileBuffer>()
                 .remove::<FileMedia>()
                 .remove::<FileDir>()
@@ -2179,6 +2268,7 @@ impl Plugin for EditorPlugin {
                 width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
             })
             .init_resource::<ExplorerChromeSynced>()
+            .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
@@ -2200,6 +2290,7 @@ impl Plugin for EditorPlugin {
                 FileCompletionCommit,
                 FileOpenExternalRequest,
                 FileVideoRect,
+                FileViewModeSet,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExplorerTreeToggle,
@@ -2223,6 +2314,7 @@ impl Plugin for EditorPlugin {
                     send_initial_media.after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
+                    send_file_view_mode,
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
                     reconcile_file_watches,
@@ -2266,6 +2358,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
             .add_observer(on_file_fold_toggle)
+            .add_observer(on_file_view_mode_set)
             .add_observer(on_explorer_tree_toggle)
             .add_observer(on_explorer_panel_toggle)
             .add_observer(on_explorer_panel_width)
@@ -2278,6 +2371,60 @@ impl Plugin for EditorPlugin {
 mod edit_flow_tests {
     use super::*;
     use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn file_view_mode_is_shared_across_editors() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        let first = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/a.rs"),
+            })
+            .id();
+        let second = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/b.rs"),
+            })
+            .id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: first,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Diff,
+            },
+        });
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Diff
+        );
+        assert!(app.world().get::<FileView>(second).is_some());
+    }
+
+    #[test]
+    fn non_editor_cannot_change_file_view_mode() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        let other = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: other,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Diff,
+            },
+        });
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Editor
+        );
+    }
 
     #[test]
     fn parse_goto_fragment_line_and_select() {

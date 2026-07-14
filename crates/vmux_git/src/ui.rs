@@ -1,14 +1,17 @@
 #![allow(non_snake_case)]
 
+use std::collections::{HashMap, HashSet};
+
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 
 use crate::event::*;
+use crate::view::{DiffViewRow, EditorDiffMarker, diff_view_rows, editor_diff_markers};
 
 const DIFF_WINDOW_ROWS: u32 = 200_000;
 
-fn is_dirty(s: FileStatus) -> bool {
+fn status_has_diff(s: FileStatus) -> bool {
     matches!(
         s,
         FileStatus::Modified
@@ -106,7 +109,7 @@ fn sign_style(kind: DiffKind) -> &'static str {
 #[component]
 pub fn GitBar(
     path: ReadSignal<String>,
-    show_diff: Signal<bool>,
+    has_diff: Signal<bool>,
     nonce: Signal<u32>,
     display_path: Signal<String>,
     branch: Signal<String>,
@@ -123,7 +126,7 @@ pub fn GitBar(
         ahead.set(s.ahead);
         behind.set(s.behind);
         staged_count.set(s.staged_count);
-        show_diff.set(is_dirty(s.file_status));
+        has_diff.set(status_has_diff(s.file_status));
         file_status.set(s.file_status);
         display_path.set(repo_display_path(&path(), &s.repo_root));
     });
@@ -289,18 +292,38 @@ pub fn GitFooter(
 }
 
 #[component]
-pub fn DiffView(path: ReadSignal<String>, nonce: ReadSignal<u32>) -> Element {
+pub fn DiffView(
+    path: ReadSignal<String>,
+    nonce: ReadSignal<u32>,
+    visible: bool,
+    markers: Signal<HashMap<u32, EditorDiffMarker>>,
+) -> Element {
     let mut lines = use_signal(Vec::<DiffLine>::new);
+    let mut expanded = use_signal(HashSet::<(usize, usize)>::new);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(String::new);
 
     let _vp =
         use_bin_event_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
+            markers.set(editor_diff_markers(&p.lines));
             lines.set(p.lines);
+            expanded.set(HashSet::new());
+            loading.set(false);
+            error.set(String::new());
         });
+    let _error = use_bin_event_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
+        error.set(event.message);
+        loading.set(false);
+    });
 
     use_effect(move || {
         let p = path();
         let _ = nonce();
         if !p.is_empty() {
+            loading.set(true);
+            error.set(String::new());
+            lines.set(Vec::new());
+            expanded.set(HashSet::new());
             let _ = try_cef_bin_emit_rkyv(&GitDiffRequest {
                 path: p,
                 top_line: 0,
@@ -310,6 +333,7 @@ pub fn DiffView(path: ReadSignal<String>, nonce: ReadSignal<u32>) -> Element {
     });
 
     let rows = lines();
+    let display_rows = diff_view_rows(&rows, &expanded());
     let maxno = rows
         .iter()
         .flat_map(|l| [l.old_no, l.new_no])
@@ -328,55 +352,95 @@ pub fn DiffView(path: ReadSignal<String>, nonce: ReadSignal<u32>) -> Element {
 
     rsx! {
         div {
-            class: "min-h-0 flex-1 overflow-auto",
+            class: if visible { "min-h-0 flex-1 overflow-auto" } else { "hidden" },
 
-            if rows.is_empty() {
+            if loading() {
+                div { class: "flex h-20 items-center justify-center font-sans text-xs text-muted-foreground",
+                    span { class: "animate-pulse", "Loading diff…" }
+                }
+            } else if !error().is_empty() {
+                div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }
+            } else if rows.is_empty() {
                 div { class: "p-3 text-xs text-muted-foreground", "No changes to show" }
             }
 
-            for (i, line) in rows.iter().enumerate() {
-                div { key: "{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
-                div { class: "flex whitespace-pre", style: "{row_bg(line.kind)}",
-                    span {
-                        class: "shrink-0 select-none px-1 text-right tabular-nums opacity-30",
-                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                        "{opt_no(line.old_no)}"
-                    }
-                    span {
-                        class: "shrink-0 select-none px-1 text-right tabular-nums opacity-30",
-                        style: "width:calc(var(--cw, 1ch) * {gw});",
-                        "{opt_no(line.new_no)}"
-                    }
-                    span {
-                        class: "shrink-0 select-none px-1 text-center",
-                        style: "{sign_style(line.kind)}",
-                        "{sign(line.kind)}"
-                    }
-                    span { class: "pr-6",
-                        for (j, s) in line.spans.iter().enumerate() {
-                            span { key: "{j}", style: "{span_style(s)}", "{s.text}" }
+            for display_row in display_rows {
+                match display_row {
+                    DiffViewRow::Line(i) => {
+                        let line = &rows[i];
+                        rsx! {
+                            div { key: "line-{i}-{line.kind:?}-{line.old_no:?}-{line.new_no:?}",
+                                div { class: "flex whitespace-pre", style: "{row_bg(line.kind)}",
+                                    span {
+                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
+                                        style: "width:calc(var(--cw, 1ch) * {gw});",
+                                        "{opt_no(line.old_no)}"
+                                    }
+                                    span {
+                                        class: "shrink-0 select-none border-r border-foreground/[0.06] bg-foreground/[0.025] px-1 text-right tabular-nums opacity-40",
+                                        style: "width:calc(var(--cw, 1ch) * {gw});",
+                                        "{opt_no(line.new_no)}"
+                                    }
+                                    span {
+                                        class: "shrink-0 select-none px-1 text-center",
+                                        style: "{sign_style(line.kind)}",
+                                        "{sign(line.kind)}"
+                                    }
+                                    span { class: "pr-6",
+                                        for (j, styled) in line.spans.iter().enumerate() {
+                                            span { key: "{j}", style: "{span_style(styled)}", "{styled.text}" }
+                                        }
+                                    }
+                                }
+                                if let Some(h) = ends[i] {
+                                    div {
+                                        class: "flex items-center justify-end gap-2 border-y border-foreground/[0.05] bg-foreground/[0.02] px-2 py-0.5 pr-6 font-sans text-xs select-none",
+                                        button {
+                                            class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
+                                            onclick: move |_| {
+                                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: true });
+                                            },
+                                            "\u{2713} accept"
+                                        }
+                                        button {
+                                            class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
+                                            onclick: move |_| {
+                                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: false });
+                                            },
+                                            "\u{2717} deny"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    DiffViewRow::Gap { start, end } => {
+                        let hidden = end - start;
+                        rsx! {
+                            div {
+                                key: "gap-{start}-{end}",
+                                class: "border-y border-cyan-400/10 bg-cyan-400/[0.035] font-sans",
+                                button {
+                                    class: "group flex h-7 w-full items-center gap-2 px-2 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
+                                    title: "Show {hidden} unchanged lines",
+                                    onclick: move |_| {
+                                        expanded.write().insert((start, end));
+                                    },
+                                    svg {
+                                        class: "h-3.5 w-3.5 shrink-0 transition-transform group-hover:translate-y-0.5",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "m6 9 6 6 6-6" }
+                                    }
+                                    span { "Show {hidden} unchanged lines" }
+                                }
+                            }
                         }
                     }
-                }
-                if let Some(h) = ends[i] {
-                    div {
-                        class: "flex items-center justify-end gap-2 px-2 pr-6 py-0.5 font-sans text-xs select-none",
-                        button {
-                            class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: true });
-                            },
-                            "\u{2713} accept"
-                        }
-                        button {
-                            class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: false });
-                            },
-                            "\u{2717} deny"
-                        }
-                    }
-                }
                 }
             }
         }
