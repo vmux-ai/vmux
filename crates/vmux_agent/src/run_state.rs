@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use std::time::Duration;
 
 #[derive(Component, Default)]
+#[require(AgentTurnMeta)]
 pub enum AgentRunState {
     #[default]
     Idle,
@@ -16,6 +18,15 @@ pub enum AgentRunState {
         args: serde_json::Value,
     },
     Errored(String),
+}
+
+/// Per-session record of finished turn wall-clock, for the chat page's resting
+/// `Worked for Ns` header. Runtime-only. `turn_start` is `Time::elapsed()` at the current
+/// turn's first `Streaming`; each `Streaming → Idle/Errored` pushes one entry to `durations`.
+#[derive(Component, Default)]
+pub struct AgentTurnMeta {
+    pub durations: Vec<u32>,
+    pub turn_start: Option<Duration>,
 }
 
 #[cfg(test)]

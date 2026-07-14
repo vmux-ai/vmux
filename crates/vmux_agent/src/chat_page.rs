@@ -6,6 +6,9 @@
 pub(crate) mod composer;
 pub mod event;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod turns;
+
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
@@ -24,6 +27,8 @@ use crate::chat_page::event::{
     SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
+use crate::chat_page::turns::group_turns;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::AcpSession;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{AgentMessages, AgentSession, PromptQueue};
@@ -34,7 +39,7 @@ use crate::handoff::{
     DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context, visible_messages,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::run_state::AgentRunState;
+use crate::run_state::{AgentRunState, AgentTurnMeta};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
 #[cfg(not(target_arch = "wasm32"))]
@@ -56,6 +61,78 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: false,
 };
+
+#[cfg(any(test, target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ApprovalDetail {
+    label: String,
+    value: String,
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn approval_details(args_json: &str) -> Vec<ApprovalDetail> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return if args_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![ApprovalDetail {
+                label: "Details".to_string(),
+                value: args_json.to_string(),
+            }]
+        };
+    };
+    let mut details = Vec::new();
+    flatten_approval_details("", &value, &mut details);
+    details
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn flatten_approval_details(
+    path: &str,
+    value: &serde_json::Value,
+    details: &mut Vec<ApprovalDetail>,
+) {
+    if let serde_json::Value::Object(fields) = value {
+        for (name, value) in fields {
+            let child_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            flatten_approval_details(&child_path, value, details);
+        }
+        return;
+    }
+    let label = approval_detail_label(path);
+    let value = match value {
+        serde_json::Value::String(value) => value.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
+    };
+    details.push(ApprovalDetail { label, value });
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn approval_detail_label(path: &str) -> String {
+    let path = path.strip_prefix("arguments.").unwrap_or(path);
+    let label = if path.is_empty() { "details" } else { path };
+    label
+        .split('.')
+        .map(|part| {
+            let words = part.replace('_', " ");
+            let mut chars = words.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn has_collapsible_steps(turn: &event::ChatTurn) -> bool {
+    !turn.steps.is_empty()
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentChatPagePlugin;
@@ -88,12 +165,38 @@ impl Plugin for AgentChatPagePlugin {
             .add_systems(
                 Update,
                 (
-                    push_chat_to_page,
+                    (track_turn_duration, push_chat_to_page).chain(),
                     sync_chat_to_ready_views,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
             );
+    }
+}
+
+/// Record per-turn wall-clock from `AgentRunState` edges (covers page + ACP mutation sites
+/// uniformly). Idempotent: the `turn_start` guard tolerates repeated same-state sets and does
+/// not reset across a mid-turn `AwaitingApproval`.
+#[cfg(not(target_arch = "wasm32"))]
+fn track_turn_duration(
+    time: Res<Time>,
+    mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
+) {
+    for (state, mut meta) in &mut sessions {
+        match state {
+            AgentRunState::Streaming => {
+                if meta.turn_start.is_none() {
+                    meta.turn_start = Some(time.elapsed());
+                }
+            }
+            AgentRunState::Idle | AgentRunState::Errored(_) => {
+                if let Some(start) = meta.turn_start.take() {
+                    meta.durations
+                        .push(time.elapsed().saturating_sub(start).as_secs() as u32);
+                }
+            }
+            AgentRunState::AwaitingApproval { .. } | AgentRunState::Installing { .. } => {}
+        }
     }
 }
 
@@ -143,6 +246,7 @@ fn sync_chat_to_ready_views(
     sessions: Query<(
         &AgentMessages,
         &AgentRunState,
+        Option<&AgentTurnMeta>,
         Option<&Profile>,
         Option<&PageMetadata>,
         &PromptQueue,
@@ -157,7 +261,8 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, profile, meta, queue, imported)) = sessions.get(stack) else {
+        let Ok((messages, state, turn_meta, profile, meta, queue, imported)) = sessions.get(stack)
+        else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -166,7 +271,7 @@ fn sync_chat_to_ready_views(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue, imported),
+            &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
         ));
         let cross = acp_sessions
             .get(stack)
@@ -203,30 +308,37 @@ fn reset_chat_synced_on_page_ready(
 fn snapshot_of(
     messages: &AgentMessages,
     state: &AgentRunState,
+    turn_meta: Option<&AgentTurnMeta>,
     profile: Option<&Profile>,
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
 ) -> ChatSnapshot {
     let display_messages = visible_messages(imported, &messages.0);
-    let messages_json =
-        serde_json::to_string(&display_messages).unwrap_or_else(|_| "[]".to_string());
-    let (status, error, call_id, name) = match state {
-        AgentRunState::Idle => ("idle", String::new(), String::new(), String::new()),
+    let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
+    let running = matches!(state, AgentRunState::Streaming);
+    let items = group_turns(&display_messages, durations, running);
+    let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+    let (status, error) = match state {
+        AgentRunState::Idle => ("idle", String::new()),
         AgentRunState::Installing { pct, message } => {
             let text = match pct {
                 Some(p) => format!("{message} ({p}%)"),
                 None => message.clone(),
             };
-            ("installing", text, String::new(), String::new())
+            ("installing", text)
         }
-        AgentRunState::Streaming => ("streaming", String::new(), String::new(), String::new()),
-        AgentRunState::AwaitingApproval { call_id, name, .. } => {
-            ("awaiting", String::new(), call_id.clone(), name.clone())
-        }
-        AgentRunState::Errored(message) => {
-            ("errored", message.clone(), String::new(), String::new())
-        }
+        AgentRunState::Streaming => ("streaming", String::new()),
+        AgentRunState::AwaitingApproval { .. } => ("awaiting", String::new()),
+        AgentRunState::Errored(message) => ("errored", message.clone()),
+    };
+    let (call_id, name, args_json) = match state {
+        AgentRunState::AwaitingApproval {
+            call_id,
+            name,
+            args,
+        } => (call_id.clone(), name.clone(), args.to_string()),
+        _ => (String::new(), String::new(), String::new()),
     };
     let (agent_name, accent_color) = profile
         .map(|p| (p.name.clone(), p.avatar.color.clone()))
@@ -240,6 +352,7 @@ fn snapshot_of(
         error,
         approval_call_id: call_id,
         approval_name: name,
+        approval_args_json: args_json,
         agent_name,
         agent_icon,
         accent_color,
@@ -248,7 +361,9 @@ fn snapshot_of(
             .unwrap_or_default(),
         handoff_truncated: imported.is_some_and(|imported| imported.truncated),
         handoff_message_count: imported
-            .map(|imported| u32::try_from(imported.messages.len()).unwrap_or(u32::MAX))
+            .map(|imported| {
+                u32::try_from(group_turns(&imported.messages, &[], false).len()).unwrap_or(u32::MAX)
+            })
             .unwrap_or_default(),
         queued: queue.items.iter().cloned().collect(),
         paused: queue.paused,
@@ -264,6 +379,7 @@ fn push_chat_to_page(
             Entity,
             &AgentMessages,
             &AgentRunState,
+            Option<&AgentTurnMeta>,
             Option<&Profile>,
             Option<&PageMetadata>,
             &PromptQueue,
@@ -272,6 +388,7 @@ fn push_chat_to_page(
         Or<(
             Changed<AgentMessages>,
             Changed<AgentRunState>,
+            Changed<AgentTurnMeta>,
             Changed<PromptQueue>,
             Changed<Profile>,
             Changed<ImportedConversation>,
@@ -282,7 +399,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, profile, meta, queue, imported) in &sessions {
+    for (stack, messages, state, turn_meta, profile, meta, queue, imported) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -295,7 +412,7 @@ fn push_chat_to_page(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, profile, meta, queue, imported),
+            &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
         ));
     }
 }
@@ -842,7 +959,7 @@ mod native_tests {
     }
 
     #[test]
-    fn snapshot_reports_imported_message_boundary() {
+    fn snapshot_reports_grouped_imported_item_boundary() {
         let imported = ImportedConversation {
             source_agent: "Codex".into(),
             source_kind: AgentKind::Codex,
@@ -850,7 +967,16 @@ mod native_tests {
             messages: vec![
                 crate::Message::User { text: "one".into() },
                 crate::Message::Assistant {
-                    blocks: vec![crate::AssistantBlock::Text("two".into())],
+                    blocks: vec![crate::AssistantBlock::ToolUse {
+                        call_id: "call-1".into(),
+                        name: "run".into(),
+                        args: "{}".into(),
+                    }],
+                },
+                crate::Message::ToolResult {
+                    call_id: "call-1".into(),
+                    content: "two".into(),
+                    is_error: false,
                 },
             ],
             truncated: false,
@@ -861,11 +987,96 @@ mod native_tests {
             &AgentRunState::Idle,
             None,
             None,
+            None,
             &PromptQueue::default(),
             Some(&imported),
         );
 
         assert_eq!(snapshot.handoff_message_count, 2);
+    }
+
+    #[test]
+    fn snapshot_includes_approval_tool_and_input() {
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::AwaitingApproval {
+                call_id: "call-1".into(),
+                name: "vmux.run".into(),
+                args: serde_json::json!({"command": "echo hi", "focus": true}),
+            },
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+        );
+
+        assert_eq!(snapshot.approval_name, "vmux.run");
+        assert_eq!(
+            snapshot.approval_args_json,
+            r#"{"command":"echo hi","focus":true}"#
+        );
+    }
+
+    #[test]
+    fn approval_prompt_renders_structured_tool_input() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("snap.approval_args_json.clone()"));
+        assert!(source.contains("approval_details(&args_json)"));
+    }
+
+    #[test]
+    fn approval_details_parse_nested_json() {
+        assert_eq!(
+            approval_details(
+                r#"{"arguments":{"path":"/tmp/SKILL.md"},"server":"vmux","tool":"read_file"}"#
+            ),
+            vec![
+                ApprovalDetail {
+                    label: "Path".into(),
+                    value: "/tmp/SKILL.md".into(),
+                },
+                ApprovalDetail {
+                    label: "Server".into(),
+                    value: "vmux".into(),
+                },
+                ApprovalDetail {
+                    label: "Tool".into(),
+                    value: "read_file".into(),
+                },
+            ]
+        );
+        assert!(approval_details("{}").is_empty());
+    }
+
+    #[test]
+    fn empty_turn_has_no_collapsible_content() {
+        let empty = event::ChatTurn::default();
+        assert!(!has_collapsible_steps(&empty));
+
+        let populated = event::ChatTurn {
+            steps: vec![event::ChatBlock::Thinking("working".into())],
+            ..Default::default()
+        };
+        assert!(has_collapsible_steps(&populated));
+    }
+
+    #[test]
+    fn disclosure_icons_use_animated_plus_minus() {
+        let page = include_str!("chat_page/page.rs");
+        let css = include_str!("../../vmux_server/assets/index.css");
+        assert!(!page.contains('▸'));
+        assert!(page.contains("render_disclosure_icon"));
+        assert!(css.contains(".disclosure[open] > summary .disclosure-icon::after"));
+    }
+
+    #[test]
+    fn disclosure_panels_animate_open_and_closed() {
+        let css = include_str!("../../vmux_server/assets/index.css");
+        assert!(css.contains("interpolate-size: allow-keywords"));
+        assert!(css.contains(".disclosure::details-content"));
+        assert!(css.contains(".disclosure[open]::details-content"));
+        assert!(css.contains("transition-behavior: allow-discrete"));
     }
 
     #[test]
@@ -1101,5 +1312,47 @@ mod native_tests {
             app.world().get::<ChatSynced>(other).is_some(),
             "a non-chat view must be left untouched"
         );
+    }
+
+    fn duration_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, track_turn_duration);
+        app
+    }
+
+    #[test]
+    fn streaming_then_idle_records_one_duration() {
+        let mut app = duration_app();
+        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<AgentTurnMeta>(e)
+                .unwrap()
+                .turn_start
+                .is_some()
+        );
+        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::Idle;
+        app.update();
+        let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
+        assert_eq!(meta.durations.len(), 1);
+        assert!(meta.turn_start.is_none());
+    }
+
+    #[test]
+    fn awaiting_approval_does_not_finalize() {
+        let mut app = duration_app();
+        let e = app.world_mut().spawn(AgentRunState::Streaming).id();
+        app.update();
+        *app.world_mut().get_mut::<AgentRunState>(e).unwrap() = AgentRunState::AwaitingApproval {
+            call_id: "c".into(),
+            name: "n".into(),
+            args: serde_json::Value::Null,
+        };
+        app.update();
+        let meta = app.world().get::<AgentTurnMeta>(e).unwrap();
+        assert!(meta.durations.is_empty());
+        assert!(meta.turn_start.is_some());
     }
 }

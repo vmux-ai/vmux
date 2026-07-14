@@ -149,6 +149,34 @@ impl AcpShared {
     }
 }
 
+fn approval_details(
+    request: &RequestPermissionRequest,
+    projector: &AcpProjector,
+) -> (String, String) {
+    let call_id = request.tool_call.tool_call_id.to_string();
+    let (projected_name, projected_args) =
+        projector.tool_call_details(&call_id).unwrap_or_default();
+    let name = request
+        .tool_call
+        .fields
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| (!projected_name.is_empty()).then_some(projected_name))
+        .unwrap_or_else(|| "tool call".to_string());
+    let args_json = request
+        .tool_call
+        .fields
+        .raw_input
+        .as_ref()
+        .map(serde_json::Value::to_string)
+        .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
+        .unwrap_or_else(|| "{}".to_string());
+    (name, args_json)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     command: String,
@@ -201,14 +229,10 @@ pub async fn run(
                         responder: Responder<RequestPermissionResponse>,
                         _cx| {
                 let call_id = req.tool_call.tool_call_id.to_string();
-                let name = req.tool_call.fields.title.clone().unwrap_or_default();
-                let args_json = req
-                    .tool_call
-                    .fields
-                    .raw_input
-                    .as_ref()
-                    .map(|v| v.to_string())
-                    .unwrap_or_default();
+                let (name, args_json) = {
+                    let projector = perm_shared.projector.lock().unwrap();
+                    approval_details(&req, &projector)
+                };
                 perm_shared.emit(ServiceMessage::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
@@ -869,7 +893,9 @@ fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{Implementation, PermissionOptionKind};
+    use agent_client_protocol::schema::v1::{
+        Implementation, PermissionOptionKind, ToolCall, ToolCallUpdateFields,
+    };
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
@@ -925,6 +951,54 @@ mod tests {
             }
             other => panic!("expected replayable ACP agent info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn approval_details_fall_back_to_projected_tool_call() {
+        let mut projector = AcpProjector::new();
+        projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
+            ToolCall::new("call-1", "vmux.run")
+                .raw_input(serde_json::json!({"command": "echo hi", "focus": true})),
+        ));
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new(),
+            ),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            approval_details(&request, &projector),
+            (
+                "vmux.run".to_string(),
+                r#"{"command":"echo hi","focus":true}"#.to_string(),
+            )
+        );
+    }
+
+    #[test]
+    fn approval_details_prefer_permission_request_fields() {
+        let mut projector = AcpProjector::new();
+        projector.apply(agent_client_protocol::schema::v1::SessionUpdate::ToolCall(
+            ToolCall::new("call-1", "old").raw_input(serde_json::json!({"command": "old"})),
+        ));
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .title("new")
+                    .raw_input(serde_json::json!({"command": "new"})),
+            ),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            approval_details(&request, &projector),
+            ("new".to_string(), r#"{"command":"new"}"#.to_string(),)
+        );
     }
 
     #[tokio::test]
