@@ -1071,6 +1071,15 @@ mod native_tests {
     }
 
     #[test]
+    fn disclosure_panels_animate_open_and_closed() {
+        let css = include_str!("../../vmux_server/assets/index.css");
+        assert!(css.contains("interpolate-size: allow-keywords"));
+        assert!(css.contains(".disclosure::details-content"));
+        assert!(css.contains(".disclosure[open]::details-content"));
+        assert!(css.contains("transition-behavior: allow-discrete"));
+    }
+
+    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());

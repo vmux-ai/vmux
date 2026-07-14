@@ -6,8 +6,8 @@ use crate::chat_page::composer::{
     should_fetch_resume,
 };
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatEscape,
-    ChatItem, ChatResume, ChatSnapshot, ChatSubmit, ChatTurn, RESUMABLE_SESSIONS_EVENT,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatEscape, ChatItem,
+    ChatResume, ChatSnapshot, ChatSubmit, ChatTurn, RESUMABLE_SESSIONS_EVENT,
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
     RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
