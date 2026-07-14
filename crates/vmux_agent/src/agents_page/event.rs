@@ -35,7 +35,13 @@ pub struct AgentEntry {
     pub name: String,
     pub icon: String,
     pub description: String,
-    /// `native` | `node` | `python` — the runtime this agent's distribution needs.
+    /// `acp` | `cli`.
+    pub source: String,
+    /// URL opened after installation or from the installed row.
+    pub launch_url: String,
+    /// Whether vmux owns enough state to remove this installation safely.
+    pub uninstallable: bool,
+    /// `native` | `node` | `python` | `cli`.
     pub runtime: String,
     /// `available` | `installing` | `installed` | `update` | `error`.
     pub status: String,
@@ -84,4 +90,18 @@ pub struct AgentsInstall {
 )]
 pub struct AgentsUninstall {
     pub id: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AgentsOpen {
+    pub url: String,
 }

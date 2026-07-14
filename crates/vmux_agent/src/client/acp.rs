@@ -89,6 +89,15 @@ pub struct AcpCatalog {
     pub agents: Vec<crate::acp_registry::RegistryAgent>,
 }
 
+#[derive(Resource, Default)]
+pub(crate) struct AcpInstallGeneration(u64);
+
+impl AcpInstallGeneration {
+    pub(crate) fn bump(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
+}
+
 /// One-shot receiver for the startup catalog fetch.
 #[derive(Resource)]
 struct AcpCatalogChannel {
@@ -125,6 +134,7 @@ impl Plugin for AcpAgentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AcpInstallChannel>()
             .init_resource::<AcpCatalog>()
+            .init_resource::<AcpInstallGeneration>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
@@ -440,6 +450,7 @@ fn parse_codex_config(
 fn drain_acp_installs(
     installs: Res<AcpInstallChannel>,
     service: Option<Res<ServiceClient>>,
+    mut install_generation: ResMut<AcpInstallGeneration>,
     mut q: Query<(&AcpSession, &mut AgentRunState)>,
 ) {
     while let Ok(msg) = installs.rx.try_recv() {
@@ -467,6 +478,7 @@ fn drain_acp_installs(
                 args,
                 env,
             } => {
+                install_generation.bump();
                 let Some(service) = service.as_ref() else {
                     continue;
                 };

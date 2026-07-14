@@ -21,10 +21,12 @@ use crate::acp_registry::Runtime;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::agents_page::event::{
     AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
-    AgentsUninstall,
+    AgentsOpen, AgentsUninstall,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::client::acp::AcpCatalog;
+use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::agent::AgentKind;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -87,16 +89,31 @@ impl Plugin for AgentsManagerPlugin {
         app.init_resource::<AgentsPageWebview>()
             .init_resource::<AgentsStatus>()
             .init_resource::<AgentsInstallChannel>()
+            .init_resource::<AcpInstallGeneration>()
             .add_plugins(BinEventEmitterPlugin::<(
                 AgentsCatalogRequest,
                 AgentsInstall,
                 AgentsUninstall,
+                AgentsOpen,
             )>::for_hosts(&["agents"]))
             .add_observer(on_catalog_request)
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
+            .add_observer(on_open_request)
             .add_systems(Update, (push_agents, drain_agent_installs));
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_open_request(
+    trigger: On<BinReceive<AgentsOpen>>,
+    mut commands: MessageWriter<vmux_command::AppCommand>,
+) {
+    commands.write(vmux_command::AppCommand::Browser(
+        vmux_command::BrowserCommand::Open(vmux_command::open::OpenCommand::InNewStack {
+            url: Some(trigger.event().payload.url.clone()),
+        }),
+    ));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -119,6 +136,9 @@ fn catalog_snapshot(catalog: &AcpCatalog, status: &AgentsStatus) -> AgentsCatalo
                 name: a.name.clone(),
                 icon: a.icon.clone().unwrap_or_default(),
                 description: a.description.clone().unwrap_or_default(),
+                source: "acp".to_string(),
+                launch_url: format!("vmux://agent/{}", a.id),
+                uninstallable: true,
                 runtime: match a.preferred_runtime() {
                     Runtime::None => "native",
                     Runtime::Node => "node",
@@ -130,8 +150,37 @@ fn catalog_snapshot(catalog: &AcpCatalog, status: &AgentsStatus) -> AgentsCatalo
             }
         })
         .collect();
+    agents.extend(cli_agent_entries(|kind| {
+        crate::exec::find_executable(kind.executable()).is_some()
+    }));
     agents.sort_by_key(|a| a.name.to_lowercase());
     AgentsCatalog { agents }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<AgentEntry> {
+    AgentKind::all()
+        .into_iter()
+        .map(|kind| {
+            let segment = kind.as_url_segment();
+            AgentEntry {
+                id: format!("cli:{segment}"),
+                name: format!("{} CLI", kind.display_name()),
+                icon: String::new(),
+                description: "Terminal-based coding agent".to_string(),
+                source: "cli".to_string(),
+                launch_url: format!("{}cli", kind.cli_url_prefix()),
+                uninstallable: false,
+                runtime: "cli".to_string(),
+                status: if is_installed(kind) {
+                    "installed".to_string()
+                } else {
+                    "available".to_string()
+                },
+                detail: String::new(),
+            }
+        })
+        .collect()
 }
 
 /// Remember which webview asked for the catalog; the push system delivers it.
@@ -180,15 +229,21 @@ fn on_install_request(
 fn on_uninstall_request(
     trigger: On<BinReceive<AgentsUninstall>>,
     mut status: ResMut<AgentsStatus>,
+    mut install_generation: ResMut<AcpInstallGeneration>,
 ) {
     let id = trigger.event().payload.id.clone();
     let _ = crate::acp_install::uninstall(&id);
     status.0.remove(&id);
+    install_generation.bump();
 }
 
 /// Fold background-install updates into the session status map.
 #[cfg(not(target_arch = "wasm32"))]
-fn drain_agent_installs(installs: Res<AgentsInstallChannel>, mut status: ResMut<AgentsStatus>) {
+fn drain_agent_installs(
+    installs: Res<AgentsInstallChannel>,
+    mut status: ResMut<AgentsStatus>,
+    mut install_generation: ResMut<AcpInstallGeneration>,
+) {
     while let Ok(msg) = installs.rx.try_recv() {
         match msg {
             AgentMsg::Progress { id, pct, message } => {
@@ -200,6 +255,7 @@ fn drain_agent_installs(installs: Res<AgentsInstallChannel>, mut status: ResMut<
             }
             AgentMsg::Done { id } => {
                 status.0.remove(&id);
+                install_generation.bump();
             }
             AgentMsg::Failed { id, message } => {
                 status.0.insert(id, ("error".to_string(), message));
@@ -232,4 +288,26 @@ fn push_agents(
         AGENTS_CATALOG_EVENT,
         &catalog_snapshot(&catalog, &status),
     ));
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_catalog_rows_report_install_state() {
+        let rows = cli_agent_entries(|kind| kind == AgentKind::Codex);
+
+        assert_eq!(rows.len(), 3);
+        let codex = rows.iter().find(|row| row.id == "cli:codex").unwrap();
+        assert_eq!(codex.source, "cli");
+        assert_eq!(codex.launch_url, "vmux://agent/codex/cli");
+        assert_eq!(codex.status, "installed");
+        assert!(!codex.uninstallable);
+        assert!(
+            rows.iter()
+                .filter(|row| row.id != "cli:codex")
+                .all(|row| row.status == "available")
+        );
+    }
 }

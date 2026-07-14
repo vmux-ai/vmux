@@ -428,28 +428,31 @@ pub fn attach_acp_agent_to_stack(
 }
 
 /// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
-fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -> Option<String> {
-    catalog?
-        .agents
-        .iter()
-        .find(|a| a.id == id)
-        .and_then(|a| a.icon.clone())
+fn acp_registry_agent_for_id<'a>(
+    catalog: Option<&'a crate::client::acp::AcpCatalog>,
+    id: &str,
+) -> Option<&'a crate::acp_registry::RegistryAgent> {
+    let registry_id = crate::acp_install::registry_id_alias(id);
+    catalog?.agents.iter().find(|agent| agent.id == registry_id)
 }
 
-fn acp_profile_name(
-    config: &vmux_setting::AcpAgentConfig,
+fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -> Option<String> {
+    acp_registry_agent_for_id(catalog, id).and_then(|agent| agent.icon.clone())
+}
+
+fn acp_profile_name_for_id(
+    id: &str,
+    config: Option<&vmux_setting::AcpAgentConfig>,
     catalog: Option<&crate::client::acp::AcpCatalog>,
 ) -> String {
-    let registry_id = crate::acp_install::registry_id_alias(&config.id);
-    catalog
-        .and_then(|catalog| catalog.agents.iter().find(|agent| agent.id == registry_id))
+    acp_registry_agent_for_id(catalog, id)
         .map(|agent| agent.name.trim())
         .filter(|name| !name.is_empty())
         .or_else(|| {
-            let name = config.name.trim();
+            let name = config?.name.trim();
             (!name.is_empty()).then_some(name)
         })
-        .unwrap_or(config.id.as_str())
+        .unwrap_or(id)
         .to_string()
 }
 
@@ -2958,8 +2961,9 @@ fn handle_swap_stack_session(
         };
         if let crate::AgentUrl::Acp { id, .. } = &target
             && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
+            && acp_registry_agent_for_id(catalog.as_deref(), id).is_none()
         {
-            bevy::log::warn!("swap: no ACP agent configured for '{id}'");
+            bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
             continue;
         }
         if ev.handoff.is_some() && !matches!(target, crate::AgentUrl::Acp { .. }) {
@@ -3022,18 +3026,13 @@ fn handle_swap_stack_session(
                 });
             }
             crate::AgentUrl::Acp { id, sid } => {
-                let cfg = settings
-                    .agent
-                    .acp
-                    .iter()
-                    .find(|cfg| cfg.id == id)
-                    .expect("ACP target validated before teardown");
+                let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
                 let routing_sid = uuid::Uuid::new_v4().to_string();
-                let icon = acp_icon_for_id(catalog.as_deref(), &cfg.id);
-                let name = acp_profile_name(cfg, catalog.as_deref());
+                let icon = acp_icon_for_id(catalog.as_deref(), &id);
+                let name = acp_profile_name_for_id(&id, cfg, catalog.as_deref());
                 attach_acp_agent_to_stack(
                     ev.stack,
-                    &cfg.id,
+                    &id,
                     &name,
                     &routing_sid,
                     &ev.cwd,
@@ -3148,7 +3147,8 @@ fn handle_agent_page_open_task(
         Some(crate::AgentUrl::Acp { id, sid }) => {
             // ACP agents own the canonical single-segment names (claude/codex/…) plus the
             // two-segment `<id>/<acp-session-id>` session form.
-            let Some(cfg) = acp_configs.iter().find(|c| c.id == id) else {
+            let cfg = acp_configs.iter().find(|config| config.id == id);
+            if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 // Not an ACP agent. A bare `vmux://agent/<kind>` for a built-in CLI kind falls
                 // back to a fresh CLI session (CLI's own url is `<kind>/cli`); this keeps the
                 // legacy bare-url entry point (and the missing-binary setup flow) working.
@@ -3166,13 +3166,13 @@ fn handle_agent_page_open_task(
                     }
                     return Ok(());
                 }
-                return Err(format!("no ACP agent configured for '{id}'"));
-            };
+                return Err(format!("ACP agent unavailable for '{id}'"));
+            }
             // Already attached to this agent on this stack? A repeat open (or the post-spawn url
             // redirect) is a no-op instead of re-spawning the session.
             if acp_sessions
                 .get(task.stack)
-                .is_ok_and(|session| session.agent_id == cfg.id)
+                .is_ok_and(|session| session.agent_id == id)
             {
                 return Ok(());
             }
@@ -3180,11 +3180,11 @@ fn handle_agent_page_open_task(
             // `sid` (when present) is the agent-assigned ACP session id from a restored url — pass
             // it as the resume target. Fresh opens mint a routing sid and load nothing.
             let routing_sid = uuid::Uuid::new_v4().to_string();
-            let icon = acp_icon_for_id(catalog, &cfg.id);
-            let name = acp_profile_name(cfg, catalog);
+            let icon = acp_icon_for_id(catalog, &id);
+            let name = acp_profile_name_for_id(&id, cfg, catalog);
             attach_acp_agent_to_stack(
                 task.stack,
-                &cfg.id,
+                &id,
                 &name,
                 &routing_sid,
                 default_cwd,
@@ -3802,19 +3802,34 @@ mod tests {
     fn acp_icon_for_id_reads_catalog() {
         use crate::acp_registry::{Distribution, RegistryAgent};
         let catalog = crate::client::acp::AcpCatalog {
-            agents: vec![RegistryAgent {
-                id: "mistral-vibe".to_string(),
-                name: "Mistral Vibe".to_string(),
-                version: None,
-                description: None,
-                icon: Some("https://cdn.example/vibe.svg".to_string()),
-                repository: None,
-                distribution: Distribution::default(),
-            }],
+            agents: vec![
+                RegistryAgent {
+                    id: "mistral-vibe".to_string(),
+                    name: "Mistral Vibe".to_string(),
+                    version: None,
+                    description: None,
+                    icon: Some("https://cdn.example/vibe.svg".to_string()),
+                    repository: None,
+                    distribution: Distribution::default(),
+                },
+                RegistryAgent {
+                    id: "claude-acp".to_string(),
+                    name: "Claude Agent".to_string(),
+                    version: None,
+                    description: None,
+                    icon: Some("https://cdn.example/claude.svg".to_string()),
+                    repository: None,
+                    distribution: Distribution::default(),
+                },
+            ],
         };
         assert_eq!(
             acp_icon_for_id(Some(&catalog), "mistral-vibe").as_deref(),
             Some("https://cdn.example/vibe.svg")
+        );
+        assert_eq!(
+            acp_icon_for_id(Some(&catalog), "claude").as_deref(),
+            Some("https://cdn.example/claude.svg")
         );
         assert_eq!(acp_icon_for_id(Some(&catalog), "absent"), None);
         assert_eq!(acp_icon_for_id(None, "mistral-vibe"), None);
@@ -3845,10 +3860,19 @@ mod tests {
             }],
         };
 
-        assert_eq!(acp_profile_name(&config, Some(&catalog)), "Claude");
-        assert_eq!(acp_profile_name(&config, None), "Configured Claude");
+        assert_eq!(
+            acp_profile_name_for_id(&config.id, Some(&config), Some(&catalog)),
+            "Claude"
+        );
+        assert_eq!(
+            acp_profile_name_for_id(&config.id, Some(&config), None),
+            "Configured Claude"
+        );
         config.name = "   ".into();
-        assert_eq!(acp_profile_name(&config, None), "claude");
+        assert_eq!(
+            acp_profile_name_for_id(&config.id, Some(&config), None),
+            "claude"
+        );
     }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -4807,6 +4831,58 @@ mod tests {
                 format!("Set up {} CLI", kind.display_name())
             );
         }
+    }
+
+    #[test]
+    fn registry_acp_opens_without_settings_entry() {
+        use crate::acp_registry::{Distribution, RegistryAgent};
+
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(crate::client::acp::AcpCatalog {
+                agents: vec![RegistryAgent {
+                    id: "custom-acp".to_string(),
+                    name: "Custom ACP".to_string(),
+                    version: None,
+                    description: None,
+                    icon: Some("https://cdn.example/custom.svg".to_string()),
+                    repository: None,
+                    distribution: Distribution::default(),
+                }],
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://agent/custom-acp".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let session = app
+            .world()
+            .get::<crate::client::acp::AcpSession>(stack)
+            .unwrap();
+        assert_eq!(session.agent_id, "custom-acp");
+        let meta = app.world().get::<PageMetadata>(stack).unwrap();
+        assert_eq!(meta.title, "Custom ACP");
+        assert_eq!(meta.icon.favicon_url(), "https://cdn.example/custom.svg");
     }
 
     #[test]

@@ -102,3 +102,5 @@ pub use tools::mcp_tool_defs;
 pub use url::{AgentKind, AgentUrl};
 #[cfg(not(target_arch = "wasm32"))]
 pub use variant::AgentVariant;
+#[cfg(not(target_arch = "wasm32"))]
+pub use vibe::setup::AgentSetupPlugin;
