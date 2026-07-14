@@ -1,6 +1,11 @@
 use vmux_core::extension::store;
 
+use bevy::prelude::Resource;
+
 use super::runtime::{self, PreparedRuntime};
+
+#[derive(Resource, Clone, Debug, Default)]
+pub struct PreparedExtensions(pub Vec<PreparedRuntime>);
 
 pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let root = store::root();

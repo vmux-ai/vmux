@@ -93,7 +93,22 @@ fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        crate::extensions::load::apply_env()
+        let extension_root = vmux_core::extension::store::root();
+        let profile = vmux_core::profile::active_profile_name();
+        let extension_index = vmux_core::extension::store::Index::load(&extension_root)
+            .unwrap_or_else(|error| panic!("failed to load extension index: {error}"));
+        let enabled_extension_ids = extension_index
+            .entries
+            .iter()
+            .filter(|entry| entry.enabled)
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let extension_bridge = crate::extensions::bridge::ExtensionBridgeServer::start(
+            &profile,
+            enabled_extension_ids,
+        )
+        .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
+        let prepared_extensions = crate::extensions::load::apply_env()
             .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -108,6 +123,16 @@ impl Plugin for BrowserPlugin {
             switch_values: Vec::new(),
         };
         configure_cef_backend_sync(app)
+            .insert_resource(crate::extensions::load::PreparedExtensions(
+                prepared_extensions,
+            ))
+            .insert_resource(extension_bridge)
+            .init_resource::<crate::extensions::broker::BridgeSubscriptions>()
+            .add_systems(
+                Startup,
+                crate::extensions::bridge_page::spawn_extension_bridge_pages,
+            )
+            .add_systems(Update, crate::extensions::broker::drain_bridge_requests)
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()

@@ -1,4 +1,6 @@
-mod bridge;
+pub(crate) mod bridge;
+pub(crate) mod bridge_page;
+pub(crate) mod broker;
 mod capability;
 mod download;
 mod install;

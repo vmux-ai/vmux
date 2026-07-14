@@ -22,6 +22,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"
 tungstenite = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }

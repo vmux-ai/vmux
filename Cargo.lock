@@ -9663,6 +9663,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tungstenite 0.28.0",
+ "url",
  "uuid",
  "vmux_agent",
  "vmux_command",
