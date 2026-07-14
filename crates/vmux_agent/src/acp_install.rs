@@ -30,6 +30,19 @@ fn store_root() -> PathBuf {
     acp_registry::agents_dir()
 }
 
+fn write_agent_receipt(root: &Path, agent: &RegistryAgent) -> Result<(), String> {
+    store::write_receipt(
+        root,
+        &store::Receipt {
+            name: agent.id.clone(),
+            version: agent.version.clone(),
+            source_id: format!("acp:{}", agent.id),
+            bin: std::collections::BTreeMap::new(),
+        },
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Final path component of a manifest `cmd` (`"./bin/agent"` → `"agent"`), used as the output
 /// name when extracting single-file archives (`.gz`/raw).
 fn cmd_basename(cmd: &str) -> &str {
@@ -163,6 +176,7 @@ pub fn ensure_npx_installed(
         .ok_or_else(|| format!("no npx distribution: {}", agent.id))?;
     let root = store_root();
     let bindir = ensure_node(&root, &mut emit)?;
+    write_agent_receipt(&root, agent)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
     let mut args = vec!["-y".to_string(), dist.package.clone()];
@@ -252,6 +266,7 @@ pub fn ensure_uvx_installed(
         .ok_or_else(|| format!("no uvx distribution: {}", agent.id))?;
     let root = store_root();
     let bindir = ensure_uv(&root, &mut emit)?;
+    write_agent_receipt(&root, agent)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
     let mut args = vec![dist.package.clone()];
@@ -289,16 +304,21 @@ fn uv_bindir(root: &Path) -> Option<PathBuf> {
     )
 }
 
-/// Whether the agent is ready to spawn without a download: a native binary receipt, or the
-/// managed runtime present for npx/uvx.
+/// Whether the agent has its own receipt and any required managed runtime is present.
 pub fn is_agent_installed(agent: &RegistryAgent) -> bool {
-    let root = store_root();
+    is_agent_installed_at(&store_root(), agent)
+}
+
+fn is_agent_installed_at(root: &Path, agent: &RegistryAgent) -> bool {
+    if !store::is_installed(root, &agent.id) {
+        return false;
+    }
     match agent.preferred_runtime() {
-        acp_registry::Runtime::None => store::is_installed(&root, &agent.id),
-        acp_registry::Runtime::Node => node_bindir(&root)
+        acp_registry::Runtime::None => true,
+        acp_registry::Runtime::Node => node_bindir(root)
             .map(|b| b.join("node").exists())
             .unwrap_or(false),
-        acp_registry::Runtime::Uv => uv_bindir(&root)
+        acp_registry::Runtime::Uv => uv_bindir(root)
             .map(|b| b.join("uvx").exists())
             .unwrap_or(false),
     }
@@ -312,10 +332,13 @@ pub fn is_update_available(agent: &RegistryAgent) -> bool {
             .unwrap_or(false)
 }
 
-/// Remove an installed native-binary agent (best-effort; npx/uvx share the managed runtime, so
-/// this only affects native binaries).
+/// Remove an agent's receipt and native package. Shared npx/uvx runtimes remain installed.
 pub fn uninstall(id: &str) -> Result<(), String> {
-    store::remove(&store_root(), id).map_err(|e| e.to_string())
+    uninstall_at(&store_root(), id)
+}
+
+fn uninstall_at(root: &Path, id: &str) -> Result<(), String> {
+    store::remove(root, id).map_err(|e| e.to_string())
 }
 
 /// Map a vmux launcher id to its ACP-registry id where they differ (the built-in CLI ids vs.
@@ -410,13 +433,7 @@ fn install_binary(
         ));
     }
 
-    let receipt = store::Receipt {
-        name: agent.id.clone(),
-        version: agent.version.clone(),
-        source_id: format!("acp:{}", agent.id),
-        bin: std::collections::BTreeMap::new(),
-    };
-    store::write_receipt(root, &receipt).map_err(|e| e.to_string())?;
+    write_agent_receipt(root, agent)?;
     let _ = std::fs::remove_dir_all(&staging);
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(())
@@ -425,6 +442,26 @@ fn install_binary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn npx_agent(id: &str) -> RegistryAgent {
+        RegistryAgent {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: Some("1.0.0".to_string()),
+            description: None,
+            icon: None,
+            repository: None,
+            distribution: acp_registry::Distribution {
+                binary: None,
+                npx: Some(acp_registry::PackageDist {
+                    package: format!("@example/{id}"),
+                    args: vec![],
+                    env: Default::default(),
+                }),
+                uvx: None,
+            },
+        }
+    }
 
     #[test]
     fn cmd_basename_strips_prefix_and_dirs() {
@@ -462,5 +499,36 @@ mod tests {
             env: Default::default(),
         };
         assert_eq!(resolved_cmd_path(pkg, &gz, "a.gz"), Path::new("/pkg/agent"));
+    }
+
+    #[test]
+    fn shared_node_does_not_mark_every_npx_agent_installed() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-acp-install-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let node = node_bindir(&root).unwrap().join("node");
+        std::fs::create_dir_all(node.parent().unwrap()).unwrap();
+        std::fs::write(&node, b"").unwrap();
+        let installed = npx_agent("installed-agent");
+        let available = npx_agent("available-agent");
+
+        assert!(!is_agent_installed_at(&root, &installed));
+        assert!(!is_agent_installed_at(&root, &available));
+
+        write_agent_receipt(&root, &installed).unwrap();
+
+        assert!(is_agent_installed_at(&root, &installed));
+        assert!(!is_agent_installed_at(&root, &available));
+
+        uninstall_at(&root, &installed.id).unwrap();
+
+        assert!(!is_agent_installed_at(&root, &installed));
+        assert!(node.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
