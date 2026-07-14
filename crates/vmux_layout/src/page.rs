@@ -801,6 +801,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
+    let folded_stack = pane.stacks.iter().find(|stack| stack.is_active).cloned();
     let mut folded = use_signal(|| false);
 
     rsx! {
@@ -839,7 +840,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     }
                 }
             }
-            if !folded() {
+            if folded() {
+                if let Some(stack) = folded_stack.clone() {
+                    SideSheetStackRow { stack, pane_id }
+                }
+            } else {
                 div { class: "flex flex-col gap-1",
                     for stack in pane
                         .stacks
@@ -886,9 +891,9 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
         div {
             id: "sidesheet-stack-{pane_id}-{stack_index}",
             class: if is_active {
-                "glass group/stack flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+                "side-sheet-stack-row glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
             } else {
-                "group/stack flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                "side-sheet-stack-row flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
@@ -910,7 +915,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 r#type: "button",
                 aria_label: "Close stack",
                 title: "Close stack",
-                class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover/stack:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
+                class: "side-sheet-stack-close ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10",
                 onmousedown: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();

@@ -76,12 +76,25 @@ fn inactive_tabs_add_horizontal_padding_on_hover() {
 }
 
 #[test]
-fn side_sheet_close_button_uses_stack_row_hover_group() {
+fn side_sheet_close_button_uses_stack_row_hover_selector() {
     let row = side_sheet_stack_row_component_source();
+    let css = include_str!("../../vmux_server/assets/index.css");
 
-    assert_eq!(row.matches("group/stack flex h-9").count(), 2);
-    assert!(row.contains("group-hover/stack:opacity-100"));
+    assert_eq!(row.matches("side-sheet-stack-row").count(), 2);
+    assert!(row.contains("side-sheet-stack-close"));
+    assert!(css.contains(".side-sheet-stack-row:hover > .side-sheet-stack-close"));
     assert!(!row.contains("group-hover:opacity-100"));
+    assert!(!row.contains("group-hover/stack:opacity-100"));
+}
+
+#[test]
+fn folded_pane_shows_its_active_stack() {
+    let pane = pane_section_component_source();
+
+    assert!(pane.contains(".find(|stack| stack.is_active"));
+    assert!(pane.contains("if folded()"));
+    assert!(pane.contains("if let Some(stack) = folded_stack.clone()"));
+    assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
 }
 
 #[test]
@@ -219,4 +232,12 @@ fn side_sheet_stack_row_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn download_pct").next())
         .expect("side sheet stack row component")
+}
+
+fn pane_section_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn PaneSection(pane: PaneNode, index: usize)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn NewStackRow").next())
+        .expect("pane section component")
 }
