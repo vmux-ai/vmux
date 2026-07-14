@@ -75,6 +75,7 @@ static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 
+#[cfg(any(target_os = "macos", test))]
 fn native_mouse_move_should_wake(layout_should_wake: bool, pane_should_wake: bool) -> bool {
     layout_should_wake || pane_should_wake
 }
