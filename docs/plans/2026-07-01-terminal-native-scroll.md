@@ -1,7 +1,5 @@
 # Terminal Native Scroll (editor-parity) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Do NOT subagent-drive this plan — CEF builds are huge and long-lived subagents drop the dev socket (`feedback_subagent_cef_fragility`). Execute inline against a warm target dir; the user runtime-tests at the end (`feedback_finish_then_test`).
-
 **Goal:** Make primary-screen terminal scrolling as fast as the `file://` editor by moving to native GPU-compositor scroll over a windowed DOM (no backend round-trip during normal scroll), and fix the editor's edge-stall with viewport-relative buffering.
 
 **Architecture:** Mirror the editor. The terminal frontend becomes an `overflow-auto` scroll container with a full-height spacer and only a windowed slice of document rows in the DOM. Scroll position (`scrollTop`) is derived from a document-row coordinate (row 0 = oldest scrollback line). The out-of-process `vmux_service` serves any document-row window by direct alacritty `Line` indexing (`grid[Line(doc_row - history_size)]`, `display_offset`-free) and streams the bottom window autonomously while the frontend is "following". Alt-screen / mouse-mode / copy-mode keep today's per-notch passthrough. Shared windowing math lives in `vmux_core::scroll`.

@@ -16,7 +16,6 @@ crates/vmux_header/target/
 crates/vmux_ui/assets/ui_library.css
 crates/vmux_ui/target/
 
-.superpowers/
 .worktrees/
 .env
 build/
