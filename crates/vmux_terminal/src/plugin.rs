@@ -4581,6 +4581,9 @@ mod tests {
         let page = include_str!("page.rs");
         assert!(page.contains("MatrixRain {"));
         assert!(page.contains("accent.rain_rgb"));
+        assert!(page.contains("terminal: true"));
+        assert!(page.contains("git status --short"));
+        assert!(page.contains("type a command · runs when ready"));
 
         let rain = include_str!("matrix_rain.rs");
         assert!(rain.contains("request_animation_frame"));

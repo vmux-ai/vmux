@@ -12,6 +12,9 @@ use crate::chat_page::event::{
     RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
+use vmux_terminal::matrix_rain::MatrixRain;
+use vmux_terminal::page::PromptGhost;
+use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -147,7 +150,7 @@ pub fn Page() -> Element {
     use_theme();
     let agent = current_agent();
     let mut items = use_signal(Vec::<ChatItem>::new);
-    let mut status = use_signal(|| "idle".to_string());
+    let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
     let mut agent_name = use_signal(String::new);
@@ -281,12 +284,16 @@ pub fn Page() -> Element {
         let n = agent_name();
         if n.is_empty() { agent.clone() } else { n }
     };
-    let dot_style = if accent().is_empty() {
-        String::new()
-    } else {
-        format!("background:{}", accent())
+    let agent_accent = agent_accent(&agent);
+    let installing = status() == "installing";
+    let install_detail = {
+        let detail = error();
+        if detail.is_empty() {
+            "Preparing agent…".to_string()
+        } else {
+            detail
+        }
     };
-
     let draft_val = draft();
     let selector = selector_mode(&draft_val);
     let command_query = match selector {
@@ -343,89 +350,90 @@ pub fn Page() -> Element {
             class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
             style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
             style { dangerous_inner_html: MD_CSS }
-            div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
-                div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
-            }
-            header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
-                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
-                span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
-                span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
-                    "{header_name}"
+            if installing {
+                div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background",
+                    MatrixRain {
+                        accent_rgb: agent_accent.rain_rgb.to_string(),
+                        words: vec![header_name.to_uppercase()],
+                    }
+                }
+            } else {
+                div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
+                    div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
+                }
+                header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
+                    {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
+                    span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
+                    span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
+                        "{header_name}"
+                    }
                 }
             }
-            div {
-                id: "chat-scroll",
-                class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
-                onscroll: move |_| {
-                    if let Some(el) = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.get_element_by_id("chat-scroll"))
-                    {
-                        let top = el.scroll_top();
-                        let dist = el.scroll_height() - top - el.client_height();
-                        // Re-pin once the user reaches the bottom; unpin only when they scroll UP
-                        // (scroll_top decreases). Never unpin from our own programmatic
-                        // scroll-to-bottom, which only moves down and would otherwise poison
-                        // `at_bottom` with a stale, mid-stream scroll height.
-                        if dist <= 48 {
-                            at_bottom.set(true);
-                        } else if top < *last_top.peek() - 4 {
-                            at_bottom.set(false);
-                        }
-                        last_top.set(top);
-                    }
-                },
-                div { class: "mx-auto flex max-w-3xl flex-col gap-4",
-                    if items.read().is_empty() && status() == "idle" {
-                        div { class: "flex flex-col items-center gap-3 py-24 text-center",
-                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
-                            h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
-                                "{header_name}"
-                            }
-                            p { class: "text-sm text-muted-foreground", "Ready when you are." }
-                        }
-                    }
-                    for (i , item) in items.read().iter().enumerate() {
-                        {render_item(i, item, &verb(), elapsed())}
-                        if !handoff_source().is_empty()
-                            && is_handoff_boundary(i, handoff_message_count())
+            if !installing {
+                div {
+                    id: "chat-scroll",
+                    class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
+                    onscroll: move |_| {
+                        if let Some(el) = web_sys::window()
+                            .and_then(|w| w.document())
+                            .and_then(|d| d.get_element_by_id("chat-scroll"))
                         {
-                            div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
-                                span { class: "h-px flex-1 bg-foreground/10" }
-                                span { "Continued from {handoff_source}" }
-                                if handoff_truncated() {
-                                    span { class: "text-amber-500/80", "· older context omitted" }
+                            let top = el.scroll_top();
+                            let dist = el.scroll_height() - top - el.client_height();
+                            // Re-pin once the user reaches the bottom; unpin only when they scroll UP
+                            // (scroll_top decreases). Never unpin from our own programmatic
+                            // scroll-to-bottom, which only moves down and would otherwise poison
+                            // `at_bottom` with a stale, mid-stream scroll height.
+                            if dist <= 48 {
+                                at_bottom.set(true);
+                            } else if top < *last_top.peek() - 4 {
+                                at_bottom.set(false);
+                            }
+                            last_top.set(top);
+                        }
+                    },
+                    div { class: "mx-auto flex max-w-3xl flex-col gap-4",
+                        if items.read().is_empty() && status() == "idle" {
+                            div { class: "flex flex-col items-center gap-3 py-24 text-center",
+                                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
+                                h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
+                                    "{header_name}"
                                 }
+                                p { class: "text-sm text-muted-foreground", "Ready when you are." }
+                            }
+                        }
+                        for (i , item) in items.read().iter().enumerate() {
+                            {render_item(i, item, &verb(), elapsed())}
+                            if !handoff_source().is_empty()
+                                && is_handoff_boundary(i, handoff_message_count())
+                            {
+                                div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
+                                    span { class: "h-px flex-1 bg-foreground/10" }
+                                    span { "Continued from {handoff_source}" }
+                                    if handoff_truncated() {
+                                        span { class: "text-amber-500/80", "· older context omitted" }
+                                    }
+                                    span { class: "h-px flex-1 bg-foreground/10" }
+                                }
+                            }
+                        }
+                        if status() == "errored" {
+                            div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                                "{error}"
+                            }
+                        }
+                        if paused() {
+                            div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
+                                span { class: "h-px flex-1 bg-foreground/10" }
+                                span { class: "shrink-0", "interrupted" }
                                 span { class: "h-px flex-1 bg-foreground/10" }
                             }
-                        }
-                    }
-                    if status() == "installing" {
-                        div { class: "flex items-center gap-2.5 text-sm",
-                            span { class: "flex items-end gap-1",
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]", style: "{dot_style}" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]", style: "{dot_style}" }
-                                span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70", style: "{dot_style}" }
-                            }
-                            span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{error}" }
-                        }
-                    }
-                    if status() == "errored" {
-                        div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
-                            "{error}"
-                        }
-                    }
-                    if paused() {
-                        div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
-                            span { class: "h-px flex-1 bg-foreground/10" }
-                            span { class: "shrink-0", "interrupted" }
-                            span { class: "h-px flex-1 bg-foreground/10" }
                         }
                     }
                 }
             }
 
-            if let Some((call_id, name, args_json)) = approval() {
+            if !installing && let Some((call_id, name, args_json)) = approval() {
                 {
                     let details = super::approval_details(&args_json);
                     rsx! {
@@ -482,8 +490,21 @@ pub fn Page() -> Element {
                 }
             }
 
-            div { class: "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl",
-                div { class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+            div {
+                class: if installing { "absolute inset-0 z-20 flex items-center justify-center px-4" } else { "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl" },
+                div {
+                    class: if installing { "relative flex w-full max-w-md flex-col gap-2 rounded-2xl bg-white/70 p-4 ring-1 ring-inset ring-black/10 backdrop-blur-md dark:bg-black/40 dark:ring-white/10" } else { "relative mx-auto flex max-w-3xl flex-col gap-2" },
+                    if installing {
+                        div { class: "mb-1 flex items-center gap-3",
+                            div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
+                                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-5 w-5 text-[10px]")}
+                            }
+                            div { class: "min-w-0 flex-1",
+                                div { class: "truncate text-sm font-semibold {agent_accent.accent_text}", "{header_name}" }
+                                div { class: "truncate text-xs text-muted-foreground", "{install_detail}" }
+                            }
+                        }
+                    }
                     if cmd_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
                             for (i , command) in filtered_cmds.iter().enumerate() {
@@ -585,112 +606,122 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    div { class: "flex items-end gap-2",
-                        textarea {
-                            id: PROMPT_ID,
-                            class: "max-h-40 flex-1 resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25",
-                            rows: "1",
-                            placeholder: "Message the agent…",
-                            value: "{draft}",
-                            oninput: move |e| {
-                                draft.set(e.value());
-                                menu_sel.set(0);
-                            },
-                            onkeydown: move |e| {
-                                let streaming = matches!(status().as_str(), "streaming" | "awaiting");
-                                let draft_now = draft.peek().clone();
-                                let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
-                                    SelectorMode::Commands(query) => {
-                                        let query = query.to_lowercase();
-                                        (
-                                            slash_cmds
-                                                .peek()
-                                                .iter()
-                                                .filter(|command| command.name.starts_with(&query))
-                                                .cloned()
-                                                .collect::<Vec<_>>(),
-                                            Vec::new(),
-                                            false,
-                                        )
+                    div { class: if installing { "flex items-end gap-2 rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10" } else { "flex items-end gap-2" },
+                        div { class: "relative min-w-0 flex-1 overflow-hidden",
+                            if installing && draft.read().is_empty() {
+                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1",
+                                    PromptGhost {
+                                        accent_bg: agent_accent.accent_bg.to_string(),
+                                        terminal: false,
                                     }
-                                    SelectorMode::Resume(query) => (
-                                        Vec::new(),
-                                        filter_sessions(&sessions.peek(), query),
-                                        true,
-                                    ),
-                                    SelectorMode::None => (Vec::new(), Vec::new(), false),
-                                };
-                                let selector_open = session_selector_open || !cmd_items.is_empty();
-                                let selector_len = if session_selector_open {
-                                    sess_items.len()
-                                } else {
-                                    cmd_items.len()
-                                };
-                                let key = e.key().to_string();
-                                let command_modifier = e.modifiers().meta()
-                                    || e.modifiers().ctrl()
-                                    || e.modifiers().alt();
-                                let direction = if e.modifiers().meta() || e.modifiers().alt() {
-                                    None
-                                } else {
-                                    menu_direction(&key, e.modifiers().ctrl())
-                                };
-
-                                if selector_open && let Some(direction) = direction {
-                                    e.prevent_default();
-                                    let selected = *menu_sel.peek();
-                                    menu_sel.set(move_selection(selected, selector_len, direction));
-                                    return;
                                 }
-                                if selector_open
-                                    && e.key() == Key::Enter
-                                    && !e.modifiers().shift()
-                                    && !command_modifier
-                                {
-                                    e.prevent_default();
-                                    let selected = *menu_sel.peek();
-                                    if session_selector_open {
-                                        if let Some(session) = sess_items.get(selected) {
-                                            select_resume_session(session, draft);
-                                        }
-                                    } else if let Some(command) = cmd_items.get(selected) {
-                                        run_slash_command(&command.name, draft, menu_sel);
-                                    }
-                                    return;
-                                }
-                                if selector_open && e.key() == Key::Escape && !command_modifier {
-                                    e.prevent_default();
-                                    draft.set(String::new());
+                            }
+                            textarea {
+                                id: PROMPT_ID,
+                                class: if installing { "relative z-10 max-h-40 min-h-9 w-full resize-none bg-transparent px-1 py-2 font-mono text-sm placeholder:text-transparent focus:outline-none" } else { "max-h-40 w-full resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25" },
+                                rows: "1",
+                                placeholder: "Message the agent…",
+                                value: "{draft}",
+                                oninput: move |e| {
+                                    draft.set(e.value());
                                     menu_sel.set(0);
-                                    return;
-                                }
-                                if session_selector_open
-                                    && matches!(e.key(), Key::Enter | Key::Escape)
-                                {
-                                    return;
-                                }
+                                },
+                                onkeydown: move |e| {
+                                    let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+                                    let draft_now = draft.peek().clone();
+                                    let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
+                                        SelectorMode::Commands(query) => {
+                                            let query = query.to_lowercase();
+                                            (
+                                                slash_cmds
+                                                    .peek()
+                                                    .iter()
+                                                    .filter(|command| command.name.starts_with(&query))
+                                                    .cloned()
+                                                    .collect::<Vec<_>>(),
+                                                Vec::new(),
+                                                false,
+                                            )
+                                        }
+                                        SelectorMode::Resume(query) => (
+                                            Vec::new(),
+                                            filter_sessions(&sessions.peek(), query),
+                                            true,
+                                        ),
+                                        SelectorMode::None => (Vec::new(), Vec::new(), false),
+                                    };
+                                    let selector_open = session_selector_open || !cmd_items.is_empty();
+                                    let selector_len = if session_selector_open {
+                                        sess_items.len()
+                                    } else {
+                                        cmd_items.len()
+                                    };
+                                    let key = e.key().to_string();
+                                    let command_modifier = e.modifiers().meta()
+                                        || e.modifiers().ctrl()
+                                        || e.modifiers().alt();
+                                    let direction = if e.modifiers().meta() || e.modifiers().alt() {
+                                        None
+                                    } else {
+                                        menu_direction(&key, e.modifiers().ctrl())
+                                    };
 
-                                if e.key() == Key::Enter && !e.modifiers().shift() {
-                                    e.prevent_default();
-                                    do_submit(draft, at_bottom);
-                                } else if e.key() == Key::Escape {
-                                    e.prevent_default();
-                                    let _ = try_cef_bin_emit_rkyv(&ChatEscape);
-                                    if should_clear_draft_on_escape(
-                                        streaming,
-                                        queued.peek().is_empty(),
-                                        draft.peek().is_empty(),
-                                    ) {
-                                        draft.set(String::new());
+                                    if selector_open && let Some(direction) = direction {
+                                        e.prevent_default();
+                                        let selected = *menu_sel.peek();
+                                        menu_sel.set(move_selection(selected, selector_len, direction));
+                                        return;
                                     }
-                                } else if e.modifiers().ctrl()
-                                    && matches!(e.key(), Key::Character(c) if c == "c")
-                                    && !has_text_selection()
-                                {
-                                    e.prevent_default();
-                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                }
-                            },
+                                    if selector_open
+                                        && e.key() == Key::Enter
+                                        && !e.modifiers().shift()
+                                        && !command_modifier
+                                    {
+                                        e.prevent_default();
+                                        let selected = *menu_sel.peek();
+                                        if session_selector_open {
+                                            if let Some(session) = sess_items.get(selected) {
+                                                select_resume_session(session, draft);
+                                            }
+                                        } else if let Some(command) = cmd_items.get(selected) {
+                                            run_slash_command(&command.name, draft, menu_sel);
+                                        }
+                                        return;
+                                    }
+                                    if selector_open && e.key() == Key::Escape && !command_modifier {
+                                        e.prevent_default();
+                                        draft.set(String::new());
+                                        menu_sel.set(0);
+                                        return;
+                                    }
+                                    if session_selector_open
+                                        && matches!(e.key(), Key::Enter | Key::Escape)
+                                    {
+                                        return;
+                                    }
+
+                                    if e.key() == Key::Enter && !e.modifiers().shift() {
+                                        e.prevent_default();
+                                        do_submit(draft, at_bottom);
+                                    } else if e.key() == Key::Escape {
+                                        e.prevent_default();
+                                        let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+                                        if should_clear_draft_on_escape(
+                                            streaming,
+                                            queued.peek().is_empty(),
+                                            draft.peek().is_empty(),
+                                        ) {
+                                            draft.set(String::new());
+                                        }
+                                    } else if e.modifiers().ctrl()
+                                        && matches!(e.key(), Key::Character(c) if c == "c")
+                                        && !has_text_selection()
+                                    {
+                                        e.prevent_default();
+                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                    }
+                                },
+                            }
                         }
                         if matches!(status().as_str(), "streaming" | "awaiting") {
                             if queued.read().is_empty() {
@@ -743,6 +774,15 @@ pub fn Page() -> Element {
                                     path { d: "M12 19V5" }
                                     path { d: "M5 12l7-7 7 7" }
                                 }
+                            }
+                        }
+                    }
+                    if installing {
+                        div { class: "px-1 text-[10px] text-muted-foreground/70",
+                            if draft.read().is_empty() {
+                                "type a prompt · runs when ready"
+                            } else {
+                                "runs when ready · Enter sends"
                             }
                         }
                     }

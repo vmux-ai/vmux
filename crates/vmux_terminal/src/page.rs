@@ -413,11 +413,14 @@ pub fn Page() -> Element {
                                         } else {
                                             div {
                                                 class: "mt-0.5",
-                                                PromptGhost { accent_bg: accent.accent_bg.to_string() }
+                                                PromptGhost {
+                                                    accent_bg: accent.accent_bg.to_string(),
+                                                    terminal: true,
+                                                }
                                             }
                                             div {
                                                 class: "mt-1 text-[10px] text-muted-foreground/70",
-                                                "type a prompt · runs when ready · Esc skips"
+                                                "type a command · runs when ready · Esc skips"
                                             }
                                         }
                                     }
@@ -994,19 +997,28 @@ fn row_selection_cols(
     }
 }
 
-/// Example prompts cycled by [`PromptGhost`] while the boot prompt is empty.
-const PROMPT_EXAMPLES: &[&str] = &[
+const AGENT_PROMPT_EXAMPLES: &[&str] = &[
     "Find me a hotel with AC near Paris for this weekend",
     "Find the best flight from Paris to Tokyo next month",
     "Build a landing site for my new restaurant — make it themeable",
     "Open a PR for my staged changes",
 ];
 
-/// Placeholder that types out [`PROMPT_EXAMPLES`] one character at a time with a
-/// blinking caret while the agent boot prompt is empty. The live draft replaces
-/// it the moment the user types; unmounting clears the interval.
+const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
+    "git status --short",
+    "rg \"TODO|FIXME\" .",
+    "find . -type f -size +100M",
+    "git log --oneline -10",
+];
+
+/// Placeholder that types example prompts one character at a time with a blinking caret.
 #[component]
-fn PromptGhost(accent_bg: String) -> Element {
+pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
+    let examples = if terminal {
+        TERMINAL_PROMPT_EXAMPLES
+    } else {
+        AGENT_PROMPT_EXAMPLES
+    };
     let ex_idx = use_signal(|| 0usize);
     let typed = use_signal(|| 0usize);
     let cb: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
@@ -1014,7 +1026,7 @@ fn PromptGhost(accent_bg: String) -> Element {
     use_effect({
         let cb = cb.clone();
         let timer = timer.clone();
-        move || start_prompt_typewriter(ex_idx, typed, cb.clone(), timer.clone())
+        move || start_prompt_typewriter(examples, ex_idx, typed, cb.clone(), timer.clone())
     });
     use_drop({
         let cb = cb.clone();
@@ -1028,7 +1040,7 @@ fn PromptGhost(accent_bg: String) -> Element {
             *cb.borrow_mut() = None;
         }
     });
-    let example = PROMPT_EXAMPLES[ex_idx() % PROMPT_EXAMPLES.len()];
+    let example = examples[ex_idx() % examples.len()];
     let full = example.chars().count();
     let shown: String = example.chars().take(typed().min(full)).collect();
     rsx! {
@@ -1041,6 +1053,7 @@ fn PromptGhost(accent_bg: String) -> Element {
 }
 
 fn start_prompt_typewriter(
+    examples: &'static [&'static str],
     mut ex_idx: Signal<usize>,
     mut typed: Signal<usize>,
     cb_cell: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
@@ -1049,11 +1062,11 @@ fn start_prompt_typewriter(
     const PAUSE_TICKS: usize = 28;
     let cb = Closure::wrap(Box::new(move || {
         let idx = *ex_idx.peek();
-        let full = PROMPT_EXAMPLES[idx % PROMPT_EXAMPLES.len()].chars().count();
+        let full = examples[idx % examples.len()].chars().count();
         let t = *typed.peek();
         if t >= full + PAUSE_TICKS {
             typed.set(0);
-            ex_idx.set((idx + 1) % PROMPT_EXAMPLES.len());
+            ex_idx.set((idx + 1) % examples.len());
         } else {
             typed.set(t + 1);
         }

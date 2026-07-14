@@ -6,7 +6,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use crossbeam_channel::{Receiver, Sender};
-use vmux_core::LastActivatedAt;
+use vmux_core::{LastActivatedAt, event::InstallPhase};
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
 use vmux_layout::stack::stack_bundle;
@@ -61,6 +61,18 @@ enum InstallMsg {
 struct AcpInstallChannel {
     tx: Sender<InstallMsg>,
     rx: Receiver<InstallMsg>,
+}
+
+fn display_install_progress(
+    phase: InstallPhase,
+    pct: Option<u8>,
+    message: &str,
+) -> (Option<u8>, String) {
+    if matches!(phase, InstallPhase::Done) {
+        (None, "Starting agent…".to_string())
+    } else {
+        (pct, message.to_string())
+    }
 }
 
 impl Default for AcpInstallChannel {
@@ -219,11 +231,12 @@ fn install_acp_session_when_focused(
 
         std::thread::spawn(move || {
             let resolved =
-                crate::acp_install::resolve_from_registry(&agent_id, |_phase, pct, msg| {
+                crate::acp_install::resolve_from_registry(&agent_id, |phase, pct, msg| {
+                    let (pct, message) = display_install_progress(phase, pct, msg);
                     let _ = progress.send(InstallMsg::Progress {
                         sid: sid.clone(),
                         pct,
-                        message: msg.to_string(),
+                        message,
                     });
                 });
             let login_env = vmux_terminal::shell_env::login_shell_env(&shell);
@@ -675,6 +688,18 @@ mod tests {
                 .find(|(k, _)| k == "PATH")
                 .map(|(_, v)| v.as_str()),
             Some("/managed:/from/login")
+        );
+    }
+
+    #[test]
+    fn completed_install_progress_describes_agent_startup() {
+        assert_eq!(
+            display_install_progress(InstallPhase::Done, Some(100), "ready"),
+            (None, "Starting agent…".to_string())
+        );
+        assert_eq!(
+            display_install_progress(InstallPhase::Downloading, Some(42), "downloading"),
+            (Some(42), "downloading".to_string())
         );
     }
 
