@@ -9659,6 +9659,7 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "vmux_agent",
  "vmux_command",

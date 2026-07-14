@@ -93,7 +93,8 @@ fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        crate::extensions::load::apply_env();
+        crate::extensions::load::apply_env()
+            .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
             manifests

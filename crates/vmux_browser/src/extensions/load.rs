@@ -1,23 +1,37 @@
 use vmux_core::extension::store;
 
-pub fn apply_env() {
+use super::runtime::{self, PreparedRuntime};
+
+pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let root = store::root();
-    let Ok(idx) = store::Index::load(&root) else {
-        return;
-    };
-    let enabled = idx.enabled_dirs(&root);
-    for dir in &enabled {
-        super::shim::ensure_window_shim(dir);
+    let profile = vmux_core::profile::active_profile_name();
+    let mut idx = store::Index::load(&root)?;
+    let mut prepared = Vec::new();
+    let mut index_changed = false;
+    for entry in idx.entries.iter_mut().filter(|entry| entry.enabled) {
+        let item = runtime::prepare_runtime(&root, &profile, entry)?;
+        if entry.source_hash.is_empty() {
+            entry.source_hash.clone_from(&item.source_hash);
+            index_changed = true;
+        }
+        prepared.push(item);
     }
-    let dirs: Vec<String> = enabled
+    if index_changed {
+        idx.save(&root)?;
+    }
+    let dirs = prepared
         .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-    if !dirs.is_empty() {
+        .map(|item| item.dir.to_string_lossy())
+        .collect::<Vec<_>>();
+    if dirs.is_empty() {
+        unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
+    } else {
         unsafe { std::env::set_var("VMUX_LOAD_EXTENSIONS", dirs.join(",")) };
     }
-    let _ = std::fs::create_dir_all(&root);
-    let _ = std::fs::write(root.join("loaded.txt"), idx.enabled_ids().join("\n"));
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    std::fs::write(root.join("loaded.txt"), idx.enabled_ids().join("\n"))
+        .map_err(|error| error.to_string())?;
+    Ok(prepared)
 }
 
 pub fn loaded_ids() -> Vec<String> {
