@@ -13,6 +13,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rkyv = { workspace = true }
 similar = "2"
+vmux_terminal = { path = "../vmux_terminal" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { workspace = true }
@@ -39,7 +40,6 @@ vmux_mcp = { path = "../vmux_mcp" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
-vmux_terminal = { path = "../vmux_terminal" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

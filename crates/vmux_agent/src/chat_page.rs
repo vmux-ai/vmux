@@ -1244,6 +1244,15 @@ mod native_tests {
     }
 
     #[test]
+    fn installing_chat_uses_matrix_loading_composer() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("MatrixRain {"));
+        assert!(source.contains("PromptGhost {"));
+        assert!(source.contains("absolute inset-0 z-20 flex items-center justify-center"));
+        assert!(source.contains("type a prompt · runs when ready"));
+    }
+
+    #[test]
     fn composer_slash_items_support_mouse_selection() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("onclick: move |_| run_slash_command"));

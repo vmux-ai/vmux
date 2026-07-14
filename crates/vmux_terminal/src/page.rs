@@ -1006,7 +1006,7 @@ const PROMPT_EXAMPLES: &[&str] = &[
 /// blinking caret while the agent boot prompt is empty. The live draft replaces
 /// it the moment the user types; unmounting clears the interval.
 #[component]
-fn PromptGhost(accent_bg: String) -> Element {
+pub fn PromptGhost(accent_bg: String) -> Element {
     let ex_idx = use_signal(|| 0usize);
     let typed = use_signal(|| 0usize);
     let cb: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
