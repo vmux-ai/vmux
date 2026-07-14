@@ -4,6 +4,10 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_core::event::extension::*;
+use vmux_ui::components::manager::{
+    ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
+    ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
+};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
 #[component]
@@ -14,128 +18,147 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut search = use_signal(String::new);
 
-    let _list = use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |e| {
-        state.set(e);
+    let _list = use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |event| {
+        state.set(event);
         loaded.set(true);
     });
-    let _prog =
-        use_bin_event_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |p| {
-            let done = matches!(p.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed);
-            if done {
-                progress.write().remove(&p.key);
+    let _progress =
+        use_bin_event_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |item| {
+            if matches!(item.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed) {
+                progress.write().remove(&item.key);
             } else {
-                progress.write().insert(p.key.clone(), p);
+                progress.write().insert(item.key.clone(), item);
             }
         });
-    let _stat = use_bin_event_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_s| {});
+    let _status = use_bin_event_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_| {});
 
     use_effect(move || {
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
             doc.set_title("Extensions");
         }
         let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });
 
-    let snap = state();
+    let snapshot = state();
+    let query = search().trim().to_lowercase();
+    let visible: Vec<ExtRow> = snapshot
+        .extensions
+        .iter()
+        .filter(|extension| {
+            query.is_empty()
+                || extension.name.to_lowercase().contains(&query)
+                || extension.id.to_lowercase().contains(&query)
+                || extension.version.to_lowercase().contains(&query)
+        })
+        .cloned()
+        .collect();
     let installing: Vec<ExtInstallProgress> = progress().values().cloned().collect();
 
     rsx! {
-        div {
-            class: "flex h-full w-full flex-col overflow-hidden bg-background text-foreground font-sans text-sm",
-            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(34,211,238,0.05), transparent 60%);",
-
-            div { class: "flex shrink-0 items-center gap-3 border-b border-foreground/[0.07] px-5 py-3",
-                div { class: "text-base font-semibold tracking-tight", "Extensions" }
-                div { class: "rounded-full bg-foreground/[0.06] px-2 py-0.5 text-xs text-muted-foreground", "{snap.extensions.len()}" }
-                div { class: "flex min-w-0 flex-1 items-center",
-                    input {
-                        r#type: "search",
-                        class: "w-full max-w-80 rounded-lg bg-foreground/[0.05] px-3 py-1.5 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition-colors placeholder:text-muted-foreground/60 focus:bg-foreground/[0.08] focus:ring-cyan-400/30",
-                        placeholder: "Search the Chrome Web Store…",
-                        value: "{search}",
-                        oninput: move |e| search.set(e.value()),
-                        onkeydown: move |e: KeyboardEvent| {
-                            if e.key() == Key::Enter {
-                                let q = search();
-                                if !q.trim().is_empty() {
-                                    let _ = try_cef_bin_emit_rkyv(&ExtBrowseStoreRequest { query: q });
-                                }
-                            }
+        ManagerPage {
+            ManagerHeader {
+                title: "Extensions",
+                count: snapshot.extensions.len(),
+                search_value: search(),
+                search_placeholder: "Search installed or Chrome Web Store…",
+                onsearch: move |event: FormEvent| search.set(event.value()),
+                onkeydown: move |event: KeyboardEvent| {
+                    if event.key() == Key::Enter {
+                        let query = search();
+                        if !query.trim().is_empty() {
+                            let _ = try_cef_bin_emit_rkyv(&ExtBrowseStoreRequest { query });
+                        }
+                    }
+                },
+                actions: rsx! {
+                    if snapshot.pending {
+                        ManagerButton {
+                            variant: ManagerButtonVariant::Primary,
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
+                            },
+                            "Relaunch to apply"
+                        }
+                    }
+                },
+            }
+            if !installing.is_empty() {
+                div { class: "shrink-0 px-5 pt-3",
+                    for item in installing.iter() {
+                        div { class: "truncate text-[10px] text-muted-foreground/70",
+                            {format!(
+                                "{}: {}{}",
+                                item.key,
+                                item.message,
+                                item.pct.map(|percent| format!(" {percent}%")).unwrap_or_default()
+                            )}
+                        }
+                    }
+                }
+            }
+            ManagerList {
+                if !loaded() {
+                    ManagerSkeleton {}
+                } else if visible.is_empty() {
+                    ManagerEmpty {
+                        title: if snapshot.extensions.is_empty() { "No extensions installed" } else { "No matching extensions" },
+                        detail: if snapshot.extensions.is_empty() {
+                            "Search the Chrome Web Store above and press Return."
+                        } else {
+                            "Try another name or extension ID."
                         },
                     }
                 }
-                if snap.pending {
-                    button {
-                        class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-medium text-cyan-200 ring-1 ring-inset ring-cyan-400/30 transition-colors hover:bg-cyan-400/25",
-                        onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent); },
-                        "Relaunch to apply"
-                    }
+                for extension in visible.iter() {
+                    {render_extension(extension)}
                 }
             }
+        }
+    }
+}
 
-            if !installing.is_empty() {
-                div { class: "shrink-0 px-5 pb-2",
-                    for pr in installing.iter() {
-                        div { class: "truncate text-[10px] text-muted-foreground/70",
-                            {format!("{}: {}{}", pr.key, pr.message, pr.pct.map(|p| format!(" {p}%")).unwrap_or_default())}
-                        }
-                    }
+fn render_extension(extension: &ExtRow) -> Element {
+    let item = extension.clone();
+    let toggle_id = item.id.clone();
+    let toggle_enabled = item.enabled;
+    let remove_id = item.id.clone();
+    let icon = item.icon.clone();
+    rsx! {
+        ManagerRow {
+            icon: rsx! {
+                if let Some(icon) = icon.as_ref() {
+                    img { class: "h-6 w-6 rounded object-contain", src: "{icon}" }
+                } else {
+                    span { class: "font-mono text-[10px] text-muted-foreground", "EXT" }
                 }
-            }
-
-            div { class: "min-h-0 flex-1 overflow-auto px-3 pb-4",
-                if !loaded() {
-                    for i in 0..3 {
-                        div {
-                            key: "{i}",
-                            class: "flex items-center gap-3 rounded-xl px-3 py-2.5",
-                            div { class: "h-6 w-6 shrink-0 animate-pulse rounded bg-foreground/[0.06]" }
-                            div { class: "flex min-w-0 flex-1 flex-col gap-1.5",
-                                div { class: "h-3 w-32 animate-pulse rounded bg-foreground/[0.06]" }
-                                div { class: "h-2.5 w-16 animate-pulse rounded bg-foreground/[0.05]" }
-                            }
-                        }
-                    }
-                } else if snap.extensions.is_empty() {
-                    div { class: "flex flex-col items-center gap-3 px-3 py-16 text-center",
-                        div { class: "text-sm text-muted-foreground", "No extensions installed yet." }
-                        div { class: "text-xs text-muted-foreground/70",
-                            "Search the Chrome Web Store above, then click \"Add to Vmux\"."
-                        }
-                    }
+            },
+            title: item.name.clone(),
+            subtitle: format!("v{}", item.version),
+            meta: rsx! {
+                ManagerBadge {
+                    tone: if item.enabled { ManagerTone::Green } else { ManagerTone::Neutral },
+                    if item.enabled { "On" } else { "Off" }
                 }
-                for ext in snap.extensions.iter() {
-                    {
-                        let e = ext.clone();
-                        let toggle_id = e.id.clone();
-                        let toggle_enabled = e.enabled;
-                        let remove_id = e.id.clone();
-                        rsx! {
-                            div {
-                                key: "{e.id}",
-                                class: "flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-foreground/[0.04]",
-                                if let Some(icon) = e.icon.as_ref() {
-                                    img { class: "h-6 w-6 shrink-0 rounded", src: "{icon}" }
-                                }
-                                div { class: "flex min-w-0 flex-1 flex-col gap-0.5",
-                                    span { class: "truncate font-medium text-foreground/95", "{e.name}" }
-                                    span { class: "text-xs text-muted-foreground/70", "v{e.version}" }
-                                }
-                                button {
-                                    class: "shrink-0 rounded-lg px-3 py-1.5 text-xs ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.09]",
-                                    onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtToggleRequest { id: toggle_id.clone(), enabled: !toggle_enabled }); },
-                                    if e.enabled { "On" } else { "Off" }
-                                }
-                                button {
-                                    class: "shrink-0 rounded-lg bg-foreground/[0.05] px-3 py-1.5 text-xs text-foreground/70 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-ansi-1/15 hover:text-ansi-1",
-                                    onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtUninstallRequest { id: remove_id.clone() }); },
-                                    "Remove"
-                                }
-                            }
-                        }
-                    }
+            },
+            actions: rsx! {
+                ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&ExtToggleRequest {
+                            id: toggle_id.clone(),
+                            enabled: !toggle_enabled,
+                        });
+                    },
+                    if item.enabled { "Disable" } else { "Enable" }
                 }
-            }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Danger,
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&ExtUninstallRequest { id: remove_id.clone() });
+                    },
+                    "Remove"
+                }
+            },
         }
     }
 }

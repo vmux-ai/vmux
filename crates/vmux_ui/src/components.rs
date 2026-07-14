@@ -20,6 +20,7 @@ pub mod hover_card;
 pub mod icon;
 pub mod input;
 pub mod label;
+pub mod manager;
 pub mod menubar;
 pub mod navbar;
 pub mod pagination;

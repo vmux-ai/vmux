@@ -17,15 +17,6 @@ use crate::vibe::setup::event::{
 use vmux_core::agent::AgentKind;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "agent",
-    title: "Agent",
-    keywords: &["ai", "chat", "assistant"],
-    icon: Some(vmux_core::BuiltinIcon::Sparkles),
-    command_bar: false,
-};
-
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Component)]
 struct AgentInstallPane {
     setup_stack: Entity,
@@ -45,11 +36,10 @@ pub struct AgentSetupPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins(BinEventEmitterPlugin::<(
             AgentInstallRunRequest,
             AgentSetupPrereqRequest,
-        )>::for_hosts(&["agent"]))
+        )>::for_hosts(&["agent", "agents"]))
             .add_observer(on_agent_install_run)
             .add_observer(on_agent_setup_prereq_request)
             .add_systems(Update, auto_redirect_agent_setup_when_installed)
@@ -106,15 +96,21 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn close_install_pane_after_success(url: &str) -> bool {
+    url.trim_end_matches('/') == "vmux://agents"
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn detect_agent_install_outcome(
     mut events: MessageReader<vmux_terminal::CommandLifecycleEvent>,
-    mut install_panes: Query<&mut AgentInstallPane>,
+    mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
+    setup_stacks: Query<&vmux_core::PageMetadata, With<vmux_layout::stack::Stack>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     use vmux_service::protocol::CommandLifecycleKind;
     for ev in events.read() {
-        for mut pane in &mut install_panes {
+        for (install_pane, mut pane) in &mut install_panes {
             if pane.process_id != ev.process_id {
                 continue;
             }
@@ -122,15 +118,27 @@ fn detect_agent_install_outcome(
                 CommandLifecycleKind::Started => pane.armed = true,
                 CommandLifecycleKind::Ended { .. } => {
                     let installed = crate::exec::find_executable(pane.agent.executable()).is_some();
-                    if let Some(false) = install_outcome(pane.armed, installed) {
+                    if let Some(ok) = install_outcome(pane.armed, installed) {
                         if browsers.has_browser(pane.setup_webview)
                             && browsers.host_emit_ready(&pane.setup_webview)
                         {
                             commands.trigger(BinHostEmitEvent::from_rkyv(
                                 pane.setup_webview,
                                 AGENT_SETUP_RESULT_EVENT,
-                                &AgentSetupResult { ok: false },
+                                &AgentSetupResult {
+                                    agent: pane.agent.as_url_segment().to_string(),
+                                    ok,
+                                },
                             ));
+                        }
+                        if ok
+                            && setup_stacks
+                                .get(pane.setup_stack)
+                                .is_ok_and(|meta| close_install_pane_after_success(&meta.url))
+                        {
+                            commands
+                                .entity(install_pane)
+                                .insert(vmux_layout::pane::ForcePaneClose);
                         }
                         pane.armed = false;
                     }
@@ -166,7 +174,7 @@ fn on_agent_install_run(
     let input = vmux_terminal::shell_input::shell_command_input(&command);
 
     for mut pane in &mut install_panes {
-        if pane.setup_webview == webview {
+        if pane.setup_webview == webview && pane.agent == kind {
             reinput.write(vmux_terminal::TerminalReinputRequest {
                 process_id: pane.process_id,
                 data: input.clone(),
@@ -288,5 +296,14 @@ mod tests {
         assert_eq!(install_outcome(false, false), None);
         assert_eq!(install_outcome(true, true), Some(true));
         assert_eq!(install_outcome(true, false), Some(false));
+    }
+
+    #[test]
+    fn successful_manager_install_closes_terminal_pane() {
+        assert!(close_install_pane_after_success("vmux://agents"));
+        assert!(close_install_pane_after_success("vmux://agents/"));
+        assert!(!close_install_pane_after_success(
+            "vmux://agent/codex/setup"
+        ));
     }
 }

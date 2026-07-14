@@ -60,6 +60,7 @@ pub struct AgentSetupPrereqStatus {
     rkyv::Deserialize,
 )]
 pub struct AgentSetupResult {
+    pub agent: String,
     pub ok: bool,
 }
 
@@ -79,9 +80,13 @@ mod tests {
 
     #[test]
     fn result_rkyv_roundtrip() {
-        let v = AgentSetupResult { ok: false };
+        let v = AgentSetupResult {
+            agent: "codex".to_string(),
+            ok: false,
+        };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<AgentSetupResult, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.agent, "codex");
         assert!(!back.ok);
     }
 }
