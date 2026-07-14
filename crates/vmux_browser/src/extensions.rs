@@ -1,3 +1,4 @@
+mod capability;
 mod download;
 mod install;
 pub mod load;
