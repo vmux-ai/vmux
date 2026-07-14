@@ -1064,7 +1064,7 @@ mod native_tests {
     #[test]
     fn disclosure_icons_use_animated_plus_minus() {
         let page = include_str!("chat_page/page.rs");
-        let css = include_str!("../../vmux_ui/assets/input.css");
+        let css = include_str!("../../vmux_server/assets/index.css");
         assert!(!page.contains('▸'));
         assert!(page.contains("render_disclosure_icon"));
         assert!(css.contains(".disclosure[open] > summary .disclosure-icon::after"));

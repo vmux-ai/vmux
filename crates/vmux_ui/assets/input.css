@@ -9,35 +9,3 @@
     @apply m-0 h-full antialiased bg-background text-foreground text-ui font-sans;
   }
 }
-
-@layer components {
-  .disclosure-icon::before,
-  .disclosure-icon::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 0.625rem;
-    height: 1px;
-    border-radius: 9999px;
-    background: currentColor;
-    transform: translate(-50%, -50%);
-    transform-origin: center;
-    transition:
-      transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
-      opacity 180ms ease;
-  }
-
-  .disclosure-icon::after {
-    transform: translate(-50%, -50%) rotate(90deg);
-  }
-
-  .disclosure[open] > summary .disclosure-icon::before {
-    transform: translate(-50%, -50%) rotate(180deg);
-  }
-
-  .disclosure[open] > summary .disclosure-icon::after {
-    opacity: 0;
-    transform: translate(-50%, -50%) rotate(180deg) scaleX(0);
-  }
-}
