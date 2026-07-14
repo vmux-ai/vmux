@@ -63,17 +63,75 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[cfg(any(test, target_arch = "wasm32"))]
-fn approval_details_text(args_json: &str) -> String {
-    let Ok(args) = serde_json::from_str::<serde_json::Value>(args_json) else {
-        return args_json.to_string();
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ApprovalDetail {
+    label: String,
+    value: String,
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn approval_details(args_json: &str) -> Vec<ApprovalDetail> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(args_json) else {
+        return if args_json.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![ApprovalDetail {
+                label: "Details".to_string(),
+                value: args_json.to_string(),
+            }]
+        };
     };
-    if let Some(command) = args.get("command").and_then(serde_json::Value::as_str) {
-        return command.to_string();
+    let mut details = Vec::new();
+    flatten_approval_details("", &value, &mut details);
+    details
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn flatten_approval_details(
+    path: &str,
+    value: &serde_json::Value,
+    details: &mut Vec<ApprovalDetail>,
+) {
+    if let serde_json::Value::Object(fields) = value {
+        for (name, value) in fields {
+            let child_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}.{name}")
+            };
+            flatten_approval_details(&child_path, value, details);
+        }
+        return;
     }
-    if args.is_null() || args.as_object().is_some_and(serde_json::Map::is_empty) {
-        return String::new();
-    }
-    serde_json::to_string_pretty(&args).unwrap_or_else(|_| args_json.to_string())
+    let label = approval_detail_label(path);
+    let value = match value {
+        serde_json::Value::String(value) => value.clone(),
+        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
+    };
+    details.push(ApprovalDetail { label, value });
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn approval_detail_label(path: &str) -> String {
+    let path = path.strip_prefix("arguments.").unwrap_or(path);
+    let label = if path.is_empty() { "details" } else { path };
+    label
+        .split('.')
+        .map(|part| {
+            let words = part.replace('_', " ");
+            let mut chars = words.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn has_collapsible_steps(turn: &event::ChatTurn) -> bool {
+    !turn.steps.is_empty()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -961,19 +1019,46 @@ mod native_tests {
     }
 
     #[test]
-    fn approval_prompt_renders_tool_input() {
+    fn approval_prompt_renders_structured_tool_input() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("snap.approval_args_json.clone()"));
-        assert!(source.contains("whitespace-pre-wrap"));
+        assert!(source.contains("approval_details(&args_json)"));
     }
 
     #[test]
-    fn approval_details_prefers_command_text() {
+    fn approval_details_parse_nested_json() {
         assert_eq!(
-            approval_details_text(r#"{"command":"echo hi\necho bye","focus":true}"#),
-            "echo hi\necho bye"
+            approval_details(
+                r#"{"arguments":{"path":"/tmp/SKILL.md"},"server":"vmux","tool":"read_file"}"#
+            ),
+            vec![
+                ApprovalDetail {
+                    label: "Path".into(),
+                    value: "/tmp/SKILL.md".into(),
+                },
+                ApprovalDetail {
+                    label: "Server".into(),
+                    value: "vmux".into(),
+                },
+                ApprovalDetail {
+                    label: "Tool".into(),
+                    value: "read_file".into(),
+                },
+            ]
         );
-        assert_eq!(approval_details_text("{}"), "");
+        assert!(approval_details("{}").is_empty());
+    }
+
+    #[test]
+    fn empty_turn_has_no_collapsible_content() {
+        let empty = event::ChatTurn::default();
+        assert!(!has_collapsible_steps(&empty));
+
+        let populated = event::ChatTurn {
+            steps: vec![event::ChatBlock::Thinking("working".into())],
+            ..Default::default()
+        };
+        assert!(has_collapsible_steps(&populated));
     }
 
     #[test]

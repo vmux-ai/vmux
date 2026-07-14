@@ -427,7 +427,7 @@ pub fn Page() -> Element {
 
             if let Some((call_id, name, args_json)) = approval() {
                 {
-                    let details = super::approval_details_text(&args_json);
+                    let details = super::approval_details(&args_json);
                     rsx! {
                         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
                             div { class: "mx-auto flex max-w-3xl flex-col gap-3",
@@ -438,7 +438,16 @@ pub fn Page() -> Element {
                                         "?"
                                     }
                                     if !details.is_empty() {
-                                        pre { class: "mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-foreground/[0.05] px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground ring-1 ring-inset ring-foreground/10", "{details}" }
+                                        div { class: "mt-2 max-h-40 overflow-auto rounded-lg bg-foreground/[0.05] ring-1 ring-inset ring-foreground/10",
+                                            for (i , detail) in details.iter().enumerate() {
+                                                div {
+                                                    key: "approval-detail-{i}",
+                                                    class: "grid grid-cols-[7rem_minmax(0,1fr)] items-start gap-3 border-b border-foreground/10 px-3 py-2 last:border-b-0",
+                                                    span { class: "pt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70", "{detail.label}" }
+                                                    pre { class: "overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground", "{detail.value}" }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 div { class: "flex justify-end gap-2",
@@ -819,6 +828,21 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
 }
 
 fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
+    if !super::has_collapsible_steps(turn) {
+        return rsx! {
+            div { class: "rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                div { class: "flex select-none items-center gap-2.5 text-sm",
+                    span { class: "flex items-end gap-1",
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
+                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
+                    }
+                    span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{verb}…" }
+                    span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed)}" }
+                }
+            }
+        };
+    }
     if turn.running {
         rsx! {
             details { class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
