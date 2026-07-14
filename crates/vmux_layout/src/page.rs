@@ -886,9 +886,9 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
         div {
             id: "sidesheet-stack-{pane_id}-{stack_index}",
             class: if is_active {
-                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+                "glass group/stack flex h-9 cursor-default items-center gap-2 rounded-md px-2"
             } else {
-                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                "group/stack flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
@@ -910,7 +910,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 r#type: "button",
                 aria_label: "Close stack",
                 title: "Close stack",
-                class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
+                class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover/stack:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
                 onmousedown: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();

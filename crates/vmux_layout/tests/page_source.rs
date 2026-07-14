@@ -76,6 +76,15 @@ fn inactive_tabs_add_horizontal_padding_on_hover() {
 }
 
 #[test]
+fn side_sheet_close_button_uses_stack_row_hover_group() {
+    let row = side_sheet_stack_row_component_source();
+
+    assert_eq!(row.matches("group/stack flex h-9").count(), 2);
+    assert!(row.contains("group-hover/stack:opacity-100"));
+    assert!(!row.contains("group-hover:opacity-100"));
+}
+
+#[test]
 fn embedded_header_css_has_fixed_tab_utilities() {
     let css_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../vmux_server/dist/assets/index.css");
@@ -202,4 +211,12 @@ fn tab_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn NewTabButton()").next())
         .expect("tab component")
+}
+
+fn side_sheet_stack_row_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn SideSheetStackRow(stack: StackNode, pane_id: u64)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn download_pct").next())
+        .expect("side sheet stack row component")
 }
