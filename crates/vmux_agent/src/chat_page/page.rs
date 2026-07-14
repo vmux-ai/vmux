@@ -294,12 +294,6 @@ pub fn Page() -> Element {
             detail
         }
     };
-    let dot_style = if accent().is_empty() {
-        String::new()
-    } else {
-        format!("background:{}", accent())
-    };
-
     let draft_val = draft();
     let selector = selector_mode(&draft_val);
     let command_query = match selector {
