@@ -76,6 +76,30 @@ fn inactive_tabs_add_horizontal_padding_on_hover() {
 }
 
 #[test]
+fn side_sheet_close_button_tracks_stack_row_hover() {
+    let row = side_sheet_stack_row_component_source();
+
+    assert!(row.contains("let mut hovered = use_signal(|| false)"));
+    assert!(row.contains("onmouseenter: move |_| hovered.set(true)"));
+    assert!(row.contains("onmouseleave: move |_| hovered.set(false)"));
+    assert!(row.contains("class: if hovered()"));
+    assert!(row.contains("opacity-100"));
+    assert!(row.contains("opacity-0"));
+    assert!(!row.contains("group-hover:opacity-100"));
+    assert!(!row.contains("group-hover/stack:opacity-100"));
+}
+
+#[test]
+fn folded_pane_shows_its_active_stack() {
+    let pane = pane_section_component_source();
+
+    assert!(pane.contains(".find(|stack| stack.is_active"));
+    assert!(pane.contains("if folded()"));
+    assert!(pane.contains("if let Some(stack) = folded_stack"));
+    assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
+}
+
+#[test]
 fn embedded_header_css_has_fixed_tab_utilities() {
     let css_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../vmux_server/dist/assets/index.css");
@@ -202,4 +226,20 @@ fn tab_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn NewTabButton()").next())
         .expect("tab component")
+}
+
+fn side_sheet_stack_row_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn SideSheetStackRow(stack: StackNode, pane_id: u64)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn download_pct").next())
+        .expect("side sheet stack row component")
+}
+
+fn pane_section_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn PaneSection(pane: PaneNode, index: usize)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn NewStackRow").next())
+        .expect("pane section component")
 }

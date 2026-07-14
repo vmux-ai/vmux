@@ -5404,12 +5404,13 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn wake_on_move_suppresses_only_over_active_pane() {
+    fn wake_on_move_suppresses_active_pane() {
         super::hover_wake::publish(
             vec![(1, 0.0, 0.0, 100.0, 100.0), (2, 200.0, 0.0, 300.0, 100.0)],
             Some(1),
         );
         assert!(!super::wake_on_move(50.0, 50.0));
+        assert_eq!(super::hover_wake::take_pending_target(), None);
         assert!(super::wake_on_move(250.0, 50.0));
         assert_eq!(super::hover_wake::take_pending_target(), Some(2));
         assert!(super::wake_on_move(150.0, 50.0));

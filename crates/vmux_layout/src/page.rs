@@ -801,6 +801,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
+    let folded_stack = pane.stacks.iter().find(|stack| stack.is_active).cloned();
     let mut folded = use_signal(|| false);
 
     rsx! {
@@ -839,7 +840,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     }
                 }
             }
-            if !folded() {
+            if folded() {
+                if let Some(stack) = folded_stack {
+                    SideSheetStackRow { stack, pane_id }
+                }
+            } else {
                 div { class: "flex flex-col gap-1",
                     for stack in pane
                         .stacks
@@ -881,15 +886,18 @@ fn NewStackRow(pane_id: u64) -> Element {
 fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
+    let mut hovered = use_signal(|| false);
 
     rsx! {
         div {
             id: "sidesheet-stack-{pane_id}-{stack_index}",
             class: if is_active {
-                "glass group flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+                "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
             } else {
-                "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
+            onmouseenter: move |_| hovered.set(true),
+            onmouseleave: move |_| hovered.set(false),
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                     command: "activate_stack".to_string(),
@@ -910,7 +918,11 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                 r#type: "button",
                 aria_label: "Close stack",
                 title: "Close stack",
-                class: "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10",
+                class: if hovered() {
+                    "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-100 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
+                } else {
+                    "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
+                },
                 onmousedown: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();
