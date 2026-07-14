@@ -6,6 +6,7 @@ mod download;
 mod install;
 pub mod load;
 mod manager_page;
+pub(crate) mod model;
 mod runtime;
 mod shim;
 

@@ -110,6 +110,9 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         let prepared_extensions = crate::extensions::load::apply_env()
             .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
+        if crate::extensions::broker::extension_conformance_enabled() {
+            app.init_resource::<crate::extensions::broker::ConformanceWakeTimer>();
+        }
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
             manifests
@@ -128,11 +131,34 @@ impl Plugin for BrowserPlugin {
             ))
             .insert_resource(extension_bridge)
             .init_resource::<crate::extensions::broker::BridgeSubscriptions>()
+            .init_resource::<crate::extensions::broker::PendingBridgeEvents>()
+            .init_resource::<crate::extensions::model::ChromeModel>()
+            .init_resource::<crate::extensions::model::ChromeStableIds>()
+            .add_message::<crate::extensions::model::ChromeModelEvent>()
             .add_systems(
                 Startup,
                 crate::extensions::bridge_page::spawn_extension_bridge_pages,
             )
-            .add_systems(Update, crate::extensions::broker::drain_bridge_requests)
+            .add_systems(
+                Update,
+                crate::extensions::broker::drain_bridge_requests
+                    .after(crate::extensions::model::rebuild_chrome_model),
+            )
+            .add_systems(
+                Update,
+                crate::extensions::model::rebuild_chrome_model
+                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::stack::ComputeFocusSet),
+            )
+            .add_systems(
+                Update,
+                crate::extensions::broker::forward_chrome_model_events
+                    .after(crate::extensions::model::rebuild_chrome_model),
+            )
+            .add_systems(
+                Update,
+                crate::extensions::broker::fire_conformance_wake_timer,
+            )
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
