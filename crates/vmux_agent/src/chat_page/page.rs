@@ -827,6 +827,15 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
     }
 }
 
+fn render_disclosure_icon() -> Element {
+    rsx! {
+        span {
+            class: "disclosure-icon relative inline-block h-3 w-3 shrink-0 text-muted-foreground",
+            aria_hidden: "true",
+        }
+    }
+}
+
 fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
     if !super::has_collapsible_steps(turn) {
         return rsx! {
@@ -845,9 +854,9 @@ fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
     }
     if turn.running {
         rsx! {
-            details { class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+            details { class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                 summary { class: "flex cursor-pointer select-none items-center gap-2.5 text-sm list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                    {render_disclosure_icon()}
                     span { class: "flex items-end gap-1",
                         span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
                         span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
@@ -869,9 +878,9 @@ fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
             None => format!("{} steps", turn.step_count),
         };
         rsx! {
-            details { class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+            details { class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                    {render_disclosure_icon()}
                     span { class: "font-medium", "{label}" }
                 }
                 {render_steps(turn)}
@@ -902,9 +911,9 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         ChatBlock::Thinking(text) => rsx! {
             details {
                 key: "{key}",
-                class: "group rounded-xl bg-foreground/[0.03] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                class: "disclosure rounded-xl bg-foreground/[0.03] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                    {render_disclosure_icon()}
                     span { class: "font-medium", "Thinking" }
                 }
                 div { class: "mt-2 whitespace-pre-wrap border-l-2 border-foreground/10 pl-3 text-xs italic leading-relaxed text-muted-foreground", "{text}" }
@@ -913,9 +922,9 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         ChatBlock::ToolUse { name, args, .. } => rsx! {
             details {
                 key: "{key}",
-                class: "group rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                class: "disclosure rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                    {render_disclosure_icon()}
                     span { class: "font-mono text-xs text-amber-500", "{name}" }
                 }
                 if !args.is_empty() && args != "{}" {
@@ -929,9 +938,9 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                 details {
                     key: "{key}",
                     open: true,
-                    class: "group rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                    class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "text-[10px] text-muted-foreground transition group-open:rotate-90", "▸" }
+                        {render_disclosure_icon()}
                         span { class: "font-medium text-foreground", "Plan" }
                         span { class: "text-muted-foreground", "· {n} tasks" }
                     }
@@ -995,9 +1004,9 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             rsx! {
                 details {
                     key: "{key}",
-                    class: "group rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+                    class: "disclosure rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs {tone} list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "text-[10px] transition group-open:rotate-90", "▸" }
+                        {render_disclosure_icon()}
                         span { "{label}" }
                     }
                     pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground", "{content}" }

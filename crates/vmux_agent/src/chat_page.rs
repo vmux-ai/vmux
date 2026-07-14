@@ -1062,6 +1062,15 @@ mod native_tests {
     }
 
     #[test]
+    fn disclosure_icons_use_animated_plus_minus() {
+        let page = include_str!("chat_page/page.rs");
+        let css = include_str!("../../vmux_ui/assets/input.css");
+        assert!(!page.contains('▸'));
+        assert!(page.contains("render_disclosure_icon"));
+        assert!(css.contains(".disclosure[open] > summary .disclosure-icon::after"));
+    }
+
+    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());
