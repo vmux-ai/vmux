@@ -16,8 +16,8 @@ use agent_client_protocol::schema::v1::{
     PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
     ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
-    TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    SessionUpdate, TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse,
+    TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
     WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
@@ -79,6 +79,7 @@ pub struct AcpShared {
     /// typing into its pane.
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
+    history_replay: AtomicBool,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
@@ -104,6 +105,7 @@ impl AcpShared {
             manager,
             input_writers,
             agent_name: Mutex::new(None),
+            history_replay: AtomicBool::new(false),
             cancel_requested: AtomicBool::new(false),
         }
     }
@@ -137,6 +139,20 @@ impl AcpShared {
         });
     }
 
+    fn begin_history_replay(&self) {
+        self.history_replay.store(true, Ordering::SeqCst);
+        *self.projector.lock().unwrap() = AcpProjector::new();
+    }
+
+    fn finish_history_replay(&self, loaded: bool) {
+        if loaded {
+            self.emit(self.snapshot_message());
+        } else {
+            *self.projector.lock().unwrap() = AcpProjector::new();
+        }
+        self.history_replay.store(false, Ordering::SeqCst);
+    }
+
     fn emit(&self, msg: ServiceMessage) {
         let _ = self.stream_tx.send(msg);
     }
@@ -146,6 +162,48 @@ impl AcpShared {
             sid: self.sid.clone(),
             status,
         });
+    }
+}
+
+fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
+    let intents = shared.projector.lock().unwrap().apply(update);
+    if shared.history_replay.load(Ordering::SeqCst) {
+        return;
+    }
+    for intent in intents {
+        match intent {
+            Intent::Delta(text) => shared.emit(ServiceMessage::AgentDelta {
+                sid: shared.sid.clone(),
+                text,
+            }),
+            Intent::Snapshot => shared.emit(shared.snapshot_message()),
+            Intent::ProposedDiff {
+                call_id,
+                path,
+                old_text,
+                new_text,
+            } => shared.emit(ServiceMessage::AcpProposedDiff {
+                sid: shared.sid.clone(),
+                call_id,
+                path,
+                old_text,
+                new_text,
+            }),
+            Intent::FileTouched { path, line, kind } => {
+                shared.emit(ServiceMessage::AgentCommand {
+                    request_id: AgentRequestId::new(),
+                    anchor: Some(shared.anchor),
+                    command: AgentCommand::FileTouched {
+                        anchor: shared.anchor,
+                        path,
+                        line,
+                        col: None,
+                        end_col: None,
+                        kind,
+                    },
+                });
+            }
+        }
     }
 }
 
@@ -335,42 +393,7 @@ pub async fn run(
         )
         .on_receive_notification(
             async move |note: SessionNotification, _cx| {
-                let intents = update_shared.projector.lock().unwrap().apply(note.update);
-                for intent in intents {
-                    match intent {
-                        Intent::Delta(text) => update_shared.emit(ServiceMessage::AgentDelta {
-                            sid: update_shared.sid.clone(),
-                            text,
-                        }),
-                        Intent::Snapshot => update_shared.emit(update_shared.snapshot_message()),
-                        Intent::ProposedDiff {
-                            call_id,
-                            path,
-                            old_text,
-                            new_text,
-                        } => update_shared.emit(ServiceMessage::AcpProposedDiff {
-                            sid: update_shared.sid.clone(),
-                            call_id,
-                            path,
-                            old_text,
-                            new_text,
-                        }),
-                        Intent::FileTouched { path, line, kind } => {
-                            update_shared.emit(ServiceMessage::AgentCommand {
-                                request_id: AgentRequestId::new(),
-                                anchor: Some(update_shared.anchor),
-                                command: AgentCommand::FileTouched {
-                                    anchor: update_shared.anchor,
-                                    path,
-                                    line,
-                                    col: None,
-                                    end_col: None,
-                                    kind,
-                                },
-                            });
-                        }
-                    }
-                }
+                project_session_update(&update_shared, note.update);
                 Ok(())
             },
             agent_client_protocol::on_receive_notification!(),
@@ -388,6 +411,10 @@ pub async fn run(
                 main_shared.publish_agent_info(name);
             }
 
+            let resume_requested = resume.is_some() && init_resp.agent_capabilities.load_session;
+            if resume_requested {
+                main_shared.begin_history_replay();
+            }
             let mut session_id =
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
@@ -396,6 +423,9 @@ pub async fn run(
                     async { cx.send_request(load).block_task().await.map(|_| ()) }
                 })
                 .await;
+            if resume_requested {
+                main_shared.finish_history_replay(session_id.is_some());
+            }
             if let Some(sid) = &session_id {
                 main_shared.emit(ServiceMessage::AcpSessionCreated {
                     sid: main_shared.sid.clone(),
@@ -894,7 +924,7 @@ fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStat
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        Implementation, PermissionOptionKind, ToolCall, ToolCallUpdateFields,
+        ContentChunk, Implementation, PermissionOptionKind, ToolCall, ToolCallUpdateFields,
     };
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
@@ -951,6 +981,87 @@ mod tests {
             }
             other => panic!("expected replayable ACP agent info, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn history_replay_emits_one_final_snapshot() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(64);
+        let shared = Arc::new(AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        ));
+        shared.begin_history_replay();
+
+        project_session_update(
+            &shared,
+            SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("hello"),
+            ))),
+        );
+        for _ in 0..300 {
+            project_session_update(
+                &shared,
+                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                    TextContent::new("x"),
+                ))),
+            );
+        }
+
+        assert!(matches!(
+            stream_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+
+        shared.finish_history_replay(true);
+
+        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+            stream_rx.try_recv().expect("final snapshot")
+        else {
+            panic!("expected snapshot");
+        };
+        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(matches!(
+            &messages[1],
+            crate::message::Message::Assistant { blocks }
+                if matches!(blocks.as_slice(), [crate::message::AssistantBlock::Text(text)] if text.len() == 300)
+        ));
+        assert!(matches!(
+            stream_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn failed_history_replay_discards_partial_transcript() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(64);
+        let shared = Arc::new(AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        ));
+        shared.begin_history_replay();
+        project_session_update(
+            &shared,
+            SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("partial"),
+            ))),
+        );
+
+        shared.finish_history_replay(false);
+
+        assert!(shared.projector.lock().unwrap().messages().is_empty());
+        assert!(matches!(
+            stream_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
     }
 
     #[test]
