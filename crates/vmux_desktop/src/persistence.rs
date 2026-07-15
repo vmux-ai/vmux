@@ -7,7 +7,9 @@ use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
 use vmux_browser::Browser;
-use vmux_core::{ArchivedPage, ArchivedPagePosition, CreatedAt, Order, PageMetadata};
+use vmux_core::{
+    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
+};
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
@@ -225,6 +227,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<PageMetadata>()
         .allow::<ArchivedPage>()
         .allow::<ArchivedPagePosition>()
+        .allow::<ArchivedTabPage>()
         .allow::<PaneId>()
         .allow::<vmux_history::CreatedAt>()
         .allow::<vmux_history::LastActivatedAt>()
@@ -1128,6 +1131,12 @@ mod tests {
                     flex_weights: vec![1.0, 4.0],
                 }],
             },
+            ArchivedTabPage {
+                group_id: "tab-group".into(),
+                tab_name: "Recovered".into(),
+                tab_startup_dir: Some("/tmp/recovered".into()),
+                active: true,
+            },
         ));
         save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
         app_save.update();
@@ -1163,6 +1172,15 @@ mod tests {
             pos.pane_path[0].axis,
             vmux_core::SplitAxis::Column
         ));
+        let tab = app_load
+            .world_mut()
+            .query::<&ArchivedTabPage>()
+            .single(app_load.world())
+            .expect("tab archive metadata round-tripped");
+        assert_eq!(tab.group_id, "tab-group");
+        assert_eq!(tab.tab_name, "Recovered");
+        assert_eq!(tab.tab_startup_dir.as_deref(), Some("/tmp/recovered"));
+        assert!(tab.active);
     }
 
     #[test]

@@ -34,7 +34,9 @@ pub mod notify;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod team;
 #[cfg(not(target_arch = "wasm32"))]
-pub use archive::{ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PaneStep, SplitAxis};
+pub use archive::{
+    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,6 +64,7 @@ impl Plugin for CorePlugin {
             .register_type::<crate::icon::BuiltinIcon>()
             .register_type::<ArchivedPage>()
             .register_type::<crate::archive::ArchivedPagePosition>()
+            .register_type::<crate::archive::ArchivedTabPage>()
             .register_type::<crate::archive::PaneStep>()
             .register_type::<crate::archive::SplitAxis>()
             .register_type::<Vec<crate::archive::PaneStep>>()
