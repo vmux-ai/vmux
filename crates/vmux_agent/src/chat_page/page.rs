@@ -12,6 +12,7 @@ use crate::chat_page::event::{
     RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
+use std::borrow::Cow;
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_terminal::page::PromptGhost;
 use vmux_ui::agent_accent::agent_accent;
@@ -906,10 +907,18 @@ fn render_working(verb: &str, elapsed: u32) -> Element {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ActivityIcon {
     Thinking,
+    ReadFile,
+    Search,
+    Image,
+    Command,
+    Browser,
+    Guardian,
     Tool,
     Output,
+    Error,
     Plan,
     Diff,
     Reconnect,
@@ -920,10 +929,43 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         ActivityIcon::Thinking => &[
             "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z",
         ],
+        ActivityIcon::ReadFile => &[
+            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+            "M14 2v4a2 2 0 0 0 2 2h4",
+            "M16 13H8",
+            "M16 17H8",
+            "M10 9H8",
+        ],
+        ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
+        ActivityIcon::Image => &[
+            "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
+            "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
+            "m21 15-5-5L5 21",
+        ],
+        ActivityIcon::Command => &["m4 17 6-6-6-6", "M12 19h8"],
+        ActivityIcon::Browser => &[
+            "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
+            "M2 12h20",
+            "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
+        ],
+        ActivityIcon::Guardian => &[
+            "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
+            "m9 12 2 2 4-4",
+        ],
         ActivityIcon::Tool => &[
             "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
         ],
-        ActivityIcon::Output => &["m4 17 6-6-6-6", "M12 19h8"],
+        ActivityIcon::Output => &[
+            "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z",
+            "M14 2v6h6",
+            "m10 17 3-3-3-3",
+            "M13 14H7",
+        ],
+        ActivityIcon::Error => &[
+            "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+            "M12 8v4",
+            "M12 16h.01",
+        ],
         ActivityIcon::Plan => &[
             "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
             "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
@@ -939,8 +981,13 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
             "M12 20h.01",
         ],
     };
+    let tone = if kind == ActivityIcon::Error {
+        "text-red-500"
+    } else {
+        "text-muted-foreground"
+    };
     rsx! {
-        span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground", aria_hidden: "true",
+        span { class: "flex h-5 w-5 shrink-0 items-center justify-center {tone}", aria_hidden: "true",
             svg {
                 class: "h-[17px] w-[17px]",
                 view_box: "0 0 24 24",
@@ -957,23 +1004,41 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
     }
 }
 
-fn tool_label(name: &str) -> String {
+fn tool_presentation(name: &str) -> (ActivityIcon, Cow<'static, str>) {
     let lower = name.to_ascii_lowercase();
-    if lower.contains("read_file") || lower.contains("read file") {
-        "Read files".to_string()
-    } else if lower.contains("grep") || lower.contains("search") {
-        "Searched files".to_string()
+    if lower.contains("guardian")
+        || lower.contains("approval")
+        || lower == "review"
+        || lower.ends_with("_review")
+        || lower.ends_with(".review")
+        || lower.ends_with(":review")
+    {
+        (ActivityIcon::Guardian, Cow::Borrowed("Guardian Review"))
+    } else if lower.contains("read_file") || lower.contains("read file") {
+        (ActivityIcon::ReadFile, Cow::Borrowed("Read files"))
     } else if lower.contains("view_image") || lower.contains("view image") {
-        "Viewed image".to_string()
-    } else if lower.contains("run") || lower.contains("exec") || lower.contains("command") {
-        "Ran commands".to_string()
-    } else if lower.contains("browser") {
-        "Used browser".to_string()
+        (ActivityIcon::Image, Cow::Borrowed("Viewed image"))
+    } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
+        (ActivityIcon::Browser, Cow::Borrowed("Used browser"))
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
+        (ActivityIcon::Search, Cow::Borrowed("Searched files"))
+    } else if lower.contains("run")
+        || lower.contains("exec")
+        || lower.contains("command")
+        || lower.contains("shell")
+        || lower.contains("terminal")
+    {
+        (ActivityIcon::Command, Cow::Borrowed("Ran commands"))
     } else {
-        name.rsplit(['.', ':'])
-            .next()
-            .unwrap_or(name)
-            .replace('_', " ")
+        (
+            ActivityIcon::Tool,
+            Cow::Owned(
+                name.rsplit(['.', ':'])
+                    .next()
+                    .unwrap_or(name)
+                    .replace('_', " "),
+            ),
+        )
     }
 }
 
@@ -998,21 +1063,24 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                 }
             }
         },
-        ChatBlock::ToolUse { name, args, .. } => rsx! {
-            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                {render_activity_icon(ActivityIcon::Tool)}
-                details { class: "disclosure min-w-0 text-sm text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "{tool_label(name)}" }
-                        {render_disclosure_icon()}
-                    }
-                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                    if !args.is_empty() && args != "{}" {
-                        pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+        ChatBlock::ToolUse { name, args, .. } => {
+            let (icon, label) = tool_presentation(name);
+            rsx! {
+                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                    {render_activity_icon(icon)}
+                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                            span { class: "font-medium", "{label}" }
+                            {render_disclosure_icon()}
+                        }
+                        div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
+                        if !args.is_empty() && args != "{}" {
+                            pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                        }
                     }
                 }
             }
-        },
+        }
         ChatBlock::Plan { steps } => {
             let n = steps.len();
             rsx! {
@@ -1088,9 +1156,14 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                 "text-muted-foreground"
             };
             let label = if *is_error { "Error" } else { "Output" };
+            let icon = if *is_error {
+                ActivityIcon::Error
+            } else {
+                ActivityIcon::Output
+            };
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon(ActivityIcon::Output)}
+                    {render_activity_icon(icon)}
                     details { class: "disclosure min-w-0 text-sm {tone}",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "{label}" }
