@@ -374,7 +374,7 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
             cwd,
             mtime,
             title: short_id.to_string(),
-            cross_runtime: false,
+            cross_runtime: true,
         });
     }
     out
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].sid, "vb-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/y"));
-        assert!(!out[0].cross_runtime);
+        assert!(out[0].cross_runtime);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

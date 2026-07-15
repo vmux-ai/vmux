@@ -280,7 +280,7 @@ pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
             cwd: PathBuf::from(&head.payload.cwd),
             mtime,
             title,
-            cross_runtime: false,
+            cross_runtime: true,
         });
     });
     out
@@ -564,7 +564,7 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].sid, "cx-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/x"));
-        assert!(!out[0].cross_runtime);
+        assert!(out[0].cross_runtime);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

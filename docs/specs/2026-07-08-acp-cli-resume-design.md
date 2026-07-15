@@ -72,7 +72,10 @@ Resume plumbing already exists on both sides; what's missing is discovery/picker
   both directions.
 - **Hard constraint: same cwd.** Sessions are keyed by encoded cwd. A handoff (or resume)
   from a different cwd silently starts a fresh session. cwd MUST travel with the session.
-- Codex/Vibe id-sharing across ACP and CLI is **unverified** — treat as false for now.
+- Codex ACP writes to the CLI's `~/.codex/sessions` store using the Codex session id.
+- Vibe ACP uses the same `AgentLoop.session_id` and session logger as the CLI.
+  ⇒ Claude, Codex, and Vibe all support ACP↔CLI handoff.
+- ACP registry ids (`claude-acp`, `codex-acp`, `mistral-vibe`) map to their canonical CLI kinds.
 
 ## Model — runtime-agnostic session identity
 
@@ -102,7 +105,7 @@ pub struct ResumableSession {
     pub cwd: PathBuf,
     pub mtime: SystemTime,
     pub title: String,        // first user message / summary; falls back to short sid
-    pub cross_runtime: bool,  // ACP↔CLI handoff safe for this kind (claude=true)
+    pub cross_runtime: bool,  // ACP↔CLI handoff safe for this kind
 }
 ```
 
@@ -112,9 +115,9 @@ pub struct ResumableSession {
 - vibe: `~/.vibe/logs/session/session_*/meta.json` → id, cwd, times.
 
 A backend collector unions across registered strategies, sorts by mtime desc, dedups by
-`(kind, sid)`. Claude's store is shared by ACP+CLI, so one scan covers both runtimes.
+`(kind, sid)`. Each built-in kind's store is shared by ACP+CLI, so one scan covers both runtimes.
 **Scan on demand** (when `/resume` is invoked), not eagerly. `cross_runtime` is a per-kind
-capability: claude=true; codex/vibe=false until verified.
+capability: true for Claude, Codex, and Vibe.
 
 ### 2. Composer slash mechanism (frontend — ACP agent page)
 
@@ -187,7 +190,8 @@ teardown-then-attach so both `/resume` and `/cli` share it without adding a
 `/cli` in the ACP composer emits `SwapStackSession` with a CLI `target_url`, current sid,
 and cwd → CLI PTY resumes the same conversation, same page.
 
-- Gated by `ResumableSession.cross_runtime` / a per-kind capability. Claude only for v1.
+- Gated by `ResumableSession.cross_runtime` / a per-kind capability. Claude, Codex, and Vibe
+  share their ACP session ids with their CLI runtimes.
 - cwd is taken from the live `AcpSession.cwd` (never `default_cwd`).
 - Reverse (`/acp` from a CLI pane) is deferred because CLI panes have no vmux composer.
 
