@@ -9,6 +9,8 @@ use wasm_bindgen::prelude::*;
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput};
 
+const START_FOCUS_PENDING: &str = "_startFocusPending";
+
 /// The `vmux://start/` launcher page: a cinematic centered hero that requests its
 /// entries on mount and renders [`CommandPalette`] in [`PaletteVariant::Start`].
 #[component]
@@ -38,7 +40,6 @@ pub fn Page() -> Element {
     use_effect(|| {
         install_window_focus_refocus();
         install_keep_input_focused_on_click();
-        focus_start_input();
     });
 
     let reveal = if mounted() {
@@ -79,25 +80,46 @@ pub fn Page() -> Element {
     }
 }
 
-/// Focus the launcher input, re-asserting focus once per animation frame until the document
-/// actually holds focus. CEF grants the OSR browser native keyboard focus (`SetFocus`) several
-/// frames after the page mounts — a single deferred `input.focus()` runs too early and is dropped,
-/// and CEF OSR emits no JS `window` focus event to hook — so a bounded retry keeps the input as
-/// the active element through that window and lands the caret as soon as native focus arrives.
+/// Focus the launcher input after the host reveals the page, re-asserting focus once per animation
+/// frame until the document actually holds focus. Concurrent requests share one bounded retry.
 fn focus_start_input() {
-    focus_start_input_retry(90);
-}
-
-fn focus_start_input_retry(frames_left: u32) {
     let Some(window) = web_sys::window() else {
         return;
     };
-    let cb = Closure::once_into_js(move || {
+    if start_focus_pending(&window) {
+        return;
+    }
+    set_start_focus_pending(&window, true);
+    focus_start_input_retry(window, 90);
+}
+
+fn focus_start_input_retry(window: web_sys::Window, frames_left: u32) {
+    let retry_window = window.clone();
+    let cb = Closure::once(move || {
         if !try_focus_command_input_once() && frames_left > 1 {
-            focus_start_input_retry(frames_left - 1);
+            focus_start_input_retry(retry_window, frames_left - 1);
+        } else {
+            set_start_focus_pending(&retry_window, false);
         }
     });
-    let _ = window.request_animation_frame(cb.unchecked_ref());
+    match window.request_animation_frame(cb.as_ref().unchecked_ref()) {
+        Ok(_) => cb.forget(),
+        Err(_) => set_start_focus_pending(&window, false),
+    }
+}
+
+fn start_focus_pending(window: &web_sys::Window) -> bool {
+    js_sys::Reflect::get(window, &JsValue::from_str(START_FOCUS_PENDING))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+}
+
+fn set_start_focus_pending(window: &web_sys::Window, pending: bool) {
+    let _ = js_sys::Reflect::set(
+        window,
+        &JsValue::from_str(START_FOCUS_PENDING),
+        &JsValue::from_bool(pending),
+    );
 }
 
 /// Focus the input if it is not already the active element; returns true once the document holds
