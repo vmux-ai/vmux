@@ -25,15 +25,15 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
                 let turn = current.get_or_insert_with(ChatTurn::default);
                 for block in blocks {
                     match block {
-                        AssistantBlock::Text(t) => turn.answer.push(ChatBlock::Text(t.clone())),
+                        AssistantBlock::Text(t) => push_assistant_text(turn, t),
                         AssistantBlock::Thinking(t) => {
-                            turn.steps.push(ChatBlock::Thinking(t.clone()))
+                            turn.blocks.push(ChatBlock::Thinking(t.clone()))
                         }
                         AssistantBlock::ToolUse {
                             call_id,
                             name,
                             args,
-                        } => turn.steps.push(ChatBlock::ToolUse {
+                        } => turn.blocks.push(ChatBlock::ToolUse {
                             call_id: call_id.clone(),
                             name: name.clone(),
                             args: args.clone(),
@@ -43,23 +43,26 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
                             path,
                             old_text,
                             new_text,
-                        } => turn.steps.push(ChatBlock::Diff {
+                        } => turn.blocks.push(ChatBlock::Diff {
                             call_id: call_id.clone(),
                             path: path.clone(),
                             old_text: old_text.clone(),
                             new_text: new_text.clone(),
                         }),
-                        AssistantBlock::Plan { steps } => turn.steps.push(ChatBlock::Plan {
+                        AssistantBlock::Plan { steps } => turn.blocks.push(ChatBlock::Plan {
                             steps: steps.iter().map(map_plan_step).collect(),
                         }),
                     }
                 }
             }
             Message::ToolResult {
-                content, is_error, ..
+                call_id,
+                content,
+                is_error,
             } => {
                 let turn = current.get_or_insert_with(ChatTurn::default);
-                turn.steps.push(ChatBlock::ToolResult {
+                turn.blocks.push(ChatBlock::ToolResult {
+                    call_id: call_id.clone(),
                     content: content.clone(),
                     is_error: *is_error,
                 });
@@ -82,11 +85,53 @@ fn flush(
     durations: &[u32],
 ) {
     if let Some(mut turn) = current.take() {
-        turn.step_count = turn.steps.len() as u32;
+        turn.step_count = turn
+            .blocks
+            .iter()
+            .filter(|block| !matches!(block, ChatBlock::Text(_)))
+            .count() as u32;
         turn.duration_secs = durations.get(*ordinal).copied();
         *ordinal += 1;
         items.push(ChatItem::Turn(turn));
     }
+}
+
+fn push_assistant_text(turn: &mut ChatTurn, text: &str) {
+    let mut prose = String::new();
+    for line in text.split_inclusive('\n') {
+        if let Some((attempt, total)) = reconnect_progress(line.trim()) {
+            push_prose(turn, &mut prose);
+            push_reconnect(turn, attempt, total);
+        } else {
+            prose.push_str(line);
+        }
+    }
+    push_prose(turn, &mut prose);
+}
+
+fn push_prose(turn: &mut ChatTurn, prose: &mut String) {
+    if prose.trim().is_empty() {
+        prose.clear();
+        return;
+    }
+    turn.blocks
+        .push(ChatBlock::Text(std::mem::take(prose).trim().to_string()));
+}
+
+fn push_reconnect(turn: &mut ChatTurn, attempt: u32, total: u32) {
+    let block = ChatBlock::Reconnect { attempt, total };
+    if matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. })) {
+        *turn.blocks.last_mut().expect("reconnect tail") = block;
+    } else {
+        turn.blocks.push(block);
+    }
+}
+
+fn reconnect_progress(text: &str) -> Option<(u32, u32)> {
+    let rest = text.strip_prefix("Reconnecting")?;
+    let rest = rest.trim_start_matches('.').trim_start_matches('…').trim();
+    let (attempt, total) = rest.split_once('/')?;
+    Some((attempt.trim().parse().ok()?, total.trim().parse().ok()?))
 }
 
 fn map_plan_step(step: &PlanStep) -> ChatPlanStep {
@@ -130,9 +175,9 @@ mod tests {
             panic!()
         };
         assert_eq!(t.step_count, 3);
-        assert_eq!(t.steps.len(), 3);
-        assert!(matches!(t.steps[2], ChatBlock::ToolResult { .. }));
-        assert_eq!(t.answer.len(), 1);
+        assert_eq!(t.blocks.len(), 4);
+        assert!(matches!(t.blocks[2], ChatBlock::ToolResult { .. }));
+        assert!(matches!(&t.blocks[3], ChatBlock::Text(text) if text == "done"));
         assert!(!t.running);
     }
 
@@ -195,6 +240,71 @@ mod tests {
         };
         assert!(t.running);
         assert_eq!(t.step_count, 0);
-        assert!(t.answer.is_empty());
+        assert!(t.blocks.is_empty());
+    }
+
+    #[test]
+    fn preserves_step_and_prose_order() {
+        let msgs = vec![
+            Message::User { text: "a".into() },
+            assistant(vec![
+                AssistantBlock::Text("before".into()),
+                tool("c1"),
+                AssistantBlock::Text("after".into()),
+            ]),
+        ];
+        let items = group_turns(&msgs, &[], false);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert!(matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "before"));
+        assert!(matches!(&turn.blocks[1], ChatBlock::ToolUse { .. }));
+        assert!(matches!(&turn.blocks[2], ChatBlock::Text(text) if text == "after"));
+    }
+
+    #[test]
+    fn collapses_consecutive_reconnect_updates() {
+        let msgs = vec![
+            Message::User { text: "a".into() },
+            assistant(vec![AssistantBlock::Text(
+                "Reconnecting... 1/5\n\nReconnecting… 2/5\nReconnecting 3/5".into(),
+            )]),
+        ];
+        let items = group_turns(&msgs, &[], true);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(turn.blocks.len(), 1);
+        assert!(matches!(
+            turn.blocks[0],
+            ChatBlock::Reconnect {
+                attempt: 3,
+                total: 5
+            }
+        ));
+        assert_eq!(turn.step_count, 1);
+    }
+
+    #[test]
+    fn reconnect_updates_do_not_swallow_prose() {
+        let msgs = vec![
+            Message::User { text: "a".into() },
+            assistant(vec![AssistantBlock::Text(
+                "before\nReconnecting... 2/5\nafter".into(),
+            )]),
+        ];
+        let items = group_turns(&msgs, &[], false);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert!(matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "before"));
+        assert!(matches!(
+            turn.blocks[1],
+            ChatBlock::Reconnect {
+                attempt: 2,
+                total: 5
+            }
+        ));
+        assert!(matches!(&turn.blocks[2], ChatBlock::Text(text) if text == "after"));
     }
 }

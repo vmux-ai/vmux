@@ -854,14 +854,24 @@ fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element
 }
 
 fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
-    let show_header = turn.step_count > 0 || (turn.running && turn.answer.is_empty());
+    let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
     rsx! {
-        div { key: "{key}", class: "flex max-w-[85%] flex-col gap-2 self-start",
-            if show_header {
-                {render_turn_header(turn, verb, elapsed)}
-            }
-            for (j , block) in turn.answer.iter().enumerate() {
+        div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
+            for (j , block) in turn.blocks.iter().enumerate() {
                 {render_block(j, block)}
+            }
+            if turn.running && !reconnecting {
+                {render_working(verb, elapsed)}
+            }
+            if !turn.running && let Some(duration) = turn.duration_secs {
+                div { class: "grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2.5 text-[11px] text-muted-foreground/70",
+                    span {}
+                    if turn.step_count == 0 {
+                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)}" }
+                    } else {
+                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)} · {turn.step_count} steps" }
+                    }
+                }
             }
         }
     }
@@ -876,66 +886,84 @@ fn render_disclosure_icon() -> Element {
     }
 }
 
-fn render_turn_header(turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
-    if !super::has_collapsible_steps(turn) {
-        return rsx! {
-            div { class: "rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                div { class: "flex select-none items-center gap-2.5 text-sm",
-                    span { class: "flex items-end gap-1",
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
-                    }
-                    span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{verb}…" }
-                    span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed)}" }
+fn render_working(verb: &str, elapsed: u32) -> Element {
+    rsx! {
+        div { class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
+            span { class: "flex h-5 w-5 items-center justify-center",
+                span { class: "flex items-end gap-0.5",
+                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.32s]" }
+                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.16s]" }
+                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current" }
                 }
             }
-        };
-    }
-    if turn.running {
-        rsx! {
-            details { class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                summary { class: "flex cursor-pointer select-none items-center gap-2.5 text-sm list-none [&::-webkit-details-marker]:hidden",
-                    {render_disclosure_icon()}
-                    span { class: "flex items-end gap-1",
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.32s]" }
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70 [animation-delay:-0.16s]" }
-                        span { class: "h-1.5 w-1.5 animate-bounce rounded-full bg-foreground/70" }
-                    }
-                    span { class: "animate-pulse bg-gradient-to-r from-foreground/45 via-foreground to-foreground/45 bg-clip-text font-medium text-transparent", "{verb}…" }
-                    span { class: "tabular-nums text-xs text-muted-foreground", "{fmt_elapsed(elapsed)}" }
-                }
-                {render_steps(turn)}
-            }
-        }
-    } else {
-        let label = match turn.duration_secs {
-            Some(secs) => format!(
-                "Worked for {} · {} steps",
-                fmt_elapsed(secs),
-                turn.step_count
-            ),
-            None => format!("{} steps", turn.step_count),
-        };
-        rsx! {
-            details { class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
-                    {render_disclosure_icon()}
-                    span { class: "font-medium", "{label}" }
-                }
-                {render_steps(turn)}
+            div { class: "flex items-baseline gap-2",
+                span { class: "animate-pulse font-medium text-foreground/75", "{verb}" }
+                span { class: "tabular-nums text-xs", "{fmt_elapsed(elapsed)}" }
             }
         }
     }
 }
 
-fn render_steps(turn: &ChatTurn) -> Element {
+fn render_activity_icon(kind: &str) -> Element {
+    let paths: &[&str] = match kind {
+        "thinking" => &[
+            "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z",
+        ],
+        "tool" => &[
+            "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
+        ],
+        "output" => &["m4 17 6-6-6-6", "M12 19h8"],
+        "plan" => &[
+            "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
+            "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
+        ],
+        "diff" => &[
+            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+            "M14 2v4a2 2 0 0 0 2 2h4",
+        ],
+        "reconnect" => &[
+            "M5 12.55a11 11 0 0 1 14.08 0",
+            "M1.42 9a16 16 0 0 1 21.16 0",
+            "M8.53 16.11a6 6 0 0 1 6.95 0",
+            "M12 20h.01",
+        ],
+        _ => &[],
+    };
     rsx! {
-        div { class: "mt-2 flex flex-col gap-2",
-            for (j , block) in turn.steps.iter().enumerate() {
-                {render_block(j, block)}
+        span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground", aria_hidden: "true",
+            svg {
+                class: "h-[17px] w-[17px]",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.8",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                for path in paths {
+                    path { d: "{path}" }
+                }
             }
         }
+    }
+}
+
+fn tool_label(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("read_file") || lower.contains("read file") {
+        "Read files".to_string()
+    } else if lower.contains("grep") || lower.contains("search") {
+        "Searched files".to_string()
+    } else if lower.contains("view_image") || lower.contains("view image") {
+        "Viewed image".to_string()
+    } else if lower.contains("run") || lower.contains("exec") || lower.contains("command") {
+        "Ran commands".to_string()
+    } else if lower.contains("browser") {
+        "Used browser".to_string()
+    } else {
+        name.rsplit(['.', ':'])
+            .next()
+            .unwrap_or(name)
+            .replace('_', " ")
     }
 }
 
@@ -949,46 +977,49 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             }
         },
         ChatBlock::Thinking(text) => rsx! {
-            details {
-                key: "{key}",
-                class: "disclosure rounded-xl bg-foreground/[0.03] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground list-none [&::-webkit-details-marker]:hidden",
-                    {render_disclosure_icon()}
-                    span { class: "font-medium", "Thinking" }
+            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                {render_activity_icon("thinking")}
+                details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "font-medium", "Thinking" }
+                        {render_disclosure_icon()}
+                    }
+                    div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
                 }
-                div { class: "mt-2 whitespace-pre-wrap border-l-2 border-foreground/10 pl-3 text-xs italic leading-relaxed text-muted-foreground", "{text}" }
             }
         },
         ChatBlock::ToolUse { name, args, .. } => rsx! {
-            details {
-                key: "{key}",
-                class: "disclosure rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                    {render_disclosure_icon()}
-                    span { class: "font-mono text-xs text-amber-500", "{name}" }
-                }
-                if !args.is_empty() && args != "{}" {
-                    pre { class: "mt-1.5 overflow-x-auto font-mono text-[11px] text-muted-foreground", "{args}" }
+            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                {render_activity_icon("tool")}
+                details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "font-medium", "{tool_label(name)}" }
+                        {render_disclosure_icon()}
+                    }
+                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
+                    if !args.is_empty() && args != "{}" {
+                        pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                    }
                 }
             }
         },
         ChatBlock::Plan { steps } => {
             let n = steps.len();
             rsx! {
-                details {
-                    key: "{key}",
-                    open: true,
-                    class: "disclosure rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs list-none [&::-webkit-details-marker]:hidden",
-                        {render_disclosure_icon()}
-                        span { class: "font-medium text-foreground", "Plan" }
-                        span { class: "text-muted-foreground", "· {n} tasks" }
-                    }
-                    ul { class: "mt-2 flex flex-col gap-1.5",
-                        for (i , step) in steps.iter().enumerate() {
-                            li { key: "{i}", class: "flex items-start gap-2 text-xs",
-                                span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
-                                span { class: plan_text_class(&step.status), "{step.content}" }
+                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                    {render_activity_icon("plan")}
+                    details { open: true, class: "disclosure min-w-0 text-sm",
+                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                            span { class: "font-medium text-foreground/80", "Plan" }
+                            span { class: "text-xs text-muted-foreground", "{n} tasks" }
+                            {render_disclosure_icon()}
+                        }
+                        ul { class: "mt-2 flex flex-col gap-1.5 border-l border-foreground/15 pl-3",
+                            for (i , step) in steps.iter().enumerate() {
+                                li { key: "{i}", class: "flex items-start gap-2 text-xs",
+                                    span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
+                                    span { class: plan_text_class(&step.status), "{step.content}" }
+                                }
                             }
                         }
                     }
@@ -1019,22 +1050,28 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
                     .collect();
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
             rsx! {
-                div {
-                    key: "{key}",
-                    class: "overflow-hidden rounded-xl ring-1 ring-inset ring-foreground/10",
-                    div { class: "flex items-center gap-2 border-b border-foreground/10 bg-foreground/[0.05] px-3 py-1.5",
-                        span { class: "font-mono text-xs font-medium text-amber-400", "{fname}" }
-                        span { class: "text-[10px] uppercase tracking-wide text-muted-foreground", "proposed edit" }
-                    }
-                    div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
-                        for (i , (line , cls)) in lines.iter().enumerate() {
-                            div { key: "{i}", class: "{cls}", "{line}" }
+                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                    {render_activity_icon("diff")}
+                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                            span { class: "font-medium", "Edited " }
+                            code { class: "truncate font-mono text-xs text-foreground/70", "{fname}" }
+                            {render_disclosure_icon()}
+                        }
+                        div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
+                            div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
+                                for (i , (line , cls)) in lines.iter().enumerate() {
+                                    div { key: "{i}", class: "{cls}", "{line}" }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        ChatBlock::ToolResult { content, is_error } => {
+        ChatBlock::ToolResult {
+            content, is_error, ..
+        } => {
             let tone = if *is_error {
                 "text-red-500"
             } else {
@@ -1042,17 +1079,24 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             };
             let label = if *is_error { "Error" } else { "Output" };
             rsx! {
-                details {
-                    key: "{key}",
-                    class: "disclosure rounded-xl bg-foreground/[0.05] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 text-xs {tone} list-none [&::-webkit-details-marker]:hidden",
-                        {render_disclosure_icon()}
-                        span { "{label}" }
+                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                    {render_activity_icon("output")}
+                    details { class: "disclosure min-w-0 text-sm {tone}",
+                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                            span { class: "font-medium", "{label}" }
+                            {render_disclosure_icon()}
+                        }
+                        pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
                     }
-                    pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-muted-foreground", "{content}" }
                 }
             }
         }
+        ChatBlock::Reconnect { attempt, total } => rsx! {
+            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
+                {render_activity_icon("reconnect")}
+                span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
+            }
+        },
     }
 }
 
