@@ -6295,6 +6295,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_layout::CloseStackRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
