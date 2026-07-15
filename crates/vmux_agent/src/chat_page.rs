@@ -21,10 +21,10 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatClearQueue, ChatEscape, ChatResume,
-    ChatSnapshot, ChatSubmit, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
-    SlashCommandEntry, SlashCommands,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue,
+    ChatEscape, ChatResume, ChatSnapshot, ChatSubmit, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
@@ -142,6 +142,7 @@ impl Plugin for AgentChatPagePlugin {
             ChatCancel,
             ChatResume,
             ChatClearQueue,
+            ChatCancelQueuedPrompt,
             ChatEscape,
             ResumeListRequest,
             ResumeSession,
@@ -152,6 +153,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_resume)
             .add_observer(on_chat_clear_queue)
+            .add_observer(on_chat_cancel_queued_prompt)
             .add_observer(on_chat_escape)
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
@@ -360,7 +362,14 @@ fn snapshot_of(
                 u32::try_from(group_turns(&imported.messages, &[], false).len()).unwrap_or(u32::MAX)
             })
             .unwrap_or_default(),
-        queued: queue.items.iter().cloned().collect(),
+        queued: queue
+            .items
+            .iter()
+            .map(|item| QueuedPromptSnapshot {
+                id: item.id,
+                text: item.text.clone(),
+            })
+            .collect(),
         paused: queue.paused,
     }
 }
@@ -498,6 +507,20 @@ fn on_chat_clear_queue(
     };
     if let Ok(mut queue) = queues.get_mut(parent.parent()) {
         queue.clear();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_cancel_queued_prompt(
+    trigger: On<BinReceive<ChatCancelQueuedPrompt>>,
+    child_of: Query<&ChildOf>,
+    mut queues: Query<&mut PromptQueue>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    if let Ok(mut queue) = queues.get_mut(parent.parent()) {
+        queue.remove(trigger.event().payload.id);
     }
 }
 
@@ -1080,7 +1103,10 @@ mod native_tests {
         enqueue_prompt(&mut queue, &mut state, "retry".into());
 
         assert!(matches!(state, AgentRunState::Idle));
-        assert_eq!(queue.items.front().map(String::as_str), Some("retry"));
+        assert_eq!(
+            queue.items.front().map(|item| item.text.as_str()),
+            Some("retry")
+        );
         assert!(!queue.paused);
     }
 
@@ -1091,7 +1117,7 @@ mod native_tests {
         let mut app = App::new();
         app.add_observer(on_chat_cancel);
         let mut queue = PromptQueue::default();
-        queue.items.push_back("queued".into());
+        queue.enqueue("queued".into());
         assert!(queue.request_flush());
         let stack = app.world_mut().spawn(queue).id();
         let webview = app.world_mut().spawn(ChildOf(stack)).id();
@@ -1117,7 +1143,7 @@ mod native_tests {
         let mut app = App::new();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
-        queue.items.push_back("retry".into());
+        queue.enqueue("retry".into());
         queue.paused = true;
         let stack = app
             .world_mut()
@@ -1147,7 +1173,7 @@ mod native_tests {
         let mut app = App::new();
         app.add_observer(on_chat_escape);
         let mut queue = PromptQueue::default();
-        queue.items.push_back("queued".into());
+        queue.enqueue("queued".into());
         assert!(queue.request_flush());
         queue.items.clear();
         let stack = app
@@ -1168,6 +1194,31 @@ mod native_tests {
                 .unwrap()
                 .flush_pending()
         );
+    }
+
+    #[test]
+    fn cancel_queued_prompt_removes_only_target() {
+        use bevy_cef::prelude::BinReceive;
+
+        let mut app = App::new();
+        app.add_observer(on_chat_cancel_queued_prompt);
+        let mut queue = PromptQueue::default();
+        queue.enqueue("first".into());
+        queue.enqueue("second".into());
+        let second_id = queue.items[1].id;
+        let stack = app.world_mut().spawn(queue).id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut()
+            .trigger(BinReceive::<ChatCancelQueuedPrompt> {
+                webview,
+                payload: ChatCancelQueuedPrompt { id: second_id },
+            });
+        app.world_mut().flush();
+
+        let queue = app.world().get::<PromptQueue>(stack).unwrap();
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0].text, "first");
     }
 
     #[test]
@@ -1265,6 +1316,8 @@ mod native_tests {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("kbd {"));
         assert!(source.contains("if queued.read().is_empty()"));
+        assert!(source.contains("ChatCancelQueuedPrompt"));
+        assert!(source.contains("title: \"Cancel queued prompt\""));
         assert!(source.contains("title: \"Stop\""));
         assert!(source.contains("rect { x: \"6\", y: \"6\""));
         assert!(source.contains("\"Send all queued prompts now (Esc)\""));

@@ -5,6 +5,21 @@
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct QueuedPromptSnapshot {
+    pub id: u64,
+    pub text: String,
+}
+
 /// Native → page: the full conversation plus run-state, pushed on every change.
 #[derive(
     Clone,
@@ -27,8 +42,8 @@ pub struct ChatSnapshot {
     pub approval_call_id: String,
     pub approval_name: String,
     pub approval_args_json: String,
-    /// Prompts queued behind the running turn (FIFO), oldest first. View-only on the page.
-    pub queued: Vec<String>,
+    /// Prompts queued behind the running turn (FIFO), oldest first.
+    pub queued: Vec<QueuedPromptSnapshot>,
     /// True after an interrupt: the queue is held (not auto-advancing) until resume/clear/submit.
     pub paused: bool,
     /// Agent display name (from the session `Profile`), for the header/hero.
@@ -113,6 +128,21 @@ pub struct ChatResume;
     rkyv::Deserialize,
 )]
 pub struct ChatClearQueue;
+
+/// Page → native: drop one queued prompt.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatCancelQueuedPrompt {
+    pub id: u64,
+}
 
 /// Page → native: apply Escape to the authoritative native queue and run state.
 #[derive(
@@ -344,14 +374,27 @@ mod tests {
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
             handoff_message_count: 2,
-            queued: vec!["a".into(), "b".into()],
+            queued: vec![
+                QueuedPromptSnapshot {
+                    id: 4,
+                    text: "a".into(),
+                },
+                QueuedPromptSnapshot {
+                    id: 9,
+                    text: "b".into(),
+                },
+            ],
             paused: true,
             ..Default::default()
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
-        assert_eq!(back.queued, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(back.queued.len(), 2);
+        assert_eq!(back.queued[0].id, 4);
+        assert_eq!(back.queued[0].text, "a");
+        assert_eq!(back.queued[1].id, 9);
+        assert_eq!(back.queued[1].text, "b");
         assert!(back.paused);
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);

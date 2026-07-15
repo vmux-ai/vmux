@@ -322,7 +322,7 @@ mod tests {
             .add_systems(Update, consume_page_agent_stream);
 
         let mut queue = PromptQueue::default();
-        queue.items.push_back("next".into());
+        queue.enqueue("next".into());
         let e = app
             .world_mut()
             .spawn((
@@ -373,8 +373,8 @@ mod tests {
             .add_systems(Update, consume_page_agent_stream);
 
         let mut queue = PromptQueue::default();
-        queue.items.push_back("a".into());
-        queue.items.push_back("b".into());
+        queue.enqueue("a".into());
+        queue.enqueue("b".into());
         assert!(queue.request_flush());
         let e = app
             .world_mut()
@@ -433,7 +433,7 @@ mod tests {
             .add_systems(Update, consume_page_agent_stream);
 
         let mut queue = PromptQueue::default();
-        queue.items.push_back("retry".into());
+        queue.enqueue("retry".into());
         assert!(queue.request_flush());
         let entity = app
             .world_mut()
@@ -463,7 +463,10 @@ mod tests {
         let queue = app.world().get::<PromptQueue>(entity).unwrap();
         assert!(queue.flush_pending());
         assert!(!queue.paused);
-        assert_eq!(queue.items.front().map(String::as_str), Some("retry"));
+        assert_eq!(
+            queue.items.front().map(|item| item.text.as_str()),
+            Some("retry")
+        );
     }
 
     #[test]
