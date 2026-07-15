@@ -249,7 +249,7 @@ pub struct RuntimeSwitchRequest {
 }
 
 /// The page's block type inside a [`ChatTurn`]. Mirrors `vmux_service::message::AssistantBlock`
-/// plus `ToolResult`, which `group_turns` folds in from the top-level tool-result message.
+/// plus folded tool results and reconnect progress.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatBlock {
     Text(String),
@@ -269,8 +269,13 @@ pub enum ChatBlock {
         steps: Vec<ChatPlanStep>,
     },
     ToolResult {
+        call_id: String,
         content: String,
         is_error: bool,
+    },
+    Reconnect {
+        attempt: u32,
+        total: u32,
     },
 }
 
@@ -289,18 +294,16 @@ pub enum ChatItem {
     Turn(ChatTurn),
 }
 
-/// One assistant turn: its collapsed step tree, its inline prose answer, and run-state.
+/// One assistant turn: its ordered prose/activity timeline and run-state.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ChatTurn {
-    /// Thinking / tool-use / tool-result / plan / diff — the collapsible "context tree".
-    pub steps: Vec<ChatBlock>,
-    /// Assistant prose — always rendered inline, never hidden.
-    pub answer: Vec<ChatBlock>,
+    /// Prose, thinking, tools, reconnects, plans, and diffs in transcript order.
+    pub blocks: Vec<ChatBlock>,
     /// True only for the live (tail) turn while the run is active.
     pub running: bool,
     /// Final wall-clock seconds for a turn that finished this process; `None` otherwise.
     pub duration_secs: Option<u32>,
-    /// `steps.len()`, sent explicitly for the header label.
+    /// Number of non-prose activity blocks.
     pub step_count: u32,
 }
 
@@ -360,14 +363,15 @@ mod tests {
         let items = vec![
             ChatItem::User { text: "hi".into() },
             ChatItem::Turn(ChatTurn {
-                steps: vec![
+                blocks: vec![
                     ChatBlock::Thinking("hmm".into()),
                     ChatBlock::ToolResult {
+                        call_id: "call-1".into(),
                         content: "ok".into(),
                         is_error: false,
                     },
+                    ChatBlock::Text("done".into()),
                 ],
-                answer: vec![ChatBlock::Text("done".into())],
                 running: false,
                 duration_secs: Some(12),
                 step_count: 2,
@@ -381,9 +385,9 @@ mod tests {
         };
         assert_eq!(turn.step_count, 2);
         assert_eq!(turn.duration_secs, Some(12));
-        assert_eq!(turn.answer.len(), 1);
+        assert_eq!(turn.blocks.len(), 3);
         assert!(matches!(
-            turn.steps[1],
+            turn.blocks[1],
             ChatBlock::ToolResult {
                 is_error: false,
                 ..

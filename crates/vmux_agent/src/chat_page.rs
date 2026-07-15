@@ -129,11 +129,6 @@ fn approval_detail_label(path: &str) -> String {
         .join(" · ")
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
-fn has_collapsible_steps(turn: &event::ChatTurn) -> bool {
-    !turn.steps.is_empty()
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentChatPagePlugin;
 
@@ -1057,18 +1052,6 @@ mod native_tests {
             ]
         );
         assert!(approval_details("{}").is_empty());
-    }
-
-    #[test]
-    fn empty_turn_has_no_collapsible_content() {
-        let empty = event::ChatTurn::default();
-        assert!(!has_collapsible_steps(&empty));
-
-        let populated = event::ChatTurn {
-            steps: vec![event::ChatBlock::Thinking("working".into())],
-            ..Default::default()
-        };
-        assert!(has_collapsible_steps(&populated));
     }
 
     #[test]
