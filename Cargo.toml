@@ -13,7 +13,7 @@ homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
 [workspace.dependencies]
-bevy = { version = "0.19.0-rc.2", default-features = false, features = [
+bevy = { version = "0.19.0", default-features = false, features = [
     "std",
     "multi_threaded",
     "async_executor",
@@ -47,15 +47,16 @@ bevy = { version = "0.19.0-rc.2", default-features = false, features = [
     "x11",
     "wayland",
 ] }
-bevy_ecs = { version = "0.19.0-rc.2", default-features = true }
-bevy_reflect = { version = "0.19.0-rc.2", default-features = true }
-bevy_winit = { version = "0.19.0-rc.2", default-features = false, features = [
+bevy_ecs = { version = "0.19.0", default-features = true }
+bevy_reflect = { version = "0.19.0", default-features = true }
+bevy_winit = { version = "0.19.0", default-features = false, features = [
     "x11",
     "wayland",
 ] }
+bevy_world_serialization = "0.19.0"
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
-moonshine-save = "0.6.1"
+moonshine-save = "0.7.0"
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "sync",
@@ -149,6 +150,4 @@ codegen-units = 1
 [patch.crates-io]
 bevy_cef = { path = "patches/bevy_cef-0.5.2" }
 bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }
-bevy_window = { path = "patches/bevy_window-0.19.0-rc.2" }
-moonshine-save = { path = "patches/moonshine-save-0.6.1" }
-moonshine-util = { path = "patches/moonshine-util-0.4.1" }
+bevy_window = { path = "patches/bevy_window-0.19.0" }

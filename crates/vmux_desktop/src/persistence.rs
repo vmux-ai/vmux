@@ -2,6 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::*;
+use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::path::{Path, PathBuf};
 
@@ -204,7 +205,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
     // ChildOf is the source of truth for hierarchy; Children is derived
     // automatically by Bevy's relationship system on load.
     let mut save = SaveWorld::default_into_file(path);
-    save.components = SceneFilter::deny_all()
+    save.components = WorldFilter::deny_all()
         .allow::<Save>()
         .allow::<ChildOf>()
         .allow::<Children>()
@@ -962,9 +963,10 @@ mod tests {
         assert!(path.exists(), "save file should exist");
 
         let mut app_load = App::new();
-        app_load.add_plugins(MinimalPlugins);
-        app_load.add_plugins(vmux_core::CorePlugin);
-        app_load.add_observer(load_on_default_event);
+        app_load
+            .add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin)
+            .add_observer(load_on_default_event);
         app_load.update();
 
         app_load
@@ -1036,8 +1038,9 @@ mod tests {
         assert!(path.exists(), "store file should exist");
 
         let mut app_load = App::new();
-        app_load.add_plugins(MinimalPlugins);
-        app_load.add_plugins(vmux_core::CorePlugin);
+        app_load
+            .add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin);
         app_load
             .register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
@@ -1131,10 +1134,11 @@ mod tests {
         assert!(path.exists());
 
         let mut app_load = App::new();
-        app_load.add_plugins(MinimalPlugins);
-        app_load.add_plugins(vmux_core::CorePlugin);
-        app_load.register_type::<PaneId>();
-        app_load.add_observer(load_on_default_event);
+        app_load
+            .add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<PaneId>()
+            .add_observer(load_on_default_event);
         app_load.update();
         app_load
             .world_mut()

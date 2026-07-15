@@ -21,6 +21,7 @@ libc = "0.2"
 muda = "0.19"
 parking_lot = "0.12"
 bevy_reflect = { workspace = true }
+bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
 serde = { workspace = true }
