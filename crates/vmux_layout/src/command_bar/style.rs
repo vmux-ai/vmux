@@ -253,6 +253,23 @@ mod tests {
     }
 
     #[test]
+    fn command_bar_rendered_ack_waits_for_two_animation_frames() {
+        let source = include_str!("page.rs");
+        let schedule_fn = source
+            .split("fn schedule_command_bar_rendered_emit")
+            .nth(1)
+            .and_then(|tail| tail.split("fn install_command_bar_size_observer").next())
+            .unwrap_or_default();
+
+        assert!(source.contains(
+            "schedule_command_bar_rendered_emit(\n                open_id,\n                2,"
+        ));
+        assert!(schedule_fn.contains("frames_left - 1"));
+        assert!(schedule_fn.contains("request_animation_frame"));
+        assert!(schedule_fn.contains("CommandBarRenderedEvent { open_id }"));
+    }
+
+    #[test]
     fn command_bar_input_handles_plain_meta_a() {
         let source = include_str!("palette.rs");
 

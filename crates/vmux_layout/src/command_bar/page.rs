@@ -20,6 +20,7 @@ pub fn Page() -> Element {
     let mut is_open = use_signal(|| false);
     let mut current_open_id = use_signal(|| 0u64);
     let mut last_rendered_open_id = use_signal(|| 0u64);
+    let mut render_ack_scheduled_open_id = use_signal(|| 0u64);
     let mut ready_sent = use_signal(|| false);
     let mut observed_size_open_id = use_signal(|| None::<u64>);
     let mut outside_pointer_listener_installed = use_signal(|| false);
@@ -30,9 +31,6 @@ pub fn Page() -> Element {
             let should_reset_input =
                 command_bar_open_should_reset_input(current_open_id(), open_id);
             if !should_reset_input {
-                if command_bar_open_should_ack(open_id) {
-                    let _ = try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id });
-                }
                 return;
             }
             current_open_id.set(open_id);
@@ -40,6 +38,7 @@ pub fn Page() -> Element {
             is_open.set(true);
             if command_bar_open_should_ack(open_id) {
                 last_rendered_open_id.set(0);
+                render_ack_scheduled_open_id.set(0);
             }
         });
 
@@ -58,9 +57,17 @@ pub fn Page() -> Element {
         if open
             && open_id != 0
             && last_rendered_open_id() != open_id
-            && try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id }).is_ok()
+            && render_ack_scheduled_open_id() != open_id
         {
-            last_rendered_open_id.set(open_id);
+            render_ack_scheduled_open_id.set(open_id);
+            if !schedule_command_bar_rendered_emit(
+                open_id,
+                2,
+                last_rendered_open_id,
+                render_ack_scheduled_open_id,
+            ) {
+                render_ack_scheduled_open_id.set(0);
+            }
         }
     });
 
@@ -242,6 +249,40 @@ fn schedule_command_bar_size_emit() {
     }) as Box<dyn FnMut()>);
     let _ = window.request_animation_frame(callback.as_ref().unchecked_ref());
     callback.forget();
+}
+
+fn schedule_command_bar_rendered_emit(
+    open_id: u64,
+    frames_left: u8,
+    mut last_rendered_open_id: Signal<u64>,
+    mut scheduled_open_id: Signal<u64>,
+) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let callback = Closure::once(move || {
+        if frames_left > 1 {
+            if !schedule_command_bar_rendered_emit(
+                open_id,
+                frames_left - 1,
+                last_rendered_open_id,
+                scheduled_open_id,
+            ) {
+                scheduled_open_id.set(0);
+            }
+        } else if try_cef_bin_emit_rkyv(&CommandBarRenderedEvent { open_id }).is_ok() {
+            last_rendered_open_id.set(open_id);
+        } else {
+            scheduled_open_id.set(0);
+        }
+    });
+    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+        Ok(_) => {
+            callback.forget();
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 fn install_command_bar_size_observer() -> bool {
