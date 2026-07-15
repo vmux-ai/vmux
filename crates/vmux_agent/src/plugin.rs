@@ -197,6 +197,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
+            .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
             .init_resource::<
@@ -894,6 +895,7 @@ impl AgentBrowserResolve<'_, '_> {
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentFileResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
+    page_open: MessageWriter<'w, vmux_core::PageOpenRequest>,
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
     observations: MessageWriter<'w, vmux_layout::worktree::TabDirectoryObserved>,
     agent_terms: Query<
@@ -907,8 +909,32 @@ pub(crate) struct AgentFileResolve<'w, 's> {
     >,
     kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    file_pages: Query<'w, 's, (Entity, &'static ChildOf, &'static vmux_core::PageMetadata)>,
+    file_pages: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static ChildOf,
+            &'static vmux_core::PageMetadata,
+            Option<&'static vmux_git::GitDiffSource>,
+        ),
+    >,
     tabs: Query<'w, 's, (), With<vmux_layout::tab::Tab>>,
+}
+
+#[derive(Clone, Copy)]
+struct FilePageTarget {
+    stack: Entity,
+    pane: Entity,
+    navigate: bool,
+}
+
+struct PendingFilePreview {
+    anchor: vmux_service::protocol::ProcessId,
+    agent_pane: Entity,
+    url: String,
+    request_id: [u8; 16],
+    user_origin: bool,
 }
 
 impl AgentFileResolve<'_, '_> {
@@ -948,7 +974,7 @@ impl AgentFileResolve<'_, '_> {
     fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
         use bevy::ecs::relationship::Relationship;
         let agent_parent = self.child_of.get(agent_pane).ok()?.get();
-        for (page, page_co, meta) in self.file_pages.iter() {
+        for (page, page_co, meta, _) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
                 continue;
             }
@@ -968,6 +994,43 @@ impl AgentFileResolve<'_, '_> {
         None
     }
 
+    fn file_page_target(&self, agent_pane: Entity, url: &str) -> Option<FilePageTarget> {
+        use bevy::ecs::relationship::Relationship;
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        let mut clean = None;
+        for (_, page_co, meta, diff) in self.file_pages.iter() {
+            if !meta.url.starts_with("file:") {
+                continue;
+            }
+            let stack = page_co.get();
+            let Ok(pane_co) = self.child_of.get(stack) else {
+                continue;
+            };
+            let pane = pane_co.get();
+            if pane == agent_pane
+                || self.child_of.get(pane).ok().map(|c| c.get()) != Some(agent_parent)
+            {
+                continue;
+            }
+            let dirty = diff.is_some_and(|source| source.dirty);
+            if vmux_layout::placement::reusable_page_match(url, &meta.url) {
+                return Some(FilePageTarget {
+                    stack,
+                    pane,
+                    navigate: !dirty && meta.url != url,
+                });
+            }
+            if !dirty && clean.is_none() {
+                clean = Some(FilePageTarget {
+                    stack,
+                    pane,
+                    navigate: true,
+                });
+            }
+        }
+        clean
+    }
+
     /// The agent's follow-pane and every `file://` preview stack in it, with each
     /// stack's URL. Generalizes `file_page_for` (which returns only the first).
     /// `None` when the agent has no file follow-pane yet.
@@ -980,7 +1043,7 @@ impl AgentFileResolve<'_, '_> {
         let agent_parent = self.child_of.get(agent_pane).ok()?.get();
         let mut follow_pane = None;
         let mut stacks = Vec::new();
-        for (page, page_co, meta) in self.file_pages.iter() {
+        for (page, page_co, meta, _) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
                 continue;
             }
@@ -1021,15 +1084,15 @@ fn file_touch_url(path: &str, line: Option<u32>, col: Option<u32>, end_col: Opti
 
 /// On an agent file read/edit, open the file in a `file://` pane beside that
 /// agent and record it as the agent's active pane (its focus ring). The first
-/// file spirals a new pane; later reads stack as new tabs on top of that pane
-/// (placement `AddTab`), and re-reading the same file refocuses its tab. `focus`
-/// only brings the new tab to the front of the file pane (it does not move the
-/// human's focused pane), so it is set only once that pane already exists.
+/// file spirals a new pane; later reads replace a clean file preview while dirty
+/// previews keep their own stack. Re-reading the same dirty file preserves its
+/// unsaved buffer.
 fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
 ) {
+    let mut previews = std::collections::HashMap::new();
     for request in reader.read() {
         let ServiceAgentCommand::FileTouched {
             anchor,
@@ -1078,16 +1141,43 @@ fn handle_agent_file_touch(
         if !settings.agent.follow_files {
             continue;
         }
-        let existing = resolve.file_page_for(agent_pane);
-        resolve.open_beside.write(vmux_layout::OpenBesideRequest {
-            pane: agent_pane,
-            direction: None,
-            url: file_touch_url(path, *line, *col, *end_col),
-            request_id: request.request_id.0,
-            focus: requested_focus_for_origin(&request.origin, existing.is_some()),
-        });
-        if let Some((_, pane)) = existing {
-            let kind = resolve.agent_kind(*anchor);
+        previews.insert(
+            agent_pane,
+            PendingFilePreview {
+                anchor: *anchor,
+                agent_pane,
+                url: file_touch_url(path, *line, *col, *end_col),
+                request_id: request.request_id.0,
+                user_origin: !origin_is_agent(&request.origin),
+            },
+        );
+    }
+    for preview in previews.into_values() {
+        let anchor = preview.anchor;
+        let existing = resolve.file_page_for(preview.agent_pane);
+        let target = resolve.file_page_target(preview.agent_pane, &preview.url);
+        if let Some(target) = target {
+            if target.navigate {
+                resolve.page_open.write(vmux_core::PageOpenRequest {
+                    target: vmux_core::PageOpenTarget::Stack(target.stack),
+                    url: preview.url,
+                    request_id: None,
+                });
+            }
+        } else {
+            resolve.open_beside.write(vmux_layout::OpenBesideRequest {
+                pane: preview.agent_pane,
+                direction: None,
+                url: preview.url,
+                request_id: preview.request_id,
+                focus: preview.user_origin && existing.is_some(),
+            });
+        }
+        if let Some(pane) = target
+            .map(|target| target.pane)
+            .or(existing.map(|(_, pane)| pane))
+        {
+            let kind = resolve.agent_kind(anchor);
             resolve
                 .activate
                 .write(vmux_layout::active_panes::ActivatePane {
@@ -3896,11 +3986,163 @@ mod tests {
         );
     }
 
+    fn file_touch_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_agent_file_touch);
+        app
+    }
+
+    fn spawn_file_touch_layout(app: &mut App, old_url: &str, dirty: bool) -> (ProcessId, Entity) {
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let agent_pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let agent_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(agent_pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
+        let file_pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
+        let file_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(file_pane)))
+            .id();
+        app.world_mut().spawn((
+            vmux_core::PageMetadata {
+                url: old_url.to_string(),
+                ..default()
+            },
+            vmux_git::GitDiffSource { dirty, ..default() },
+            ChildOf(file_stack),
+        ));
+        (anchor, file_stack)
+    }
+
+    fn send_file_read(app: &mut App, anchor: ProcessId, path: &str) {
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::FileTouched {
+                    anchor,
+                    path: path.to_string(),
+                    line: None,
+                    col: None,
+                    end_col: None,
+                    kind: vmux_service::protocol::FileTouchKind::Read,
+                },
+            });
+    }
+
+    #[test]
+    fn file_read_replaces_clean_follow_stack() {
+        let mut app = file_touch_test_app();
+        let (anchor, file_stack) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
+        send_file_read(&mut app, anchor, "/repo/new.rs");
+
+        app.update();
+
+        let opens: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(opens.len(), 1);
+        assert!(matches!(
+            opens[0].target,
+            vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
+        ));
+        assert_eq!(opens[0].url, "file:///repo/new.rs");
+        let beside = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::OpenBesideRequest>>()
+            .drain()
+            .count();
+        assert_eq!(beside, 0);
+    }
+
+    #[test]
+    fn same_frame_file_reads_replace_once_with_latest() {
+        let mut app = file_touch_test_app();
+        let (anchor, file_stack) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
+        send_file_read(&mut app, anchor, "/repo/first.rs");
+        send_file_read(&mut app, anchor, "/repo/latest.rs");
+
+        app.update();
+
+        let opens: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(opens.len(), 1);
+        assert!(matches!(
+            opens[0].target,
+            vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
+        ));
+        assert_eq!(opens[0].url, "file:///repo/latest.rs");
+    }
+
+    #[test]
+    fn file_read_preserves_dirty_follow_stack() {
+        let mut app = file_touch_test_app();
+        let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", true);
+        send_file_read(&mut app, anchor, "/repo/new.rs");
+
+        app.update();
+
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .count();
+        assert_eq!(opens, 0);
+        let beside: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::OpenBesideRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(beside.len(), 1);
+        assert_eq!(beside[0].url, "file:///repo/new.rs");
+    }
+
+    #[test]
+    fn file_read_does_not_reload_matching_dirty_page() {
+        let mut app = file_touch_test_app();
+        let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/current.rs", true);
+        send_file_read(&mut app, anchor, "/repo/current.rs");
+
+        app.update();
+
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .count();
+        let beside = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::OpenBesideRequest>>()
+            .drain()
+            .count();
+        assert_eq!((opens, beside), (0, 0));
+    }
+
     #[test]
     fn skill_file_read_does_not_open_follow_pane() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
@@ -3955,6 +4197,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
@@ -4022,6 +4265,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
@@ -4149,6 +4393,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, vmux_layout::worktree::WorktreePlugin))
             .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .init_resource::<CapturedRunCwd>()
@@ -6050,6 +6295,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_layout::CloseStackRequest>()
+            .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
