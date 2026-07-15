@@ -868,6 +868,8 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
                     span {}
                     if turn.step_count == 0 {
                         span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)}" }
+                    } else if turn.step_count == 1 {
+                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)} · 1 step" }
                     } else {
                         span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)} · {turn.step_count} steps" }
                     }
@@ -904,30 +906,38 @@ fn render_working(verb: &str, elapsed: u32) -> Element {
     }
 }
 
-fn render_activity_icon(kind: &str) -> Element {
+enum ActivityIcon {
+    Thinking,
+    Tool,
+    Output,
+    Plan,
+    Diff,
+    Reconnect,
+}
+
+fn render_activity_icon(kind: ActivityIcon) -> Element {
     let paths: &[&str] = match kind {
-        "thinking" => &[
+        ActivityIcon::Thinking => &[
             "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z",
         ],
-        "tool" => &[
+        ActivityIcon::Tool => &[
             "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
         ],
-        "output" => &["m4 17 6-6-6-6", "M12 19h8"],
-        "plan" => &[
+        ActivityIcon::Output => &["m4 17 6-6-6-6", "M12 19h8"],
+        ActivityIcon::Plan => &[
             "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
             "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
         ],
-        "diff" => &[
+        ActivityIcon::Diff => &[
             "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
             "M14 2v4a2 2 0 0 0 2 2h4",
         ],
-        "reconnect" => &[
+        ActivityIcon::Reconnect => &[
             "M5 12.55a11 11 0 0 1 14.08 0",
             "M1.42 9a16 16 0 0 1 21.16 0",
             "M8.53 16.11a6 6 0 0 1 6.95 0",
             "M12 20h.01",
         ],
-        _ => &[],
     };
     rsx! {
         span { class: "flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground", aria_hidden: "true",
@@ -978,7 +988,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         },
         ChatBlock::Thinking(text) => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                {render_activity_icon("thinking")}
+                {render_activity_icon(ActivityIcon::Thinking)}
                 details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "Thinking" }
@@ -990,7 +1000,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         },
         ChatBlock::ToolUse { name, args, .. } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                {render_activity_icon("tool")}
+                {render_activity_icon(ActivityIcon::Tool)}
                 details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "{tool_label(name)}" }
@@ -1007,7 +1017,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             let n = steps.len();
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon("plan")}
+                    {render_activity_icon(ActivityIcon::Plan)}
                     details { open: true, class: "disclosure min-w-0 text-sm",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium text-foreground/80", "Plan" }
@@ -1051,7 +1061,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon("diff")}
+                    {render_activity_icon(ActivityIcon::Diff)}
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "Edited " }
@@ -1080,7 +1090,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             let label = if *is_error { "Error" } else { "Output" };
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon("output")}
+                    {render_activity_icon(ActivityIcon::Output)}
                     details { class: "disclosure min-w-0 text-sm {tone}",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "{label}" }
@@ -1093,7 +1103,7 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         }
         ChatBlock::Reconnect { attempt, total } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
-                {render_activity_icon("reconnect")}
+                {render_activity_icon(ActivityIcon::Reconnect)}
                 span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
             }
         },
