@@ -293,7 +293,5 @@ fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
 fn workspace_bevy_winit_does_not_reenable_default_platform() {
     let manifest = include_str!("../../../Cargo.toml");
 
-    assert!(
-        manifest.contains("bevy_winit = { version = \"0.19.0-rc.2\", default-features = false")
-    );
+    assert!(manifest.contains("bevy_winit = { version = \"0.19.0\", default-features = false"));
 }
