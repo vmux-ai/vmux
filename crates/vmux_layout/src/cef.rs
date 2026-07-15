@@ -382,7 +382,7 @@ mod apply_cef_state_tests {
             ev(
                 Some("● Codex"),
                 Some("https://example.com/favicon.ico"),
-                Some("vmux://agent/codex"),
+                None,
             ),
         );
         assert_eq!(meta.title, "● Codex");
