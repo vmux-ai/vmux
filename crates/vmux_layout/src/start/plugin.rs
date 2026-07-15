@@ -96,16 +96,23 @@ fn sync_live_start_pages(
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     focused: Res<crate::stack::FocusedStack>,
-    starts: Query<(Entity, &WebviewSource, Has<StartWorkSynced>)>,
+    starts: Query<(
+        Entity,
+        &WebviewSource,
+        Has<StartWorkSynced>,
+        Has<CefKeyboardTarget>,
+    )>,
+    added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     // Refresh on work-snapshot changes and on focus/tab changes (so the tabs list
     // and active markers stay current), plus first-sync for newly-ready pages.
-    let changed = work_snapshot.is_changed() || focused.is_changed();
-    let targets: Vec<Entity> = starts
+    let focus_changed = focused.is_changed();
+    let changed = work_snapshot.is_changed() || focus_changed;
+    let targets: Vec<(Entity, bool)> = starts
         .iter()
-        .filter_map(|(e, src, synced)| {
+        .filter_map(|(e, src, synced, keyboard_target)| {
             let WebviewSource::Url(url) = src else {
                 return None;
             };
@@ -115,7 +122,13 @@ fn sync_live_start_pages(
             if !browsers.has_browser(e) || !browsers.host_emit_ready(&e) {
                 return None;
             }
-            (changed || !synced).then_some(e)
+            let focus_requested = should_focus_start_sync(
+                synced,
+                keyboard_target,
+                added_keyboard_targets.contains(e),
+                focus_changed,
+            );
+            (changed || !synced || focus_requested).then_some((e, focus_requested))
         })
         .collect();
     if targets.is_empty() {
@@ -128,16 +141,32 @@ fn sync_live_start_pages(
         &pages_snapshot,
         &work_snapshot,
     );
-    for e in targets {
+    for (e, focus_requested) in targets {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             e,
             COMMAND_BAR_OPEN_EVENT,
             &payload,
         ));
+        if focus_requested {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                e,
+                START_FOCUS_INPUT_EVENT,
+                &StartFocusInput,
+            ));
+        }
         // The start page can be despawned this frame (e.g. selecting an agent opens in-place over
         // it) before this command applies — `try_insert` skips silently instead of panicking.
         commands.entity(e).try_insert(StartWorkSynced);
     }
+}
+
+fn should_focus_start_sync(
+    synced: bool,
+    keyboard_target: bool,
+    keyboard_target_added: bool,
+    focus_changed: bool,
+) -> bool {
+    keyboard_target && (!synced || keyboard_target_added || focus_changed)
 }
 
 /// Claim `vmux://start/` page-open tasks. When a warm spare is available it is reparented
@@ -256,6 +285,7 @@ fn on_start_spare_revealed(
 fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
     spares: Query<(), With<WarmStartSpare>>,
+    keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     tab_gather: TabGatherParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
@@ -264,7 +294,8 @@ fn on_start_data_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if spares.contains(webview) {
+    let is_spare = spares.contains(webview);
+    if is_spare {
         commands.entity(webview).insert(WarmStartReady);
     }
     let payload = build_start_payload(
@@ -279,6 +310,13 @@ fn on_start_data_request(
         COMMAND_BAR_OPEN_EVENT,
         &payload,
     ));
+    if keyboard_targets.contains(webview) {
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            START_FOCUS_INPUT_EVENT,
+            &StartFocusInput,
+        ));
+    }
 }
 
 /// Build the launcher payload shared by the on-mount data feed and warm-spare refresh.
@@ -330,8 +368,36 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef::prelude::BinReceive;
     use vmux_core::PageOpenId;
     use vmux_core::page::PageManifest;
+
+    #[derive(Resource, Default)]
+    struct EmittedIds(Vec<String>);
+
+    fn capture_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedIds>) {
+        emitted.0.push(trigger.id.clone());
+    }
+
+    fn start_ready_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<CommandBarSpacesSnapshot>()
+            .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarPagesSnapshot>()
+            .init_resource::<CommandBarWorkSnapshot>()
+            .init_resource::<EmittedIds>()
+            .add_observer(on_start_data_request)
+            .add_observer(capture_emit);
+        app
+    }
+
+    fn emit_start_ready(app: &mut App, webview: Entity) {
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: StartDataRequest,
+        });
+        app.update();
+    }
 
     #[test]
     fn start_plugin_spawns_manifest() {
@@ -339,6 +405,65 @@ mod tests {
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.host == "start"));
+    }
+
+    #[test]
+    fn page_mount_does_not_start_focus_retry() {
+        let source = include_str!("page.rs");
+        let setup_effect = source
+            .split_once("use_effect(|| {")
+            .expect("start page setup effect")
+            .1
+            .split_once("});")
+            .expect("end of start page setup effect")
+            .0;
+
+        assert!(setup_effect.contains("install_window_focus_refocus();"));
+        assert!(setup_effect.contains("install_keep_input_focused_on_click();"));
+        assert!(!setup_effect.contains("focus_start_input();"));
+    }
+
+    #[test]
+    fn cold_start_focuses_after_page_ready() {
+        let mut app = start_ready_app();
+        let webview = app.world_mut().spawn(CefKeyboardTarget).id();
+
+        emit_start_ready(&mut app, webview);
+
+        let emitted = &app.world().resource::<EmittedIds>().0;
+        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]);
+    }
+
+    #[test]
+    fn warm_start_waits_for_reveal_before_focusing() {
+        let mut app = start_ready_app();
+        let webview = app.world_mut().spawn(WarmStartSpare).id();
+
+        emit_start_ready(&mut app, webview);
+
+        assert!(app.world().get::<WarmStartReady>(webview).is_some());
+        let emitted = &app.world().resource::<EmittedIds>().0;
+        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
+    }
+
+    #[test]
+    fn inactive_cold_start_waits_for_activation_before_focusing() {
+        let mut app = start_ready_app();
+        let webview = app.world_mut().spawn_empty().id();
+
+        emit_start_ready(&mut app, webview);
+
+        let emitted = &app.world().resource::<EmittedIds>().0;
+        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
+    }
+
+    #[test]
+    fn start_sync_focuses_only_active_pages_on_first_sync_or_activation() {
+        assert!(!should_focus_start_sync(false, false, false, false));
+        assert!(should_focus_start_sync(false, true, false, false));
+        assert!(should_focus_start_sync(true, true, true, false));
+        assert!(should_focus_start_sync(true, true, false, true));
+        assert!(!should_focus_start_sync(true, true, false, false));
     }
 
     fn start_task(stack: Entity) -> PageOpenTask {
