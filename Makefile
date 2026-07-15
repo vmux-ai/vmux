@@ -1,4 +1,4 @@
-.PHONY: dev test-app local release build-local build-release build setup-cef install-debug-render-process doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
+.PHONY: dev test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
 
 .DEFAULT_GOAL := dev
 
@@ -6,6 +6,7 @@ VMUX_PROFILE ?= personal
 VMUX_TEST ?=
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
+CARGO_WITH_CEF_CACHE := CARGO_BIN="$(CARGO_BIN)" ./scripts/cargo-with-cef-cache.sh
 RUSTUP_BIN := $(or $(shell command -v rustup 2>/dev/null),$(HOME)/.cargo/bin/rustup)
 EXPORT_CEF_BIN := $(or $(shell command -v export-cef-dir 2>/dev/null),$(HOME)/.cargo/bin/export-cef-dir)
 DX_BIN := $(or $(shell command -v dx 2>/dev/null),$(HOME)/.cargo/bin/dx)
@@ -21,8 +22,8 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 # Header / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
 
 dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_service -p vmux_cli
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop --features dev
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop --features dev
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
 	APP_BINARY="target/debug/vmux_desktop" \
@@ -45,7 +46,7 @@ test-app:
 	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
-	env -u CEF_PATH "$(CARGO_BIN)" build -p vmux_desktop -p vmux_cli -p vmux_service --release
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release
 
 -include .env
 export
@@ -72,9 +73,12 @@ setup-cef:
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).
 # Installs into the same path `bevy_cef` debug mode loads on macOS.
 install-debug-render-process:
-	env -u CEF_PATH "$(CARGO_BIN)" build -p bevy_cef_debug_render_process --features debug
+	$(CARGO_WITH_CEF_CACHE) build -p bevy_cef_debug_render_process --features debug
 	cp "$(CURDIR)/target/debug/bevy_cef_debug_render_process" \
 	  "$(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process"
+
+seed-target:
+	./scripts/seed-worktree-target.sh
 
 # Get workspace packages excluding vendored patches
 PKGS = $(shell "$(CARGO_BIN)" metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.manifest_path | test("patches") | not) | .name')
@@ -84,7 +88,7 @@ lint:
 		"$(CARGO_BIN)" fmt -p "$$pkg" -- --check || exit 1; \
 	done
 	@for pkg in $(PKGS); do \
-		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets -- -D warnings || exit 1; \
+		$(CARGO_WITH_CEF_CACHE) clippy -p "$$pkg" --all-targets -- -D warnings || exit 1; \
 	done
 
 lint-fix:
@@ -92,11 +96,11 @@ lint-fix:
 		"$(CARGO_BIN)" fmt -p "$$pkg" || exit 1; \
 	done
 	@for pkg in $(PKGS); do \
-		env -u CEF_PATH "$(CARGO_BIN)" clippy -p "$$pkg" --all-targets --fix --allow-dirty --allow-staged -- -D warnings || exit 1; \
+		$(CARGO_WITH_CEF_CACHE) clippy -p "$$pkg" --all-targets --fix --allow-dirty --allow-staged -- -D warnings || exit 1; \
 	done
 
 test:
-	env -u CEF_PATH "$(CARGO_BIN)" test --workspace --exclude bevy_cef_core
+	$(CARGO_WITH_CEF_CACHE) test --workspace --exclude bevy_cef_core
 
 # Reset vmux *dev* storage for a clean test. Removes the layout store, session,
 # logs, the saved profile display name, and stale dev service sockets (all

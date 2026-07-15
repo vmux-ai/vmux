@@ -42,13 +42,38 @@ fn test_app_marks_test_session() {
 fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
     let makefile = include_str!("../../../Makefile");
 
-    assert!(
-        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_service -p vmux_cli")
-    );
-    assert!(
-        makefile.contains("env -u CEF_PATH \"$(CARGO_BIN)\" build -p vmux_desktop --features dev")
-    );
+    assert!(makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli"));
+    assert!(makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop --features dev"));
     assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
+}
+
+#[test]
+fn local_cargo_builds_share_cef_sdk_and_sccache() {
+    let makefile = include_str!("../../../Makefile");
+    let wrapper = include_str!("../../../scripts/cargo-with-cef-cache.sh");
+
+    assert!(makefile.contains("./scripts/cargo-with-cef-cache.sh"));
+    assert!(wrapper.contains("seed-worktree-target.sh\" --if-needed"));
+    assert!(wrapper.contains("VMUX_CEF_SDK_CACHE"));
+    assert!(wrapper.contains("Library/Caches/Vmux/cef-sdk"));
+    assert!(wrapper.contains("CEF_PATH=\"$cef_cache\""));
+    assert!(wrapper.contains("command -v sccache"));
+    assert!(wrapper.contains("CMAKE_C_COMPILER_LAUNCHER"));
+    assert!(wrapper.contains("CMAKE_CXX_COMPILER_LAUNCHER"));
+}
+
+#[test]
+fn worktree_target_seed_uses_copy_on_write_and_drops_cef_cmake_state() {
+    let makefile = include_str!("../../../Makefile");
+    let script = include_str!("../../../scripts/seed-worktree-target.sh");
+
+    assert!(makefile.contains("seed-target:"));
+    assert!(script.contains("git rev-parse --path-format=absolute --git-common-dir"));
+    assert!(script.contains("--if-needed"));
+    assert!(script.contains("cp -cR"));
+    assert!(script.contains("cp --reflink=always -a"));
+    assert!(script.contains("cef-dll-sys-*"));
+    assert!(script.contains("libcef_dll_sys-*"));
 }
 
 #[test]
@@ -58,7 +83,7 @@ fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
         .find("target/debug/vmux_desktop")
         .expect("debug desktop stop");
     let run_idx = makefile
-        .find("exec env -u CEF_PATH")
+        .find("exec env -u CEF_PATH DYLD_LIBRARY_PATH")
         .expect("debug desktop run");
 
     assert!(makefile.contains("pgrep -f \"target/debug/vmux_desktop\""));
@@ -87,7 +112,7 @@ fn build_git_env_uses_github_style_short_hash() {
 fn local_package_only_builds_app_bundle() {
     let package_script = include_str!("../../../scripts/package.sh");
 
-    assert!(package_script.contains("cargo packager --release --formats app"));
+    assert!(package_script.contains("cargo-with-cef-cache.sh\" packager --release --formats app"));
     assert!(package_script.contains("if [[ \"$PROFILE\" == \"local\" ]]"));
 }
 
