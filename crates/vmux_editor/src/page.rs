@@ -10,6 +10,7 @@ use crate::page_model::{
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::media::MediaKind;
+use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::file_icon::type_icon;
@@ -398,6 +399,10 @@ pub fn Page() -> Element {
 
     let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
+        schedule_git_refresh(git_refresh_generation, git_nonce);
+    });
+
+    let _git_changed = use_bin_event_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
         schedule_git_refresh(git_refresh_generation, git_nonce);
     });
 

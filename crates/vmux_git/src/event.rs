@@ -3,6 +3,7 @@ pub const GIT_DIFF_META_EVENT: &str = "git-diff-meta";
 pub const GIT_DIFF_VIEWPORT_EVENT: &str = "git-diff-viewport";
 pub const GIT_RESULT_EVENT: &str = "git-result";
 pub const GIT_ERROR_EVENT: &str = "git-error";
+pub const GIT_CHANGED_EVENT: &str = "git-changed";
 
 macro_rules! wire {
     ($($item:item)*) => {
@@ -48,6 +49,7 @@ wire! {
     pub struct GitDiffViewportEvent { pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine> }
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }
     pub struct GitErrorEvent { pub message: String }
+    pub struct GitChangedEvent {}
 }
 
 #[derive(

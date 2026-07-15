@@ -44,6 +44,8 @@ fn page_wires_shared_editor_diff_toggle() {
     assert!(s.contains("markers: git_line_markers"));
     assert!(s.contains("diff_marker_class(marker)"));
     assert!(s.contains("schedule_git_refresh(git_refresh_generation, git_nonce)"));
+    assert!(s.contains("GIT_CHANGED_EVENT"));
+    assert!(s.contains("GitChangedEvent"));
     assert!(s.contains("transition-transform duration-150"));
     assert!(s.contains("if git_path() != m.abs_path"));
 }
