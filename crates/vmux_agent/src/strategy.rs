@@ -50,7 +50,15 @@ impl AgentStrategies {
 /// Whether a kind's ACP and CLI runtimes share the same session id (so a session can be
 /// handed off between them). Single source of truth for the `cross_runtime` flag.
 pub fn kind_supports_cross_runtime(kind: AgentKind) -> bool {
-    matches!(kind, AgentKind::Claude)
+    matches!(kind, AgentKind::Vibe | AgentKind::Claude | AgentKind::Codex)
+}
+
+/// Maps a built-in launcher id or its ACP registry id to the shared agent kind.
+pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
+    AgentKind::all().into_iter().find(|kind| {
+        let segment = kind.as_url_segment();
+        agent_id == segment || agent_id == crate::acp_install::registry_id_alias(segment)
+    })
 }
 
 /// Sort newest-first and drop duplicate `(kind, sid)` keeping the newest.
@@ -121,5 +129,23 @@ mod tests {
             got.iter().map(|s| s.sid.as_str()).collect::<Vec<_>>(),
             vec!["b", "a"]
         );
+    }
+
+    #[test]
+    fn all_builtin_kinds_support_cross_runtime_handoff() {
+        for kind in AgentKind::all() {
+            assert!(kind_supports_cross_runtime(kind));
+        }
+    }
+
+    #[test]
+    fn acp_agent_kind_maps_launcher_and_registry_ids() {
+        assert_eq!(acp_agent_kind("claude"), Some(AgentKind::Claude));
+        assert_eq!(acp_agent_kind("claude-acp"), Some(AgentKind::Claude));
+        assert_eq!(acp_agent_kind("codex"), Some(AgentKind::Codex));
+        assert_eq!(acp_agent_kind("codex-acp"), Some(AgentKind::Codex));
+        assert_eq!(acp_agent_kind("vibe"), Some(AgentKind::Vibe));
+        assert_eq!(acp_agent_kind("mistral-vibe"), Some(AgentKind::Vibe));
+        assert_eq!(acp_agent_kind("custom"), None);
     }
 }

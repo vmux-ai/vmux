@@ -18,7 +18,7 @@ pub struct ResumableSession {
     pub mtime: SystemTime,
     /// First user message / summary, or a short sid fallback.
     pub title: String,
-    /// True when this kind's ACP and CLI runtimes share the session id (Claude only, for now).
+    /// True when this kind's ACP and CLI runtimes share the session id.
     pub cross_runtime: bool,
 }
 

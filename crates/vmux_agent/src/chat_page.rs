@@ -41,7 +41,7 @@ use crate::handoff::{
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::strategy::{AgentStrategies, kind_supports_cross_runtime};
+use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::PageMetadata;
 #[cfg(not(target_arch = "wasm32"))]
@@ -276,7 +276,7 @@ fn sync_chat_to_ready_views(
         let cross = acp_sessions
             .get(stack)
             .ok()
-            .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+            .and_then(|acp| acp_agent_kind(&acp.agent_id))
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -600,7 +600,7 @@ fn slash_commands_for(cross_runtime: bool) -> Vec<SlashCommandEntry> {
 }
 
 /// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
-/// the handoff is unavailable (unknown/non-cross-runtime kind, no session id yet, bad `to`).
+/// the handoff is unavailable (unknown agent, no session id yet, bad `to`).
 #[cfg(not(target_arch = "wasm32"))]
 fn runtime_switch_target(
     agent_id: &str,
@@ -609,7 +609,7 @@ fn runtime_switch_target(
     to: &str,
     acp_ids: &[String],
 ) -> Option<(String, std::path::PathBuf)> {
-    let kind = AgentKind::from_url_segment(agent_id)?;
+    let kind = acp_agent_kind(agent_id)?;
     if !kind_supports_cross_runtime(kind) {
         return None;
     }
@@ -703,7 +703,7 @@ fn on_resume_list_request(
     let stack = child_of.get(webview).ok().map(ChildOf::parent);
     let acp = stack.and_then(|stack| acp_sessions.get(stack).ok());
     let kind = acp
-        .and_then(|acp| AgentKind::from_url_segment(&acp.agent_id))
+        .and_then(|acp| acp_agent_kind(&acp.agent_id))
         .or_else(|| {
             stack.and_then(|stack| agent_sessions.get(stack).ok().map(|session| session.kind))
         });
@@ -787,11 +787,8 @@ fn on_resume_session(
         return;
     };
     if let Ok(acp) = acp_sessions.get(stack)
-        && let Some(target_url) = foreign_handoff_target(
-            &acp.agent_id,
-            AgentKind::from_url_segment(&acp.agent_id),
-            kind,
-        )
+        && let Some(target_url) =
+            foreign_handoff_target(&acp.agent_id, acp_agent_kind(&acp.agent_id), kind)
     {
         let strategies = strategies
             .map(|strategies| (*strategies).clone())
@@ -878,16 +875,29 @@ mod native_tests {
     use std::path::Path;
 
     #[test]
-    fn runtime_switch_claude_acp_to_cli() {
-        let ids = vec!["claude".to_string()];
-        let got = runtime_switch_target("claude", Some("sid-9"), Path::new("/w"), "cli", &ids);
-        assert_eq!(
-            got,
-            Some((
-                "vmux://agent/claude/cli/sid-9".to_string(),
-                std::path::PathBuf::from("/w")
-            ))
-        );
+    fn runtime_switch_builtin_acp_agents_to_cli() {
+        let cases = [
+            ("claude", "claude"),
+            ("claude-acp", "claude"),
+            ("codex", "codex"),
+            ("codex-acp", "codex"),
+            ("vibe", "vibe"),
+            ("mistral-vibe", "vibe"),
+        ];
+        let ids = cases
+            .iter()
+            .map(|(id, _)| (*id).to_string())
+            .collect::<Vec<_>>();
+        for (agent_id, cli_segment) in cases {
+            let got = runtime_switch_target(agent_id, Some("sid-9"), Path::new("/w"), "cli", &ids);
+            assert_eq!(
+                got,
+                Some((
+                    format!("vmux://agent/{cli_segment}/cli/sid-9"),
+                    std::path::PathBuf::from("/w")
+                ))
+            );
+        }
     }
 
     #[test]
@@ -900,10 +910,10 @@ mod native_tests {
     }
 
     #[test]
-    fn runtime_switch_gated_for_non_cross_runtime_kind() {
+    fn runtime_switch_gated_for_unknown_agent() {
         let ids = vec!["claude".to_string()];
         assert_eq!(
-            runtime_switch_target("codex", Some("s"), Path::new("/w"), "cli", &ids),
+            runtime_switch_target("custom", Some("s"), Path::new("/w"), "cli", &ids),
             None
         );
     }
