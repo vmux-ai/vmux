@@ -30,9 +30,17 @@ pub struct AgentApprovalPolicy {
 /// clears, or submits again; `flush_pending` combines all queued prompts for an Esc flush.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PromptQueue {
-    pub items: VecDeque<String>,
+    pub items: VecDeque<QueuedPrompt>,
     pub paused: bool,
     flush_pending: bool,
+    next_id: u64,
+}
+
+/// One prompt waiting in a [`PromptQueue`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedPrompt {
+    pub id: u64,
+    pub text: String,
 }
 
 impl PromptQueue {
@@ -48,8 +56,23 @@ impl PromptQueue {
 
     /// Append one prompt and allow dispatch to continue.
     pub fn enqueue(&mut self, text: String) {
-        self.items.push_back(text);
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        self.items.push_back(QueuedPrompt { id, text });
         self.paused = false;
+    }
+
+    /// Remove one queued prompt by its stable id.
+    pub fn remove(&mut self, id: u64) -> bool {
+        let Some(index) = self.items.iter().position(|item| item.id == id) else {
+            return false;
+        };
+        self.items.remove(index);
+        if self.items.is_empty() {
+            self.paused = false;
+            self.flush_pending = false;
+        }
+        true
     }
 
     /// Mark all currently queued prompts for one combined dispatch.
@@ -83,14 +106,14 @@ impl PromptQueue {
     /// Take one FIFO prompt, or all prompts joined by blank lines for a pending flush.
     pub fn take_next(&mut self) -> Option<String> {
         if !self.flush_pending {
-            return self.items.pop_front();
+            return self.items.pop_front().map(|item| item.text);
         }
         self.flush_pending = false;
-        let mut text = self.items.pop_front()?;
-        text.reserve(self.items.iter().map(|item| item.len() + 2).sum());
+        let mut text = self.items.pop_front()?.text;
+        text.reserve(self.items.iter().map(|item| item.text.len() + 2).sum());
         for item in self.items.drain(..) {
             text.push_str("\n\n");
-            text.push_str(&item);
+            text.push_str(&item.text);
         }
         Some(text)
     }
@@ -111,7 +134,7 @@ mod tests {
     fn prompt_queue_ready_gate() {
         let mut q = PromptQueue::default();
         assert!(!q.ready(true));
-        q.items.push_back("a".into());
+        q.enqueue("a".into());
         assert!(q.ready(true));
         assert!(!q.ready(false));
         q.paused = true;
@@ -121,17 +144,20 @@ mod tests {
     #[test]
     fn take_next_preserves_fifo_without_flush() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
-        q.items.push_back("second".into());
+        q.enqueue("first".into());
+        q.enqueue("second".into());
         assert_eq!(q.take_next(), Some("first".to_string()));
-        assert_eq!(q.items.front().map(String::as_str), Some("second"));
+        assert_eq!(
+            q.items.front().map(|item| item.text.as_str()),
+            Some("second")
+        );
     }
 
     #[test]
     fn take_next_merges_all_items_for_flush() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
-        q.items.push_back("second".into());
+        q.enqueue("first".into());
+        q.enqueue("second".into());
 
         assert!(q.request_flush());
         assert_eq!(q.take_next(), Some("first\n\nsecond".to_string()));
@@ -142,7 +168,7 @@ mod tests {
     #[test]
     fn enqueue_preserves_pending_flush() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
+        q.enqueue("first".into());
         assert!(q.request_flush());
 
         q.enqueue("second".into());
@@ -154,7 +180,7 @@ mod tests {
     #[test]
     fn cancel_flush_clears_pending_flush() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
+        q.enqueue("first".into());
         assert!(q.request_flush());
 
         q.cancel_flush();
@@ -165,7 +191,7 @@ mod tests {
     #[test]
     fn clear_resets_queue_state() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
+        q.enqueue("first".into());
         assert!(q.request_flush());
         q.paused = true;
 
@@ -179,12 +205,39 @@ mod tests {
     #[test]
     fn resume_resets_pause_and_flush() {
         let mut q = PromptQueue::default();
-        q.items.push_back("first".into());
+        q.enqueue("first".into());
         assert!(q.request_flush());
         q.paused = true;
 
         q.resume();
 
+        assert!(!q.paused);
+        assert!(!q.flush_pending);
+    }
+
+    #[test]
+    fn remove_targets_stable_id() {
+        let mut q = PromptQueue::default();
+        q.enqueue("first".into());
+        q.enqueue("second".into());
+        let second_id = q.items[1].id;
+
+        assert!(q.remove(second_id));
+        assert_eq!(q.items.len(), 1);
+        assert_eq!(q.items[0].text, "first");
+        assert!(!q.remove(second_id));
+    }
+
+    #[test]
+    fn removing_last_item_resets_queue_state() {
+        let mut q = PromptQueue::default();
+        q.enqueue("first".into());
+        let id = q.items[0].id;
+        assert!(q.request_flush());
+        q.paused = true;
+
+        assert!(q.remove(id));
+        assert!(q.items.is_empty());
         assert!(!q.paused);
         assert!(!q.flush_pending);
     }

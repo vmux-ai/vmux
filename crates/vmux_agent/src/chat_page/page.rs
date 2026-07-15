@@ -6,10 +6,11 @@ use crate::chat_page::composer::{
     should_fetch_resume,
 };
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatClearQueue, ChatEscape, ChatItem,
-    ChatResume, ChatSnapshot, ChatSubmit, ChatTurn, RESUMABLE_SESSIONS_EVENT,
-    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
+    ChatClearQueue, ChatEscape, ChatItem, ChatResume, ChatSnapshot, ChatSubmit, ChatTurn,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use vmux_terminal::matrix_rain::MatrixRain;
@@ -163,7 +164,7 @@ pub fn Page() -> Element {
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
-    let mut queued = use_signal(Vec::<String>::new);
+    let mut queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
     let mut paused = use_signal(|| false);
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
@@ -558,12 +559,30 @@ pub fn Page() -> Element {
                     }
                     if !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
-                            for (qi , qtext) in queued.read().iter().enumerate() {
+                            for queued_prompt in queued.read().iter().cloned() {
                                 div {
-                                    key: "q{qi}",
-                                    class: "flex max-w-[80%] items-baseline gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] px-3.5 py-2 text-sm text-muted-foreground",
+                                    key: "q{queued_prompt.id}",
+                                    class: "group flex max-w-[80%] items-center gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] py-2 pl-3.5 pr-2 text-sm text-muted-foreground",
                                     span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
-                                    span { class: "whitespace-pre-wrap break-words", "{qtext}" }
+                                    span { class: "min-w-0 flex-1 whitespace-pre-wrap break-words", "{queued_prompt.text}" }
+                                    button {
+                                        class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
+                                        title: "Cancel queued prompt",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ChatCancelQueuedPrompt {
+                                                id: queued_prompt.id,
+                                            });
+                                        },
+                                        svg {
+                                            class: "h-3.5 w-3.5",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
                                 }
                             }
                             if paused() {
