@@ -1,3 +1,4 @@
+use super::TextureWakeCallback;
 use crate::common::WebviewNativeOverlay;
 use crate::prelude::WebviewSurface;
 use bevy::asset::RenderAssetUsages;
@@ -58,6 +59,7 @@ fn queue_accelerated_uploads(
     overlay_frames: Res<NativeOverlayFrames>,
     mut images: ResMut<Assets<Image>>,
     queue: Res<WebviewAcceleratedQueue>,
+    texture_wake: Option<Res<TextureWakeCallback>>,
 ) {
     let Ok(mut pending) = queue.0.lock() else {
         return;
@@ -67,6 +69,7 @@ fn queue_accelerated_uploads(
     // the last upload, blit the whole surface (drop dirty rects) so no superseded region is missed.
     let mut latest: HashMap<Entity, AcceleratedFrame> = HashMap::new();
     let mut coalesced: HashSet<Entity> = HashSet::new();
+    let mut resized = false;
     while let Ok(frame) = browsers.try_receive_accelerated() {
         let webview = frame.webview;
         if latest.insert(webview, frame).is_some() {
@@ -88,13 +91,27 @@ fn queue_accelerated_uploads(
             frame.dirty.clear();
         }
         let id = surface.0.id();
-        let mismatched = images
-            .get(id)
-            .is_none_or(|image| image.width() != frame.width || image.height() != frame.height);
-        if mismatched && let Some(mut image) = images.get_mut(id) {
-            *image = resized_surface_image(frame.width, frame.height);
+        if let Some(mut image) = images.get_mut(id) {
+            resized |= resize_surface_image_if_needed(&mut image, frame.width, frame.height);
         }
         pending.push(PendingAcceleratedUpload { image: id, frame });
+    }
+    if resized {
+        request_followup_frame(texture_wake.as_deref());
+    }
+}
+
+fn resize_surface_image_if_needed(image: &mut Image, width: u32, height: u32) -> bool {
+    if image.width() == width && image.height() == height {
+        return false;
+    }
+    *image = resized_surface_image(width, height);
+    true
+}
+
+fn request_followup_frame(texture_wake: Option<&TextureWakeCallback>) {
+    if let Some(wake) = texture_wake.and_then(|wake| wake.0.as_ref()) {
+        wake();
     }
 }
 
@@ -214,6 +231,10 @@ fn upload_accelerated_textures(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     #[test]
     fn accelerated_uploads_survive_gpu_asset_resize_lag() {
         let source = include_str!("accelerated_upload.rs");
@@ -235,5 +256,23 @@ mod tests {
             upload.contains("retry.push(upload);"),
             "GPU-size misses must retry instead of dropping one-shot frames"
         );
+    }
+
+    #[test]
+    fn surface_resize_requests_followup_frame() {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let wakes_for_callback = Arc::clone(&wakes);
+        let wake = TextureWakeCallback(Some(Arc::new(move || {
+            wakes_for_callback.fetch_add(1, Ordering::Relaxed);
+        })));
+        let mut image = resized_surface_image(1, 1);
+
+        assert!(resize_surface_image_if_needed(&mut image, 100, 50));
+        request_followup_frame(Some(&wake));
+
+        assert_eq!(image.width(), 100);
+        assert_eq!(image.height(), 50);
+        assert_eq!(wakes.load(Ordering::Relaxed), 1);
+        assert!(!resize_surface_image_if_needed(&mut image, 100, 50));
     }
 }
