@@ -8,6 +8,11 @@ use std::time::SystemTime;
 use regex::Regex;
 
 pub const CEF_EMBEDDED_APP_INDEX_CSS: &str = "index.css";
+pub const SKIP_DX_BUILD_ENV: &str = "VMUX_SKIP_DX_BUILD";
+
+pub fn skip_dx_build() -> bool {
+    std::env::var_os(SKIP_DX_BUILD_ENV).is_some()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CefMode {
@@ -86,6 +91,7 @@ impl PageBuilder {
             println!("cargo:rerun-if-changed={}", p.display());
         }
         println!("cargo:rerun-if-changed=build.rs");
+        println!("cargo:rerun-if-env-changed={SKIP_DX_BUILD_ENV}");
 
         if std::env::var("TARGET")
             .unwrap_or_default()
@@ -97,7 +103,7 @@ impl PageBuilder {
         let release = std::env::var("PROFILE").unwrap_or_default() == "release";
         let dist = self.manifest_dir.join(self.dist_subdir);
         let shell = self.manifest_dir.join("assets/index.html");
-        if self.needs_dist_rebuild(release, &workspace_root) {
+        if !skip_dx_build() && self.needs_dist_rebuild(release, &workspace_root) {
             run_dx_web_bundle(
                 &workspace_root,
                 self.dx_package,
