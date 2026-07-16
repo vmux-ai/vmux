@@ -1047,43 +1047,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_dev_tools"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db815000affd21545a6d6986f180a66393aee8c84330843e854d376c8537b10f"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_camera",
- "bevy_color",
- "bevy_core_pipeline",
- "bevy_diagnostic",
- "bevy_ecs",
- "bevy_image",
- "bevy_input",
- "bevy_log",
- "bevy_math",
- "bevy_pbr",
- "bevy_picking",
- "bevy_platform",
- "bevy_reflect",
- "bevy_render",
- "bevy_shader",
- "bevy_state",
- "bevy_text",
- "bevy_time",
- "bevy_transform",
- "bevy_ui",
- "bevy_ui_render",
- "bevy_utils",
- "bevy_window",
- "ron 0.12.1",
- "serde",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
 name = "bevy_diagnostic"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1692,8 +1655,6 @@ dependencies = [
 [[package]]
 name = "bevy_remote"
 version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c3a8f11f0017b2b7b8b8bb907c499ace3baa9cda240065457fb7391a3fa2ee8"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1702,7 +1663,6 @@ dependencies = [
  "bevy_asset",
  "bevy_color",
  "bevy_derive",
- "bevy_dev_tools",
  "bevy_ecs",
  "bevy_log",
  "bevy_platform",
@@ -1715,6 +1675,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smol-hyper",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

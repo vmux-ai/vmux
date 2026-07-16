@@ -71,6 +71,11 @@ default-features = false
 
 [dependencies.bevy_remote]
 version = "0.19.0"
+default-features = false
+features = [
+    "bevy_asset",
+    "bevy_render",
+]
 
 [dependencies.cef]
 version = "148.2.0"

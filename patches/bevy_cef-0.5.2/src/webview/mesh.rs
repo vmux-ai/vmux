@@ -1,51 +1,120 @@
+#[cfg(feature = "pbr")]
 mod webview_extend_material;
 mod webview_extend_standard_material;
 mod webview_material;
 
 pub use crate::common::*;
+#[cfg(feature = "pbr")]
 use crate::system_param::pointer::WebviewPointer;
+#[cfg(feature = "pbr")]
 use crate::webview::history_swipe::{
     HistorySwipeAction, HistorySwipeOutcome, HistorySwipeState, return_history_swipe_visual,
 };
+#[cfg(feature = "pbr")]
 use crate::webview::pinch_zoom::zoom_level_after_pinch;
 use crate::webview::webview_sprite::WebviewSpritePlugin;
+#[cfg(not(feature = "pbr"))]
+use bevy::asset::{AsAssetId, Asset, AssetApp, AssetId};
+#[cfg(feature = "pbr")]
 use bevy::input::gestures::PinchGesture;
+#[cfg(feature = "pbr")]
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+#[cfg(feature = "pbr")]
 use bevy::picking::Pickable;
+#[cfg(not(feature = "pbr"))]
+use bevy::prelude::Deref;
+#[cfg(feature = "pbr")]
+pub use bevy::prelude::MeshMaterial3d as WebviewMaterialHandle;
 use bevy::prelude::*;
+#[cfg(feature = "pbr")]
 use bevy_cef_core::prelude::*;
+#[cfg(feature = "pbr")]
 use std::time::Instant;
+#[cfg(feature = "pbr")]
 pub use webview_extend_material::*;
 pub use webview_extend_standard_material::*;
 pub use webview_material::*;
+
+#[cfg(not(feature = "pbr"))]
+#[derive(Component, Clone, Debug, Deref)]
+#[require(Sprite = webview_sprite())]
+pub struct WebviewMaterialHandle<M: Asset>(pub Handle<M>);
+
+#[cfg(not(feature = "pbr"))]
+fn webview_sprite() -> Sprite {
+    Sprite {
+        custom_size: Some(Vec2::ONE),
+        ..default()
+    }
+}
+
+#[cfg(not(feature = "pbr"))]
+impl<M: Asset> From<&WebviewMaterialHandle<M>> for AssetId<M> {
+    fn from(material: &WebviewMaterialHandle<M>) -> Self {
+        material.id()
+    }
+}
+
+#[cfg(not(feature = "pbr"))]
+impl<M: Asset> AsAssetId for WebviewMaterialHandle<M> {
+    type Asset = M;
+
+    fn as_asset_id(&self) -> AssetId<Self::Asset> {
+        self.id()
+    }
+}
 
 pub struct MeshWebviewPlugin;
 
 impl Plugin for MeshWebviewPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "pbr")]
         if !app.is_plugin_added::<MeshPickingPlugin>() {
             app.add_plugins(MeshPickingPlugin);
         }
 
         app.add_plugins((
             WebviewMaterialPlugin,
-            WebviewExtendStandardMaterialPlugin,
             WebviewSpritePlugin,
             crate::webview::texture_upload::WebviewTextureUploadPlugin,
             crate::webview::accelerated_upload::WebviewAcceleratedUploadPlugin,
-        ))
-        .add_systems(
-            Update,
-            (
-                setup_observers,
-                on_mouse_wheel.run_if(on_message::<MouseWheel>),
-                on_pinch_zoom.run_if(on_message::<PinchGesture>),
-                return_history_swipe_visual,
-            ),
+        ));
+
+        #[cfg(not(feature = "pbr"))]
+        app.init_asset::<WebviewExtendStandardMaterial>();
+
+        #[cfg(feature = "pbr")]
+        app.add_plugins(WebviewExtendStandardMaterialPlugin)
+            .add_systems(
+                Update,
+                (
+                    setup_observers,
+                    on_mouse_wheel.run_if(on_message::<MouseWheel>),
+                    on_pinch_zoom.run_if(on_message::<PinchGesture>),
+                    return_history_swipe_visual,
+                ),
+            );
+    }
+}
+
+#[cfg(all(test, not(feature = "pbr")))]
+mod user_mode_tests {
+    use super::*;
+    use bevy::asset::AssetPlugin;
+
+    #[test]
+    fn initializes_webview_material_assets() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default(), MeshWebviewPlugin));
+
+        assert!(
+            app.world()
+                .contains_resource::<Assets<WebviewExtendStandardMaterial>>()
         );
     }
 }
 
+#[cfg(feature = "pbr")]
 fn setup_observers(
     mut commands: Commands,
     webviews: Query<
@@ -66,6 +135,7 @@ fn setup_observers(
     }
 }
 
+#[cfg(feature = "pbr")]
 fn on_pointer_move(
     trigger: On<Pointer<Move>>,
     input: Res<ButtonInput<MouseButton>>,
@@ -83,6 +153,7 @@ fn on_pointer_move(
     browsers.send_mouse_move(&webview, input.get_pressed(), pos, false);
 }
 
+#[cfg(feature = "pbr")]
 fn on_pointer_pressed(
     trigger: On<Pointer<Press>>,
     browsers: NonSend<Browsers>,
@@ -98,6 +169,7 @@ fn on_pointer_pressed(
     browsers.send_mouse_click(&webview, pos, trigger.button, false);
 }
 
+#[cfg(feature = "pbr")]
 fn on_pointer_released(
     trigger: On<Pointer<Release>>,
     browsers: NonSend<Browsers>,
@@ -113,6 +185,7 @@ fn on_pointer_released(
     browsers.send_mouse_click(&webview, pos, trigger.button, true);
 }
 
+#[cfg(feature = "pbr")]
 fn on_mouse_wheel(
     mut commands: Commands,
     mut er: MessageReader<MouseWheel>,
@@ -194,6 +267,7 @@ fn on_mouse_wheel(
     }
 }
 
+#[cfg(feature = "pbr")]
 fn on_pinch_zoom(
     mut er: MessageReader<PinchGesture>,
     pointer: WebviewPointer,
@@ -249,11 +323,12 @@ fn on_pinch_zoom(
     }
 }
 
+#[cfg(feature = "pbr")]
 fn accepts_untargeted_pointer(pickable: Option<&Pickable>) -> bool {
     pickable.is_none_or(|p| p != &Pickable::IGNORE)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "pbr"))]
 mod tests {
     use super::*;
 

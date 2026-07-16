@@ -6,7 +6,9 @@ description.workspace = true
 publish = false
 
 [features]
+default = ["player-mode"]
 dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
+player-mode = ["vmux_layout/player-mode"]
 
 [[bin]]
 name = "vmux_desktop"

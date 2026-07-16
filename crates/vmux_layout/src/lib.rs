@@ -28,7 +28,7 @@ pub mod active_panes;
 pub mod cef;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod debug;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "player-mode"))]
 mod focus_ring;
 #[cfg(not(target_arch = "wasm32"))]
 mod header;
@@ -36,7 +36,10 @@ mod header;
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod profile;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "player-mode"))]
+pub mod scene;
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "player-mode")))]
+#[path = "scene_user.rs"]
 pub mod scene;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod settings;

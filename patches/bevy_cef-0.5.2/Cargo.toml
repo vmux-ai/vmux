@@ -40,6 +40,7 @@ repository = "https://github.com/not-elm/bevy_cef"
 [features]
 debug = ["bevy_cef_core/debug"]
 default = []
+pbr = ["bevy/bevy_pbr"]
 serialize = ["bevy/serialize"]
 
 [lib]
@@ -104,7 +105,7 @@ features = [
     "bevy_window",
     "bevy_asset",
     "bevy_sprite",
-    "bevy_pbr",
+    "bevy_sprite_render",
     "bevy_winit",
     "bevy_picking",
     "mesh_picking",
@@ -119,6 +120,11 @@ version = "0.5.2"
 
 [dependencies.bevy_remote]
 version = "0.19.0"
+default-features = false
+features = [
+    "bevy_asset",
+    "bevy_render",
+]
 
 [dependencies.bevy_picking]
 version = "0.19.0"
