@@ -1186,6 +1186,9 @@ struct PollServiceWriters<'w> {
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
+    page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
+    page_agent_model_selection_result:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
     page_agent_session_created:
         MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
     page_agent_acp_terminal_created:
@@ -1686,6 +1689,36 @@ fn poll_service_messages(
                 writers
                     .page_agent_info
                     .write(vmux_service::agent_events::PageAgentInfo { sid, name });
+            }
+            ServiceMessage::AcpModelInfo {
+                sid,
+                config_id,
+                current_model_id,
+                models,
+            } => {
+                writers.page_agent_model_info.write(
+                    vmux_service::agent_events::PageAgentModelInfo {
+                        sid,
+                        config_id,
+                        current_model_id,
+                        models,
+                    },
+                );
+            }
+            ServiceMessage::AcpModelSelectionResult {
+                sid,
+                request_id,
+                model_id,
+                succeeded,
+            } => {
+                writers.page_agent_model_selection_result.write(
+                    vmux_service::agent_events::PageAgentModelSelectionResult {
+                        sid,
+                        request_id,
+                        model_id,
+                        succeeded,
+                    },
+                );
             }
             ServiceMessage::AgentCommandResult { request_id, result } => {
                 writers.agent_command_results.write(

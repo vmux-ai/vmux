@@ -35,6 +35,37 @@ pub struct AcpSession {
     pub resume: Option<String>,
 }
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct AcpModelState {
+    pub config_id: String,
+    pub current_model_id: String,
+    pub(crate) pending: Option<PendingAcpModelSelection>,
+    pub models: Vec<vmux_service::protocol::AcpModelOption>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PendingAcpModelSelection {
+    pub request_id: u64,
+    pub model_id: String,
+}
+
+impl AcpModelState {
+    pub fn display_model_id(&self) -> &str {
+        self.pending
+            .as_ref()
+            .map(|pending| pending.model_id.as_str())
+            .unwrap_or(&self.current_model_id)
+    }
+
+    pub fn current_name(&self) -> &str {
+        self.models
+            .iter()
+            .find(|model| model.id == self.display_model_id())
+            .map(|model| model.name.as_str())
+            .unwrap_or_else(|| self.display_model_id())
+    }
+}
+
 /// Progress, resolved launch spec, or terminal failure of a background agent install, keyed by
 /// session id. The resolved spec is turned into `SpawnAcpAgent` on the ECS side (which owns the
 /// non-clonable `ServiceClient`).
@@ -144,6 +175,8 @@ impl Plugin for AcpAgentPlugin {
             .init_resource::<AcpCatalog>()
             .init_resource::<AcpInstallGeneration>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentModelSelectionResult>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
@@ -155,6 +188,7 @@ impl Plugin for AcpAgentPlugin {
                     drain_acp_installs,
                     receive_catalog,
                     apply_acp_agent_info,
+                    (apply_acp_model_info, apply_acp_model_selection_result).chain(),
                     apply_acp_session_created,
                     apply_acp_terminal_created,
                 ),
@@ -176,6 +210,62 @@ fn apply_acp_agent_info(
         for (session, mut profile) in &mut sessions {
             if session.sid == event.sid && profile.name != name {
                 *profile = vmux_core::team::Profile::registry(name, &session.agent_id);
+            }
+        }
+    }
+}
+
+fn apply_acp_model_info(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentModelInfo>,
+    mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
+    mut commands: Commands,
+) {
+    for event in reader.read() {
+        for (entity, session, current) in &mut sessions {
+            if session.sid != event.sid {
+                continue;
+            }
+            if event.config_id.is_empty() || event.models.is_empty() {
+                if current.is_some() {
+                    commands.entity(entity).remove::<AcpModelState>();
+                }
+                continue;
+            }
+            if let Some(mut current) = current {
+                let pending = current.pending.take();
+                *current = AcpModelState {
+                    config_id: event.config_id.clone(),
+                    current_model_id: event.current_model_id.clone(),
+                    pending,
+                    models: event.models.clone(),
+                };
+            } else {
+                commands.entity(entity).insert(AcpModelState {
+                    config_id: event.config_id.clone(),
+                    current_model_id: event.current_model_id.clone(),
+                    pending: None,
+                    models: event.models.clone(),
+                });
+            }
+        }
+    }
+}
+
+fn apply_acp_model_selection_result(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentModelSelectionResult>,
+    mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
+) {
+    for event in reader.read() {
+        for (session, mut state) in &mut sessions {
+            if session.sid == event.sid
+                && state.pending.as_ref().is_some_and(|pending| {
+                    pending.request_id == event.request_id && pending.model_id == event.model_id
+                })
+            {
+                if event.succeeded {
+                    state.current_model_id.clone_from(&event.model_id);
+                }
+                state.pending = None;
             }
         }
     }
@@ -794,6 +884,172 @@ mod tests {
             app.world().get::<Profile>(matching).unwrap().name,
             "Antigravity"
         );
+    }
+
+    #[test]
+    fn live_acp_model_info_updates_only_matching_session() {
+        use vmux_service::agent_events::PageAgentModelInfo;
+        use vmux_service::protocol::AcpModelOption;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let matching = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "claude".into(),
+                sid: "s1".into(),
+                cwd: "/tmp".into(),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            })
+            .id();
+        let unrelated = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "codex".into(),
+                sid: "s2".into(),
+                cwd: "/tmp".into(),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            })
+            .id();
+
+        app.world_mut().write_message(PageAgentModelInfo {
+            sid: "s1".into(),
+            config_id: "model".into(),
+            current_model_id: "sonnet".into(),
+            models: vec![AcpModelOption {
+                id: "sonnet".into(),
+                name: "Claude Sonnet".into(),
+                description: None,
+            }],
+        });
+        app.update();
+
+        let state = app.world().get::<AcpModelState>(matching).unwrap();
+        assert_eq!(state.current_name(), "Claude Sonnet");
+        assert!(state.pending.is_none());
+        assert!(app.world().get::<AcpModelState>(unrelated).is_none());
+    }
+
+    #[test]
+    fn model_results_preserve_latest_pending_selection() {
+        use vmux_service::agent_events::{PageAgentModelInfo, PageAgentModelSelectionResult};
+        use vmux_service::protocol::AcpModelOption;
+
+        let models = vec![
+            AcpModelOption {
+                id: "default".into(),
+                name: "Default".into(),
+                description: None,
+            },
+            AcpModelOption {
+                id: "opus".into(),
+                name: "Opus".into(),
+                description: None,
+            },
+            AcpModelOption {
+                id: "fable".into(),
+                name: "Fable".into(),
+                description: None,
+            },
+        ];
+        let mut app = App::new();
+        app.add_message::<PageAgentModelInfo>()
+            .add_message::<PageAgentModelSelectionResult>()
+            .add_systems(
+                Update,
+                (apply_acp_model_info, apply_acp_model_selection_result).chain(),
+            );
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AcpModelState {
+                    config_id: "model".into(),
+                    current_model_id: "default".into(),
+                    pending: Some(PendingAcpModelSelection {
+                        request_id: 2,
+                        model_id: "fable".into(),
+                    }),
+                    models: models.clone(),
+                },
+            ))
+            .id();
+
+        app.world_mut().write_message(PageAgentModelInfo {
+            sid: "s1".into(),
+            config_id: "model".into(),
+            current_model_id: "opus".into(),
+            models: models.clone(),
+        });
+        app.update();
+
+        let state = app.world().get::<AcpModelState>(entity).unwrap();
+        assert_eq!(state.current_model_id, "opus");
+        assert_eq!(
+            state.pending.as_ref().map(|pending| pending.request_id),
+            Some(2)
+        );
+        assert_eq!(state.current_name(), "Fable");
+
+        app.world_mut()
+            .write_message(PageAgentModelSelectionResult {
+                sid: "s1".into(),
+                request_id: 1,
+                model_id: "fable".into(),
+                succeeded: false,
+            });
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AcpModelState>(entity)
+                .unwrap()
+                .pending
+                .as_ref()
+                .map(|pending| pending.request_id),
+            Some(2)
+        );
+
+        app.world_mut()
+            .write_message(PageAgentModelSelectionResult {
+                sid: "s1".into(),
+                request_id: 2,
+                model_id: "fable".into(),
+                succeeded: false,
+            });
+        app.update();
+        let state = app.world().get::<AcpModelState>(entity).unwrap();
+        assert!(state.pending.is_none());
+        assert_eq!(state.current_name(), "Opus");
+
+        {
+            let mut state = app.world_mut().get_mut::<AcpModelState>(entity).unwrap();
+            state.pending = Some(PendingAcpModelSelection {
+                request_id: 3,
+                model_id: "fable".into(),
+            });
+        }
+        app.world_mut()
+            .write_message(PageAgentModelSelectionResult {
+                sid: "s1".into(),
+                request_id: 3,
+                model_id: "fable".into(),
+                succeeded: true,
+            });
+        app.update();
+        let state = app.world().get::<AcpModelState>(entity).unwrap();
+        assert_eq!(state.current_model_id, "fable");
+        assert!(state.pending.is_none());
     }
 
     #[test]

@@ -161,6 +161,8 @@ pub struct ChatEscape;
 pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";
 /// Bin-event id: native → page, the slash commands available for this pane.
 pub const SLASH_COMMANDS_EVENT: &str = "slash_commands";
+/// Bin-event id: native → page, current ACP model and selectable models.
+pub const MODEL_STATE_EVENT: &str = "model_state";
 
 /// One row in the `/resume` picker. Strings only (the page is dumb — native does the work).
 #[derive(
@@ -231,6 +233,55 @@ pub struct SlashCommandEntry {
 )]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
+}
+
+/// One row in the `/model` picker.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ModelOptionEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// Native → page ACP model state.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ModelState {
+    pub current_model_id: String,
+    pub current_model_name: String,
+    pub models: Vec<ModelOptionEntry>,
+}
+
+/// Page → native selected ACP model.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SelectModel {
+    pub model_id: String,
 }
 
 /// Page → native: open the `/resume` picker (native replies with [`ResumableSessions`]).

@@ -15,10 +15,11 @@ use agent_client_protocol::schema::v1::{
     LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
     PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
     ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
-    SessionUpdate, TerminalExitStatus, TerminalId, TerminalOutputRequest, TerminalOutputResponse,
-    TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
+    SessionConfigOptionCategory, SessionConfigSelectOptions, SessionId, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId,
+    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use tokio::process::Command;
@@ -44,6 +45,11 @@ pub enum AcpInput {
     Approve {
         call_id: String,
         decision: ApprovalDecision,
+    },
+    SetModel {
+        request_id: u64,
+        config_id: String,
+        model_id: String,
     },
     /// Interrupt the in-flight prompt (ACP `session/cancel`); keep the session alive.
     Cancel,
@@ -81,6 +87,7 @@ pub struct AcpShared {
     /// typing into its pane.
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
+    model_info: Mutex<Option<AcpModelInfoState>>,
     history_replay: AtomicBool,
     history_replay_updates: AtomicUsize,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
@@ -108,6 +115,7 @@ impl AcpShared {
             manager,
             input_writers,
             agent_name: Mutex::new(None),
+            model_info: Mutex::new(None),
             history_replay: AtomicBool::new(false),
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
@@ -135,12 +143,63 @@ impl AcpShared {
             })
     }
 
+    pub fn model_info_message(&self) -> Option<ServiceMessage> {
+        self.model_info
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|state| state.message(&self.sid))
+    }
+
     fn publish_agent_info(&self, name: String) {
         *self.agent_name.lock().unwrap() = Some(name.clone());
         self.emit(ServiceMessage::AcpAgentInfo {
             sid: self.sid.clone(),
             name,
         });
+    }
+
+    fn publish_model_info(&self, config_options: &[SessionConfigOption]) {
+        let next = model_info(config_options);
+        let mut current = self.model_info.lock().unwrap();
+        if *current == next {
+            return;
+        }
+        let removed = current.is_some() && next.is_none();
+        *current = next.clone();
+        drop(current);
+        if let Some(state) = next {
+            self.emit(state.message(&self.sid));
+        } else if removed {
+            self.emit(ServiceMessage::AcpModelInfo {
+                sid: self.sid.clone(),
+                config_id: String::new(),
+                current_model_id: String::new(),
+                models: Vec::new(),
+            });
+        }
+    }
+
+    fn publish_selected_model(
+        &self,
+        config_id: &str,
+        model_id: &str,
+        config_options: &[SessionConfigOption],
+    ) {
+        let response = model_info(config_options);
+        let mut current = self.model_info.lock().unwrap();
+        let Some(mut next) = response.or_else(|| current.clone()) else {
+            return;
+        };
+        if next.config_id == config_id && next.models.iter().any(|model| model.id == model_id) {
+            next.current_model_id = model_id.to_string();
+        }
+        if current.as_ref() == Some(&next) {
+            return;
+        }
+        *current = Some(next.clone());
+        drop(current);
+        self.emit(next.message(&self.sid));
     }
 
     fn begin_history_replay(&self) {
@@ -178,6 +237,9 @@ impl AcpShared {
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
+    if let SessionUpdate::ConfigOptionUpdate(config) = &update {
+        shared.publish_model_info(&config.config_options);
+    }
     let mut projector = shared.projector.lock().unwrap();
     let intents = projector.apply(update);
     if shared.history_replay.load(Ordering::SeqCst) {
@@ -228,6 +290,57 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
             }
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcpModelInfoState {
+    config_id: String,
+    current_model_id: String,
+    models: Vec<crate::protocol::AcpModelOption>,
+}
+
+impl AcpModelInfoState {
+    fn message(&self, sid: &str) -> ServiceMessage {
+        ServiceMessage::AcpModelInfo {
+            sid: sid.to_string(),
+            config_id: self.config_id.clone(),
+            current_model_id: self.current_model_id.clone(),
+            models: self.models.clone(),
+        }
+    }
+}
+
+fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoState> {
+    let config = config_options.iter().find(|config| {
+        matches!(
+            config.category.as_ref(),
+            Some(SessionConfigOptionCategory::Model)
+        ) || config.id.to_string().eq_ignore_ascii_case("model")
+            || config.name.trim().eq_ignore_ascii_case("model")
+    })?;
+    let SessionConfigKind::Select(select) = &config.kind else {
+        return None;
+    };
+    let options = match &select.options {
+        SessionConfigSelectOptions::Ungrouped(options) => options.iter().collect::<Vec<_>>(),
+        SessionConfigSelectOptions::Grouped(groups) => groups
+            .iter()
+            .flat_map(|group| group.options.iter())
+            .collect::<Vec<_>>(),
+        _ => return None,
+    };
+    Some(AcpModelInfoState {
+        config_id: config.id.to_string(),
+        current_model_id: select.current_value.to_string(),
+        models: options
+            .into_iter()
+            .map(|option| crate::protocol::AcpModelOption {
+                id: option.value.to_string(),
+                name: option.name.clone(),
+                description: option.description.clone(),
+            })
+            .collect(),
+    })
 }
 
 fn approval_details(
@@ -443,7 +556,15 @@ pub async fn run(
                     let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
                     load.mcp_servers = mcp_servers.clone();
                     load.meta = session_meta.clone();
-                    async { cx.send_request(load).block_task().await.map(|_| ()) }
+                    let shared = main_shared.clone();
+                    let cx = cx.clone();
+                    async move {
+                        cx.send_request(load).block_task().await.map(|response| {
+                            shared.publish_model_info(
+                                response.config_options.as_deref().unwrap_or_default(),
+                            );
+                        })
+                    }
                 })
                 .await;
             if resume_requested {
@@ -454,6 +575,42 @@ pub async fn run(
                     sid: main_shared.sid.clone(),
                     acp_session_id: sid.to_string(),
                 });
+            }
+            if session_id.is_none() {
+                let ensured = ensure_session(&mut session_id, || {
+                    let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                    new_session.mcp_servers = mcp_servers.clone();
+                    new_session.meta = session_meta.clone();
+                    let shared = main_shared.clone();
+                    let cx = cx.clone();
+                    async move {
+                        cx.send_request(new_session)
+                            .block_task()
+                            .await
+                            .map(|response| {
+                                shared.publish_model_info(
+                                    response.config_options.as_deref().unwrap_or_default(),
+                                );
+                                response.session_id
+                            })
+                    }
+                })
+                .await;
+                match ensured {
+                    Ok((sid, true)) => {
+                        main_shared.emit(ServiceMessage::AcpSessionCreated {
+                            sid: main_shared.sid.clone(),
+                            acp_session_id: sid.to_string(),
+                        });
+                    }
+                    Ok(_) => {}
+                    Err(err) => {
+                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                            "acp session/new failed: {err}"
+                        )));
+                        return Ok(());
+                    }
+                }
             }
             main_shared.emit_status(AgentRunStatus::Idle);
 
@@ -472,11 +629,18 @@ pub async fn run(
                             let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
                             new_session.mcp_servers = mcp_servers.clone();
                             new_session.meta = session_meta.clone();
-                            async {
+                            let shared = main_shared.clone();
+                            let cx = cx.clone();
+                            async move {
                                 cx.send_request(new_session)
                                     .block_task()
                                     .await
-                                    .map(|response| response.session_id)
+                                    .map(|response| {
+                                        shared.publish_model_info(
+                                            response.config_options.as_deref().unwrap_or_default(),
+                                        );
+                                        response.session_id
+                                    })
                             }
                         })
                         .await;
@@ -521,6 +685,52 @@ pub async fn run(
                             let _ = tx.send(decision);
                         }
                     }
+                    AcpInput::SetModel {
+                        request_id,
+                        config_id,
+                        model_id,
+                    } => {
+                        let Some(sid) = session_id.clone() else {
+                            main_shared.emit_status(AgentRunStatus::Errored(
+                                "ACP session is not ready".to_string(),
+                            ));
+                            continue;
+                        };
+                        match cx
+                            .send_request(SetSessionConfigOptionRequest::new(
+                                sid,
+                                config_id.clone(),
+                                model_id.clone(),
+                            ))
+                            .block_task()
+                            .await
+                        {
+                            Ok(response) => {
+                                main_shared.publish_selected_model(
+                                    &config_id,
+                                    &model_id,
+                                    &response.config_options,
+                                );
+                                publish_model_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &model_id,
+                                    true,
+                                );
+                            }
+                            Err(err) => {
+                                publish_model_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &model_id,
+                                    false,
+                                );
+                                main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                    "acp model selection failed: {err}"
+                                )));
+                            }
+                        }
+                    }
                     AcpInput::Cancel => {
                         main_shared.cancel_requested.store(true, Ordering::SeqCst);
                         for (_id, tx) in main_shared.pending_perms.lock().unwrap().drain() {
@@ -561,6 +771,20 @@ fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
             (!name.is_empty()).then_some(name)
         })
         .map(str::to_string)
+}
+
+fn publish_model_selection_result(
+    shared: &AcpShared,
+    request_id: u64,
+    model_id: &str,
+    succeeded: bool,
+) {
+    shared.emit(ServiceMessage::AcpModelSelectionResult {
+        sid: shared.sid.clone(),
+        request_id,
+        model_id: model_id.to_string(),
+        succeeded,
+    });
 }
 
 async fn load_requested_session<F, Fut, E>(
@@ -947,7 +1171,8 @@ fn status_after_prompt(cancelled: bool, errored: Option<String>) -> AgentRunStat
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, Implementation, PermissionOptionKind, ToolCall, ToolCallUpdateFields,
+        ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
+        SessionConfigSelectOption, ToolCall, ToolCallUpdateFields,
     };
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
@@ -1003,6 +1228,187 @@ mod tests {
                 assert_eq!(name, "Antigravity");
             }
             other => panic!("expected replayable ACP agent info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_info_reads_categorized_grouped_selector() {
+        let config = SessionConfigOption::select(
+            "llm",
+            "Language model",
+            "opus",
+            vec![SessionConfigSelectGroup::new(
+                "anthropic",
+                "Anthropic",
+                vec![
+                    SessionConfigSelectOption::new("sonnet", "Claude Sonnet"),
+                    SessionConfigSelectOption::new("opus", "Claude Opus")
+                        .description("Most capable"),
+                ],
+            )],
+        )
+        .category(SessionConfigOptionCategory::Model);
+
+        let info = model_info(&[config]).expect("model selector");
+
+        assert_eq!(info.config_id, "llm");
+        assert_eq!(info.current_model_id, "opus");
+        assert_eq!(info.models.len(), 2);
+        assert_eq!(info.models[1].name, "Claude Opus");
+        assert_eq!(info.models[1].description.as_deref(), Some("Most capable"));
+    }
+
+    #[test]
+    fn model_info_falls_back_to_model_id_without_category() {
+        let config = SessionConfigOption::select(
+            "model",
+            "Runtime",
+            "gpt-5",
+            vec![SessionConfigSelectOption::new("gpt-5", "GPT-5")],
+        );
+
+        let info = model_info(&[config]).expect("model selector");
+
+        assert_eq!(info.config_id, "model");
+        assert_eq!(info.current_model_id, "gpt-5");
+    }
+
+    #[test]
+    fn acp_model_info_is_replayable_without_a_subscriber() {
+        let (stream_tx, stream_rx) = broadcast::channel(1);
+        drop(stream_rx);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        let config = SessionConfigOption::select(
+            "model",
+            "Model",
+            "sonnet",
+            vec![SessionConfigSelectOption::new("sonnet", "Claude Sonnet")],
+        )
+        .category(SessionConfigOptionCategory::Model);
+
+        shared.publish_model_info(&[config]);
+
+        match shared.model_info_message() {
+            Some(ServiceMessage::AcpModelInfo {
+                sid,
+                current_model_id,
+                models,
+                ..
+            }) => {
+                assert_eq!(sid, "s1");
+                assert_eq!(current_model_id, "sonnet");
+                assert_eq!(models[0].name, "Claude Sonnet");
+            }
+            other => panic!("expected replayable ACP model info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_selection_result_publishes_request_identity() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(2);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        publish_model_selection_result(&shared, 7, "fable", false);
+
+        match stream_rx.try_recv().expect("selection result") {
+            ServiceMessage::AcpModelSelectionResult {
+                sid,
+                request_id,
+                model_id,
+                succeeded,
+            } => {
+                assert_eq!(sid, "s1");
+                assert_eq!(request_id, 7);
+                assert_eq!(model_id, "fable");
+                assert!(!succeeded);
+            }
+            other => panic!("expected ACP model selection result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selected_model_wins_over_stale_set_response() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(4);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        let stale = SessionConfigOption::select(
+            "model",
+            "Model",
+            "fable",
+            vec![
+                SessionConfigSelectOption::new("default", "Default"),
+                SessionConfigSelectOption::new("fable", "Fable"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Model);
+        shared.publish_model_info(std::slice::from_ref(&stale));
+        let _ = stream_rx.try_recv();
+
+        shared.publish_selected_model("model", "default", &[stale]);
+
+        match stream_rx.try_recv().expect("selected model update") {
+            ServiceMessage::AcpModelInfo {
+                current_model_id, ..
+            } => assert_eq!(current_model_id, "default"),
+            other => panic!("expected ACP model info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selected_model_uses_cached_options_when_set_response_is_empty() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(4);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        let config = SessionConfigOption::select(
+            "model",
+            "Model",
+            "fable",
+            vec![
+                SessionConfigSelectOption::new("default", "Default"),
+                SessionConfigSelectOption::new("fable", "Fable"),
+            ],
+        )
+        .category(SessionConfigOptionCategory::Model);
+        shared.publish_model_info(&[config]);
+        let _ = stream_rx.try_recv();
+
+        shared.publish_selected_model("model", "default", &[]);
+
+        match stream_rx.try_recv().expect("selected model update") {
+            ServiceMessage::AcpModelInfo {
+                current_model_id,
+                models,
+                ..
+            } => {
+                assert_eq!(current_model_id, "default");
+                assert_eq!(models.len(), 2);
+            }
+            other => panic!("expected ACP model info, got {other:?}"),
         }
     }
 

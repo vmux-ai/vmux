@@ -1,4 +1,6 @@
-use super::event::{ChatBlock, ChatItem, ResumableSessionEntry, SlashCommandEntry};
+use super::event::{
+    ChatBlock, ChatItem, ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry,
+};
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
@@ -8,6 +10,7 @@ pub(crate) enum SelectorMode<'a> {
     None,
     Commands(&'a str),
     Resume(&'a str),
+    Models(&'a str),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +54,11 @@ pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     {
         return SelectorMode::Resume(rest.trim_start_matches(char::is_whitespace));
     }
+    if let Some(rest) = token.strip_prefix("model")
+        && rest.chars().next().is_some_and(char::is_whitespace)
+    {
+        return SelectorMode::Models(rest.trim_start_matches(char::is_whitespace));
+    }
     if token.chars().any(char::is_whitespace) {
         SelectorMode::None
     } else {
@@ -72,7 +80,24 @@ pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -
                 && matches.next().is_none()
         }
         SelectorMode::None => false,
+        SelectorMode::Models(_) => false,
     }
+}
+
+pub(crate) fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return models.to_vec();
+    }
+    models
+        .iter()
+        .filter(|model| {
+            model.id.to_lowercase().contains(&query)
+                || model.name.to_lowercase().contains(&query)
+                || model.description.to_lowercase().contains(&query)
+        })
+        .cloned()
+        .collect()
 }
 
 pub(crate) fn filter_sessions(
@@ -362,11 +387,32 @@ mod tests {
         assert_eq!(selector_mode("/res"), SelectorMode::Commands("res"));
         assert_eq!(selector_mode("/resume"), SelectorMode::Commands("resume"));
         assert_eq!(selector_mode("/resume "), SelectorMode::Resume(""));
+        assert_eq!(selector_mode("/model"), SelectorMode::Commands("model"));
+        assert_eq!(selector_mode("/model son"), SelectorMode::Models("son"));
         assert_eq!(
             selector_mode("/resume  SID-9"),
             SelectorMode::Resume("SID-9")
         );
         assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
+    }
+
+    #[test]
+    fn models_filter_by_name_id_and_description() {
+        let models = vec![
+            ModelOptionEntry {
+                id: "claude-sonnet".into(),
+                name: "Sonnet".into(),
+                description: "Balanced".into(),
+            },
+            ModelOptionEntry {
+                id: "claude-opus".into(),
+                name: "Opus".into(),
+                description: "Most capable".into(),
+            },
+        ];
+        assert_eq!(filter_models(&models, "son")[0].id, "claude-sonnet");
+        assert_eq!(filter_models(&models, "capable")[0].id, "claude-opus");
+        assert_eq!(filter_models(&models, "claude-opus")[0].name, "Opus");
     }
 
     #[test]
