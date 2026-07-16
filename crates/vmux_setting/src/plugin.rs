@@ -5,15 +5,18 @@ use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::{BinEventEmitterPlugin, WebviewExtendStandardMaterial};
 use vmux_command::{ReadAppCommands, WriteAppCommands};
 
-use crate::event::SettingsCommandEvent;
+use crate::event::{
+    CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SettingsCommandEvent,
+};
 use runtime::{
     LastSelfWriteHash, SettingsLoadSet, SettingsSaveDebounce, SettingsSaveRequest,
     SettingsWriteRequest, flush_settings_save, load_settings, persist_settings_to_disk,
     reload_settings_on_change, request_settings_save,
 };
 use view::{
-    broadcast_schema_to_views, broadcast_settings_to_views, handle_open_settings_command,
-    handle_settings_page_open, on_settings_command, reset_sent_markers_on_page_ready,
+    broadcast_schema_to_views, broadcast_settings_to_views, broadcast_update_status_to_views,
+    handle_open_settings_command, handle_settings_page_open, on_check_for_updates,
+    on_settings_command, reset_sent_markers_on_page_ready,
 };
 
 /// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
@@ -26,8 +29,10 @@ impl Plugin for SettingsPlugin {
         vmux_core::register_host_spawn(app, "settings");
         app.init_resource::<LastSelfWriteHash>()
             .init_resource::<SettingsSaveDebounce>()
+            .init_resource::<CurrentUpdateCheckStatus>()
             .add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
+            .add_message::<CheckForUpdatesRequest>()
             .configure_sets(
                 Startup,
                 SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
@@ -61,14 +66,20 @@ impl Plugin for SettingsPlugin {
                 Update,
                 handle_settings_page_open.in_set(vmux_core::PageOpenSet::HandleKnownPages),
             )
-            .add_plugins(BinEventEmitterPlugin::<(SettingsCommandEvent,)>::for_hosts(
-                &["settings"],
-            ))
+            .add_plugins(BinEventEmitterPlugin::<(
+                SettingsCommandEvent,
+                CheckForUpdatesEvent,
+            )>::for_hosts(&["settings"]))
             .add_observer(on_settings_command)
+            .add_observer(on_check_for_updates)
             .add_observer(reset_sent_markers_on_page_ready)
             .add_systems(
                 Update,
-                (broadcast_schema_to_views, broadcast_settings_to_views),
+                (
+                    broadcast_schema_to_views,
+                    broadcast_settings_to_views,
+                    broadcast_update_status_to_views,
+                ),
             )
             .add_systems(
                 Update,
