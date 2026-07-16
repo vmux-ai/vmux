@@ -497,9 +497,6 @@ fn handle_reopen_closed_page(
     active_space: Res<ActiveSpaceEntity>,
     settings: Res<LayoutSettings>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut page_open: MessageWriter<PageOpenRequest>,
-    mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
-    mut terminal_spawn: MessageWriter<TerminalSpawnRequest>,
     mut commands: Commands,
 ) {
     let mut reopen = false;
@@ -556,13 +553,7 @@ fn handle_reopen_closed_page(
             *primary_window,
         );
         for (entry, stack) in restored {
-            reopen_page_content(
-                &entry.page,
-                stack,
-                &mut page_open,
-                &mut spawn_agent,
-                &mut terminal_spawn,
-            );
+            reopen_page_content(&entry.page, stack, &mut commands);
             commands.entity(entry.entity).despawn();
         }
         return;
@@ -592,24 +583,12 @@ fn handle_reopen_closed_page(
         .insert(vmux_history::LastActivatedAt::now());
     focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
-    reopen_page_content(
-        &page,
-        stack,
-        &mut page_open,
-        &mut spawn_agent,
-        &mut terminal_spawn,
-    );
+    reopen_page_content(&page, stack, &mut commands);
 
     commands.entity(entry_entity).despawn();
 }
 
-fn reopen_page_content(
-    page: &ArchivedPage,
-    stack: Entity,
-    page_open: &mut MessageWriter<PageOpenRequest>,
-    spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
-    terminal_spawn: &mut MessageWriter<TerminalSpawnRequest>,
-) {
+fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Commands) {
     if page.url.is_empty() {
         return;
     }
@@ -632,12 +611,15 @@ fn reopen_page_content(
             .as_ref()
             .map(|l| PathBuf::from(&l.cwd))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        spawn_agent.write(SpawnAgentInStackRequest {
+        let request = SpawnAgentInStackRequest {
             kind,
             cwd,
             session_id,
             stack,
             initial_prompt: None,
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
         let cwd = page
@@ -646,15 +628,21 @@ fn reopen_page_content(
             .map(|l| l.cwd.clone())
             .filter(|c| !c.is_empty())
             .map(PathBuf::from);
-        terminal_spawn.write(TerminalSpawnRequest {
+        let request = TerminalSpawnRequest {
             cwd,
             target_stack: Some(stack),
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     } else {
-        page_open.write(PageOpenRequest {
+        let request = PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
             url: page.url.clone(),
             request_id: None,
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     }
 }
@@ -1692,6 +1680,60 @@ mod tests {
             .resource_mut::<Messages<PageOpenRequest>>()
             .drain()
             .collect()
+    }
+
+    #[derive(Resource, Default)]
+    struct CapturedTerminalSpawnTargets(Vec<bool>);
+
+    fn capture_terminal_spawn_targets(
+        mut reader: MessageReader<TerminalSpawnRequest>,
+        stacks: Query<(), With<Stack>>,
+        mut captured: ResMut<CapturedTerminalSpawnTargets>,
+    ) {
+        for request in reader.read() {
+            captured.0.push(
+                request
+                    .target_stack
+                    .is_some_and(|stack| stacks.contains(stack)),
+            );
+        }
+    }
+
+    #[test]
+    fn reopen_terminal_dispatches_after_target_stack_materializes() {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<SpawnAgentInStackRequest>()
+            .add_message::<TerminalSpawnRequest>()
+            .init_resource::<crate::space::ActiveSpaceEntity>()
+            .init_resource::<crate::settings::LayoutSettings>()
+            .init_resource::<CapturedTerminalSpawnTargets>()
+            .add_systems(
+                Update,
+                (
+                    super::handle_reopen_closed_page,
+                    capture_terminal_spawn_targets,
+                )
+                    .chain_ignore_deferred(),
+            );
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut().spawn((Space, SpaceId("s1".to_string())));
+        app.world_mut().spawn(ArchivedPage {
+            url: TERMINAL_PAGE_URL.to_string(),
+            space_id: "s1".to_string(),
+            closed_at: 5,
+            ..default()
+        });
+
+        dispatch_reopen(&mut app);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CapturedTerminalSpawnTargets>().0,
+            vec![true]
+        );
     }
 
     #[test]
