@@ -376,7 +376,6 @@ fn on_tabs_command_emit(
     mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut close_requests: MessageWriter<CloseTabRequest>,
-    mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -393,7 +392,6 @@ fn on_tabs_command_emit(
             messages.write(cmd);
         }
         "close" => {
-            last_tab_close.0 = Some(Instant::now());
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
@@ -773,10 +771,9 @@ mod tests {
 
     #[test]
     fn tabs_close_event_records_recent_tab_close() {
-        use bevy::ecs::system::RunSystemOnce;
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_message::<crate::TabLayoutSpawnRequest>();
 
         let webview = app.world_mut().spawn_empty().id();
@@ -812,15 +809,32 @@ mod tests {
                 tab_id: Some(tab.to_bits().to_string()),
             },
         });
-        app.world_mut().flush();
-        app.world_mut()
-            .run_system_once(crate::archive::handle_close_tab_requests)
-            .unwrap();
-        app.world_mut().flush();
+        app.update();
 
         assert!(app.world().get_entity(tab).is_err());
         assert!(app.world().get_entity(other_tab).is_ok());
         assert!(app.world().resource::<LastTabCloseAt>().0.is_some());
+    }
+
+    #[test]
+    fn tabs_close_event_without_target_does_not_record_recent_close() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_message::<crate::TabLayoutSpawnRequest>();
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PrimaryWindow);
+
+        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+            webview,
+            payload: TabsCommandEvent {
+                command: "close".to_string(),
+                tab_id: None,
+            },
+        });
+        app.update();
+
+        assert!(app.world().resource::<LastTabCloseAt>().0.is_none());
     }
 
     #[test]

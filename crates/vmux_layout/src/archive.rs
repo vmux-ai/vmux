@@ -312,33 +312,63 @@ pub(crate) fn handle_close_tab_requests(
     mut commands: Commands,
 ) {
     let mut seen = HashSet::new();
-    for request in reader.read() {
-        if !seen.insert(request.tab) {
-            continue;
-        }
+    let requests: Vec<Entity> = reader
+        .read()
+        .filter_map(|request| seen.insert(request.tab).then_some(request.tab))
+        .filter(|tab| tab_data.contains(*tab))
+        .collect();
+    let closing: HashSet<Entity> = requests.iter().copied().collect();
+    let mut replacement_spaces = HashSet::new();
+    for requested_tab in requests {
+        let request = CloseTabRequest { tab: requested_tab };
         let Ok(tab) = tab_data.get(request.tab) else {
             continue;
         };
         let siblings =
             active_tab_siblings(request.tab, &layout.child_of, &layout.children_q, &tab_q);
-        if siblings.len() <= 1 {
-            let Some((space, startup_dir)) = effective_startup_dir
-                .as_deref()
-                .and_then(|effective| effective.0.clone())
+        let surviving_siblings: Vec<Entity> = siblings
+            .iter()
+            .copied()
+            .filter(|sibling| !closing.contains(sibling))
+            .collect();
+        if surviving_siblings.is_empty() {
+            let Ok(tab_space) = layout
+                .child_of
+                .get(request.tab)
+                .map(|parent| parent.parent())
             else {
                 continue;
             };
-            layout_requests.write(TabLayoutSpawnRequest {
-                space,
-                primary_window: *primary_window,
-                name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
-                startup_dir,
-                content: TabLayoutSpawnContent::StartupUrlOrPrompt,
-                clear_pending_stack: true,
-                focus: true,
-            });
+            if !replacement_spaces.contains(&tab_space) {
+                let Some((space, startup_dir)) = effective_startup_dir
+                    .as_deref()
+                    .and_then(|effective| effective.0.clone())
+                else {
+                    continue;
+                };
+                if space != tab_space {
+                    continue;
+                }
+                layout_requests.write(TabLayoutSpawnRequest {
+                    space,
+                    primary_window: *primary_window,
+                    name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
+                    startup_dir,
+                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                    clear_pending_stack: true,
+                    focus: true,
+                });
+                replacement_spaces.insert(space);
+            }
         } else if active_tab_param.get() == Some(request.tab)
-            && let Some(next) = pick_after_close(request.tab, &siblings)
+            && let Some(next) = pick_after_close(
+                request.tab,
+                &siblings
+                    .iter()
+                    .copied()
+                    .filter(|sibling| *sibling == request.tab || !closing.contains(sibling))
+                    .collect::<Vec<_>>(),
+            )
         {
             commands
                 .entity(next)
@@ -1580,6 +1610,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn closing_last_two_tabs_same_frame_requests_one_replacement() {
+        let mut app = App::new();
+        app.add_message::<CloseTabRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_systems(Update, super::handle_close_tab_requests);
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            PathBuf::from("/tmp"),
+        ))));
+        let first = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_history::LastActivatedAt(2),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_history::LastActivatedAt(1),
+                ChildOf(space),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .write(CloseTabRequest { tab: first });
+        app.world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .write(CloseTabRequest { tab: second });
+
+        app.update();
+
+        assert!(app.world().get_entity(first).is_err());
+        assert!(app.world().get_entity(second).is_err());
+        let requests: Vec<TabLayoutSpawnRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].space, space);
+    }
+
     fn reopen_app() -> App {
         let mut app = App::new();
         app.add_message::<AppCommand>()
@@ -1627,6 +1711,7 @@ mod tests {
         for (url, leaf, stack_index, child_index, active) in [
             ("https://left-1.example", "left", 0, 0, false),
             ("https://left-2.example", "left", 1, 0, false),
+            ("", "left", 2, 0, false),
             ("https://right.example", "right", 0, 1, true),
         ] {
             app.world_mut().spawn((
@@ -1674,6 +1759,14 @@ mod tests {
             .expect("recovered tab");
         let recovered_tab = app.world().get::<Tab>(recovered).unwrap();
         assert_eq!(recovered_tab.startup_dir.as_deref(), Some("/tmp/recovered"));
+        let space_tabs: Vec<Entity> = app
+            .world()
+            .get::<Children>(space)
+            .unwrap()
+            .iter()
+            .filter(|entity| app.world().get::<Tab>(*entity).is_some())
+            .collect();
+        assert_eq!(space_tabs[1], recovered);
         let root = app
             .world_mut()
             .query::<(Entity, &PaneId)>()
@@ -1687,12 +1780,24 @@ mod tests {
                 .map(|parent| parent.parent()),
             Some(recovered)
         );
+        assert_eq!(
+            app.world()
+                .get::<PaneSplit>(root)
+                .map(|split| split.direction),
+            Some(PaneSplitDirection::Row)
+        );
+        assert!(
+            app.world()
+                .get::<vmux_history::LastActivatedAt>(root)
+                .is_some_and(|activated| activated.0 > 0)
+        );
         for (leaf_id, expected_urls) in [
             (
                 "left",
                 vec![
                     "https://left-1.example".to_string(),
                     "https://left-2.example".to_string(),
+                    String::new(),
                 ],
             ),
             ("right", vec!["https://right.example".to_string()]),
@@ -1704,6 +1809,11 @@ mod tests {
                 .find(|(_, id)| id.0 == leaf_id)
                 .map(|(entity, _)| entity)
                 .expect("leaf pane");
+            let expected_flex = if leaf_id == "left" { 1.0 } else { 2.0 };
+            assert_eq!(
+                app.world().get::<PaneSize>(leaf).map(|size| size.flex_grow),
+                Some(expected_flex)
+            );
             let urls: Vec<String> = app
                 .world()
                 .get::<Children>(leaf)
@@ -1713,7 +1823,38 @@ mod tests {
                 .map(|metadata| metadata.url.clone())
                 .collect();
             assert_eq!(urls, expected_urls);
+            if leaf_id == "right" {
+                assert!(
+                    app.world()
+                        .get::<vmux_history::LastActivatedAt>(leaf)
+                        .is_some_and(|activated| activated.0 > 0)
+                );
+                let active_stack = app
+                    .world()
+                    .get::<Children>(leaf)
+                    .unwrap()
+                    .iter()
+                    .find(|stack| {
+                        app.world()
+                            .get::<PageMetadata>(*stack)
+                            .is_some_and(|metadata| metadata.url == "https://right.example")
+                    })
+                    .expect("active stack");
+                assert!(
+                    app.world()
+                        .get::<vmux_history::LastActivatedAt>(active_stack)
+                        .is_some_and(|activated| activated.0 > 0)
+                );
+            }
         }
+        assert_eq!(
+            app.world_mut()
+                .query::<(&Stack, &vmux_history::LastActivatedAt)>()
+                .iter(app.world())
+                .filter(|(_, activated)| activated.0 > 0)
+                .count(),
+            1
+        );
         assert_eq!(drain_opens(&mut app).len(), 3);
         assert_eq!(
             app.world_mut()
