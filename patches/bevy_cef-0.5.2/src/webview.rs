@@ -2,9 +2,8 @@ use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
-    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewNativeOverlay,
-    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
-    WebviewWindowed, WebviewWindowedNativeFocus,
+    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize,
+    WebviewSource, WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -252,6 +251,10 @@ fn spawn_texture_wake_throttler(
     }) as TextureWake
 }
 
+fn shared_texture_enabled(windowed: bool) -> bool {
+    !windowed
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
     mut browsers: NonSendMut<Browsers>,
@@ -279,7 +282,6 @@ fn create_webview(
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
             Has<WebviewWindowedNativeFocus>,
-            Has<WebviewNativeOverlay>,
         ),
         With<ResolvedWebviewUri>,
     >,
@@ -299,7 +301,6 @@ fn create_webview(
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
-            native_overlay,
         ) in
             webviews.iter()
         {
@@ -364,11 +365,7 @@ fn create_webview(
                 },
                 windowless_frame_rate,
                 windowed,
-                // Transparent OSR webviews that render to a Bevy mesh (not a native overlay) must use
-                // CPU paint: the accelerated shared-texture path blits transparent surfaces to black
-                // on the mesh. The layout is the only such case (transparent + mesh in player mode);
-                // it routes through the native overlay (accelerated) in user mode.
-                !transparent || native_overlay,
+                shared_texture_enabled(windowed),
                 native_liquid_glass,
                 windowed && windowed_native_focus,
             );
@@ -491,5 +488,11 @@ mod tests {
         assert!(implementation.contains("Has<WebviewWindowedNativeFocus>"));
         assert!(implementation.contains("windowed_native_focus"));
         assert!(implementation.contains("windowed && windowed_native_focus"));
+    }
+
+    #[test]
+    fn windowless_webviews_use_shared_textures() {
+        assert!(shared_texture_enabled(false));
+        assert!(!shared_texture_enabled(true));
     }
 }

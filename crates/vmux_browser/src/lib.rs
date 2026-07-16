@@ -992,8 +992,7 @@ fn sync_windowed_content_mesh_materials(
 ///
 /// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
 /// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
-/// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
-/// transparent areas.
+/// visible leaves OSR running. Premultiplied alpha preserves CEF's accelerated transparent pixels.
 fn sync_layout_mesh_visibility(
     layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -1003,8 +1002,8 @@ fn sync_layout_mesh_visibility(
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
         };
-        if material.base.alpha_mode != AlphaMode::Blend {
-            material.base.alpha_mode = AlphaMode::Blend;
+        if material.base.alpha_mode != AlphaMode::Premultiplied {
+            material.base.alpha_mode = AlphaMode::Premultiplied;
         }
         if material.base.base_color.alpha() != want_alpha {
             material.base.base_color.set_alpha(want_alpha);
@@ -4254,9 +4253,9 @@ mod tests {
         assert_eq!(
             mat.base.base_color.alpha(),
             1.0,
-            "User mode renders the layout via the mesh (CPU OSR) so it tracks live resize"
+            "User mode renders the layout via the accelerated OSR mesh so it tracks live resize"
         );
-        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(mat.base.alpha_mode, AlphaMode::Premultiplied);
     }
 
     #[test]
@@ -4269,8 +4268,8 @@ mod tests {
         );
         assert_eq!(
             mat.base.alpha_mode,
-            AlphaMode::Blend,
-            "Player keeps Blend so pages show through the layout's transparent areas"
+            AlphaMode::Premultiplied,
+            "Player uses premultiplied alpha so pages show through the layout's transparent areas"
         );
     }
 
@@ -4752,7 +4751,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_cef_shell_keeps_blend_material() {
+    fn layout_cef_shell_keeps_premultiplied_material() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_app_settings_with_radius(12.0))
@@ -4762,7 +4761,7 @@ mod tests {
             .add_systems(Update, sync_webview_pane_corner_clip);
 
         let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Blend;
+        material.base.alpha_mode = AlphaMode::Premultiplied;
         let handle = app
             .world_mut()
             .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
@@ -4783,7 +4782,7 @@ mod tests {
             .expect("webview material");
 
         assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Premultiplied);
     }
 
     #[test]
