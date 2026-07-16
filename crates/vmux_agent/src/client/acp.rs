@@ -196,7 +196,7 @@ fn auto_allow_acp_approval(
 /// Marks an `AcpSession` whose install has already been kicked off, so
 /// [`install_acp_session_when_focused`] starts it exactly once.
 #[derive(Component)]
-struct AcpInstallStarted;
+pub(crate) struct AcpInstallStarted;
 
 /// Install (and spawn) an ACP agent only once its stack is actually focused — i.e. the user
 /// opened it. Background or restored agent tabs stay idle until visited, so vmux never installs
