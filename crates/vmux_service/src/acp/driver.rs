@@ -140,17 +140,32 @@ impl AcpShared {
     }
 
     fn begin_history_replay(&self) {
+        let mut projector = self.projector.lock().unwrap();
         self.history_replay.store(true, Ordering::SeqCst);
-        *self.projector.lock().unwrap() = AcpProjector::new();
+        *projector = AcpProjector::new();
     }
 
     fn finish_history_replay(&self, loaded: bool) {
-        if loaded {
-            self.emit(self.snapshot_message());
-        } else {
-            *self.projector.lock().unwrap() = AcpProjector::new();
+        let snapshot = {
+            let mut projector = self.projector.lock().unwrap();
+            let msg = loaded.then(|| {
+                let messages_json = serde_json::to_string(projector.messages())
+                    .unwrap_or_else(|_| "[]".to_string());
+                ServiceMessage::AgentMessagesSnapshot {
+                    sid: self.sid.clone(),
+                    messages_json,
+                }
+            });
+            if !loaded {
+                *projector = AcpProjector::new();
+            }
+            self.history_replay.store(false, Ordering::SeqCst);
+            msg
+        };
+
+        if let Some(msg) = snapshot {
+            self.emit(msg);
         }
-        self.history_replay.store(false, Ordering::SeqCst);
     }
 
     fn emit(&self, msg: ServiceMessage) {
@@ -166,10 +181,14 @@ impl AcpShared {
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
-    let intents = shared.projector.lock().unwrap().apply(update);
-    if shared.history_replay.load(Ordering::SeqCst) {
-        return;
-    }
+    let intents = {
+        let mut projector = shared.projector.lock().unwrap();
+        let intents = projector.apply(update);
+        if shared.history_replay.load(Ordering::SeqCst) {
+            return;
+        }
+        intents
+    };
     for intent in intents {
         match intent {
             Intent::Delta(text) => shared.emit(ServiceMessage::AgentDelta {
