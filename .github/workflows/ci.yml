@@ -86,7 +86,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: lint
-          cache-all-crates: true
 
       - name: Cache cargo binaries
         uses: actions/cache@v4
@@ -130,11 +129,7 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: |
-          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
-            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
-          fi
-          dx --version
+        run: ./scripts/install-dioxus-cli.sh
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -186,7 +181,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test
-          cache-all-crates: true
 
       - name: Cache cargo binaries
         uses: actions/cache@v4
@@ -219,11 +213,7 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: |
-          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
-            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
-          fi
-          dx --version
+        run: ./scripts/install-dioxus-cli.sh
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
@@ -347,13 +337,6 @@ jobs:
         with:
           workspaces: website
           shared-key: website
-          cache-all-crates: true
-
-      - name: Cache cargo binaries
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/bin
-          key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-v3
 
       - name: Cache binaryen
         uses: actions/cache@v4
@@ -362,11 +345,7 @@ jobs:
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
 
       - name: Install dioxus-cli
-        run: |
-          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
-            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
-          fi
-          dx --version
+        run: ./scripts/install-dioxus-cli.sh
 
       - name: Install binaryen
         run: ./scripts/install-dioxus-binaryen.sh
@@ -434,7 +413,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: build-mac
-          cache-all-crates: true
 
       - name: Cache cargo binaries
         uses: actions/cache@v4
@@ -473,11 +451,7 @@ jobs:
           fi
 
       - name: Install dioxus-cli
-        run: |
-          if ! dx --version 2>/dev/null | grep -q "${{ env.DIOXUS_CLI_VERSION }}"; then
-            cargo install dioxus-cli --locked --version "${{ env.DIOXUS_CLI_VERSION }}" --force
-          fi
-          dx --version
+        run: ./scripts/install-dioxus-cli.sh
 
       - name: Install binaryen
         run: ./scripts/install-dioxus-binaryen.sh

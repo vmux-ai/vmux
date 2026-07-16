@@ -77,9 +77,8 @@ setup-cef:
 # Build from vmux-patched bevy_cef_core (required when adding CEF schemes such as vmux://).
 # Installs into the same path `bevy_cef` debug mode loads on macOS.
 install-debug-render-process:
-	$(CARGO_WITH_CEF_CACHE) build -p bevy_cef_debug_render_process --features debug
-	cp "$(CURDIR)/target/debug/bevy_cef_debug_render_process" \
-	  "$(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process"
+	CARGO_BIN="$(CARGO_BIN)" CEF_FRAMEWORK_DIR="$(CEF_FRAMEWORK_DIR)" \
+	  ./scripts/install-debug-render-process.sh
 
 seed-target:
 	./scripts/seed-worktree-target.sh

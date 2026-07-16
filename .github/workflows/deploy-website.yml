@@ -6,6 +6,7 @@ on:
     paths:
       - "website/**"
       - "scripts/install.sh"
+      - "scripts/install-dioxus-cli.sh"
       - ".github/workflows/deploy-website.yml"
   workflow_dispatch:
 
@@ -21,6 +22,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
+  DIOXUS_CLI_VERSION: "0.7.4"
   BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 
@@ -43,7 +45,6 @@ jobs:
         with:
           workspaces: website
           shared-key: deploy-website
-          cache-all-crates: true
 
       - name: Cache tailwindcss
         uses: actions/cache@v4
@@ -63,7 +64,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install dioxus-cli
-        run: command -v dx >/dev/null 2>&1 || cargo install dioxus-cli --locked --version 0.7.4
+        run: ./scripts/install-dioxus-cli.sh
 
       - name: Install Binaryen
         run: ./scripts/install-dioxus-binaryen.sh

@@ -67,7 +67,7 @@ fn local_cargo_builds_share_cef_sdk_and_sccache() {
 }
 
 #[test]
-fn worktree_target_seed_uses_copy_on_write_and_drops_cef_cmake_state() {
+fn worktree_target_seed_uses_copy_on_write_and_relocates_cef_cmake_state() {
     let makefile = include_str!("../../../Makefile");
     let script = include_str!("../../../scripts/seed-worktree-target.sh");
 
@@ -76,8 +76,77 @@ fn worktree_target_seed_uses_copy_on_write_and_drops_cef_cmake_state() {
     assert!(script.contains("--if-needed"));
     assert!(script.contains("cp -cR"));
     assert!(script.contains("cp --reflink=always -a"));
-    assert!(script.contains("cef-dll-sys-*"));
-    assert!(script.contains("libcef_dll_sys-*"));
+    assert!(script.contains("relocate-cef-target.sh"));
+    assert!(!script.contains("-path '*/build/cef-dll-sys-*' -o"));
+}
+
+#[test]
+fn cef_target_relocator_rewrites_only_cef_build_state() {
+    use std::{fs, process::Command};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let staging = temp.path().join("target");
+    let source = temp.path().join("source-target");
+    let original = temp.path().join("original-target");
+    let destination = temp.path().join("destination-target");
+    let cmake = staging.join("debug/build/cef-dll-sys-test/out/build/CMakeCache.txt");
+    let fingerprint = staging
+        .join("debug/.fingerprint/cef-dll-sys-test/run-build-script-build-script-build.json");
+    let dep = staging.join("debug/deps/cef_dll_sys-test.d");
+    let unrelated = staging.join("debug/build/other/output");
+
+    for path in [&cmake, &fingerprint, &dep] {
+        fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
+        fs::write(path, format!("{}\n", original.display())).expect("write fixture");
+    }
+    fs::write(
+        &cmake,
+        format!(
+            "CMAKE_CACHEFILE_DIR:INTERNAL={}/debug/build/cef-dll-sys-test/out/build\n",
+            original.display()
+        ),
+    )
+    .expect("write CMake cache fixture");
+    fs::create_dir_all(unrelated.parent().expect("parent")).expect("create unrelated parent");
+    fs::write(&unrelated, format!("{}\n", source.display())).expect("write unrelated fixture");
+
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/relocate-cef-target.sh");
+    let status = Command::new("bash")
+        .arg(script)
+        .arg(&staging)
+        .arg(&source)
+        .arg(&destination)
+        .status()
+        .expect("run CEF target relocator");
+    assert!(status.success());
+
+    for path in [&cmake, &fingerprint, &dep] {
+        assert!(
+            fs::read_to_string(path)
+                .expect("read relocated fixture")
+                .contains(&destination.display().to_string())
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(unrelated).expect("read unrelated fixture"),
+        format!("{}\n", source.display())
+    );
+}
+
+#[test]
+fn debug_render_process_install_uses_fingerprint_cache() {
+    let makefile = include_str!("../../../Makefile");
+    let script = include_str!("../../../scripts/install-debug-render-process.sh");
+
+    assert!(makefile.contains("./scripts/install-debug-render-process.sh"));
+    assert!(!makefile.contains(
+        "$(CARGO_WITH_CEF_CACHE) build -p bevy_cef_debug_render_process --features debug"
+    ));
+    assert!(script.contains("VMUX_CEF_HELPER_CACHE"));
+    assert!(script.contains("hash-object --stdin"));
+    assert!(script.contains("CEF debug render process up to date"));
+    assert!(script.contains("Installed cached CEF debug render process"));
 }
 
 #[test]
