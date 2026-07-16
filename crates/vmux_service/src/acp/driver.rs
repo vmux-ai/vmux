@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -32,6 +32,8 @@ use crate::protocol::{
     AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
     compose_agent_prompt,
 };
+
+const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -80,6 +82,7 @@ pub struct AcpShared {
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     history_replay: AtomicBool,
+    history_replay_updates: AtomicUsize,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
@@ -106,6 +109,7 @@ impl AcpShared {
             input_writers,
             agent_name: Mutex::new(None),
             history_replay: AtomicBool::new(false),
+            history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
         }
     }
@@ -141,31 +145,24 @@ impl AcpShared {
 
     fn begin_history_replay(&self) {
         let mut projector = self.projector.lock().unwrap();
+        self.history_replay_updates.store(0, Ordering::SeqCst);
         self.history_replay.store(true, Ordering::SeqCst);
         *projector = AcpProjector::new();
     }
 
     fn finish_history_replay(&self, loaded: bool) {
-        let snapshot = {
-            let mut projector = self.projector.lock().unwrap();
-            let msg = loaded.then(|| {
-                let messages_json = serde_json::to_string(projector.messages())
-                    .unwrap_or_else(|_| "[]".to_string());
-                ServiceMessage::AgentMessagesSnapshot {
-                    sid: self.sid.clone(),
-                    messages_json,
-                }
-            });
-            if !loaded {
-                *projector = AcpProjector::new();
-            }
-            self.history_replay.store(false, Ordering::SeqCst);
-            msg
-        };
-
-        if let Some(msg) = snapshot {
-            self.emit(msg);
+        let mut projector = self.projector.lock().unwrap();
+        if !loaded {
+            *projector = AcpProjector::new();
         }
+        let messages_json =
+            serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
+        self.history_replay_updates.store(0, Ordering::SeqCst);
+        self.history_replay.store(false, Ordering::SeqCst);
+        self.emit(ServiceMessage::AgentMessagesSnapshot {
+            sid: self.sid.clone(),
+            messages_json,
+        });
     }
 
     fn emit(&self, msg: ServiceMessage) {
@@ -181,14 +178,21 @@ impl AcpShared {
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
-    let intents = {
-        let mut projector = shared.projector.lock().unwrap();
-        let intents = projector.apply(update);
-        if shared.history_replay.load(Ordering::SeqCst) {
-            return;
+    let mut projector = shared.projector.lock().unwrap();
+    let intents = projector.apply(update);
+    if shared.history_replay.load(Ordering::SeqCst) {
+        let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
+        if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
+            let messages_json =
+                serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
+            shared.emit(ServiceMessage::AgentMessagesSnapshot {
+                sid: shared.sid.clone(),
+                messages_json,
+            });
         }
-        intents
-    };
+        return;
+    }
+    drop(projector);
     for intent in intents {
         match intent {
             Intent::Delta(text) => shared.emit(ServiceMessage::AgentDelta {
@@ -1003,7 +1007,7 @@ mod tests {
     }
 
     #[test]
-    fn history_replay_emits_one_final_snapshot() {
+    fn history_replay_emits_progressive_and_final_snapshots() {
         let (stream_tx, mut stream_rx) = broadcast::channel(64);
         let shared = Arc::new(AcpShared::new(
             "s1".into(),
@@ -1021,6 +1025,13 @@ mod tests {
                 TextContent::new("hello"),
             ))),
         );
+        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+            stream_rx.try_recv().expect("first progressive snapshot")
+        else {
+            panic!("expected snapshot");
+        };
+        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
+        assert_eq!(messages.len(), 1);
         for _ in 0..300 {
             project_session_update(
                 &shared,
@@ -1030,11 +1041,10 @@ mod tests {
             );
         }
 
-        assert!(matches!(
-            stream_rx.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
-        ));
-
+        let snapshots: Vec<ServiceMessage> =
+            std::iter::from_fn(|| stream_rx.try_recv().ok()).collect();
+        assert!(snapshots.len() > 1);
+        assert!(snapshots.len() < 64);
         shared.finish_history_replay(true);
 
         let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
@@ -1074,9 +1084,24 @@ mod tests {
             ))),
         );
 
+        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+            stream_rx.try_recv().expect("progressive snapshot")
+        else {
+            panic!("expected snapshot");
+        };
+        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
+        assert_eq!(messages.len(), 1);
+
         shared.finish_history_replay(false);
 
         assert!(shared.projector.lock().unwrap().messages().is_empty());
+        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+            stream_rx.try_recv().expect("clearing snapshot")
+        else {
+            panic!("expected snapshot");
+        };
+        let messages: Vec<crate::message::Message> = serde_json::from_str(&messages_json).unwrap();
+        assert!(messages.is_empty());
         assert!(matches!(
             stream_rx.try_recv(),
             Err(broadcast::error::TryRecvError::Empty)

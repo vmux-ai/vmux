@@ -288,6 +288,7 @@ pub fn Page() -> Element {
     };
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
+    let installing_splash = installing && items.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -352,7 +353,7 @@ pub fn Page() -> Element {
             class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
             style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
             style { dangerous_inner_html: MD_CSS }
-            if installing {
+            if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background",
                     MatrixRain {
                         accent_rgb: agent_accent.rain_rgb.to_string(),
@@ -371,7 +372,7 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            if !installing {
+            if !installing_splash {
                 div {
                     id: "chat-scroll",
                     class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
@@ -493,9 +494,9 @@ pub fn Page() -> Element {
             }
 
             div {
-                class: if installing { "absolute inset-0 z-20 flex items-center justify-center px-4" } else { "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl" },
+                class: if installing_splash { "absolute inset-0 z-20 flex items-center justify-center px-4" } else { "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl" },
                 div {
-                    class: if installing { "relative flex w-full max-w-md flex-col gap-2 rounded-2xl bg-white/70 p-4 ring-1 ring-inset ring-black/10 backdrop-blur-md dark:bg-black/40 dark:ring-white/10" } else { "relative mx-auto flex max-w-3xl flex-col gap-2" },
+                    class: if installing_splash { "relative flex w-full max-w-md flex-col gap-2 rounded-2xl bg-white/70 p-4 ring-1 ring-inset ring-black/10 backdrop-blur-md dark:bg-black/40 dark:ring-white/10" } else { "relative mx-auto flex max-w-3xl flex-col gap-2" },
                     if installing {
                         div { class: "mb-1 flex items-center gap-3",
                             div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",

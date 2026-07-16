@@ -1290,6 +1290,7 @@ mod native_tests {
     #[test]
     fn installing_chat_uses_matrix_loading_composer() {
         let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("let installing_splash = installing && items.read().is_empty();"));
         assert!(source.contains("MatrixRain {"));
         assert!(source.contains("PromptGhost {"));
         assert!(source.contains("terminal: false"));
