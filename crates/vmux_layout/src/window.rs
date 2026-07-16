@@ -1080,6 +1080,7 @@ mod tests {
         assert_eq!(material.base.cull_mode, None);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn transparent_webview_material_uses_premultiplied_alpha() {
         let mut app = App::new();
@@ -1093,7 +1094,7 @@ mod tests {
         app.world_mut().spawn((
             WebviewSource::new("https://example.com/"),
             WebviewTransparent,
-            MeshMaterial3d(handle.clone()),
+            WebviewMaterialHandle(handle.clone()),
         ));
         app.update();
 
@@ -1204,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_uses_transparent_osr_native_overlay() {
+    fn layout_uses_transparent_osr_surface() {
         let mut app = setup_window_app();
         app.update();
 
@@ -1235,10 +1236,11 @@ mod tests {
                 .get::<WebviewNativeOverlay>(layout_shell)
                 .is_none()
         );
-        assert!(
+        assert_eq!(
             app.world()
                 .get::<WebviewMaxFrameRate>(layout_shell)
-                .is_none()
+                .map(|rate| rate.0),
+            Some(30)
         );
         assert!(
             app.world()

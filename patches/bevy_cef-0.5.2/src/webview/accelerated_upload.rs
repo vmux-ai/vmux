@@ -11,7 +11,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
-use bevy_cef_core::prelude::{AcceleratedFrame, Browsers};
+use bevy_cef_core::prelude::{AcceleratedFrame, AcceleratedPixelFormat, Browsers};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
@@ -92,7 +92,12 @@ fn queue_accelerated_uploads(
         }
         let id = surface.0.id();
         if let Some(mut image) = images.get_mut(id) {
-            resized |= resize_surface_image_if_needed(&mut image, frame.width, frame.height);
+            resized |= resize_surface_image_if_needed(
+                &mut image,
+                frame.width,
+                frame.height,
+                accelerated_surface_format(frame.format),
+            );
         }
         pending.push(PendingAcceleratedUpload { image: id, frame });
     }
@@ -101,11 +106,19 @@ fn queue_accelerated_uploads(
     }
 }
 
-fn resize_surface_image_if_needed(image: &mut Image, width: u32, height: u32) -> bool {
-    if image.width() == width && image.height() == height {
+fn resize_surface_image_if_needed(
+    image: &mut Image,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+) -> bool {
+    if image.width() == width
+        && image.height() == height
+        && image.texture_descriptor.format == format
+    {
         return false;
     }
-    *image = resized_surface_image(width, height);
+    *image = resized_surface_image(width, height, format);
     true
 }
 
@@ -115,7 +128,14 @@ fn request_followup_frame(texture_wake: Option<&TextureWakeCallback>) {
     }
 }
 
-fn resized_surface_image(width: u32, height: u32) -> Image {
+fn accelerated_surface_format(format: AcceleratedPixelFormat) -> TextureFormat {
+    match format {
+        AcceleratedPixelFormat::Rgba8 => TextureFormat::Rgba8UnormSrgb,
+        AcceleratedPixelFormat::Bgra8 => TextureFormat::Bgra8UnormSrgb,
+    }
+}
+
+fn resized_surface_image(width: u32, height: u32, format: TextureFormat) -> Image {
     Image::new_fill(
         Extent3d {
             width,
@@ -124,7 +144,7 @@ fn resized_surface_image(width: u32, height: u32) -> Image {
         },
         TextureDimension::D2,
         &[0, 0, 0, 0],
-        TextureFormat::Bgra8UnormSrgb,
+        format,
         RenderAssetUsages::all(),
     )
 }
@@ -265,14 +285,48 @@ mod tests {
         let wake = TextureWakeCallback(Some(Arc::new(move || {
             wakes_for_callback.fetch_add(1, Ordering::Relaxed);
         })));
-        let mut image = resized_surface_image(1, 1);
+        let mut image = resized_surface_image(1, 1, TextureFormat::Bgra8UnormSrgb);
 
-        assert!(resize_surface_image_if_needed(&mut image, 100, 50));
+        assert!(resize_surface_image_if_needed(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+        ));
         request_followup_frame(Some(&wake));
 
         assert_eq!(image.width(), 100);
         assert_eq!(image.height(), 50);
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
-        assert!(!resize_surface_image_if_needed(&mut image, 100, 50));
+        assert!(!resize_surface_image_if_needed(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+        ));
+    }
+
+    #[test]
+    fn accelerated_surface_matches_cef_pixel_format() {
+        assert_eq!(
+            accelerated_surface_format(AcceleratedPixelFormat::Rgba8),
+            TextureFormat::Rgba8UnormSrgb
+        );
+        assert_eq!(
+            accelerated_surface_format(AcceleratedPixelFormat::Bgra8),
+            TextureFormat::Bgra8UnormSrgb
+        );
+
+        let mut image = resized_surface_image(100, 50, TextureFormat::Bgra8UnormSrgb);
+        assert!(resize_surface_image_if_needed(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Rgba8UnormSrgb,
+        ));
+        assert_eq!(
+            image.texture_descriptor.format,
+            TextureFormat::Rgba8UnormSrgb
+        );
     }
 }

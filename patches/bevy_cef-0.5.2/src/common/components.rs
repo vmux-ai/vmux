@@ -18,6 +18,7 @@ impl Plugin for WebviewCoreComponentsPlugin {
             .register_type::<WebviewWindowedNativeFocus>()
             .register_type::<WebviewMaxFrameRate>()
             .register_type::<WebviewNativeOverlay>()
+            .register_type::<WebviewNativeDirectOverlay>()
             .register_type::<HistorySwipeVisualOffset>()
             .register_type::<HostWindow>()
             .register_type::<ZoomLevel>()
@@ -93,6 +94,11 @@ pub struct WebviewMaxFrameRate(pub i32);
 #[derive(Component, Debug, Clone, Copy, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct WebviewNativeOverlay;
+
+/// Marker: present accelerated frames through the host's native presenter without waking Bevy.
+#[derive(Component, Debug, Clone, Copy, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct WebviewNativeDirectOverlay;
 
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]

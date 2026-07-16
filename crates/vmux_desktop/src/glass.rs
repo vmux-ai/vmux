@@ -1,6 +1,11 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
+use bevy_cef_core::prelude::WebviewDirtyRect;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::scene::InteractionMode;
 
@@ -12,32 +17,35 @@ pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
     fn build(&self, app: &mut App) {
-        app.init_non_send::<GlassState>()
-            .init_non_send::<LayoutOverlay>()
-            .init_non_send::<CommandBarOverlay>()
-            .add_systems(PreUpdate, install_window_glass)
-            .add_systems(
-                Update,
-                (
-                    sync_window_glass_visibility,
-                    keep_window_surface_layer_transparent,
-                ),
+        app.insert_resource(bevy_cef::prelude::NativeOverlayPresenter(Some(
+            native_overlay_presenter(),
+        )))
+        .init_non_send::<GlassState>()
+        .init_non_send::<LayoutOverlay>()
+        .init_non_send::<CommandBarOverlay>()
+        .add_systems(PreUpdate, install_window_glass)
+        .add_systems(
+            Update,
+            (
+                sync_window_glass_visibility,
+                keep_window_surface_layer_transparent,
+            ),
+        )
+        .add_systems(
+            Update,
+            handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
+        )
+        .add_systems(
+            Last,
+            (
+                reveal_window_after_layout_ready,
+                restore_fullscreen_after_reveal,
+                ensure_window_active_after_reveal,
+                sync_layout_overlay,
+                sync_command_bar_overlay,
             )
-            .add_systems(
-                Update,
-                handle_toggle_fullscreen_command.in_set(vmux_command::ReadAppCommands),
-            )
-            .add_systems(
-                Last,
-                (
-                    reveal_window_after_layout_ready,
-                    restore_fullscreen_after_reveal,
-                    ensure_window_active_after_reveal,
-                    sync_layout_overlay,
-                    sync_command_bar_overlay,
-                )
-                    .chain(),
-            );
+                .chain(),
+        );
     }
 }
 
@@ -346,6 +354,729 @@ struct CommandBarOverlay {
     held: Option<bevy_cef_core::prelude::AcceleratedFrame>,
 }
 
+#[derive(Clone)]
+struct SendLayer(objc2::rc::Retained<objc2_quartz_core::CALayer>);
+
+unsafe impl Send for SendLayer {}
+unsafe impl Sync for SendLayer {}
+
+#[derive(Clone)]
+struct MetalOverlayContext {
+    device: objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLDevice>>,
+    queue: objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLCommandQueue>>,
+}
+
+unsafe impl Send for MetalOverlayContext {}
+unsafe impl Sync for MetalOverlayContext {}
+
+#[derive(Clone)]
+struct MetalOverlaySurface {
+    io_surface: objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>,
+    texture: objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLTexture>>,
+}
+
+unsafe impl Send for MetalOverlaySurface {}
+unsafe impl Sync for MetalOverlaySurface {}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+enum OverlayDamage {
+    #[default]
+    None,
+    Full,
+    Rects(Vec<WebviewDirtyRect>),
+}
+
+impl OverlayDamage {
+    fn from_frame(width: u32, height: u32, dirty: &[WebviewDirtyRect]) -> Self {
+        if dirty.is_empty() {
+            Self::Full
+        } else {
+            overlay_damage_from_rects(width, height, dirty.iter().copied())
+        }
+    }
+
+    fn union(self, other: Self, width: u32, height: u32) -> Self {
+        match (self, other) {
+            (Self::Full, _) | (_, Self::Full) => Self::Full,
+            (Self::None, damage) | (damage, Self::None) => damage,
+            (Self::Rects(mut left), Self::Rects(right)) => {
+                left.extend(right);
+                overlay_damage_from_rects(width, height, left)
+            }
+        }
+    }
+
+    fn into_frame_dirty(self) -> Vec<WebviewDirtyRect> {
+        match self {
+            Self::None | Self::Full => Vec::new(),
+            Self::Rects(rects) => rects,
+        }
+    }
+}
+
+struct MetalOverlaySlot {
+    surface: MetalOverlaySurface,
+    initialized: bool,
+    stale: OverlayDamage,
+}
+
+struct MetalOverlaySwapchain {
+    generation: u64,
+    width: u32,
+    height: u32,
+    format: bevy_cef_core::prelude::AcceleratedPixelFormat,
+    slots: [MetalOverlaySlot; 2],
+    front: Option<usize>,
+}
+
+struct MetalSourceTexture {
+    io_surface: usize,
+    width: u32,
+    height: u32,
+    format: bevy_cef_core::prelude::AcceleratedPixelFormat,
+    texture: objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLTexture>>,
+    last_used: u64,
+}
+
+unsafe impl Send for MetalSourceTexture {}
+unsafe impl Sync for MetalSourceTexture {}
+
+#[derive(Clone)]
+struct MetalOverlayInFlight {
+    generation: u64,
+    target: usize,
+    damage: OverlayDamage,
+}
+
+#[derive(Default)]
+struct NativeOverlayPresentState {
+    layers: HashMap<Entity, SendLayer>,
+    pending: HashMap<Entity, bevy_cef_core::prelude::AcceleratedFrame>,
+    held: HashMap<Entity, bevy_cef_core::prelude::AcceleratedFrame>,
+    metal: Option<MetalOverlayContext>,
+    swapchains: HashMap<Entity, MetalOverlaySwapchain>,
+    source_textures: HashMap<Entity, Vec<MetalSourceTexture>>,
+    in_flight: HashMap<Entity, MetalOverlayInFlight>,
+    next_generation: u64,
+    source_texture_clock: u64,
+}
+
+static NATIVE_OVERLAY_PRESENT_STATE: LazyLock<Mutex<NativeOverlayPresentState>> =
+    LazyLock::new(|| Mutex::new(NativeOverlayPresentState::default()));
+static NATIVE_OVERLAY_PRESENT_SCHEDULED: AtomicBool = AtomicBool::new(false);
+
+fn overlay_rect_union(left: WebviewDirtyRect, right: WebviewDirtyRect) -> Option<WebviewDirtyRect> {
+    let left_right = left.x.saturating_add(left.width);
+    let left_bottom = left.y.saturating_add(left.height);
+    let right_right = right.x.saturating_add(right.width);
+    let right_bottom = right.y.saturating_add(right.height);
+    if left_right < right.x
+        || right_right < left.x
+        || left_bottom < right.y
+        || right_bottom < left.y
+    {
+        return None;
+    }
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    Some(WebviewDirtyRect {
+        x,
+        y,
+        width: left_right.max(right_right).saturating_sub(x),
+        height: left_bottom.max(right_bottom).saturating_sub(y),
+    })
+}
+
+fn overlay_damage_from_rects(
+    width: u32,
+    height: u32,
+    rects: impl IntoIterator<Item = WebviewDirtyRect>,
+) -> OverlayDamage {
+    let mut merged = Vec::<WebviewDirtyRect>::new();
+    for rect in rects {
+        let right = rect.x.saturating_add(rect.width).min(width);
+        let bottom = rect.y.saturating_add(rect.height).min(height);
+        if right <= rect.x || bottom <= rect.y || rect.x >= width || rect.y >= height {
+            continue;
+        }
+        let mut rect = WebviewDirtyRect {
+            x: rect.x,
+            y: rect.y,
+            width: right - rect.x,
+            height: bottom - rect.y,
+        };
+        let mut index = 0;
+        while index < merged.len() {
+            if let Some(union) = overlay_rect_union(merged[index], rect) {
+                rect = union;
+                merged.swap_remove(index);
+                index = 0;
+            } else {
+                index += 1;
+            }
+        }
+        merged.push(rect);
+    }
+    if merged.is_empty() {
+        return OverlayDamage::None;
+    }
+    let area = merged.iter().fold(0_u64, |total, rect| {
+        total.saturating_add(rect.width as u64 * rect.height as u64)
+    });
+    let full_area = width as u64 * height as u64;
+    if merged.len() > 16 || area.saturating_mul(2) >= full_area {
+        OverlayDamage::Full
+    } else {
+        OverlayDamage::Rects(merged)
+    }
+}
+
+fn coalesced_overlay_dirty(
+    width: u32,
+    height: u32,
+    previous: &[WebviewDirtyRect],
+    latest: &[WebviewDirtyRect],
+    same_surface: bool,
+) -> Vec<WebviewDirtyRect> {
+    if !same_surface {
+        return Vec::new();
+    }
+    OverlayDamage::from_frame(width, height, previous)
+        .union(
+            OverlayDamage::from_frame(width, height, latest),
+            width,
+            height,
+        )
+        .into_frame_dirty()
+}
+
+fn native_overlay_blit_regions<'a>(
+    width: u32,
+    height: u32,
+    damage: &'a OverlayDamage,
+    initialized: bool,
+) -> Cow<'a, [WebviewDirtyRect]> {
+    if !initialized || matches!(damage, OverlayDamage::Full) {
+        return Cow::Owned(vec![WebviewDirtyRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        }]);
+    }
+    match damage {
+        OverlayDamage::None => Cow::Borrowed(&[]),
+        OverlayDamage::Full => unreachable!(),
+        OverlayDamage::Rects(rects) => Cow::Borrowed(rects),
+    }
+}
+
+fn native_overlay_presenter() -> bevy_cef_core::prelude::AcceleratedFramePresenter {
+    Arc::new(|frame| {
+        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let webview = frame.webview;
+        if let Some(previous) = state.pending.insert(webview, frame)
+            && let Some(latest) = state.pending.get_mut(&webview)
+        {
+            latest.dirty = coalesced_overlay_dirty(
+                latest.width,
+                latest.height,
+                &previous.dirty,
+                &latest.dirty,
+                previous.width == latest.width
+                    && previous.height == latest.height
+                    && previous.format == latest.format,
+            );
+        }
+        let should_schedule = !state.in_flight.contains_key(&webview);
+        drop(state);
+        if should_schedule {
+            schedule_native_overlay_present();
+        }
+    })
+}
+
+fn schedule_native_overlay_present() {
+    if NATIVE_OVERLAY_PRESENT_SCHEDULED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    dispatch2::DispatchQueue::main().exec_async(drain_native_overlay_present);
+}
+
+fn drain_native_overlay_present() {
+    use objc2::runtime::AnyObject;
+
+    let ready = {
+        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entities: Vec<_> = state
+            .pending
+            .keys()
+            .copied()
+            .filter(|entity| {
+                state.layers.contains_key(entity) && !state.in_flight.contains_key(entity)
+            })
+            .collect();
+        entities
+            .into_iter()
+            .filter_map(|entity| {
+                Some((
+                    entity,
+                    state.layers.get(&entity)?.clone(),
+                    state.pending.remove(&entity)?,
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+
+    for (entity, layer, frame) in ready {
+        if present_native_overlay_dirty(entity, &frame) {
+            continue;
+        }
+        let io_surface = frame.io_surface as *mut AnyObject;
+        if io_surface.is_null() {
+            continue;
+        }
+        unsafe { layer.0.setContents(Some(&*io_surface)) };
+        NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .held
+            .insert(entity, frame);
+    }
+
+    NATIVE_OVERLAY_PRESENT_SCHEDULED.store(false, Ordering::Release);
+    let has_ready = {
+        let state = NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.pending.keys().any(|entity| {
+            state.layers.contains_key(entity) && !state.in_flight.contains_key(entity)
+        })
+    };
+    if has_ready {
+        schedule_native_overlay_present();
+    }
+}
+
+fn register_native_overlay_layer(
+    entity: Entity,
+    layer: &objc2::rc::Retained<objc2_quartz_core::CALayer>,
+) {
+    let mut state = NATIVE_OVERLAY_PRESENT_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state
+        .layers
+        .entry(entity)
+        .or_insert_with(|| SendLayer(layer.clone()));
+    let should_schedule = state.pending.contains_key(&entity);
+    drop(state);
+    if should_schedule {
+        schedule_native_overlay_present();
+    }
+}
+
+fn unregister_native_overlay_layer(entity: Entity) {
+    let mut state = NATIVE_OVERLAY_PRESENT_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.layers.remove(&entity);
+    state.pending.remove(&entity);
+    state.held.remove(&entity);
+    state.swapchains.remove(&entity);
+    state.source_textures.remove(&entity);
+    state.in_flight.remove(&entity);
+}
+
+fn create_metal_overlay_context() -> Option<MetalOverlayContext> {
+    use objc2_metal::MTLDevice;
+
+    let device = objc2_metal::MTLCreateSystemDefaultDevice()?;
+    let queue = device.newCommandQueue()?;
+    Some(MetalOverlayContext { device, queue })
+}
+
+fn overlay_metal_format(
+    format: bevy_cef_core::prelude::AcceleratedPixelFormat,
+) -> (objc2_metal::MTLPixelFormat, i32) {
+    match format {
+        bevy_cef_core::prelude::AcceleratedPixelFormat::Rgba8 => {
+            (objc2_metal::MTLPixelFormat::RGBA8Unorm_sRGB, 0x5247_4241)
+        }
+        bevy_cef_core::prelude::AcceleratedPixelFormat::Bgra8 => {
+            (objc2_metal::MTLPixelFormat::BGRA8Unorm_sRGB, 0x4247_5241)
+        }
+    }
+}
+
+fn overlay_texture_descriptor(
+    width: u32,
+    height: u32,
+    pixel_format: objc2_metal::MTLPixelFormat,
+) -> objc2::rc::Retained<objc2_metal::MTLTextureDescriptor> {
+    let descriptor = unsafe {
+        objc2_metal::MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            pixel_format,
+            width as usize,
+            height as usize,
+            false,
+        )
+    };
+    descriptor.setStorageMode(objc2_metal::MTLStorageMode::Shared);
+    descriptor
+}
+
+fn create_overlay_io_surface(
+    width: u32,
+    height: u32,
+    pixel_fourcc: i32,
+) -> Option<objc2_core_foundation::CFRetained<objc2_io_surface::IOSurfaceRef>> {
+    use objc2_core_foundation::{CFDictionary, CFNumber, CFType};
+    use objc2_io_surface::{
+        IOSurfaceRef, kIOSurfaceAllocSize, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow,
+        kIOSurfaceHeight, kIOSurfacePixelFormat, kIOSurfaceWidth,
+    };
+
+    let bytes_per_row = (width as usize * 4).div_ceil(256) * 256;
+    let width_value = CFNumber::new_i64(width as i64);
+    let height_value = CFNumber::new_i64(height as i64);
+    let bytes_per_row_value = CFNumber::new_i64(bytes_per_row as i64);
+    let bytes_per_element_value = CFNumber::new_i64(4);
+    let alloc_size_value = CFNumber::new_i64((bytes_per_row * height as usize) as i64);
+    let pixel_format_value = CFNumber::new_i32(pixel_fourcc);
+    let keys: [&CFType; 6] = unsafe {
+        [
+            kIOSurfaceWidth.as_ref(),
+            kIOSurfaceHeight.as_ref(),
+            kIOSurfaceBytesPerRow.as_ref(),
+            kIOSurfaceBytesPerElement.as_ref(),
+            kIOSurfaceAllocSize.as_ref(),
+            kIOSurfacePixelFormat.as_ref(),
+        ]
+    };
+    let values: [&CFType; 6] = [
+        width_value.as_ref(),
+        height_value.as_ref(),
+        bytes_per_row_value.as_ref(),
+        bytes_per_element_value.as_ref(),
+        alloc_size_value.as_ref(),
+        pixel_format_value.as_ref(),
+    ];
+    let properties = CFDictionary::<CFType, CFType>::from_slices(&keys, &values);
+    unsafe { IOSurfaceRef::new(properties.as_opaque()) }
+}
+
+fn create_metal_overlay_surface(
+    context: &MetalOverlayContext,
+    width: u32,
+    height: u32,
+    format: bevy_cef_core::prelude::AcceleratedPixelFormat,
+) -> Option<MetalOverlaySurface> {
+    use objc2_metal::MTLDevice;
+
+    let (pixel_format, pixel_fourcc) = overlay_metal_format(format);
+    let io_surface = create_overlay_io_surface(width, height, pixel_fourcc)?;
+    let descriptor = overlay_texture_descriptor(width, height, pixel_format);
+    let texture =
+        context
+            .device
+            .newTextureWithDescriptor_iosurface_plane(&descriptor, &io_surface, 0)?;
+    Some(MetalOverlaySurface {
+        io_surface,
+        texture,
+    })
+}
+
+fn create_metal_overlay_swapchain(
+    context: &MetalOverlayContext,
+    generation: u64,
+    width: u32,
+    height: u32,
+    format: bevy_cef_core::prelude::AcceleratedPixelFormat,
+) -> Option<MetalOverlaySwapchain> {
+    let create_slot = || {
+        Some(MetalOverlaySlot {
+            surface: create_metal_overlay_surface(context, width, height, format)?,
+            initialized: false,
+            stale: OverlayDamage::None,
+        })
+    };
+    Some(MetalOverlaySwapchain {
+        generation,
+        width,
+        height,
+        format,
+        slots: [create_slot()?, create_slot()?],
+        front: None,
+    })
+}
+
+fn cached_source_texture(
+    state: &mut NativeOverlayPresentState,
+    context: &MetalOverlayContext,
+    entity: Entity,
+    frame: &bevy_cef_core::prelude::AcceleratedFrame,
+) -> Option<objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_metal::MTLTexture>>> {
+    use objc2_metal::MTLDevice;
+
+    state.source_texture_clock = state.source_texture_clock.wrapping_add(1);
+    let last_used = state.source_texture_clock;
+    let cache = state.source_textures.entry(entity).or_default();
+    if let Some(cached) = cache.iter_mut().find(|cached| {
+        cached.io_surface == frame.io_surface
+            && cached.width == frame.width
+            && cached.height == frame.height
+            && cached.format == frame.format
+    }) {
+        cached.last_used = last_used;
+        return Some(cached.texture.clone());
+    }
+    let source_surface = unsafe { &*(frame.io_surface as *const objc2_io_surface::IOSurfaceRef) };
+    let (pixel_format, _) = overlay_metal_format(frame.format);
+    let descriptor = overlay_texture_descriptor(frame.width, frame.height, pixel_format);
+    let texture =
+        context
+            .device
+            .newTextureWithDescriptor_iosurface_plane(&descriptor, source_surface, 0)?;
+    if cache.len() >= 4
+        && let Some((oldest, _)) = cache
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, cached)| cached.last_used)
+    {
+        cache.swap_remove(oldest);
+    }
+    cache.push(MetalSourceTexture {
+        io_surface: frame.io_surface,
+        width: frame.width,
+        height: frame.height,
+        format: frame.format,
+        texture: texture.clone(),
+        last_used,
+    });
+    Some(texture)
+}
+
+fn complete_native_overlay_present(
+    entity: Entity,
+    generation: u64,
+    target: usize,
+    succeeded: bool,
+) {
+    use objc2::runtime::AnyObject;
+
+    let (layer, surface, should_schedule) = {
+        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(in_flight) = state.in_flight.remove(&entity) else {
+            return;
+        };
+        if in_flight.generation != generation || in_flight.target != target {
+            return;
+        }
+        let surface = if succeeded {
+            let Some(swapchain) = state.swapchains.get_mut(&entity) else {
+                return;
+            };
+            if swapchain.generation != generation {
+                return;
+            }
+            for (index, slot) in swapchain.slots.iter_mut().enumerate() {
+                if index == target {
+                    slot.initialized = true;
+                    slot.stale = OverlayDamage::None;
+                } else if slot.initialized {
+                    slot.stale = std::mem::take(&mut slot.stale).union(
+                        in_flight.damage.clone(),
+                        swapchain.width,
+                        swapchain.height,
+                    );
+                }
+            }
+            swapchain.front = Some(target);
+            Some(swapchain.slots[target].surface.clone())
+        } else {
+            None
+        };
+        let layer = surface
+            .as_ref()
+            .and_then(|_| state.layers.get(&entity).cloned());
+        if surface.is_some() {
+            state.held.remove(&entity);
+        }
+        let should_schedule = state.pending.contains_key(&entity)
+            && state.layers.contains_key(&entity)
+            && !state.in_flight.contains_key(&entity);
+        (layer, surface, should_schedule)
+    };
+    if let (Some(layer), Some(surface)) = (layer, surface) {
+        let io_surface =
+            (&*surface.io_surface as *const objc2_io_surface::IOSurfaceRef).cast::<AnyObject>();
+        unsafe { layer.0.setContents(Some(&*io_surface)) };
+    }
+    if should_schedule {
+        schedule_native_overlay_present();
+    }
+}
+
+fn present_native_overlay_dirty(
+    entity: Entity,
+    frame: &bevy_cef_core::prelude::AcceleratedFrame,
+) -> bool {
+    use objc2_metal::{
+        MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandBufferStatus, MTLCommandEncoder,
+        MTLCommandQueue, MTLOrigin, MTLSize,
+    };
+
+    if frame.io_surface == 0 || frame.width == 0 || frame.height == 0 {
+        return false;
+    }
+    let (
+        context,
+        surface,
+        source_texture,
+        generation,
+        target,
+        frame_damage,
+        copy_damage,
+        initialized,
+    ) = {
+        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.in_flight.contains_key(&entity) {
+            return false;
+        }
+        if state.metal.is_none() {
+            state.metal = create_metal_overlay_context();
+        }
+        let Some(context) = state.metal.clone() else {
+            return false;
+        };
+        let recreate = state.swapchains.get(&entity).is_none_or(|swapchain| {
+            swapchain.width != frame.width
+                || swapchain.height != frame.height
+                || swapchain.format != frame.format
+        });
+        if recreate {
+            state.next_generation = state.next_generation.wrapping_add(1);
+            let generation = state.next_generation;
+            let Some(swapchain) = create_metal_overlay_swapchain(
+                &context,
+                generation,
+                frame.width,
+                frame.height,
+                frame.format,
+            ) else {
+                return false;
+            };
+            state.swapchains.insert(entity, swapchain);
+            state.source_textures.remove(&entity);
+        }
+        let Some(source_texture) = cached_source_texture(&mut state, &context, entity, frame)
+        else {
+            return false;
+        };
+        let frame_damage = OverlayDamage::from_frame(frame.width, frame.height, &frame.dirty);
+        let swapchain = state.swapchains.get(&entity).unwrap();
+        let target = swapchain.front.map_or(0, |front| 1 - front);
+        let slot = &swapchain.slots[target];
+        let copy_damage = if slot.initialized {
+            slot.stale
+                .clone()
+                .union(frame_damage.clone(), frame.width, frame.height)
+        } else {
+            OverlayDamage::Full
+        };
+        (
+            context,
+            slot.surface.clone(),
+            source_texture,
+            swapchain.generation,
+            target,
+            frame_damage,
+            copy_damage,
+            slot.initialized,
+        )
+    };
+    let Some(command_buffer) = context.queue.commandBuffer() else {
+        return false;
+    };
+    let Some(blit) = command_buffer.blitCommandEncoder() else {
+        return false;
+    };
+    let copy = |x: u32, y: u32, width: u32, height: u32| {
+        if width == 0 || height == 0 {
+            return;
+        }
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                &source_texture,
+                0,
+                0,
+                MTLOrigin {
+                    x: x as usize,
+                    y: y as usize,
+                    z: 0,
+                },
+                MTLSize {
+                    width: width as usize,
+                    height: height as usize,
+                    depth: 1,
+                },
+                &surface.texture,
+                0,
+                0,
+                MTLOrigin {
+                    x: x as usize,
+                    y: y as usize,
+                    z: 0,
+                },
+            );
+        }
+    };
+    for rect in
+        native_overlay_blit_regions(frame.width, frame.height, &copy_damage, initialized).iter()
+    {
+        copy(rect.x, rect.y, rect.width, rect.height);
+    }
+    blit.endEncoding();
+    NATIVE_OVERLAY_PRESENT_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .in_flight
+        .insert(
+            entity,
+            MetalOverlayInFlight {
+                generation,
+                target,
+                damage: frame_damage,
+            },
+        );
+    let keepalive = frame.keepalive.clone();
+    let completed = block2::RcBlock::new(
+        move |buffer: std::ptr::NonNull<
+            objc2::runtime::ProtocolObject<dyn objc2_metal::MTLCommandBuffer>,
+        >| {
+            let succeeded =
+                unsafe { buffer.as_ref() }.status() == MTLCommandBufferStatus::Completed;
+            let keepalive = keepalive.clone();
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                complete_native_overlay_present(entity, generation, target, succeeded);
+                drop(keepalive);
+            });
+        },
+    );
+    unsafe { command_buffer.addCompletedHandler(block2::RcBlock::as_ptr(&completed)) };
+    command_buffer.commit();
+    true
+}
+
 fn primary_content_view_ptr(entity: Entity) -> Option<*mut core::ffi::c_void> {
     use bevy::winit::WINIT_WINDOWS;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -393,9 +1124,12 @@ fn sync_layout_overlay(
 ) {
     use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
     use objc2_app_kit::{NSColor, NSView};
-    use objc2_quartz_core::CALayer;
+    use objc2_quartz_core::{CAAutoresizingMask, CALayer};
 
     if *mode != InteractionMode::User {
+        for layout_e in &layout_e_q {
+            unregister_native_overlay_layer(layout_e);
+        }
         if state.shown {
             if let Some(layer) = &state.layer {
                 layer.setHidden(true);
@@ -415,9 +1149,6 @@ fn sync_layout_overlay(
         .lock()
         .ok()
         .and_then(|mut map| map.remove(&layout_e));
-    if next.is_none() && state.held.is_none() {
-        return;
-    }
     let Some(ns_view) = primary_content_view_ptr(window_e) else {
         return;
     };
@@ -436,12 +1167,16 @@ fn sync_layout_overlay(
         layer.setOpaque(false);
         layer.setBackgroundColor(Some(&clear_color.CGColor()));
         layer.setZPosition(100.0);
+        layer.setAutoresizingMask(
+            CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable,
+        );
         host_layer.addSublayer(&layer);
         state.layer = Some(layer);
     }
     let Some(layer) = state.layer.clone() else {
         return;
     };
+    register_native_overlay_layer(layout_e, &layer);
     layer.setOpaque(false);
     layer.setBackgroundColor(Some(&clear_color.CGColor()));
     layer.setFrame(bounds);
@@ -662,6 +1397,147 @@ mod tests {
         assert!(overlay.contains("host_layer.setOpaque(false)"));
         assert!(overlay.contains("host_layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
         assert!(overlay.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
+    }
+
+    #[test]
+    fn native_overlay_blits_only_dirty_regions() {
+        let dirty = vec![
+            WebviewDirtyRect {
+                x: 10,
+                y: 20,
+                width: 30,
+                height: 40,
+            },
+            WebviewDirtyRect {
+                x: 50,
+                y: 60,
+                width: 70,
+                height: 80,
+            },
+        ];
+
+        let damage = OverlayDamage::from_frame(200, 100, &dirty);
+
+        assert_eq!(
+            native_overlay_blit_regions(200, 100, &damage, true).as_ref(),
+            [
+                dirty[0],
+                WebviewDirtyRect {
+                    height: 40,
+                    ..dirty[1]
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn native_overlay_resize_forces_full_blit() {
+        let dirty = vec![WebviewDirtyRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        }];
+
+        let damage = OverlayDamage::from_frame(200, 100, &dirty);
+
+        assert_eq!(
+            native_overlay_blit_regions(200, 100, &damage, false).as_ref(),
+            [WebviewDirtyRect {
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 100,
+            }]
+        );
+    }
+
+    #[test]
+    fn native_overlay_coalescing_unions_dirty_regions() {
+        let previous = vec![WebviewDirtyRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        }];
+        let latest = vec![WebviewDirtyRect {
+            x: 100,
+            y: 20,
+            width: 30,
+            height: 40,
+        }];
+
+        let dirty = coalesced_overlay_dirty(200, 100, &previous, &latest, true);
+
+        assert_eq!(
+            dirty,
+            [
+                WebviewDirtyRect {
+                    x: 10,
+                    y: 20,
+                    width: 30,
+                    height: 40,
+                },
+                WebviewDirtyRect {
+                    x: 100,
+                    y: 20,
+                    width: 30,
+                    height: 40,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn native_overlay_coalescing_merges_overlapping_regions() {
+        let previous = vec![WebviewDirtyRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        }];
+        let latest = vec![WebviewDirtyRect {
+            x: 20,
+            y: 30,
+            width: 40,
+            height: 50,
+        }];
+
+        assert_eq!(
+            coalesced_overlay_dirty(200, 100, &previous, &latest, true),
+            [WebviewDirtyRect {
+                x: 10,
+                y: 20,
+                width: 50,
+                height: 60,
+            }]
+        );
+    }
+
+    #[test]
+    fn native_overlay_full_damage_survives_coalescing() {
+        let latest = vec![WebviewDirtyRect {
+            x: 20,
+            y: 30,
+            width: 40,
+            height: 50,
+        }];
+
+        assert!(coalesced_overlay_dirty(200, 100, &[], &latest, true).is_empty());
+        assert!(coalesced_overlay_dirty(200, 100, &latest, &latest, false).is_empty());
+    }
+
+    #[test]
+    fn native_overlay_metal_completion_is_asynchronous() {
+        let source = include_str!("glass.rs");
+        let presenter = source
+            .split("fn present_native_overlay_dirty")
+            .nth(1)
+            .and_then(|tail| tail.split("fn primary_content_view_ptr").next())
+            .unwrap_or_default();
+
+        assert!(presenter.contains("addCompletedHandler"));
+        assert!(!presenter.contains("waitUntilCompleted"));
     }
 
     fn reveal_test_app(reveal_ready: bool) -> App {

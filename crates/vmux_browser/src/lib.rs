@@ -22,8 +22,10 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{
-    CefEmbeddedHosts, CommandLineConfig, RenderTextureMessage, webview_debug_log,
+    CefEmbeddedHosts, CommandLineConfig, NativeMouseButtons, NativeMouseMovePresenter,
+    RenderTextureMessage, webview_debug_log,
 };
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
@@ -322,10 +324,29 @@ struct CefPointerHitRect {
 struct NativeLayoutPointerState {
     regions: Vec<CefPointerHitRect>,
     pointer_inside: bool,
+    position_px: Option<Vec2>,
 }
 
 static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
     LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
+
+#[derive(Default)]
+struct NativeLayoutMousePresenterState {
+    scale: f32,
+    presenter: Option<NativeMouseMovePresenter>,
+}
+
+thread_local! {
+    static NATIVE_LAYOUT_MOUSE_PRESENTER: RefCell<NativeLayoutMousePresenterState> =
+        RefCell::new(NativeLayoutMousePresenterState::default());
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeLayoutPointerMoveResult {
+    pub owns_pointer: bool,
+    pub forwarded: bool,
+    pub changed: bool,
+}
 
 fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
     if !rect.interactive {
@@ -357,6 +378,28 @@ fn clear_native_layout_pointer_regions() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.regions.clear();
     state.pointer_inside = false;
+    state.position_px = None;
+    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow_mut(|state| {
+        state.presenter = None;
+    });
+}
+
+fn set_native_layout_mouse_presenter(scale: f32, presenter: Option<NativeMouseMovePresenter>) {
+    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow_mut(|state| {
+        state.scale = scale;
+        let same_browser = state
+            .presenter
+            .as_ref()
+            .map(NativeMouseMovePresenter::browser_id)
+            == presenter.as_ref().map(NativeMouseMovePresenter::browser_id);
+        if !same_browser {
+            state.presenter = presenter;
+        }
+    });
+}
+
+fn native_layout_mouse_presenter_active() -> bool {
+    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| state.presenter.is_some())
 }
 
 fn layout_pointer_move_should_wake(was_inside: bool, inside: bool) -> bool {
@@ -379,6 +422,60 @@ pub fn native_layout_pointer_move_should_wake(x_px: f32, y_px: f32) -> bool {
     let should_wake = layout_pointer_move_should_wake(state.pointer_inside, inside);
     state.pointer_inside = inside;
     should_wake
+}
+
+pub fn forward_native_layout_pointer_move(
+    x_px: f32,
+    y_px: f32,
+    buttons: NativeMouseButtons,
+) -> NativeLayoutPointerMoveResult {
+    if !x_px.is_finite() || !y_px.is_finite() {
+        return NativeLayoutPointerMoveResult::default();
+    }
+    let (was_inside, inside) = {
+        let mut state = NATIVE_LAYOUT_POINTER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let inside = state
+            .regions
+            .iter()
+            .copied()
+            .any(|rect| cef_pointer_hit_rect_contains(rect, Vec2::new(x_px, y_px)));
+        let was_inside = state.pointer_inside;
+        state.pointer_inside = inside;
+        state.position_px = Some(Vec2::new(x_px, y_px));
+        (was_inside, inside)
+    };
+    let owns_pointer = was_inside || inside;
+    let forwarded = NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
+        let Some(presenter) = state.presenter.as_ref() else {
+            return false;
+        };
+        if !owns_pointer || !state.scale.is_finite() || state.scale <= 0.0 {
+            return false;
+        }
+        presenter.send(Vec2::new(x_px, y_px) / state.scale, buttons, !inside);
+        true
+    });
+    NativeLayoutPointerMoveResult {
+        owns_pointer,
+        forwarded,
+        changed: was_inside != inside,
+    }
+}
+
+pub fn native_layout_pointer_is_inside() -> bool {
+    NATIVE_LAYOUT_POINTER_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .pointer_inside
+}
+
+pub fn native_layout_pointer_position_px() -> Option<Vec2> {
+    NATIVE_LAYOUT_POINTER_STATE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .position_px
 }
 
 fn cef_pointer_hit_rect(
@@ -429,6 +526,12 @@ fn sync_layout_cef_pointer_target(
     let Ok((layout, has_target)) = layout_q.single() else {
         return;
     };
+    #[cfg(target_os = "macos")]
+    let should_target = {
+        let _ = (&windows, &cef_regions);
+        modal_pointer_targets.is_empty() && native_layout_pointer_is_inside()
+    };
+    #[cfg(not(target_os = "macos"))]
     let should_target = modal_pointer_targets.is_empty()
         && windows
             .single()
@@ -442,6 +545,12 @@ fn sync_layout_cef_pointer_target(
     }
 }
 
+#[cfg(target_os = "macos")]
+fn forward_layout_cef_cursor_move(mut events: MessageReader<CursorMoved>) {
+    for _ in events.read() {}
+}
+
+#[cfg(not(target_os = "macos"))]
 fn forward_layout_cef_cursor_move(
     mut events: MessageReader<CursorMoved>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -500,7 +609,13 @@ fn forward_layout_cef_mouse_button(
         let Ok(window) = windows.get(event.window) else {
             continue;
         };
-        let Some(position) = window.cursor_position() else {
+        #[cfg(target_os = "macos")]
+        let position = native_layout_pointer_position_px()
+            .map(|position| position / window.resolution.scale_factor())
+            .or_else(|| window.cursor_position());
+        #[cfg(not(target_os = "macos"))]
+        let position = window.cursor_position();
+        let Some(position) = position else {
             continue;
         };
         let inside = cef_pointer_regions_contains(position, &cef_regions);
@@ -994,10 +1109,15 @@ fn sync_windowed_content_mesh_materials(
 /// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
 /// visible leaves OSR running. Premultiplied alpha preserves CEF's accelerated transparent pixels.
 fn sync_layout_mesh_visibility(
+    mode: Res<vmux_layout::scene::InteractionMode>,
     layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let want_alpha = 1.0;
+    let want_alpha = if *mode == vmux_layout::scene::InteractionMode::User {
+        0.0
+    } else {
+        1.0
+    };
     for mat_handle in &layout_q {
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
@@ -1017,23 +1137,29 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         .copied()
         .unwrap_or_default();
     let base_windowed = windowed_backend_should_use_windowed(world, mode);
-    let mut query = world.query_filtered::<(Entity, Has<LayoutCef>, Has<WebviewNativeOverlay>), (
-        With<Browser>,
-        With<WebviewSource>,
-    )>();
-    let entities: Vec<(Entity, bool, bool)> = query.iter(world).collect();
+    let mut query = world.query_filtered::<(
+        Entity,
+        Has<LayoutCef>,
+        Has<WebviewNativeOverlay>,
+        Has<WebviewNativeDirectOverlay>,
+    ), (With<Browser>, With<WebviewSource>)>();
+    let entities: Vec<(Entity, bool, bool, bool)> = query.iter(world).collect();
     let target_windowed = |_entity: Entity, is_layout: bool| base_windowed && !is_layout;
-    let target_native_overlay = |_is_layout: bool| false;
+    let target_native_overlay = |is_layout: bool| {
+        cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
+    };
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &(entity, is_layout, actual_native_overlay) in &entities {
+        for &(entity, is_layout, actual_native_overlay, actual_direct_overlay) in &entities {
             let has_browser = browsers.has_browser(entity);
             let actual_windowed = browsers.is_windowed(&entity);
             let want_windowed = target_windowed(entity, is_layout);
             let want_native_overlay = target_native_overlay(is_layout);
             let needs_recreate = actual_windowed.is_some_and(|actual| actual != want_windowed)
-                || has_browser && actual_native_overlay != want_native_overlay;
+                || has_browser
+                    && (actual_native_overlay != want_native_overlay
+                        || actual_direct_overlay != want_native_overlay);
             if needs_recreate {
                 recreate.push(entity);
             }
@@ -1045,14 +1171,16 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for (entity, is_layout, _) in entities {
+    for (entity, is_layout, _, _) in entities {
         let want_windowed = target_windowed(entity, is_layout);
         let want_native_overlay = target_native_overlay(is_layout);
         let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
         let overlay_matches =
             world.get::<WebviewNativeOverlay>(entity).is_some() == want_native_overlay;
+        let direct_overlay_matches =
+            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_overlay;
         let needs_recreate = recreate.contains(&entity);
-        if marker_matches && overlay_matches && !needs_recreate {
+        if marker_matches && overlay_matches && direct_overlay_matches && !needs_recreate {
             continue;
         }
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
@@ -1064,9 +1192,11 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             entity_mut.remove::<WebviewWindowed>();
         }
         if want_native_overlay {
-            entity_mut.insert(WebviewNativeOverlay);
+            entity_mut.insert((WebviewNativeOverlay, WebviewNativeDirectOverlay));
         } else {
-            entity_mut.remove::<WebviewNativeOverlay>();
+            entity_mut
+                .remove::<WebviewNativeOverlay>()
+                .remove::<WebviewNativeDirectOverlay>();
         }
         if needs_recreate {
             entity_mut
@@ -1607,6 +1737,14 @@ fn refresh_layout_cef_hover(
             .filter(|rect| rect.interactive)
             .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
     );
+    #[cfg(target_os = "macos")]
+    {
+        set_native_layout_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
+        if native_layout_mouse_presenter_active() {
+            *state = LayoutHoverRefreshState::default();
+            return;
+        }
+    }
     let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
     else {
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
@@ -4248,12 +4386,12 @@ mod tests {
     }
 
     #[test]
-    fn user_mode_makes_layout_mesh_visible() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 0.0);
+    fn user_mode_hides_layout_mesh_behind_native_overlay() {
+        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 1.0);
         assert_eq!(
             mat.base.base_color.alpha(),
-            1.0,
-            "User mode renders the layout via the accelerated OSR mesh so it tracks live resize"
+            0.0,
+            "User mode presents layout chrome through the native accelerated overlay"
         );
         assert_eq!(mat.base.alpha_mode, AlphaMode::Premultiplied);
     }
@@ -5086,7 +5224,21 @@ mod tests {
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(layout).is_none());
-        assert!(app.world().get::<WebviewNativeOverlay>(layout).is_none());
+        assert_eq!(
+            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world()
+                .get::<WebviewNativeDirectOverlay>(layout)
+                .is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert!(
+            app.world()
+                .get::<WebviewNativeDirectOverlay>(modal)
+                .is_none()
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
@@ -5135,6 +5287,16 @@ mod tests {
         sync_cef_backend_for_interaction_mode(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(layout).is_none());
+        assert_eq!(
+            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(
+            app.world()
+                .get::<WebviewNativeDirectOverlay>(layout)
+                .is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(modal).is_some(),
             cfg!(target_os = "macos")
@@ -5442,8 +5604,44 @@ mod tests {
         assert!(refresh_fn.contains("cef_pointer_regions_contains"));
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
         assert!(refresh_fn.contains("set_native_layout_pointer_regions"));
+        assert!(refresh_fn.contains("browsers.native_mouse_move_presenter"));
+        assert!(refresh_fn.contains("native_layout_mouse_presenter_active"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
         assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
+    }
+
+    #[test]
+    fn macos_layout_mouse_move_has_one_forwarding_path() {
+        let source = include_str!("lib.rs");
+        let raw_forward = source
+            .split("#[cfg(target_os = \"macos\")]\nfn forward_layout_cef_cursor_move")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(not(target_os = \"macos\"))]").next())
+            .unwrap_or_default();
+
+        assert!(!raw_forward.contains("browsers.send_mouse_move"));
+        assert!(raw_forward.contains("events.read()"));
+    }
+
+    #[test]
+    fn macos_layout_click_uses_native_pointer_position() {
+        let source = include_str!("lib.rs");
+        let click_forward = source
+            .split("fn forward_layout_cef_mouse_button")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("fn dismiss_windowed_command_bar_on_outside_click")
+                    .next()
+            })
+            .unwrap_or_default();
+        let target_sync = source
+            .split("fn sync_layout_cef_pointer_target")
+            .nth(1)
+            .and_then(|tail| tail.split("fn forward_layout_cef_cursor_move").next())
+            .unwrap_or_default();
+
+        assert!(click_forward.contains("native_layout_pointer_position_px"));
+        assert!(target_sync.contains("native_layout_pointer_is_inside"));
     }
 
     #[test]

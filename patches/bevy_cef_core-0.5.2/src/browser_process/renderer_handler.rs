@@ -16,6 +16,7 @@ pub type TextureSender = Sender<RenderTextureMessage>;
 pub type TextureReceiver = Receiver<RenderTextureMessage>;
 
 pub type TextureWake = Arc<dyn Fn() + Send + Sync + 'static>;
+pub type AcceleratedFramePresenter = Arc<dyn Fn(AcceleratedFrame) + Send + Sync + 'static>;
 
 /// The texture structure passed from [`CefRenderHandler::OnPaint`](https://cef-builds.spotifycdn.com/docs/106.1/classCefRenderHandler.html#a6547d5c9dd472e6b84706dc81d3f1741).
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -89,11 +90,18 @@ pub struct SendSharedTextureHandle(pub SharedTextureHandle);
 unsafe impl Send for SendSharedTextureHandle {}
 unsafe impl Sync for SendSharedTextureHandle {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcceleratedPixelFormat {
+    Rgba8,
+    Bgra8,
+}
+
 pub struct AcceleratedFrame {
     pub webview: Entity,
     pub ty: RenderPaintElementType,
     pub width: u32,
     pub height: u32,
+    pub format: AcceleratedPixelFormat,
     pub handle: SendSharedTextureHandle,
     /// Raw `IOSurfaceRef` (as `usize`) backing this frame, kept alive by `keepalive`. Lets a native
     /// overlay set it directly as a `CALayer`'s `contents` instead of importing into a GPU texture.
@@ -119,6 +127,7 @@ pub struct RenderHandlerBuilder {
     texture_sender: TextureSender,
     accel_sender: AcceleratedSender,
     texture_wake: Option<TextureWake>,
+    accelerated_presenter: Option<AcceleratedFramePresenter>,
     size: SharedViewSize,
     device_scale: SharedDeviceScaleFactor,
 }
@@ -129,6 +138,7 @@ impl RenderHandlerBuilder {
         texture_sender: TextureSender,
         accel_sender: AcceleratedSender,
         texture_wake: Option<TextureWake>,
+        accelerated_presenter: Option<AcceleratedFramePresenter>,
         size: SharedViewSize,
         device_scale: SharedDeviceScaleFactor,
     ) -> RenderHandler {
@@ -138,6 +148,7 @@ impl RenderHandlerBuilder {
             texture_sender,
             accel_sender,
             texture_wake,
+            accelerated_presenter,
             size,
             device_scale,
         })
@@ -172,6 +183,7 @@ impl Clone for RenderHandlerBuilder {
             texture_sender: self.texture_sender.clone(),
             accel_sender: self.accel_sender.clone(),
             texture_wake: self.texture_wake.clone(),
+            accelerated_presenter: self.accelerated_presenter.clone(),
             size: self.size.clone(),
             device_scale: self.device_scale.clone(),
         }
@@ -261,14 +273,23 @@ impl ImplRenderHandler for RenderHandlerBuilder {
                 ty,
                 width,
                 height,
+                format: if info.format == ColorType::RGBA_8888 {
+                    AcceleratedPixelFormat::Rgba8
+                } else {
+                    AcceleratedPixelFormat::Bgra8
+                },
                 handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
                 io_surface,
                 keepalive,
                 dirty: webview_dirty_rects(dirty_rects, width, height),
             };
-            let _ = self.accel_sender.send_blocking(frame);
-            if let Some(wake) = self.texture_wake.as_ref() {
-                wake();
+            if let Some(presenter) = self.accelerated_presenter.as_ref() {
+                presenter(frame);
+            } else {
+                let _ = self.accel_sender.send_blocking(frame);
+                if let Some(wake) = self.texture_wake.as_ref() {
+                    wake();
+                }
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -323,6 +344,21 @@ mod tests {
 
         assert!(rx.try_recv().is_ok());
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn accelerated_native_presenter_bypasses_bevy_wake() {
+        let source = include_str!("renderer_handler.rs");
+        let callback = source
+            .split("fn on_accelerated_paint")
+            .nth(1)
+            .and_then(|tail| tail.split("fn get_raw").next())
+            .unwrap_or_default();
+
+        assert!(callback.contains("presenter(frame)"));
+        assert!(callback.contains("else {"));
+        assert!(callback.contains("self.accel_sender.send_blocking(frame)"));
+        assert!(callback.contains("wake()"));
     }
 
     #[test]
