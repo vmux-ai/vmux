@@ -14,6 +14,6 @@ base64 = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-vmux_command = { path = "../vmux_command" }
+vmux_command_mcp = { path = "../vmux_command_mcp" }
 vmux_macro = { path = "../vmux_macro" }
-vmux_service = { path = "../vmux_service" }
+vmux_service = { package = "vmux_service_client", path = "../vmux_service_client" }

@@ -1,47 +1,14 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
-use crate::{read_message, socket_path, write_message};
+use crate::socket_path;
 use bevy::ecs::resource::Resource;
 use std::sync::Arc;
-use tokio::io::BufReader;
-use tokio::net::UnixStream;
-use tokio::sync::Mutex;
+
+pub use vmux_service_client::client::ServiceConnection;
 
 #[derive(Resource)]
 pub struct ServiceClient(pub ServiceHandle);
 
 const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
-
-/// Async client connection to the vmux service.
-/// Wraps the Unix socket with framing/serialization.
-pub struct ServiceConnection {
-    reader: Mutex<BufReader<tokio::net::unix::OwnedReadHalf>>,
-    writer: Mutex<tokio::net::unix::OwnedWriteHalf>,
-}
-
-impl ServiceConnection {
-    /// Connect to the service socket.
-    pub async fn connect() -> std::io::Result<Self> {
-        let sock = socket_path();
-        let stream = UnixStream::connect(&sock).await?;
-        let (r, w) = stream.into_split();
-        Ok(Self {
-            reader: Mutex::new(BufReader::new(r)),
-            writer: Mutex::new(w),
-        })
-    }
-
-    /// Send a message to the service.
-    pub async fn send(&self, msg: &ClientMessage) -> std::io::Result<()> {
-        let mut w = self.writer.lock().await;
-        write_message!(&mut *w, msg)
-    }
-
-    /// Receive a message from the service. Returns None on disconnect.
-    pub async fn recv(&self) -> std::io::Result<Option<ServiceMessage>> {
-        let mut r = self.reader.lock().await;
-        read_message!(&mut *r, ServiceMessage)
-    }
-}
 
 /// Non-async handle for Bevy systems to communicate with the service.
 /// Uses a background tokio task and std mpsc channels.

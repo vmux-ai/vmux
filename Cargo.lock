@@ -9681,7 +9681,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "vmux_mcp",
- "vmux_service",
+ "vmux_service_client",
 ]
 
 [[package]]
@@ -9696,6 +9696,15 @@ dependencies = [
  "serde_json",
  "vmux_core",
  "vmux_history",
+ "vmux_macro",
+]
+
+[[package]]
+name = "vmux_command_mcp"
+version = "0.0.24"
+dependencies = [
+ "serde_json",
+ "vmux_command",
  "vmux_macro",
 ]
 
@@ -9715,6 +9724,8 @@ dependencies = [
  "sha2",
  "tempfile",
  "uuid",
+ "vmux_profile",
+ "vmux_wire",
  "zip",
 ]
 
@@ -9899,6 +9910,7 @@ dependencies = [
  "vmux_git",
  "vmux_history",
  "vmux_ui",
+ "vmux_wire",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -9921,9 +9933,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "vmux_command",
+ "vmux_command_mcp",
  "vmux_macro",
- "vmux_service",
+ "vmux_service_client",
+]
+
+[[package]]
+name = "vmux_profile"
+version = "0.0.24"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]
@@ -9979,10 +9998,25 @@ dependencies = [
  "uuid",
  "vmux_core",
  "vmux_layout",
+ "vmux_service_client",
  "vmux_ui",
+ "vmux_wire",
  "vte",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_service_client"
+version = "0.0.24"
+dependencies = [
+ "chrono",
+ "libc",
+ "rkyv",
+ "tokio",
+ "tracing",
+ "vmux_profile",
+ "vmux_wire",
 ]
 
 [[package]]
@@ -10104,6 +10138,18 @@ dependencies = [
  "vmux_core",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_wire"
+version = "0.0.24"
+dependencies = [
+ "bevy_ecs",
+ "bevy_reflect",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

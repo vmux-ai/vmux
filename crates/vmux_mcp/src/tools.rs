@@ -1,6 +1,5 @@
 use serde::Serialize;
 use serde_json::Value;
-use vmux_command::command::AppCommand;
 use vmux_macro::McpTool;
 use vmux_service::protocol::AgentCommand;
 
@@ -601,7 +600,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
 /// the ACP terminal methods), `run` + `read_terminal` are omitted; `terminal_send` (no ACP
 /// equivalent for keystrokes/TUIs) is always kept.
 pub fn tool_definitions_filtered(acp_terminals: bool) -> Vec<ToolDefinition> {
-    let mut defs: Vec<ToolDefinition> = AppCommand::mcp_tool_entries()
+    let mut defs: Vec<ToolDefinition> = vmux_command_mcp::tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
         .map(|(name, description, schema)| ToolDefinition {
@@ -929,13 +928,13 @@ pub fn dispatch_with_anchor(
             .and_then(McpParamTool::to_agent_command)
             .map(DispatchTarget::Command);
     }
-    if AppCommand::from_mcp_id(name).is_some() {
+    if vmux_command_mcp::accepts_id(name) {
         return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
             id: name.to_string(),
             args_json: String::new(),
         }));
     }
-    if AppCommand::from_mcp_call(name, arguments.clone()).is_some() {
+    if vmux_command_mcp::accepts_call(name, arguments.clone()) {
         let args_json = serde_json::to_string(&arguments).unwrap_or_default();
         return Ok(DispatchTarget::Command(AgentCommand::AppCommand {
             id: name.to_string(),

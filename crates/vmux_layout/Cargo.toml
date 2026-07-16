@@ -26,6 +26,7 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
+vmux_wire = { path = "../vmux_wire" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

@@ -161,7 +161,9 @@ fn package_builds_cef_helper_separately_without_lto() {
         include_str!("../../../patches/bevy_cef_debug_render_process-0.5.2/Cargo.toml");
     let script = include_str!("../../../scripts/build-package-binaries.sh");
 
-    assert!(script.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --release"));
+    assert!(script.contains("build -p vmux_cli --release"));
+    assert!(script.contains("build -p vmux_desktop -p vmux_service --release"));
+    assert!(!script.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --release"));
     assert!(script.contains("build -p bevy_cef_debug_render_process --profile cef-helper"));
     assert!(script.contains(
         "cp -f target/cef-helper/bevy_cef_debug_render_process target/release/bevy_cef_debug_render_process"

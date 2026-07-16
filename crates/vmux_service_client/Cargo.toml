@@ -1,0 +1,17 @@
+[package]
+name = "vmux_service_client"
+description = "Lightweight client and CLI for vmux_service"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+chrono = { workspace = true }
+rkyv = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+vmux_profile = { path = "../vmux_profile" }
+vmux_wire = { path = "../vmux_wire" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
