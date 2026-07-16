@@ -11,8 +11,9 @@ use vmux_layout::{
 };
 
 use crate::event::{
-    SETTINGS_LIST_EVENT, SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
-    SettingsListEvent, SettingsSchemaEvent,
+    CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
+    SETTINGS_PAGE_URL, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent, SettingsListEvent,
+    SettingsSchemaEvent, UPDATE_CHECK_STATUS_EVENT, UpdateCheckStatusEvent,
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
@@ -111,7 +112,8 @@ pub(crate) fn reset_sent_markers_on_page_ready(
     commands
         .entity(entity)
         .remove::<SettingsListSent>()
-        .remove::<SettingsSchemaSent>();
+        .remove::<SettingsSchemaSent>()
+        .remove::<UpdateCheckStatusSent>();
 }
 
 #[derive(Component)]
@@ -119,6 +121,9 @@ pub(crate) struct SettingsListSent;
 
 #[derive(Component)]
 pub(crate) struct SettingsSchemaSent;
+
+#[derive(Component)]
+pub(crate) struct UpdateCheckStatusSent;
 
 pub(crate) fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
@@ -179,6 +184,48 @@ pub(crate) fn broadcast_schema_to_views(
     }
 }
 
+pub(crate) fn broadcast_update_status_to_views(
+    status: Res<CurrentUpdateCheckStatus>,
+    pending: Query<
+        Entity,
+        (
+            With<Settings>,
+            With<PageReady>,
+            Without<UpdateCheckStatusSent>,
+        ),
+    >,
+    sent: Query<Entity, (With<Settings>, With<PageReady>, With<UpdateCheckStatusSent>)>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let payload = UpdateCheckStatusEvent {
+        status: status.0.clone(),
+    };
+    for entity in &pending {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            UPDATE_CHECK_STATUS_EVENT,
+            &payload,
+        ));
+        commands.entity(entity).insert(UpdateCheckStatusSent);
+    }
+    if status.is_changed() {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                UPDATE_CHECK_STATUS_EVENT,
+                &payload,
+            ));
+        }
+    }
+}
+
 pub(crate) fn on_settings_command(
     trigger: On<BinReceive<SettingsCommandEvent>>,
     mut settings: ResMut<AppSettings>,
@@ -198,6 +245,13 @@ pub(crate) fn on_settings_command(
         }
         Err(e) => bevy::log::warn!("settings: update {} rejected: {}", evt.path, e),
     }
+}
+
+pub(crate) fn on_check_for_updates(
+    _trigger: On<BinReceive<CheckForUpdatesEvent>>,
+    mut requests: MessageWriter<CheckForUpdatesRequest>,
+) {
+    requests.write(CheckForUpdatesRequest);
 }
 
 pub(crate) fn handle_open_settings_command(
@@ -321,7 +375,7 @@ fn build_settings_schema() -> SettingsSchema {
                 "auto_update",
                 FieldSpec {
                     label: Some("Auto-update".into()),
-                    hint: Some("Check for new releases on launch.".into()),
+                    hint: Some("Check for and install updates on launch and every hour.".into()),
                     ..Default::default()
                 },
             ),

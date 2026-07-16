@@ -5,7 +5,10 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use vmux_layout::event::RestartRequestEvent;
-use vmux_setting::AppSettings;
+use vmux_setting::{
+    AppSettings,
+    event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
+};
 
 const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
 
@@ -198,7 +201,6 @@ struct UpdateChecker {
     rx: Mutex<mpsc::Receiver<UpdateResult>>,
     tx: mpsc::Sender<UpdateResult>,
     timer: Timer,
-    started: bool,
     done: bool,
     in_flight: bool,
 }
@@ -226,7 +228,6 @@ fn init_update_checker(mut commands: Commands, config: Res<UpdateConfig>) {
         rx: Mutex::new(rx),
         tx,
         timer: Timer::from_seconds(config.initial_delay.as_secs_f32(), TimerMode::Once),
-        started: false,
         done: false,
         in_flight: false,
     });
@@ -238,8 +239,11 @@ fn poll_update_result(
     settings: Res<AppSettings>,
     time: Res<Time>,
     mut state: ResMut<vmux_layout::UpdateState>,
+    mut status: ResMut<CurrentUpdateCheckStatus>,
+    mut manual_requests: MessageReader<CheckForUpdatesRequest>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
+    let manual_requested = manual_requests.read().count() > 0 && !checker.in_flight;
     let mut results = Vec::new();
     if let Ok(rx) = checker.rx.lock() {
         while let Ok(result) = rx.try_recv() {
@@ -250,6 +254,7 @@ fn poll_update_result(
         match result {
             UpdateResult::NoUpdate => {
                 checker.in_flight = false;
+                status.0 = UpdateCheckStatus::UpToDate;
                 bevy::log::debug!("no update available");
             }
             UpdateResult::Downloading {
@@ -257,6 +262,9 @@ fn poll_update_result(
                 downloaded,
                 total,
             } => {
+                status.0 = UpdateCheckStatus::Downloading {
+                    version: version.clone(),
+                };
                 *state = vmux_layout::UpdateState::Downloading {
                     version,
                     downloaded,
@@ -264,16 +272,23 @@ fn poll_update_result(
                 };
             }
             UpdateResult::Installing { version } => {
+                status.0 = UpdateCheckStatus::Installing {
+                    version: version.clone(),
+                };
                 *state = vmux_layout::UpdateState::Installing { version };
             }
             UpdateResult::Installed { version } => {
                 checker.in_flight = false;
                 bevy::log::info!("update v{version} installed, will take effect on next launch");
+                status.0 = UpdateCheckStatus::Ready {
+                    version: version.clone(),
+                };
                 *state = vmux_layout::UpdateState::Ready { version };
                 checker.done = true;
             }
             UpdateResult::Failed(e) => {
                 checker.in_flight = false;
+                status.0 = UpdateCheckStatus::Failed;
                 bevy::log::debug!("update check failed: {e}");
                 if !matches!(
                     *state,
@@ -289,36 +304,43 @@ fn poll_update_result(
         return;
     }
 
-    if !settings.auto_update {
-        return;
-    }
-
     if checker.in_flight {
         return;
     }
 
-    checker.timer.tick(time.delta());
+    let automatic_due = if settings.auto_update {
+        checker.timer.tick(time.delta());
+        checker.timer.just_finished()
+    } else {
+        false
+    };
 
-    if !checker.timer.just_finished() {
+    if !should_start_update_check(manual_requested, settings.auto_update, automatic_due) {
         return;
     }
 
-    if !checker.started {
-        checker.started = true;
-        checker.timer.set_duration(config.poll_interval);
-        checker.timer.set_mode(TimerMode::Repeating);
-        checker.timer.reset();
-    }
+    checker.timer.set_duration(config.poll_interval);
+    checker.timer.set_mode(TimerMode::Repeating);
+    checker.timer.reset();
 
     let tx = checker.tx.clone();
     let endpoint = config.endpoint.clone();
     let pubkey = config.pubkey.clone();
     let wake = make_wake(proxy.as_deref());
     checker.in_flight = true;
+    status.0 = UpdateCheckStatus::Checking;
 
     std::thread::spawn(move || {
         run_update_check(&endpoint, &pubkey, &tx, &*wake);
     });
+}
+
+fn should_start_update_check(
+    manual_requested: bool,
+    auto_update: bool,
+    automatic_due: bool,
+) -> bool {
+    manual_requested || (auto_update && automatic_due)
 }
 
 fn make_wake(proxy: Option<&EventLoopProxyWrapper>) -> Box<dyn Fn() + Send> {
@@ -506,6 +528,26 @@ mod tests {
     #[test]
     fn default_endpoint_is_vmux_ai_updates_json() {
         assert_eq!(DEFAULT_ENDPOINT, "https://vmux.ai/updates.json");
+    }
+
+    #[test]
+    fn default_updater_checks_after_launch_and_hourly() {
+        let updater = VmuxUpdaterBuilder::default();
+
+        assert_eq!(updater.initial_delay, Duration::from_secs(5));
+        assert_eq!(updater.poll_interval, Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn manual_update_check_bypasses_auto_update_setting() {
+        assert!(should_start_update_check(true, false, false));
+    }
+
+    #[test]
+    fn automatic_update_check_requires_enabled_setting_and_due_timer() {
+        assert!(should_start_update_check(false, true, true));
+        assert!(!should_start_update_check(false, false, true));
+        assert!(!should_start_update_check(false, true, false));
     }
 
     #[test]

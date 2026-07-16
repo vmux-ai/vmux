@@ -1,12 +1,14 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent, SettingsListEvent,
-    SettingsSchemaEvent,
+    CheckForUpdatesEvent, SETTINGS_LIST_EVENT, SETTINGS_SCHEMA_EVENT, SettingsCommandEvent,
+    SettingsListEvent, SettingsSchemaEvent, UPDATE_CHECK_STATUS_EVENT, UpdateCheckStatus,
+    UpdateCheckStatusEvent,
 };
 use crate::schema::{SettingsSchema, WidgetKind};
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
+use vmux_ui::components::button::{Button, ButtonVariant};
 use vmux_ui::components::card::{Card, CardContent, CardDescription, CardHeader, CardTitle};
 use vmux_ui::components::input::Input;
 use vmux_ui::components::select::{
@@ -192,6 +194,7 @@ fn SectionView(
     value: Value,
     schema: SettingsSchema,
 ) -> Element {
+    let show_update_check = id == "general";
     rsx! {
         section { id: "{id}", class: "scroll-mt-6",
             Card {
@@ -204,10 +207,71 @@ fn SectionView(
                 CardContent {
                     div { class: "flex flex-col divide-y divide-border",
                         ObjectBody { value, parent_path: root_path, depth: 0, schema }
+                        if show_update_check {
+                            UpdateCheckRow {}
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+#[component]
+fn UpdateCheckRow() -> Element {
+    let mut status = use_signal(UpdateCheckStatus::default);
+    let _status_listener = use_bin_event_listener::<UpdateCheckStatusEvent, _>(
+        UPDATE_CHECK_STATUS_EVENT,
+        move |event| status.set(event.status),
+    );
+    let current = status();
+    let (button_label, hint, disabled) = update_check_presentation(&current);
+
+    rsx! {
+        Row {
+            label: "Software Update".to_string(),
+            hint: Some(hint),
+            control: rsx! {
+                Button {
+                    variant: ButtonVariant::Outline,
+                    disabled,
+                    onclick: move |_| {
+                        status.set(UpdateCheckStatus::Checking);
+                        let _ = try_cef_bin_emit_rkyv(&CheckForUpdatesEvent);
+                    },
+                    "{button_label}"
+                }
+            },
+        }
+    }
+}
+
+fn update_check_presentation(status: &UpdateCheckStatus) -> (&'static str, String, bool) {
+    match status {
+        UpdateCheckStatus::Idle => (
+            "Check for Updates",
+            "Checks automatically on launch and every hour when Auto-update is enabled."
+                .to_string(),
+            false,
+        ),
+        UpdateCheckStatus::Checking => ("Checking…", "Checking for updates…".to_string(), true),
+        UpdateCheckStatus::UpToDate => ("Check Again", "Vmux is up to date.".to_string(), false),
+        UpdateCheckStatus::Downloading { version } => {
+            ("Downloading…", format!("Downloading Vmux {version}…"), true)
+        }
+        UpdateCheckStatus::Installing { version } => {
+            ("Installing…", format!("Installing Vmux {version}…"), true)
+        }
+        UpdateCheckStatus::Ready { version } => (
+            "Update Ready",
+            format!("Vmux {version} is ready. Restart to apply it."),
+            true,
+        ),
+        UpdateCheckStatus::Failed => (
+            "Try Again",
+            "Unable to check for updates.".to_string(),
+            false,
+        ),
     }
 }
 
