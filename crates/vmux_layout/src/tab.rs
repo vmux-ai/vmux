@@ -22,6 +22,11 @@ pub struct TabPlugin;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TabCommandSet;
 
+#[derive(Message, Clone, Copy)]
+pub struct CloseTabRequest {
+    pub tab: Entity,
+}
+
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
@@ -29,6 +34,7 @@ impl Plugin for TabPlugin {
             .register_type::<TabWorktree>()
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
+            .add_message::<CloseTabRequest>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
             ]))
@@ -39,6 +45,12 @@ impl Plugin for TabPlugin {
                     .in_set(ReadAppCommands)
                     .in_set(TabCommandSet)
                     .after(crate::settings::EffectiveStartupDirSet),
+            )
+            .add_systems(
+                Update,
+                crate::archive::handle_close_tab_requests
+                    .in_set(ReadAppCommands)
+                    .after(TabCommandSet),
             )
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
             .add_systems(PostUpdate, sync_tab_order);
@@ -125,6 +137,7 @@ fn handle_tab_commands(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -165,27 +178,7 @@ fn handle_tab_commands(
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
                 TabCommand::Close => {
                     let Some(active) = active_tab else { continue };
-                    let siblings = active_tab_siblings(active, &child_of_q, &all_children, &tab_q);
-                    if siblings.len() <= 1 {
-                        let Some((space, startup_dir)) = effective_startup_dir
-                            .as_deref()
-                            .and_then(|effective| effective.0.clone())
-                        else {
-                            continue;
-                        };
-                        layout_requests.write(TabLayoutSpawnRequest {
-                            space,
-                            primary_window: *primary_window,
-                            name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                            startup_dir,
-                            content: TabLayoutSpawnContent::StartupUrlOrPrompt,
-                            clear_pending_stack: true,
-                            focus: true,
-                        });
-                    } else if let Some(next) = pick_after_close(active, &siblings) {
-                        commands.entity(next).insert(LastActivatedAt::now());
-                    }
-                    commands.entity(active).despawn();
+                    close_requests.write(CloseTabRequest { tab: active });
                 }
                 TabCommand::New => {
                     let Some((space, _)) = effective_startup_dir
@@ -379,16 +372,10 @@ fn on_tabs_command_emit(
     trigger: On<BinReceive<TabsCommandEvent>>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
-    tab_q: Query<Entity, With<Tab>>,
-    primary_window: Single<Entity, With<PrimaryWindow>>,
-    child_of_q: Query<&ChildOf>,
-    all_children: Query<&Children>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
-    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
-    mut last_tab_close: ResMut<LastTabCloseAt>,
+    mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -405,33 +392,10 @@ fn on_tabs_command_emit(
             messages.write(cmd);
         }
         "close" => {
-            last_tab_close.0 = Some(Instant::now());
             let target = tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
                 .or(active_tab);
             let Some(target) = target else { return };
-            let siblings = active_tab_siblings(target, &child_of_q, &all_children, &tab_q);
-            if siblings.len() <= 1 {
-                let Some((space, startup_dir)) = effective_startup_dir
-                    .as_deref()
-                    .and_then(|effective| effective.0.clone())
-                else {
-                    return;
-                };
-                layout_requests.write(TabLayoutSpawnRequest {
-                    space,
-                    primary_window: *primary_window,
-                    name: Some(format!("Tab {}", tabs.iter().count() + 1)),
-                    startup_dir,
-                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
-                    clear_pending_stack: true,
-                    focus: true,
-                });
-            } else if active_tab == Some(target)
-                && let Some(next) = pick_after_close(target, &siblings)
-            {
-                commands.entity(next).insert(LastActivatedAt::now());
-            }
-            commands.entity(target).despawn();
+            close_requests.write(CloseTabRequest { tab: target });
         }
         "switch" => {
             let Some(id_str) = evt.tab_id.as_deref() else {
@@ -663,6 +627,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .init_resource::<crate::NewStackContext>()
@@ -808,6 +773,7 @@ mod tests {
     fn tabs_close_event_records_recent_tab_close() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
             .add_message::<crate::TabLayoutSpawnRequest>();
 
         let webview = app.world_mut().spawn_empty().id();
@@ -843,7 +809,7 @@ mod tests {
                 tab_id: Some(tab.to_bits().to_string()),
             },
         });
-        app.world_mut().flush();
+        app.update();
 
         assert!(app.world().get_entity(tab).is_err());
         assert!(app.world().get_entity(other_tab).is_ok());
@@ -851,11 +817,42 @@ mod tests {
     }
 
     #[test]
+    fn tabs_close_event_without_target_does_not_record_recent_close() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, CommandPlugin, TabPlugin))
+            .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
+            .add_message::<crate::TabLayoutSpawnRequest>();
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PrimaryWindow);
+
+        app.world_mut().trigger(BinReceive::<TabsCommandEvent> {
+            webview,
+            payload: TabsCommandEvent {
+                command: "close".to_string(),
+                tab_id: None,
+            },
+        });
+        app.update();
+
+        assert!(app.world().resource::<LastTabCloseAt>().0.is_none());
+    }
+
+    #[test]
     fn closing_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands));
+            .add_message::<CloseTabRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_systems(
+                Update,
+                (
+                    handle_tab_commands,
+                    crate::archive::handle_close_tab_requests,
+                )
+                    .chain()
+                    .in_set(ReadAppCommands),
+            );
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(MainNode).id();
@@ -908,7 +905,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<CloseTabRequest>()
             .init_resource::<LastTabCloseAt>()
+            .add_systems(Update, crate::archive::handle_close_tab_requests)
             .add_observer(on_tabs_command_emit);
 
         let webview = app.world_mut().spawn_empty().id();
@@ -943,7 +942,7 @@ mod tests {
                 tab_id: Some(d.to_bits().to_string()),
             },
         });
-        app.world_mut().flush();
+        app.update();
         app.world_mut()
             .run_system_once(crate::active::ensure_active_tab)
             .ok();
@@ -964,6 +963,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<CloseTabRequest>()
             .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
 

@@ -1,14 +1,18 @@
-use std::path::PathBuf;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::PathBuf,
+};
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy_cef::prelude::HostWindow;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest};
 use vmux_core::{
-    ArchivedPage, ArchivedPagePosition, PageArchiveRequest, PageMetadata, PageOpenRequest,
-    PageOpenTarget, PaneStep, SplitAxis, now_millis,
+    ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
+    PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, now_millis,
 };
 
 use crate::event::TERMINAL_PAGE_URL;
@@ -17,9 +21,12 @@ use crate::pane::{
 };
 use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
-use crate::stack::{FocusedStack, Stack, StackCommandSet, stack_bundle};
-use crate::tab::Tab;
+use crate::stack::{ActiveTabParam, FocusedStack, Stack, StackCommandSet, stack_bundle};
+use crate::tab::{
+    CloseTabRequest, LastTabCloseAt, Tab, active_tab_siblings, pick_after_close, tab_bundle,
+};
 use crate::window::spawn_tab_scaffold_in_space;
+use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 const MAX_ARCHIVE_ENTRIES: usize = 25;
 const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -191,43 +198,273 @@ fn pane_path_of(
 
 fn capture_archived_pages(mut reader: MessageReader<PageArchiveRequest>, mut commands: Commands) {
     for req in reader.read() {
-        if req.url.is_empty() {
-            continue;
-        }
-        commands.spawn((
-            ArchivedPage {
-                url: req.url.clone(),
-                title: req.title.clone(),
-                space_id: req.space_id.clone(),
-                closed_at: now_millis(),
-                launch: req.launch.clone(),
-                tab_index: req.tab_index,
-            },
-            ArchivedPagePosition {
-                leaf_pane_id: req.leaf_pane_id.clone(),
-                stack_index: req.stack_index,
-                pane_path: req.pane_path.clone(),
-            },
-        ));
+        spawn_archived_page(&mut commands, req, now_millis(), None);
     }
 }
 
-fn maintain_archive(archived: Query<(Entity, &ArchivedPage)>, mut commands: Commands) {
+fn spawn_archived_page(
+    commands: &mut Commands,
+    req: &PageArchiveRequest,
+    closed_at: i64,
+    tab: Option<ArchivedTabPage>,
+) {
+    if req.url.is_empty() && tab.is_none() {
+        return;
+    }
+    let mut entity = commands.spawn((
+        ArchivedPage {
+            url: req.url.clone(),
+            title: req.title.clone(),
+            space_id: req.space_id.clone(),
+            closed_at,
+            launch: req.launch.clone(),
+            tab_index: req.tab_index,
+        },
+        ArchivedPagePosition {
+            leaf_pane_id: req.leaf_pane_id.clone(),
+            stack_index: req.stack_index,
+            pane_path: req.pane_path.clone(),
+        },
+    ));
+    if let Some(tab) = tab {
+        entity.insert(tab);
+    }
+}
+
+fn maintain_archive(
+    archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
+    mut commands: Commands,
+) {
     let now = now_millis();
-    let mut live: Vec<(Entity, i64)> = Vec::new();
-    for (entity, page) in &archived {
-        if now - page.closed_at > ARCHIVE_TTL_MS {
-            commands.entity(entity).despawn();
+    let mut groups: HashMap<String, (i64, Vec<Entity>)> = HashMap::new();
+    let mut singles = Vec::new();
+    for (entity, page, tab) in &archived {
+        if let Some(tab) = tab.filter(|tab| !tab.group_id.is_empty()) {
+            let group = groups
+                .entry(tab.group_id.clone())
+                .or_insert_with(|| (page.closed_at, Vec::new()));
+            group.0 = group.0.max(page.closed_at);
+            group.1.push(entity);
         } else {
-            live.push((entity, page.closed_at));
+            singles.push((page.closed_at, vec![entity]));
         }
     }
-    if live.len() > MAX_ARCHIVE_ENTRIES {
-        live.sort_by_key(|(_, closed_at)| *closed_at);
-        let overflow = live.len() - MAX_ARCHIVE_ENTRIES;
-        for (entity, _) in live.into_iter().take(overflow) {
+
+    let mut live: Vec<(i64, Vec<Entity>)> = groups.into_values().collect();
+    live.extend(singles);
+    for (closed_at, entities) in &live {
+        if now - *closed_at <= ARCHIVE_TTL_MS {
+            continue;
+        }
+        for &entity in entities {
             commands.entity(entity).despawn();
         }
+    }
+    live.retain(|(closed_at, _)| now - *closed_at <= ARCHIVE_TTL_MS);
+    if live.len() <= MAX_ARCHIVE_ENTRIES {
+        return;
+    }
+    live.sort_by_key(|(closed_at, _)| *closed_at);
+    let overflow = live.len() - MAX_ARCHIVE_ENTRIES;
+    for (_, entities) in live.into_iter().take(overflow) {
+        for entity in entities {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub(crate) struct TabArchiveLayout<'w, 's> {
+    stack_pages: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static PageMetadata,
+            Option<&'static TerminalLaunch>,
+            Option<&'static vmux_history::LastActivatedAt>,
+        ),
+        With<Stack>,
+    >,
+    child_of: Query<'w, 's, &'static ChildOf>,
+    children_q: Query<'w, 's, &'static Children>,
+    spaces: Query<'w, 's, (), With<Space>>,
+    space_ids: Query<'w, 's, &'static SpaceId>,
+    tabs: Query<'w, 's, (), With<Tab>>,
+    stacks: Query<'w, 's, (), With<Stack>>,
+    pane_ids: Query<'w, 's, &'static PaneId>,
+    splits: Query<'w, 's, &'static PaneSplit>,
+    pane_sizes: Query<'w, 's, &'static PaneSize>,
+    panes: Query<'w, 's, (), With<Pane>>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn handle_close_tab_requests(
+    mut reader: MessageReader<CloseTabRequest>,
+    active_tab_param: ActiveTabParam,
+    tab_data: Query<&Tab>,
+    tab_q: Query<Entity, With<Tab>>,
+    layout: TabArchiveLayout,
+    primary_window: Single<Entity, With<PrimaryWindow>>,
+    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
+    mut last_tab_close: ResMut<LastTabCloseAt>,
+    mut commands: Commands,
+) {
+    let mut seen = HashSet::new();
+    let requests: Vec<Entity> = reader
+        .read()
+        .filter_map(|request| seen.insert(request.tab).then_some(request.tab))
+        .filter(|tab| tab_data.contains(*tab))
+        .collect();
+    let closing: HashSet<Entity> = requests.iter().copied().collect();
+    let mut replacement_spaces = HashSet::new();
+    for requested_tab in requests {
+        let request = CloseTabRequest { tab: requested_tab };
+        let Ok(tab) = tab_data.get(request.tab) else {
+            continue;
+        };
+        let siblings =
+            active_tab_siblings(request.tab, &layout.child_of, &layout.children_q, &tab_q);
+        let surviving_siblings: Vec<Entity> = siblings
+            .iter()
+            .copied()
+            .filter(|sibling| !closing.contains(sibling))
+            .collect();
+        if surviving_siblings.is_empty() {
+            let Ok(tab_space) = layout
+                .child_of
+                .get(request.tab)
+                .map(|parent| parent.parent())
+            else {
+                continue;
+            };
+            if !replacement_spaces.contains(&tab_space) {
+                let Some((space, startup_dir)) = effective_startup_dir
+                    .as_deref()
+                    .and_then(|effective| effective.0.clone())
+                else {
+                    continue;
+                };
+                if space != tab_space {
+                    continue;
+                }
+                layout_requests.write(TabLayoutSpawnRequest {
+                    space,
+                    primary_window: *primary_window,
+                    name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
+                    startup_dir,
+                    content: TabLayoutSpawnContent::StartupUrlOrPrompt,
+                    clear_pending_stack: true,
+                    focus: true,
+                });
+                replacement_spaces.insert(space);
+            }
+        } else if active_tab_param.get() == Some(request.tab)
+            && let Some(next) = pick_after_close(
+                request.tab,
+                &siblings
+                    .iter()
+                    .copied()
+                    .filter(|sibling| *sibling == request.tab || !closing.contains(sibling))
+                    .collect::<Vec<_>>(),
+            )
+        {
+            commands
+                .entity(next)
+                .insert(vmux_history::LastActivatedAt::now());
+        }
+
+        archive_tab(request.tab, tab, &layout, &mut commands);
+        last_tab_close.0 = Some(std::time::Instant::now());
+        commands.entity(request.tab).despawn();
+    }
+}
+
+fn archive_tab(tab_entity: Entity, tab: &Tab, layout: &TabArchiveLayout, commands: &mut Commands) {
+    let Some(space) = space_of(tab_entity, &layout.child_of, &layout.spaces) else {
+        return;
+    };
+    let space_id = layout
+        .space_ids
+        .get(space)
+        .map(|id| id.0.clone())
+        .unwrap_or_default();
+    let tab_index = layout.children_q.get(space).ok().and_then(|children| {
+        children
+            .iter()
+            .filter(|entity| layout.tabs.contains(*entity))
+            .position(|entity| entity == tab_entity)
+    });
+    let mut stacks = Vec::new();
+    collect_descendant_stacks(tab_entity, &layout.children_q, &layout.stacks, &mut stacks);
+    let active_stack = stacks.iter().copied().max_by_key(|stack| {
+        layout
+            .stack_pages
+            .get(*stack)
+            .ok()
+            .and_then(|(_, _, _, activated)| activated)
+            .map(|activated| activated.0)
+            .unwrap_or_default()
+    });
+    let group_id = uuid::Uuid::new_v4().to_string();
+    let closed_at = now_millis();
+
+    for stack in stacks {
+        let Ok((_, metadata, launch, _)) = layout.stack_pages.get(stack) else {
+            continue;
+        };
+        let (leaf_pane_id, stack_index, pane_path) = pane_path_of(
+            stack,
+            &layout.child_of,
+            &layout.children_q,
+            &layout.pane_ids,
+            &layout.splits,
+            &layout.pane_sizes,
+            &layout.panes,
+            &layout.stacks,
+            &layout.tabs,
+        )
+        .unwrap_or_default();
+        let request = PageArchiveRequest {
+            url: metadata.url.clone(),
+            title: metadata.title.clone(),
+            space_id: space_id.clone(),
+            launch: launch.cloned(),
+            tab_index,
+            leaf_pane_id,
+            stack_index,
+            pane_path,
+        };
+        spawn_archived_page(
+            commands,
+            &request,
+            closed_at,
+            Some(ArchivedTabPage {
+                group_id: group_id.clone(),
+                tab_name: tab.name.clone(),
+                tab_startup_dir: tab.startup_dir.clone(),
+                active: active_stack == Some(stack),
+            }),
+        );
+    }
+}
+
+fn collect_descendant_stacks(
+    entity: Entity,
+    children_q: &Query<&Children>,
+    stacks: &Query<(), With<Stack>>,
+    result: &mut Vec<Entity>,
+) {
+    if stacks.contains(entity) {
+        result.push(entity);
+        return;
+    }
+    let Ok(children) = children_q.get(entity) else {
+        return;
+    };
+    for child in children.iter() {
+        collect_descendant_stacks(child, children_q, stacks, result);
     }
 }
 
@@ -241,10 +478,18 @@ struct ReopenLayout<'w, 's> {
     tabs: Query<'w, 's, (), With<Tab>>,
 }
 
+#[derive(Clone)]
+struct ReopenEntry {
+    entity: Entity,
+    page: ArchivedPage,
+    position: Option<ArchivedPagePosition>,
+    tab: Option<ArchivedTabPage>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_reopen_closed_page(
     mut reader: MessageReader<AppCommand>,
-    archived: Query<(Entity, &ArchivedPage)>,
+    archived: Query<(Entity, &ArchivedPage, Option<&ArchivedTabPage>)>,
     positions: Query<&ArchivedPagePosition>,
     spaces: Query<(Entity, &SpaceId), With<Space>>,
     any_space: Query<Entity, With<Space>>,
@@ -252,9 +497,6 @@ fn handle_reopen_closed_page(
     active_space: Res<ActiveSpaceEntity>,
     settings: Res<LayoutSettings>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    mut page_open: MessageWriter<PageOpenRequest>,
-    mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
-    mut terminal_spawn: MessageWriter<TerminalSpawnRequest>,
     mut commands: Commands,
 ) {
     let mut reopen = false;
@@ -270,10 +512,10 @@ fn handle_reopen_closed_page(
         return;
     }
 
-    let Some((entry_entity, page)) = archived
+    let Some((entry_entity, page, archived_tab)) = archived
         .iter()
-        .max_by_key(|(_, p)| p.closed_at)
-        .map(|(e, p)| (e, p.clone()))
+        .max_by_key(|(_, page, _)| page.closed_at)
+        .map(|(entity, page, tab)| (entity, page.clone(), tab.cloned()))
     else {
         return;
     };
@@ -288,6 +530,34 @@ fn handle_reopen_closed_page(
     let Some(space) = target_space else {
         return;
     };
+
+    if let Some(tab) = archived_tab.filter(|tab| !tab.group_id.is_empty()) {
+        let entries: Vec<ReopenEntry> = archived
+            .iter()
+            .filter(|(_, _, candidate)| {
+                candidate.is_some_and(|candidate| candidate.group_id == tab.group_id)
+            })
+            .map(|(entity, page, tab)| ReopenEntry {
+                entity,
+                page: page.clone(),
+                position: positions.get(entity).ok().cloned(),
+                tab: tab.cloned(),
+            })
+            .collect();
+        let restored = restore_archived_tab(
+            space,
+            origin_space == Some(space),
+            &tab,
+            entries,
+            &mut commands,
+            *primary_window,
+        );
+        for (entry, stack) in restored {
+            reopen_page_content(&entry.page, stack, &mut commands);
+            commands.entity(entry.entity).despawn();
+        }
+        return;
+    }
 
     let position = positions.get(entry_entity).ok().cloned();
     let (stack, focus_anchor) = resolve_reopen_stack(
@@ -313,6 +583,15 @@ fn handle_reopen_closed_page(
         .insert(vmux_history::LastActivatedAt::now());
     focus_reopened_ancestors(focus_anchor, &layout, &mut commands);
 
+    reopen_page_content(&page, stack, &mut commands);
+
+    commands.entity(entry_entity).despawn();
+}
+
+fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Commands) {
+    if page.url.is_empty() {
+        return;
+    }
     // CLI agent urls are `<kind>/cli` (fresh) or `<kind>/cli/<sid>` (resume). A plain
     // `<kind>/<sid>` (no `cli` marker) is an ACP session and falls through to `PageOpenRequest`,
     // which reconstructs it via the runtime agent handler. ("cli" is `url::CLI_FRESH_SID`, not
@@ -332,12 +611,15 @@ fn handle_reopen_closed_page(
             .as_ref()
             .map(|l| PathBuf::from(&l.cwd))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
-        spawn_agent.write(SpawnAgentInStackRequest {
+        let request = SpawnAgentInStackRequest {
             kind,
             cwd,
             session_id,
             stack,
             initial_prompt: None,
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     } else if page.url.starts_with(TERMINAL_PAGE_URL) {
         let cwd = page
@@ -346,19 +628,279 @@ fn handle_reopen_closed_page(
             .map(|l| l.cwd.clone())
             .filter(|c| !c.is_empty())
             .map(PathBuf::from);
-        terminal_spawn.write(TerminalSpawnRequest {
+        let request = TerminalSpawnRequest {
             cwd,
             target_stack: Some(stack),
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     } else {
-        page_open.write(PageOpenRequest {
+        let request = PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
             url: page.url.clone(),
             request_id: None,
+        };
+        commands.queue(move |world: &mut World| {
+            world.write_message(request);
         });
     }
+}
 
-    commands.entity(entry_entity).despawn();
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ArchivedPaneChild {
+    Split(String),
+    Leaf(String),
+}
+
+struct ArchivedSplit {
+    axis: SplitAxis,
+    flex_weights: Vec<f32>,
+    children: BTreeMap<usize, ArchivedPaneChild>,
+}
+
+struct ArchivedPaneTree {
+    root_id: String,
+    splits: HashMap<String, ArchivedSplit>,
+}
+
+fn restore_archived_tab(
+    space: Entity,
+    origin_matches: bool,
+    archived_tab: &ArchivedTabPage,
+    mut entries: Vec<ReopenEntry>,
+    commands: &mut Commands,
+    primary_window: Entity,
+) -> Vec<(ReopenEntry, Entity)> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
+    let active_entry = entries
+        .iter()
+        .find(|entry| entry.tab.as_ref().is_some_and(|tab| tab.active))
+        .map(|entry| entry.entity)
+        .unwrap_or(entries[0].entity);
+    let tab = commands
+        .spawn((
+            tab_bundle(),
+            vmux_history::LastActivatedAt::now(),
+            CreatedAt::now(),
+            ChildOf(space),
+        ))
+        .id();
+    commands.entity(tab).insert(Tab {
+        name: archived_tab.tab_name.clone(),
+        startup_dir: archived_tab.tab_startup_dir.clone(),
+    });
+    if origin_matches && let Some(index) = entries.first().and_then(|entry| entry.page.tab_index) {
+        commands.entity(space).insert_children(index, &[tab]);
+    }
+
+    let tree = build_archived_pane_tree(&entries);
+    let mut pane_entities = HashMap::new();
+    let mut leaf_entities = HashMap::new();
+    let fallback_leaf = if let Some(tree) = tree.as_ref() {
+        spawn_archived_split(
+            &tree.root_id,
+            tab,
+            None,
+            true,
+            tree,
+            commands,
+            primary_window,
+            &mut pane_entities,
+            &mut leaf_entities,
+        );
+        None
+    } else {
+        let root_id = uuid::Uuid::new_v4().to_string();
+        let root = commands
+            .spawn((
+                split_root_bundle(PaneSplitDirection::Row),
+                PaneId(root_id.clone()),
+                vmux_history::LastActivatedAt(0),
+                HostWindow(primary_window),
+                ChildOf(tab),
+            ))
+            .id();
+        pane_entities.insert(root_id, root);
+        let leaf_id = uuid::Uuid::new_v4().to_string();
+        let leaf = commands
+            .spawn((
+                leaf_pane_bundle(),
+                PaneId(leaf_id.clone()),
+                vmux_history::LastActivatedAt(0),
+                ChildOf(root),
+            ))
+            .id();
+        pane_entities.insert(leaf_id.clone(), leaf);
+        leaf_entities.insert(leaf_id, leaf);
+        Some(leaf)
+    };
+
+    entries.sort_by(|left, right| {
+        let left_position = left.position.as_ref();
+        let right_position = right.position.as_ref();
+        left_position
+            .map(|position| (&position.leaf_pane_id, position.stack_index))
+            .cmp(&right_position.map(|position| (&position.leaf_pane_id, position.stack_index)))
+    });
+
+    let mut restored = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let leaf = entry
+            .position
+            .as_ref()
+            .and_then(|position| leaf_entities.get(&position.leaf_pane_id).copied())
+            .or(fallback_leaf)
+            .or_else(|| leaf_entities.values().next().copied());
+        let Some(leaf) = leaf else {
+            continue;
+        };
+        let active = entry.entity == active_entry;
+        let stack = commands
+            .spawn((
+                stack_bundle(),
+                vmux_history::LastActivatedAt(if active { now_millis() } else { 0 }),
+                CreatedAt::now(),
+                ChildOf(leaf),
+            ))
+            .id();
+        commands.entity(stack).insert(PageMetadata {
+            url: entry.page.url.clone(),
+            title: entry.page.title.clone(),
+            ..default()
+        });
+        if active {
+            commands
+                .entity(leaf)
+                .insert(vmux_history::LastActivatedAt::now());
+            if let Some(position) = entry.position.as_ref() {
+                for step in &position.pane_path {
+                    if let Some(entity) = pane_entities.get(&step.split_id) {
+                        commands
+                            .entity(*entity)
+                            .insert(vmux_history::LastActivatedAt::now());
+                    }
+                }
+            }
+        }
+        restored.push((entry, stack));
+    }
+    restored
+}
+
+fn build_archived_pane_tree(entries: &[ReopenEntry]) -> Option<ArchivedPaneTree> {
+    let mut root_id = None;
+    let mut splits: HashMap<String, ArchivedSplit> = HashMap::new();
+    for entry in entries {
+        let position = entry.position.as_ref()?;
+        if position.leaf_pane_id.is_empty() || position.pane_path.is_empty() {
+            return None;
+        }
+        let entry_root = &position.pane_path[0].split_id;
+        if root_id
+            .as_ref()
+            .is_some_and(|root: &String| root != entry_root)
+        {
+            return None;
+        }
+        root_id.get_or_insert_with(|| entry_root.clone());
+        for (index, step) in position.pane_path.iter().enumerate() {
+            let child = if let Some(next) = position.pane_path.get(index + 1) {
+                ArchivedPaneChild::Split(next.split_id.clone())
+            } else {
+                ArchivedPaneChild::Leaf(position.leaf_pane_id.clone())
+            };
+            let split = splits
+                .entry(step.split_id.clone())
+                .or_insert_with(|| ArchivedSplit {
+                    axis: step.axis,
+                    flex_weights: step.flex_weights.clone(),
+                    children: BTreeMap::new(),
+                });
+            if split.axis != step.axis {
+                return None;
+            }
+            if let Some(existing) = split.children.get(&step.child_index)
+                && existing != &child
+            {
+                return None;
+            }
+            split.children.insert(step.child_index, child);
+        }
+    }
+    Some(ArchivedPaneTree {
+        root_id: root_id?,
+        splits,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_archived_split(
+    id: &str,
+    parent: Entity,
+    flex_grow: Option<f32>,
+    root: bool,
+    tree: &ArchivedPaneTree,
+    commands: &mut Commands,
+    primary_window: Entity,
+    pane_entities: &mut HashMap<String, Entity>,
+    leaf_entities: &mut HashMap<String, Entity>,
+) -> Option<Entity> {
+    let split = tree.splits.get(id)?;
+    let direction = match split.axis {
+        SplitAxis::Row => PaneSplitDirection::Row,
+        SplitAxis::Column => PaneSplitDirection::Column,
+    };
+    let entity = commands
+        .spawn((
+            split_root_bundle(direction),
+            PaneId(id.to_string()),
+            vmux_history::LastActivatedAt(0),
+            ChildOf(parent),
+        ))
+        .id();
+    if let Some(flex_grow) = flex_grow {
+        commands.entity(entity).insert(PaneSize { flex_grow });
+    }
+    if root {
+        commands.entity(entity).insert(HostWindow(primary_window));
+    }
+    pane_entities.insert(id.to_string(), entity);
+
+    for (child_index, child) in &split.children {
+        let flex_grow = split.flex_weights.get(*child_index).copied().unwrap_or(1.0);
+        match child {
+            ArchivedPaneChild::Split(child_id) => {
+                spawn_archived_split(
+                    child_id,
+                    entity,
+                    Some(flex_grow),
+                    false,
+                    tree,
+                    commands,
+                    primary_window,
+                    pane_entities,
+                    leaf_entities,
+                );
+            }
+            ArchivedPaneChild::Leaf(child_id) => {
+                let leaf = commands
+                    .spawn((
+                        leaf_pane_bundle(),
+                        PaneId(child_id.clone()),
+                        vmux_history::LastActivatedAt(0),
+                        ChildOf(entity),
+                    ))
+                    .id();
+                commands.entity(leaf).insert(PaneSize { flex_grow });
+                pane_entities.insert(child_id.clone(), leaf);
+                leaf_entities.insert(child_id.clone(), leaf);
+            }
+        }
+    }
+    Some(entity)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -498,7 +1040,20 @@ fn reattach_along_path(
     }
     let anchor = parent;
     if depth == path.len() {
-        return Some((parent, anchor));
+        let leaf = if layout.leaf_panes.contains(parent) {
+            parent
+        } else if let Some(leaf) = first_leaf_descendant(parent, layout) {
+            leaf
+        } else {
+            commands
+                .spawn((
+                    leaf_pane_bundle(),
+                    vmux_history::LastActivatedAt::now(),
+                    ChildOf(parent),
+                ))
+                .id()
+        };
+        return Some((leaf, anchor));
     }
 
     if layout.leaf_panes.contains(parent) {
@@ -547,6 +1102,18 @@ fn reattach_along_path(
         parent = new_child;
     }
     Some((parent, anchor))
+}
+
+fn first_leaf_descendant(root: Entity, layout: &ReopenLayout) -> Option<Entity> {
+    if layout.leaf_panes.contains(root) {
+        return Some(root);
+    }
+    for child in layout.children_q.get(root).ok()?.iter() {
+        if let Some(leaf) = first_leaf_descendant(child, layout) {
+            return Some(leaf);
+        }
+    }
+    None
 }
 
 fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) -> usize {
@@ -887,6 +1454,204 @@ mod tests {
         assert!(matches!(req.pane_path[0].axis, SplitAxis::Row));
     }
 
+    #[test]
+    fn close_tab_archives_every_stack_in_one_group() {
+        let mut app = App::new();
+        app.add_message::<CloseTabRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_systems(Update, super::handle_close_tab_requests);
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
+            .id();
+        app.world_mut().spawn((
+            Tab::default(),
+            vmux_history::LastActivatedAt(1),
+            ChildOf(space),
+        ));
+        let tab = app
+            .world_mut()
+            .spawn((
+                Tab {
+                    name: "Work".to_string(),
+                    startup_dir: Some("/tmp/work".to_string()),
+                },
+                vmux_history::LastActivatedAt(2),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneId("root".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let left = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("left".to_string()),
+                PaneSize { flex_grow: 1.0 },
+                ChildOf(root),
+            ))
+            .id();
+        let right = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneId("right".to_string()),
+                PaneSize { flex_grow: 2.0 },
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://left.example".to_string(),
+                ..default()
+            },
+            vmux_history::LastActivatedAt(3),
+            ChildOf(left),
+        ));
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata {
+                url: "https://right.example".to_string(),
+                ..default()
+            },
+            vmux_history::LastActivatedAt(4),
+            ChildOf(right),
+        ));
+        app.world_mut().spawn((
+            Stack::default(),
+            PageMetadata::default(),
+            vmux_history::LastActivatedAt(2),
+            ChildOf(left),
+        ));
+        app.world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .write(CloseTabRequest { tab });
+
+        app.update();
+
+        assert!(app.world().get_entity(tab).is_err());
+        let mut query = app
+            .world_mut()
+            .query::<(&ArchivedPage, &ArchivedPagePosition, &ArchivedTabPage)>();
+        let archived: Vec<_> = query
+            .iter(app.world())
+            .map(|(page, position, tab)| {
+                (
+                    page.url.clone(),
+                    position.leaf_pane_id.clone(),
+                    tab.group_id.clone(),
+                    tab.tab_name.clone(),
+                    tab.tab_startup_dir.clone(),
+                    tab.active,
+                )
+            })
+            .collect();
+        assert_eq!(archived.len(), 3);
+        assert_eq!(
+            archived
+                .iter()
+                .map(|entry| entry.2.as_str())
+                .collect::<HashSet<_>>()
+                .len(),
+            1
+        );
+        assert!(archived.iter().all(|entry| entry.3 == "Work"));
+        assert!(
+            archived
+                .iter()
+                .all(|entry| entry.4.as_deref() == Some("/tmp/work"))
+        );
+        assert_eq!(archived.iter().filter(|entry| entry.5).count(), 1);
+        assert!(
+            archived
+                .iter()
+                .any(|entry| entry.0 == "https://right.example" && entry.5)
+        );
+        assert!(
+            archived
+                .iter()
+                .any(|entry| entry.1 == "left" && entry.0 == "https://left.example")
+        );
+        assert!(
+            archived
+                .iter()
+                .any(|entry| entry.1 == "right" && entry.0 == "https://right.example")
+        );
+        assert!(
+            archived
+                .iter()
+                .any(|entry| entry.1 == "left" && entry.0.is_empty())
+        );
+    }
+
+    #[test]
+    fn closing_last_two_tabs_same_frame_requests_one_replacement() {
+        let mut app = App::new();
+        app.add_message::<CloseTabRequest>()
+            .add_message::<TabLayoutSpawnRequest>()
+            .init_resource::<LastTabCloseAt>()
+            .add_systems(Update, super::handle_close_tab_requests);
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string()), vmux_core::Active))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            PathBuf::from("/tmp"),
+        ))));
+        let first = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_history::LastActivatedAt(2),
+                vmux_core::Active,
+                ChildOf(space),
+            ))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                vmux_history::LastActivatedAt(1),
+                ChildOf(space),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .write(CloseTabRequest { tab: first });
+        app.world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .write(CloseTabRequest { tab: second });
+
+        app.update();
+
+        assert!(app.world().get_entity(first).is_err());
+        assert!(app.world().get_entity(second).is_err());
+        let requests: Vec<TabLayoutSpawnRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<TabLayoutSpawnRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].space, space);
+    }
+
     fn reopen_app() -> App {
         let mut app = App::new();
         app.add_message::<AppCommand>()
@@ -915,6 +1680,231 @@ mod tests {
             .resource_mut::<Messages<PageOpenRequest>>()
             .drain()
             .collect()
+    }
+
+    #[derive(Resource, Default)]
+    struct CapturedTerminalSpawnTargets(Vec<bool>);
+
+    fn capture_terminal_spawn_targets(
+        mut reader: MessageReader<TerminalSpawnRequest>,
+        stacks: Query<(), With<Stack>>,
+        mut captured: ResMut<CapturedTerminalSpawnTargets>,
+    ) {
+        for request in reader.read() {
+            captured.0.push(
+                request
+                    .target_stack
+                    .is_some_and(|stack| stacks.contains(stack)),
+            );
+        }
+    }
+
+    #[test]
+    fn reopen_terminal_dispatches_after_target_stack_materializes() {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<SpawnAgentInStackRequest>()
+            .add_message::<TerminalSpawnRequest>()
+            .init_resource::<crate::space::ActiveSpaceEntity>()
+            .init_resource::<crate::settings::LayoutSettings>()
+            .init_resource::<CapturedTerminalSpawnTargets>()
+            .add_systems(
+                Update,
+                (
+                    super::handle_reopen_closed_page,
+                    capture_terminal_spawn_targets,
+                )
+                    .chain_ignore_deferred(),
+            );
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), bevy::window::PrimaryWindow));
+        app.world_mut().spawn((Space, SpaceId("s1".to_string())));
+        app.world_mut().spawn(ArchivedPage {
+            url: TERMINAL_PAGE_URL.to_string(),
+            space_id: "s1".to_string(),
+            closed_at: 5,
+            ..default()
+        });
+
+        dispatch_reopen(&mut app);
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CapturedTerminalSpawnTargets>().0,
+            vec![true]
+        );
+    }
+
+    #[test]
+    fn reopen_tab_group_restores_panes_and_stacks_together() {
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        app.world_mut().spawn((
+            Tab {
+                name: "Existing".to_string(),
+                startup_dir: None,
+            },
+            ChildOf(space),
+        ));
+        for (url, leaf, stack_index, child_index, active) in [
+            ("https://left-1.example", "left", 0, 0, false),
+            ("https://left-2.example", "left", 1, 0, false),
+            ("", "left", 2, 0, false),
+            ("https://right.example", "right", 0, 1, true),
+        ] {
+            app.world_mut().spawn((
+                ArchivedPage {
+                    url: url.to_string(),
+                    space_id: "s1".to_string(),
+                    closed_at: 10,
+                    tab_index: Some(1),
+                    ..default()
+                },
+                ArchivedPagePosition {
+                    leaf_pane_id: leaf.to_string(),
+                    stack_index,
+                    pane_path: vec![PaneStep {
+                        split_id: "root".to_string(),
+                        axis: SplitAxis::Row,
+                        child_index,
+                        flex_weights: vec![1.0, 2.0],
+                    }],
+                },
+                ArchivedTabPage {
+                    group_id: "group-1".to_string(),
+                    tab_name: "Recovered".to_string(),
+                    tab_startup_dir: Some("/tmp/recovered".to_string()),
+                    active,
+                },
+            ));
+        }
+
+        dispatch_reopen(&mut app);
+
+        let tabs: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(tabs.len(), 2);
+        let recovered = tabs
+            .into_iter()
+            .find(|entity| {
+                app.world()
+                    .get::<Tab>(*entity)
+                    .is_some_and(|tab| tab.name == "Recovered")
+            })
+            .expect("recovered tab");
+        let recovered_tab = app.world().get::<Tab>(recovered).unwrap();
+        assert_eq!(recovered_tab.startup_dir.as_deref(), Some("/tmp/recovered"));
+        let space_tabs: Vec<Entity> = app
+            .world()
+            .get::<Children>(space)
+            .unwrap()
+            .iter()
+            .filter(|entity| app.world().get::<Tab>(*entity).is_some())
+            .collect();
+        assert_eq!(space_tabs[1], recovered);
+        let root = app
+            .world_mut()
+            .query::<(Entity, &PaneId)>()
+            .iter(app.world())
+            .find(|(_, id)| id.0 == "root")
+            .map(|(entity, _)| entity)
+            .expect("root pane");
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(root)
+                .map(|parent| parent.parent()),
+            Some(recovered)
+        );
+        assert_eq!(
+            app.world()
+                .get::<PaneSplit>(root)
+                .map(|split| split.direction),
+            Some(PaneSplitDirection::Row)
+        );
+        assert!(
+            app.world()
+                .get::<vmux_history::LastActivatedAt>(root)
+                .is_some_and(|activated| activated.0 > 0)
+        );
+        for (leaf_id, expected_urls) in [
+            (
+                "left",
+                vec![
+                    "https://left-1.example".to_string(),
+                    "https://left-2.example".to_string(),
+                    String::new(),
+                ],
+            ),
+            ("right", vec!["https://right.example".to_string()]),
+        ] {
+            let leaf = app
+                .world_mut()
+                .query::<(Entity, &PaneId)>()
+                .iter(app.world())
+                .find(|(_, id)| id.0 == leaf_id)
+                .map(|(entity, _)| entity)
+                .expect("leaf pane");
+            let expected_flex = if leaf_id == "left" { 1.0 } else { 2.0 };
+            assert_eq!(
+                app.world().get::<PaneSize>(leaf).map(|size| size.flex_grow),
+                Some(expected_flex)
+            );
+            let urls: Vec<String> = app
+                .world()
+                .get::<Children>(leaf)
+                .unwrap()
+                .iter()
+                .filter_map(|stack| app.world().get::<PageMetadata>(stack))
+                .map(|metadata| metadata.url.clone())
+                .collect();
+            assert_eq!(urls, expected_urls);
+            if leaf_id == "right" {
+                assert!(
+                    app.world()
+                        .get::<vmux_history::LastActivatedAt>(leaf)
+                        .is_some_and(|activated| activated.0 > 0)
+                );
+                let active_stack = app
+                    .world()
+                    .get::<Children>(leaf)
+                    .unwrap()
+                    .iter()
+                    .find(|stack| {
+                        app.world()
+                            .get::<PageMetadata>(*stack)
+                            .is_some_and(|metadata| metadata.url == "https://right.example")
+                    })
+                    .expect("active stack");
+                assert!(
+                    app.world()
+                        .get::<vmux_history::LastActivatedAt>(active_stack)
+                        .is_some_and(|activated| activated.0 > 0)
+                );
+            }
+        }
+        assert_eq!(
+            app.world_mut()
+                .query::<(&Stack, &vmux_history::LastActivatedAt)>()
+                .iter(app.world())
+                .filter(|(_, activated)| activated.0 > 0)
+                .count(),
+            1
+        );
+        assert_eq!(drain_opens(&mut app).len(), 3);
+        assert_eq!(
+            app.world_mut()
+                .query::<&ArchivedPage>()
+                .iter(app.world())
+                .count(),
+            0
+        );
     }
 
     #[test]
@@ -1452,6 +2442,79 @@ mod tests {
                 .get::<vmux_history::LastActivatedAt>()
                 .is_some(),
             "reattached intermediate split is activated through the restored chain"
+        );
+    }
+
+    #[test]
+    fn reopen_stale_leaf_id_that_is_now_split_uses_descendant_leaf() {
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneId("root".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let promoted = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                PaneId("old-leaf".to_string()),
+                ChildOf(root),
+            ))
+            .id();
+        let survivor = app
+            .world_mut()
+            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(promoted)))
+            .id();
+        app.world_mut().spawn((Stack::default(), ChildOf(survivor)));
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://reopened.example".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "old-leaf".to_string(),
+                stack_index: 0,
+                pane_path: vec![PaneStep {
+                    split_id: "root".to_string(),
+                    axis: SplitAxis::Row,
+                    child_index: 0,
+                    flex_weights: vec![1.0],
+                }],
+            },
+        ));
+
+        dispatch_reopen(&mut app);
+
+        let reopened = app
+            .world_mut()
+            .query::<(Entity, &PageMetadata)>()
+            .iter(app.world())
+            .find(|(_, metadata)| metadata.url == "https://reopened.example")
+            .map(|(entity, _)| entity)
+            .expect("reopened stack");
+        let parent = app.world().get::<ChildOf>(reopened).unwrap().parent();
+        assert_eq!(parent, survivor);
+        assert!(app.world().get::<PaneSplit>(parent).is_none());
+        assert!(
+            app.world()
+                .get::<Children>(promoted)
+                .is_some_and(|children| !children.contains(&reopened))
         );
     }
 

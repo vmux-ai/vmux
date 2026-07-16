@@ -53,8 +53,9 @@ When taking a Linear issue (e.g. "take VMX-XX"), immediately move it to **In Pro
 1. Check if a worktree already exists: `git worktree list`
 2. Create worktree if needed: `git worktree add .worktrees/vmx-<number> -b <branch-name>` — always name the worktree directory using the `vmx-<number>` convention matching the Linear issue (e.g., `.worktrees/vmx-88`).
 3. `cd` into the worktree directory and make all edits there. The first build through `make` automatically seeds its build cache from the main worktree.
-4. When done, merge to main, then remove: `git worktree remove .worktrees/<short-name>`
-5. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
+4. When done, commit on the feature branch, push it, and open a PR. Never merge feature work into local `main`.
+5. After the PR is merged remotely, remove the worktree: `git worktree remove .worktrees/<short-name>`
+6. Remember: if the worktree is deleted while your shell is inside it, `cd` back to the repo root — `../..` won't work.
 
 Worktree directory: `.worktrees/` (already in `.gitignore`).
 
@@ -74,5 +75,7 @@ After merging, clean up: remove the worktree (`git worktree remove .worktrees/<n
 - Delete the plan file once the plan is fully implemented.
 
 ## Git
+
+Never merge, rebase, or cherry-pick feature work into local `main`. Land changes through PRs only.
 
 Always prefer `git rebase` over `git merge` when updating branches. Use `git push --force-with-lease` after rebasing.

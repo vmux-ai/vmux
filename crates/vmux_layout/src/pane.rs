@@ -61,6 +61,7 @@ impl Plugin for PanePlugin {
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<SpawnCounter>()
+            .add_systems(Update, repair_stacks_parented_to_splits)
             .add_systems(Update, stamp_spawn_seq)
             .add_systems(Update, assign_pane_ids)
             .add_systems(
@@ -512,6 +513,41 @@ pub fn first_leaf_descendant(
         }
     }
     entity
+}
+
+fn repair_stacks_parented_to_splits(
+    splits: Query<
+        (Entity, &Children),
+        (With<PaneSplit>, Or<(Added<PaneSplit>, Changed<Children>)>),
+    >,
+    pane_children: Query<&Children, With<Pane>>,
+    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    stacks: Query<(), With<Stack>>,
+    mut commands: Commands,
+) {
+    for (split, children) in &splits {
+        let direct_stacks: Vec<Entity> = children
+            .iter()
+            .filter(|&child| stacks.contains(child))
+            .collect();
+        if direct_stacks.is_empty() {
+            continue;
+        }
+        let mut leaf = first_leaf_descendant(split, &pane_children, &leaf_panes);
+        if leaf == split {
+            leaf = commands
+                .spawn((leaf_pane_bundle(), LastActivatedAt::now(), ChildOf(split)))
+                .id();
+        }
+        warn!(
+            "Repairing {} stack(s) parented directly to pane split {:?}",
+            direct_stacks.len(),
+            split
+        );
+        for stack in direct_stacks {
+            commands.entity(stack).insert(ChildOf(leaf));
+        }
+    }
 }
 
 pub fn first_stack_in_pane(
@@ -2765,6 +2801,39 @@ mod tests {
         app.world_mut()
             .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(id)));
         id
+    }
+
+    #[test]
+    fn repair_direct_stack_child_of_split_moves_it_to_leaf() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, repair_stacks_parented_to_splits);
+        let split = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(split)))
+            .id();
+        let leaf = app.world_mut().spawn((Pane, ChildOf(split))).id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(stack).map(Relationship::get),
+            Some(leaf)
+        );
+        assert!(
+            app.world()
+                .get::<Children>(split)
+                .is_some_and(|children| !children.contains(&stack))
+        );
     }
 
     #[test]

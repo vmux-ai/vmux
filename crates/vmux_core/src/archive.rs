@@ -26,6 +26,18 @@ pub struct ArchivedPagePosition {
     pub pane_path: Vec<PaneStep>,
 }
 
+/// Membership and tab metadata for a page archived by a whole-tab close.
+#[derive(Component, Clone, Debug, Reflect, Default)]
+#[reflect(Component, Default)]
+#[require(Save)]
+#[type_path = "vmux_core::archive"]
+pub struct ArchivedTabPage {
+    pub group_id: String,
+    pub tab_name: String,
+    pub tab_startup_dir: Option<String>,
+    pub active: bool,
+}
+
 #[derive(Clone, Debug, Reflect, Default, PartialEq)]
 #[type_path = "vmux_core::archive"]
 pub struct PaneStep {
@@ -87,6 +99,11 @@ mod tests {
         assert!(
             registry
                 .get(std::any::TypeId::of::<ArchivedPagePosition>())
+                .is_some()
+        );
+        assert!(
+            registry
+                .get(std::any::TypeId::of::<ArchivedTabPage>())
                 .is_some()
         );
         assert!(registry.get(std::any::TypeId::of::<PaneStep>()).is_some());
