@@ -78,12 +78,12 @@ cd "$ROOT"
 if [[ "$PROFILE" == "local" ]]; then
     # Local skips the dmg pass; `make build-local` ad-hoc-signs the
     # .app separately via sign-and-notarize.sh + SKIP_NOTARIZE=1.
-    env -u CEF_PATH VMUX_BUILD_PROFILE="$PROFILE" cargo packager --release --formats app
+    VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" packager --release --formats app
 else
     # Release: single invocation builds the .app, then the dmg pass'
     # before-each hook injects CEF + signs + notarizes before
     # dmg::package wraps it. Uses formats=["app","dmg"] from Cargo.toml.
-    env -u CEF_PATH VMUX_BUILD_PROFILE="$PROFILE" cargo packager --release
+    VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" packager --release
 fi
 
 # inject-cef only meaningfully runs in the dmg-format pass (the .app

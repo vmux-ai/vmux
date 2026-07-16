@@ -30,6 +30,8 @@ make doctor
 make
 ```
 
+The first build through `make` in a linked worktree automatically seeds its build cache from the main worktree.
+
 See [Makefile](Makefile) for all targets.
 
 ## License
