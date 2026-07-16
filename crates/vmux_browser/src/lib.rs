@@ -384,6 +384,7 @@ fn clear_native_layout_pointer_regions() {
     });
 }
 
+#[cfg(target_os = "macos")]
 fn set_native_layout_mouse_presenter(scale: f32, presenter: Option<NativeMouseMovePresenter>) {
     NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow_mut(|state| {
         state.scale = scale;
@@ -398,6 +399,7 @@ fn set_native_layout_mouse_presenter(scale: f32, presenter: Option<NativeMouseMo
     });
 }
 
+#[cfg(target_os = "macos")]
 fn native_layout_mouse_presenter_active() -> bool {
     NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| state.presenter.is_some())
 }
