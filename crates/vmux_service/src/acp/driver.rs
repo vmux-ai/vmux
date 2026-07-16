@@ -47,6 +47,7 @@ pub enum AcpInput {
         decision: ApprovalDecision,
     },
     SetModel {
+        request_id: u64,
         config_id: String,
         model_id: String,
     },
@@ -685,6 +686,7 @@ pub async fn run(
                         }
                     }
                     AcpInput::SetModel {
+                        request_id,
                         config_id,
                         model_id,
                     } => {
@@ -709,8 +711,20 @@ pub async fn run(
                                     &model_id,
                                     &response.config_options,
                                 );
+                                publish_model_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &model_id,
+                                    true,
+                                );
                             }
                             Err(err) => {
+                                publish_model_selection_result(
+                                    &main_shared,
+                                    request_id,
+                                    &model_id,
+                                    false,
+                                );
                                 main_shared.emit_status(AgentRunStatus::Errored(format!(
                                     "acp model selection failed: {err}"
                                 )));
@@ -757,6 +771,20 @@ fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
             (!name.is_empty()).then_some(name)
         })
         .map(str::to_string)
+}
+
+fn publish_model_selection_result(
+    shared: &AcpShared,
+    request_id: u64,
+    model_id: &str,
+    succeeded: bool,
+) {
+    shared.emit(ServiceMessage::AcpModelSelectionResult {
+        sid: shared.sid.clone(),
+        request_id,
+        model_id: model_id.to_string(),
+        succeeded,
+    });
 }
 
 async fn load_requested_session<F, Fut, E>(
@@ -1279,6 +1307,35 @@ mod tests {
                 assert_eq!(models[0].name, "Claude Sonnet");
             }
             other => panic!("expected replayable ACP model info, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn model_selection_result_publishes_request_identity() {
+        let (stream_tx, mut stream_rx) = broadcast::channel(2);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        publish_model_selection_result(&shared, 7, "fable", false);
+
+        match stream_rx.try_recv().expect("selection result") {
+            ServiceMessage::AcpModelSelectionResult {
+                sid,
+                request_id,
+                model_id,
+                succeeded,
+            } => {
+                assert_eq!(sid, "s1");
+                assert_eq!(request_id, 7);
+                assert_eq!(model_id, "fable");
+                assert!(!succeeded);
+            }
+            other => panic!("expected ACP model selection result, got {other:?}"),
         }
     }
 

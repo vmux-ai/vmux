@@ -134,22 +134,45 @@ fn approval_detail_label(path: &str) -> String {
 pub struct AgentChatPagePlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Message)]
+struct AcpSetModelRequest {
+    sid: String,
+    request_id: u64,
+    config_id: String,
+    model_id: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
+struct AcpModelRequestCounter(u64);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AcpModelRequestCounter {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1);
+        self.0
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(
-            ChatSubmit,
-            ChatApproval,
-            ChatCancel,
-            ChatResume,
-            ChatClearQueue,
-            ChatCancelQueuedPrompt,
-            ChatEscape,
-            ResumeListRequest,
-            ResumeSession,
-            RuntimeSwitchRequest,
-            SelectModel,
-        )>::for_hosts(&["agent"]))
+        app.init_resource::<AcpModelRequestCounter>()
+            .add_message::<AcpSetModelRequest>()
+            .add_plugins(BinEventEmitterPlugin::<(
+                ChatSubmit,
+                ChatApproval,
+                ChatCancel,
+                ChatResume,
+                ChatClearQueue,
+                ChatCancelQueuedPrompt,
+                ChatEscape,
+                ResumeListRequest,
+                ResumeSession,
+                RuntimeSwitchRequest,
+                SelectModel,
+            )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -169,6 +192,7 @@ impl Plugin for AgentChatPagePlugin {
                     sync_chat_to_ready_views,
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
+                    send_acp_model_requests,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -298,7 +322,7 @@ fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
         return ModelState::default();
     };
     ModelState {
-        current_model_id: state.current_model_id.clone(),
+        current_model_id: state.display_model_id().to_string(),
         current_model_name: state.current_name().to_string(),
         models: state
             .models
@@ -726,27 +750,51 @@ fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommand
 fn on_select_model(
     trigger: On<BinReceive<SelectModel>>,
     child_of: Query<&ChildOf>,
-    sessions: Query<(&AcpSession, &AcpModelState)>,
+    mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
+    mut counter: ResMut<AcpModelRequestCounter>,
+    mut requests: MessageWriter<AcpSetModelRequest>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((session, mut model_state)) = sessions.get_mut(parent.parent()) else {
+        return;
+    };
+    let model_id = trigger.event().payload.model_id.clone();
+    if model_state.display_model_id() == model_id
+        || !model_state.models.iter().any(|model| model.id == model_id)
+    {
+        return;
+    }
+    let request_id = counter.next();
+    requests.write(AcpSetModelRequest {
+        sid: session.sid.clone(),
+        request_id,
+        config_id: model_state.config_id.clone(),
+        model_id: model_id.clone(),
+    });
+    model_state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+        request_id,
+        model_id,
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn send_acp_model_requests(
+    mut requests: MessageReader<AcpSetModelRequest>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let Ok((session, model_state)) = sessions.get(parent.parent()) else {
-        return;
-    };
-    let model_id = trigger.event().payload.model_id.clone();
-    if !model_state.models.iter().any(|model| model.id == model_id) {
-        return;
+    for request in requests.read() {
+        service.0.send(ClientMessage::AcpSetModel {
+            sid: request.sid.clone(),
+            request_id: request.request_id,
+            config_id: request.config_id.clone(),
+            model_id: request.model_id.clone(),
+        });
     }
-    service.0.send(ClientMessage::AcpSetModel {
-        sid: session.sid.clone(),
-        config_id: model_state.config_id.clone(),
-        model_id,
-    });
 }
 
 /// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
@@ -1077,6 +1125,96 @@ mod native_tests {
         let with_cli = slash_commands_for(true, false);
         assert_eq!(with_cli.len(), 2);
         assert_eq!(with_cli[1].name, "cli");
+    }
+
+    #[test]
+    fn model_selection_updates_cached_state_before_response() {
+        let mut app = App::new();
+        app.init_resource::<AcpModelRequestCounter>()
+            .add_message::<AcpSetModelRequest>()
+            .add_observer(on_select_model);
+        let stack = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s1".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AcpModelState {
+                    config_id: "model".into(),
+                    current_model_id: "default".into(),
+                    pending: None,
+                    models: vec![
+                        vmux_service::protocol::AcpModelOption {
+                            id: "default".into(),
+                            name: "Default".into(),
+                            description: None,
+                        },
+                        vmux_service::protocol::AcpModelOption {
+                            id: "fable".into(),
+                            name: "Fable".into(),
+                            description: None,
+                        },
+                    ],
+                },
+            ))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: SelectModel {
+                model_id: "fable".into(),
+            },
+        });
+
+        let state = app.world().get::<AcpModelState>(stack).unwrap();
+        assert_eq!(state.current_model_id, "default");
+        assert_eq!(
+            state.pending.as_ref().map(|pending| pending.request_id),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .pending
+                .as_ref()
+                .map(|pending| pending.model_id.as_str()),
+            Some("fable")
+        );
+        assert_eq!(state.current_name(), "Fable");
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AcpSetModelRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].sid, "s1");
+        assert_eq!(requests[0].request_id, 1);
+        assert_eq!(requests[0].config_id, "model");
+        assert_eq!(requests[0].model_id, "fable");
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: SelectModel {
+                model_id: "fable".into(),
+            },
+        });
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: SelectModel {
+                model_id: "missing".into(),
+            },
+        });
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<AcpSetModelRequest>>()
+                .drain()
+                .count(),
+            0
+        );
     }
 
     #[test]

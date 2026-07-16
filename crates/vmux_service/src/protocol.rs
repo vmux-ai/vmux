@@ -468,6 +468,7 @@ pub enum ClientMessage {
     /// Select a model exposed by an ACP session's model configuration option.
     AcpSetModel {
         sid: String,
+        request_id: u64,
         config_id: String,
         model_id: String,
     },
@@ -793,6 +794,13 @@ pub enum ServiceMessage {
         config_id: String,
         current_model_id: String,
         models: Vec<AcpModelOption>,
+    },
+    /// Completion of a model selection request, correlated by `request_id`.
+    AcpModelSelectionResult {
+        sid: String,
+        request_id: u64,
+        model_id: String,
+        succeeded: bool,
     },
 }
 
@@ -1307,6 +1315,7 @@ mod tests {
             },
             ClientMessage::AcpSetModel {
                 sid: "s".into(),
+                request_id: 7,
                 config_id: "model".into(),
                 model_id: "sonnet".into(),
             },
@@ -1378,6 +1387,12 @@ mod tests {
                     name: "Claude Sonnet".into(),
                     description: Some("Balanced".into()),
                 }],
+            },
+            ServiceMessage::AcpModelSelectionResult {
+                sid: "s".into(),
+                request_id: 7,
+                model_id: "opus".into(),
+                succeeded: false,
             },
         ];
         for msg in services {

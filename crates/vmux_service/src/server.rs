@@ -792,12 +792,14 @@ async fn handle_client(
 
             ClientMessage::AcpSetModel {
                 sid,
+                request_id,
                 config_id,
                 model_id,
             } => {
                 acp_manager.lock().await.input(
                     &sid,
                     crate::acp::AcpInput::SetModel {
+                        request_id,
                         config_id,
                         model_id,
                     },

@@ -1187,6 +1187,8 @@ struct PollServiceWriters<'w> {
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
     page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
+    page_agent_model_selection_result:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
     page_agent_session_created:
         MessageWriter<'w, vmux_service::agent_events::PageAgentSessionCreated>,
     page_agent_acp_terminal_created:
@@ -1700,6 +1702,21 @@ fn poll_service_messages(
                         config_id,
                         current_model_id,
                         models,
+                    },
+                );
+            }
+            ServiceMessage::AcpModelSelectionResult {
+                sid,
+                request_id,
+                model_id,
+                succeeded,
+            } => {
+                writers.page_agent_model_selection_result.write(
+                    vmux_service::agent_events::PageAgentModelSelectionResult {
+                        sid,
+                        request_id,
+                        model_id,
+                        succeeded,
                     },
                 );
             }
