@@ -31,7 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Resolve cef crate version from Cargo.lock
@@ -52,7 +52,7 @@ jobs:
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -97,7 +97,7 @@ jobs:
           shared-key: api-docs
 
       - name: Cache CEF framework
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}

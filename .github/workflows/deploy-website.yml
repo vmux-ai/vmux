@@ -34,7 +34,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.95.0
@@ -47,13 +47,13 @@ jobs:
           shared-key: deploy-website
 
       - name: Cache tailwindcss
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
 
       - name: Cache binaryen
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
@@ -95,10 +95,10 @@ jobs:
         run: install -m 0644 scripts/install.sh website/target/dx/vmux_website/release/web/public/install
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: website/target/dx/vmux_website/release/web/public
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
