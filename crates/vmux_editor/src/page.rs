@@ -152,6 +152,42 @@ fn diff_marker_class(marker: EditorDiffMarker) -> &'static str {
     }
 }
 
+fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "text-ansi-2",
+        EditorDiffMarker::Modified => "text-cyan-500 dark:text-cyan-300",
+        EditorDiffMarker::Deleted => "text-ansi-1",
+        EditorDiffMarker::Staged => "text-ansi-2/80",
+    }
+}
+
+fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
+        EditorDiffMarker::Modified => "bg-cyan-400/[0.06] hover:bg-cyan-400/[0.10]",
+        EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
+        EditorDiffMarker::Staged => "bg-ansi-2/[0.035] hover:bg-ansi-2/[0.07]",
+    }
+}
+
+fn reveal_git_change(
+    markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    cell_dims: Signal<(f64, f64)>,
+) {
+    let Some(line) = markers.read().keys().min().copied() else {
+        return;
+    };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let closure = Closure::once(move || {
+        ensure_line_visible(line.saturating_sub(1), cell_dims().1);
+    });
+    let _ = window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 0);
+    closure.forget();
+}
+
 fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
     if show_hidden {
         all.to_vec()
@@ -828,6 +864,8 @@ pub fn Page() -> Element {
                             file_view_mode.set(next);
                             if next == FileViewMode::Diff {
                                 git_nonce.set(git_nonce().wrapping_add(1));
+                            } else {
+                                reveal_git_change(git_line_markers, cell_dims);
                             }
                             let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: next });
                         },
@@ -1075,7 +1113,7 @@ pub fn Page() -> Element {
                                                 rsx! {
                                                     div {
                                                         key: "{ln}",
-                                                        class: "group flex hover:bg-foreground/[0.035]",
+                                                        class: if let Some(marker) = diff_marker { "group flex {diff_marker_row_class(marker)}" } else { "group flex hover:bg-foreground/[0.035]" },
                                                         style: "position:absolute;left:0;right:0;top:{lt}px;",
                                                         onmousedown: move |e: Event<MouseData>| {
                                                             e.prevent_default();
@@ -1180,7 +1218,10 @@ pub fn Page() -> Element {
                                                             if let Some(s) = sev {
                                                                 span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }
-                                                            span { class: "text-right opacity-40 group-hover:opacity-90", "{ln + 1}" }
+                                                            span {
+                                                                class: if let Some(marker) = diff_marker { "text-right opacity-90 {diff_marker_text_class(marker)}" } else { "text-right opacity-40 group-hover:opacity-90" },
+                                                                "{ln + 1}"
+                                                            }
                                                             match fold {
                                                                 FoldGutter::Open => {
                                                                     let vis = if gutter_hover() { "opacity-100" } else { "opacity-0" };
