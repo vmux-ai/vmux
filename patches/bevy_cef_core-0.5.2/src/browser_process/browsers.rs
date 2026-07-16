@@ -63,6 +63,35 @@ pub const BACKGROUND_WINDOWLESS_FRAME_RATE: i32 = 30;
 /// Frame rate for a hidden host window. CEF still needs a nonzero rate to keep timers alive.
 pub const HIDDEN_WINDOWLESS_FRAME_RATE: i32 = 1;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeMouseButtons {
+    pub left: bool,
+    pub right: bool,
+    pub middle: bool,
+}
+
+#[derive(Clone)]
+pub struct NativeMouseMovePresenter {
+    browser_id: i32,
+    host: BrowserHost,
+}
+
+impl NativeMouseMovePresenter {
+    pub fn browser_id(&self) -> i32 {
+        self.browser_id
+    }
+
+    pub fn send(&self, position: Vec2, buttons: NativeMouseButtons, mouse_leave: bool) {
+        let mouse_event = cef::MouseEvent {
+            x: position.x as i32,
+            y: position.y as i32,
+            modifiers: modifiers_from_native_mouse_buttons(buttons),
+        };
+        self.host
+            .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
+    }
+}
+
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
 
 /// Whether a webview at `uri` must use an extension-free request context.
@@ -198,6 +227,7 @@ impl Browsers {
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
+        accelerated_presenter: Option<AcceleratedFramePresenter>,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
@@ -237,6 +267,7 @@ impl Browsers {
             media_permission_sender,
             webview_popup_sender,
             texture_wake,
+            accelerated_presenter,
             !allow_native_focus,
         );
 
@@ -534,6 +565,17 @@ impl Browsers {
                 .host
                 .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
         }
+    }
+
+    pub fn native_mouse_move_presenter(
+        &self,
+        webview: &Entity,
+    ) -> Option<NativeMouseMovePresenter> {
+        let browser = self.browsers.get(webview)?;
+        (!browser.windowed).then(|| NativeMouseMovePresenter {
+            browser_id: browser.client.identifier(),
+            host: browser.host.clone(),
+        })
     }
 
     pub fn send_mouse_click(
@@ -1970,6 +2012,7 @@ impl Browsers {
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
+        accelerated_presenter: Option<AcceleratedFramePresenter>,
         cancel_native_focus: bool,
     ) -> Client {
         let client = ClientHandlerBuilder::new(RenderHandlerBuilder::build(
@@ -1977,6 +2020,7 @@ impl Browsers {
             self.sender.clone(),
             self.accel_sender.clone(),
             texture_wake.clone(),
+            accelerated_presenter,
             size.clone(),
             device_scale.clone(),
         ))
@@ -2052,6 +2096,21 @@ pub fn modifiers_from_mouse_buttons<'a>(buttons: impl IntoIterator<Item = &'a Mo
             }
             _ => {}
         }
+    }
+    modifiers
+}
+
+#[allow(clippy::unnecessary_cast)]
+pub fn modifiers_from_native_mouse_buttons(buttons: NativeMouseButtons) -> u32 {
+    let mut modifiers = cef_event_flags_t::EVENTFLAG_NONE.0 as u32;
+    if buttons.left {
+        modifiers |= cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0 as u32;
+    }
+    if buttons.right {
+        modifiers |= cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0 as u32;
+    }
+    if buttons.middle {
+        modifiers |= cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0 as u32;
     }
     modifiers
 }
@@ -2143,7 +2202,9 @@ mod tests {
         windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
-    use crate::prelude::modifiers_from_mouse_buttons;
+    use crate::prelude::{
+        NativeMouseButtons, modifiers_from_mouse_buttons, modifiers_from_native_mouse_buttons,
+    };
     use bevy::prelude::*;
     use std::time::Duration;
 
@@ -2215,6 +2276,21 @@ mod tests {
             modifiers,
             cef_dll_sys::cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0 as u32
                 | cef_dll_sys::cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0 as u32
+        );
+    }
+
+    #[test]
+    #[allow(clippy::unnecessary_cast)]
+    fn native_mouse_buttons_map_to_cef_modifiers() {
+        let modifiers = modifiers_from_native_mouse_buttons(NativeMouseButtons {
+            left: true,
+            right: false,
+            middle: true,
+        });
+        assert_eq!(
+            modifiers,
+            cef_dll_sys::cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0 as u32
+                | cef_dll_sys::cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0 as u32
         );
     }
 

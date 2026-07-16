@@ -680,17 +680,24 @@ fn sync_window_surface_alpha(
 fn apply_webview_material_defaults(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     q: Query<
-        &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+        (
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+            Has<WebviewTransparent>,
+        ),
         Or<(
             Added<WebviewSource>,
             Changed<WebviewMaterialHandle<WebviewExtendStandardMaterial>>,
         )>,
     >,
 ) {
-    for handle in &q {
+    for (handle, transparent) in &q {
         if let Some(mut material) = materials.get_mut(handle) {
             material.base.unlit = true;
-            material.base.alpha_mode = AlphaMode::Blend;
+            material.base.alpha_mode = if transparent {
+                AlphaMode::Premultiplied
+            } else {
+                AlphaMode::Blend
+            };
             material.base.depth_bias = WEBVIEW_MESH_DEPTH_BIAS;
             material.base.cull_mode = None;
         }
@@ -1073,6 +1080,33 @@ mod tests {
         assert_eq!(material.base.cull_mode, None);
     }
 
+    #[cfg(feature = "player-mode")]
+    #[test]
+    fn transparent_webview_material_uses_premultiplied_alpha() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, apply_webview_material_defaults);
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
+            .add(WebviewExtendStandardMaterial::default());
+        app.world_mut().spawn((
+            WebviewSource::new("https://example.com/"),
+            WebviewTransparent,
+            WebviewMaterialHandle(handle.clone()),
+        ));
+        app.update();
+
+        let material = app
+            .world()
+            .resource::<Assets<WebviewExtendStandardMaterial>>()
+            .get(&handle)
+            .expect("webview material");
+
+        assert_eq!(material.base.alpha_mode, AlphaMode::Premultiplied);
+    }
+
     fn test_settings(gap: f32) -> LayoutSettings {
         LayoutSettings {
             radius: 0.0,
@@ -1171,7 +1205,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_uses_transparent_osr_native_overlay() {
+    fn layout_uses_transparent_osr_surface() {
         let mut app = setup_window_app();
         app.update();
 
@@ -1202,10 +1236,11 @@ mod tests {
                 .get::<WebviewNativeOverlay>(layout_shell)
                 .is_none()
         );
-        assert!(
+        assert_eq!(
             app.world()
                 .get::<WebviewMaxFrameRate>(layout_shell)
-                .is_none()
+                .map(|rate| rate.0),
+            Some(30)
         );
         assert!(
             app.world()

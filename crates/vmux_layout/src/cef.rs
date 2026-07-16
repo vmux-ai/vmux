@@ -4,6 +4,8 @@ use bevy_cef::prelude::*;
 
 use crate::event::LAYOUT_PAGE_URL;
 
+const LAYOUT_OSR_MAX_FRAME_RATE: i32 = 30;
+
 #[derive(Component)]
 pub struct Browser;
 
@@ -215,11 +217,14 @@ pub fn layout_cef_bundle(
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     (
-        LayoutCef,
-        Browser,
-        HostWindow(host_window),
-        WebviewTransparent,
-        bevy_cef::prelude::CefIgnorePinchZoom,
+        (
+            LayoutCef,
+            Browser,
+            HostWindow(host_window),
+            WebviewTransparent,
+            WebviewMaxFrameRate(LAYOUT_OSR_MAX_FRAME_RATE),
+            bevy_cef::prelude::CefIgnorePinchZoom,
+        ),
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),

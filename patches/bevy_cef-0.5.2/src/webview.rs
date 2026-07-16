@@ -2,7 +2,7 @@ use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
-    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewNativeOverlay,
+    WebviewMaxFrameRate, WebviewNativeDirectOverlay, WebviewNativeLiquidGlass,
     WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
     WebviewWindowed, WebviewWindowedNativeFocus,
 };
@@ -35,6 +35,9 @@ mod webview_sprite;
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
 
+#[derive(Resource, Clone, Default)]
+pub struct NativeOverlayPresenter(pub Option<AcceleratedFramePresenter>);
+
 #[derive(Resource, Clone)]
 struct TextureWakeMinInterval(Arc<AtomicU64>);
 
@@ -62,7 +65,7 @@ fn duration_nanos(duration: Duration) -> u64 {
 
 pub mod prelude {
     pub use crate::webview::{
-        CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin,
+        CefSystems, NativeOverlayPresenter, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin,
         accelerated_upload::NativeOverlayFrames, mesh::*, texture_upload::WebviewTextureUploads,
     };
 }
@@ -133,6 +136,7 @@ impl Plugin for WebviewPlugin {
         app.register_type::<RequestShowDevTool>()
             .init_resource::<CefDiskProfileRoot>()
             .init_non_send::<Browsers>()
+            .init_resource::<NativeOverlayPresenter>()
             .insert_resource(TextureWakeCallback(texture_wake))
             .insert_resource(texture_wake_policy)
             .add_plugins((MeshWebviewPlugin,))
@@ -143,6 +147,7 @@ impl Plugin for WebviewPlugin {
                     create_webview,
                     navigate_on_source_change,
                 )
+                    .run_if(not(on_message::<AppExit>))
                     .in_set(CefSystems::CreateAndResize),
             )
             .add_systems(
@@ -252,6 +257,10 @@ fn spawn_texture_wake_throttler(
     }) as TextureWake
 }
 
+fn shared_texture_enabled(windowed: bool) -> bool {
+    !windowed
+}
+
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
     mut browsers: NonSendMut<Browsers>,
@@ -266,20 +275,21 @@ fn create_webview(
     committed_nav_sender: Res<WebviewCommittedNavigationSender>,
     cef_senders: (Res<WebviewCefStateSender>, Res<MediaPermissionSender>),
     popup_sender: Res<WebviewPopupSender>,
-    texture_wake: Res<TextureWakeCallback>,
+    render_callbacks: (Res<TextureWakeCallback>, Res<NativeOverlayPresenter>),
     webviews: Query<
         (
             Entity,
             &ResolvedWebviewUri,
             &WebviewSize,
             &PreloadScripts,
+            Option<&WebviewMaxFrameRate>,
             Option<&HostWindow>,
             Has<WebviewTransparent>,
             Has<WebviewWindowed>,
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
             Has<WebviewWindowedNativeFocus>,
-            Has<WebviewNativeOverlay>,
+            Has<WebviewNativeDirectOverlay>,
         ),
         With<ResolvedWebviewUri>,
     >,
@@ -293,13 +303,14 @@ fn create_webview(
             uri,
             size,
             initialize_scripts,
+            max_frame_rate,
             host_window,
             transparent,
             windowed,
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
-            native_overlay,
+            native_direct_overlay,
         ) in
             webviews.iter()
         {
@@ -319,8 +330,11 @@ fn create_webview(
             let refresh_rate_millihertz = winit_window
                 .and_then(|window| window.current_monitor())
                 .and_then(|monitor| monitor.refresh_rate_millihertz());
-            let windowless_frame_rate =
+            let mut windowless_frame_rate =
                 windowless_frame_rate_from_refresh_millihertz(refresh_rate_millihertz);
+            if let Some(cap) = max_frame_rate {
+                windowless_frame_rate = windowless_frame_rate.min(cap.0.max(1));
+            }
             let host_window = winit_window
                 .and_then(|w| {
                     #[allow(deprecated)]
@@ -351,7 +365,10 @@ fn create_webview(
                 cef_senders.0.0.clone(),
                 cef_senders.1.0.clone(),
                 popup_sender.0.clone(),
-                texture_wake.0.clone(),
+                render_callbacks.0.0.clone(),
+                native_direct_overlay
+                    .then(|| render_callbacks.1.0.clone())
+                    .flatten(),
                 &initialize_scripts.0,
                 host_window,
                 disk_profile.0.as_deref(),
@@ -364,11 +381,7 @@ fn create_webview(
                 },
                 windowless_frame_rate,
                 windowed,
-                // Transparent OSR webviews that render to a Bevy mesh (not a native overlay) must use
-                // CPU paint: the accelerated shared-texture path blits transparent surfaces to black
-                // on the mesh. The layout is the only such case (transparent + mesh in player mode);
-                // it routes through the native overlay (accelerated) in user mode.
-                !transparent || native_overlay,
+                shared_texture_enabled(windowed),
                 native_liquid_glass,
                 windowed && windowed_native_focus,
             );
@@ -491,5 +504,23 @@ mod tests {
         assert!(implementation.contains("Has<WebviewWindowedNativeFocus>"));
         assert!(implementation.contains("windowed_native_focus"));
         assert!(implementation.contains("windowed && windowed_native_focus"));
+    }
+
+    #[test]
+    fn windowless_webviews_use_shared_textures() {
+        assert!(shared_texture_enabled(false));
+        assert!(!shared_texture_enabled(true));
+    }
+
+    #[test]
+    fn webview_creation_stops_during_app_exit() {
+        let source = include_str!("webview.rs");
+        let plugin = source
+            .split("impl Plugin for WebviewPlugin")
+            .nth(1)
+            .and_then(|tail| tail.split("fn duration_nanos").next())
+            .unwrap_or_default();
+
+        assert!(plugin.contains("run_if(not(on_message::<AppExit>))"));
     }
 }
