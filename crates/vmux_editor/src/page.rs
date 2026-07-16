@@ -154,18 +154,18 @@ fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
 fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
     match marker {
         EditorDiffMarker::Added => "text-ansi-2",
-        EditorDiffMarker::Modified => "text-cyan-500 dark:text-cyan-300",
+        EditorDiffMarker::Modified => "text-ansi-3",
         EditorDiffMarker::Deleted => "text-ansi-1",
-        EditorDiffMarker::Staged => "text-ansi-2/80",
+        EditorDiffMarker::Staged => "text-ansi-3/80",
     }
 }
 
 fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
     match marker {
         EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
-        EditorDiffMarker::Modified => "bg-cyan-400/[0.06] hover:bg-cyan-400/[0.10]",
+        EditorDiffMarker::Modified => "bg-ansi-3/[0.06] hover:bg-ansi-3/[0.10]",
         EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
-        EditorDiffMarker::Staged => "bg-ansi-2/[0.035] hover:bg-ansi-2/[0.07]",
+        EditorDiffMarker::Staged => "bg-ansi-3/[0.035] hover:bg-ansi-3/[0.07]",
     }
 }
 
@@ -1061,7 +1061,7 @@ pub fn Page() -> Element {
                     if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
                         {
                             let (cw, ch) = cell_dims();
-                            let gutter = gw as f64 * cw + 36.0;
+                            let gutter = gw as f64 * cw + 48.0;
                             let cx = gutter + cursor().col as f64 * cw;
                             let cy = cursor().row as f64 * ch;
                             let spacer = total_rows() as f64 * ch;
@@ -1118,7 +1118,7 @@ pub fn Page() -> Element {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
                                                             let (cw, _) = cell_dims();
-                                                            let g = gw as f64 * cw + 36.0;
+                                                            let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
                                                                 && let Some(t) = raw
@@ -1150,7 +1150,7 @@ pub fn Page() -> Element {
                                                         oncontextmenu: move |e: Event<MouseData>| {
                                                             e.prevent_default();
                                                             let (cw, _) = cell_dims();
-                                                            let g = gw as f64 * cw + 36.0;
+                                                            let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
                                                                 && let Some(t) = raw
@@ -1174,7 +1174,7 @@ pub fn Page() -> Element {
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
                                                             let (cw, _) = cell_dims();
-                                                            let g = gw as f64 * cw + 36.0;
+                                                            let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
                                                                 && let Some(t) = raw
@@ -1207,20 +1207,23 @@ pub fn Page() -> Element {
                                                         },
                                                         span {
                                                             class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
-                                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
+                                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 3rem);",
                                                             if let Some(s) = sev {
                                                                 span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }
-                                                            if let Some(marker) = diff_marker {
-                                                                span {
-                                                                    class: "mr-1 w-[1ch] text-center font-semibold {diff_marker_text_class(marker)}",
-                                                                    title: "Changed line",
-                                                                    "{diff_marker_sign(marker)}"
-                                                                }
+                                                            span {
+                                                                class: if let Some(marker) = diff_marker { "shrink-0 text-right opacity-90 {diff_marker_text_class(marker)}" } else { "shrink-0 text-right opacity-40 group-hover:opacity-90" },
+                                                                style: "width:calc(var(--cw, 1ch) * {gw});",
+                                                                "{ln + 1}"
                                                             }
                                                             span {
-                                                                class: if let Some(marker) = diff_marker { "text-right opacity-90 {diff_marker_text_class(marker)}" } else { "text-right opacity-40 group-hover:opacity-90" },
-                                                                "{ln + 1}"
+                                                                class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {diff_marker_text_class(marker)}" } else { "ml-1 w-[1ch] shrink-0" },
+                                                                if let Some(marker) = diff_marker {
+                                                                    span {
+                                                                        title: "Changed line",
+                                                                        "{diff_marker_sign(marker)}"
+                                                                    }
+                                                                }
                                                             }
                                                             match fold {
                                                                 FoldGutter::Open => {
@@ -1394,7 +1397,7 @@ pub fn Page() -> Element {
                                                 };
                                                 let hrow = first_row() + i as u32;
                                                 let top = hrow as f64 * ch + ch;
-                                                let left = gw as f64 * cw + 36.0 + h.col as f64 * cw;
+                                                let left = gw as f64 * cw + 48.0 + h.col as f64 * cw;
                                                 rsx! {
                                                     div {
                                                         class: "pointer-events-none absolute z-30 max-w-2xl overflow-hidden rounded-xl bg-foreground/[0.05] px-3 py-2 text-xs leading-snug text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
