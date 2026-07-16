@@ -140,7 +140,7 @@ jobs:
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
 
       - name: Clippy
-        run: env -u CEF_PATH cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
 
   test-rust:
     name: Test (rust)

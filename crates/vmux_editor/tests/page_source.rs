@@ -42,8 +42,18 @@ fn page_wires_shared_editor_diff_toggle() {
     assert!(s.contains("if next == FileViewMode::Diff"));
     assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
     assert!(s.contains("markers: git_line_markers"));
-    assert!(s.contains("diff_marker_class(marker)"));
+    assert!(s.contains("diff_marker_sign(marker)"));
     assert!(s.contains("schedule_git_refresh(git_refresh_generation, git_nonce)"));
+    assert!(s.contains("GIT_CHANGED_EVENT"));
+    assert!(s.contains("GitChangedEvent"));
+    assert!(s.contains("reveal_git_change(git_line_markers, cell_dims)"));
+    assert!(s.contains("diff_marker_text_class(marker)"));
+    assert!(s.contains("diff_marker_row_class(marker)"));
+    assert!(s.contains("text-ansi-3"));
+    assert!(s.contains("width:calc(var(--cw, 1ch) * {gw});"));
+    let line_number = s.find("\"{ln + 1}\"").unwrap();
+    let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
+    assert!(line_number < marker_sign);
     assert!(s.contains("transition-transform duration-150"));
     assert!(s.contains("if git_path() != m.abs_path"));
 }

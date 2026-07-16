@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 mod page_build;
 
 use page_build::{
-    dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
-    workspace_root_from_manifest_dir,
+    SKIP_DX_BUILD_ENV, dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
+    skip_dx_build, workspace_root_from_manifest_dir,
 };
 
 fn main() {
@@ -19,6 +19,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../vmux_server/src/build.rs");
+    println!("cargo:rerun-if-env-changed={SKIP_DX_BUILD_ENV}");
 
     let target = std::env::var("TARGET").unwrap_or_default();
     let profile = std::env::var("PROFILE").unwrap_or_default();
@@ -31,6 +32,10 @@ fn main() {
     }
 
     if profile == "release" {
+        return;
+    }
+
+    if skip_dx_build() {
         return;
     }
 

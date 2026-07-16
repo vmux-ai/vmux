@@ -302,6 +302,7 @@ pub fn DiffView(
     let mut expanded = use_signal(HashSet::<(usize, usize)>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(String::new);
+    let mut requested_path = use_signal(String::new);
 
     let _vp =
         use_bin_event_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
@@ -320,10 +321,16 @@ pub fn DiffView(
         let p = path();
         let _ = nonce();
         if !p.is_empty() {
-            loading.set(true);
+            let path_changed = *requested_path.peek() != p;
+            requested_path.set(p.clone());
+            if path_changed || lines.peek().is_empty() {
+                loading.set(true);
+            }
             error.set(String::new());
-            lines.set(Vec::new());
-            expanded.set(HashSet::new());
+            if path_changed {
+                lines.set(Vec::new());
+                expanded.set(HashSet::new());
+            }
             let _ = try_cef_bin_emit_rkyv(&GitDiffRequest {
                 path: p,
                 top_line: 0,
