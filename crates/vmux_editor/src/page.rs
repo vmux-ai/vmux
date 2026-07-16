@@ -143,12 +143,11 @@ fn row_class(selected: bool) -> String {
     }
 }
 
-fn diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
     match marker {
-        EditorDiffMarker::Added => "bg-ansi-2",
-        EditorDiffMarker::Modified => "bg-cyan-400",
-        EditorDiffMarker::Deleted => "bg-ansi-1",
-        EditorDiffMarker::Staged => "bg-ansi-2/60",
+        EditorDiffMarker::Added => "+",
+        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "~",
+        EditorDiffMarker::Deleted => "-",
     }
 }
 
@@ -1209,14 +1208,15 @@ pub fn Page() -> Element {
                                                         span {
                                                             class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
                                                             style: "min-width:calc(var(--cw, 1ch) * {gw} + 2.25rem);",
-                                                            if let Some(marker) = diff_marker {
-                                                                span {
-                                                                    class: "pointer-events-none absolute inset-y-0 left-0 w-0.5 {diff_marker_class(marker)}",
-                                                                    title: "Changed line",
-                                                                }
-                                                            }
                                                             if let Some(s) = sev {
                                                                 span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
+                                                            }
+                                                            if let Some(marker) = diff_marker {
+                                                                span {
+                                                                    class: "mr-1 w-[1ch] text-center font-semibold {diff_marker_text_class(marker)}",
+                                                                    title: "Changed line",
+                                                                    "{diff_marker_sign(marker)}"
+                                                                }
                                                             }
                                                             span {
                                                                 class: if let Some(marker) = diff_marker { "text-right opacity-90 {diff_marker_text_class(marker)}" } else { "text-right opacity-40 group-hover:opacity-90" },

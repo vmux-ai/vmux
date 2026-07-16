@@ -42,7 +42,7 @@ fn page_wires_shared_editor_diff_toggle() {
     assert!(s.contains("if next == FileViewMode::Diff"));
     assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
     assert!(s.contains("markers: git_line_markers"));
-    assert!(s.contains("diff_marker_class(marker)"));
+    assert!(s.contains("diff_marker_sign(marker)"));
     assert!(s.contains("schedule_git_refresh(git_refresh_generation, git_nonce)"));
     assert!(s.contains("GIT_CHANGED_EVENT"));
     assert!(s.contains("GitChangedEvent"));
