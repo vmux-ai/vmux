@@ -3666,6 +3666,7 @@ fn handle_page_open_requests(
 }
 
 fn normalize_vmux_url(url: &str) -> String {
+    let url = url.trim();
     if let Some(rest) = url.strip_prefix("vmux://")
         && !rest.is_empty()
         && !rest.contains('/')
@@ -4159,7 +4160,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_vmux_url_adds_trailing_slash_to_bare_host() {
+    fn normalize_vmux_url_trims_and_adds_trailing_slash_to_bare_host() {
         assert_eq!(normalize_vmux_url("vmux://lsp"), "vmux://lsp/");
         assert_eq!(normalize_vmux_url("vmux://terminal"), "vmux://terminal/");
         assert_eq!(normalize_vmux_url("vmux://lsp/"), "vmux://lsp/");
@@ -4174,6 +4175,10 @@ mod tests {
         assert_eq!(
             normalize_vmux_url("file:///tmp/main.rs"),
             "file:///tmp/main.rs"
+        );
+        assert_eq!(
+            normalize_vmux_url("  vmux://agent/codex/session-id  "),
+            "vmux://agent/codex/session-id"
         );
     }
 
