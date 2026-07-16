@@ -35,6 +35,23 @@ pub struct AcpSession {
     pub resume: Option<String>,
 }
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct AcpModelState {
+    pub config_id: String,
+    pub current_model_id: String,
+    pub models: Vec<vmux_service::protocol::AcpModelOption>,
+}
+
+impl AcpModelState {
+    pub fn current_name(&self) -> &str {
+        self.models
+            .iter()
+            .find(|model| model.id == self.current_model_id)
+            .map(|model| model.name.as_str())
+            .unwrap_or(&self.current_model_id)
+    }
+}
+
 /// Progress, resolved launch spec, or terminal failure of a background agent install, keyed by
 /// session id. The resolved spec is turned into `SpawnAcpAgent` on the ECS side (which owns the
 /// non-clonable `ServiceClient`).
@@ -144,6 +161,7 @@ impl Plugin for AcpAgentPlugin {
             .init_resource::<AcpCatalog>()
             .init_resource::<AcpInstallGeneration>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
             .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
             .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
             .add_systems(Startup, start_catalog_fetch)
@@ -155,6 +173,7 @@ impl Plugin for AcpAgentPlugin {
                     drain_acp_installs,
                     receive_catalog,
                     apply_acp_agent_info,
+                    apply_acp_model_info,
                     apply_acp_session_created,
                     apply_acp_terminal_created,
                 ),
@@ -176,6 +195,34 @@ fn apply_acp_agent_info(
         for (session, mut profile) in &mut sessions {
             if session.sid == event.sid && profile.name != name {
                 *profile = vmux_core::team::Profile::registry(name, &session.agent_id);
+            }
+        }
+    }
+}
+
+fn apply_acp_model_info(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentModelInfo>,
+    sessions: Query<(Entity, &AcpSession, Option<&AcpModelState>)>,
+    mut commands: Commands,
+) {
+    for event in reader.read() {
+        for (entity, session, current) in &sessions {
+            if session.sid != event.sid {
+                continue;
+            }
+            if event.config_id.is_empty() || event.models.is_empty() {
+                if current.is_some() {
+                    commands.entity(entity).remove::<AcpModelState>();
+                }
+                continue;
+            }
+            let next = AcpModelState {
+                config_id: event.config_id.clone(),
+                current_model_id: event.current_model_id.clone(),
+                models: event.models.clone(),
+            };
+            if current != Some(&next) {
+                commands.entity(entity).insert(next);
             }
         }
     }
@@ -794,6 +841,54 @@ mod tests {
             app.world().get::<Profile>(matching).unwrap().name,
             "Antigravity"
         );
+    }
+
+    #[test]
+    fn live_acp_model_info_updates_only_matching_session() {
+        use vmux_service::agent_events::PageAgentModelInfo;
+        use vmux_service::protocol::AcpModelOption;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default())
+            .add_plugins(AcpAgentPlugin)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        let matching = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "claude".into(),
+                sid: "s1".into(),
+                cwd: "/tmp".into(),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            })
+            .id();
+        let unrelated = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "codex".into(),
+                sid: "s2".into(),
+                cwd: "/tmp".into(),
+                anchor: vmux_core::ProcessId::new(),
+                resume: None,
+            })
+            .id();
+
+        app.world_mut().write_message(PageAgentModelInfo {
+            sid: "s1".into(),
+            config_id: "model".into(),
+            current_model_id: "sonnet".into(),
+            models: vec![AcpModelOption {
+                id: "sonnet".into(),
+                name: "Claude Sonnet".into(),
+                description: None,
+            }],
+        });
+        app.update();
+
+        let state = app.world().get::<AcpModelState>(matching).unwrap();
+        assert_eq!(state.current_name(), "Claude Sonnet");
+        assert!(app.world().get::<AcpModelState>(unrelated).is_none());
     }
 
     #[test]

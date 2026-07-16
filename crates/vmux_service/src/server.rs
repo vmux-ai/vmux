@@ -790,6 +790,20 @@ async fn handle_client(
                 }
             }
 
+            ClientMessage::AcpSetModel {
+                sid,
+                config_id,
+                model_id,
+            } => {
+                acp_manager.lock().await.input(
+                    &sid,
+                    crate::acp::AcpInput::SetModel {
+                        config_id,
+                        model_id,
+                    },
+                );
+            }
+
             ClientMessage::AgentCancel { sid } => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
@@ -887,6 +901,10 @@ async fn handle_client(
                     if let Some(agent_info) = acp_manager.lock().await.agent_info(&sid) {
                         let mut w = writer.lock().await;
                         write_message!(&mut *w, &agent_info)?;
+                    }
+                    if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &model_info)?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();

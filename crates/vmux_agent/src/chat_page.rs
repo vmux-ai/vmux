@@ -22,14 +22,15 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue,
-    ChatEscape, ChatResume, ChatSnapshot, ChatSubmit, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SlashCommandEntry, SlashCommands,
+    ChatEscape, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
+    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::client::acp::AcpSession;
+use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
@@ -147,6 +148,7 @@ impl Plugin for AgentChatPagePlugin {
             ResumeListRequest,
             ResumeSession,
             RuntimeSwitchRequest,
+            SelectModel,
         )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
@@ -158,12 +160,15 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
+            .add_observer(on_select_model)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(
                 Update,
                 (
                     (track_turn_duration, push_chat_to_page).chain(),
                     sync_chat_to_ready_views,
+                    push_acp_model_state_to_page,
+                    push_removed_acp_model_state_to_page,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -249,7 +254,7 @@ fn sync_chat_to_ready_views(
         &PromptQueue,
         Option<&ImportedConversation>,
     )>,
-    acp_sessions: Query<&AcpSession>,
+    acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -270,20 +275,115 @@ fn sync_chat_to_ready_views(
             CHAT_SNAPSHOT_EVENT,
             &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
         ));
-        let cross = acp_sessions
+        let (cross, model_state) = acp_sessions
             .get(stack)
             .ok()
-            .and_then(|acp| acp_agent_kind(&acp.agent_id))
+            .map(|(acp, model)| {
+                (
+                    acp_agent_kind(&acp.agent_id)
+                        .map(kind_supports_cross_runtime)
+                        .unwrap_or(false),
+                    model,
+                )
+            })
+            .unwrap_or((false, None));
+        emit_model_state(webview, model_state, cross, &mut commands);
+        commands.entity(webview).insert(ChatSynced);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
+    let Some(state) = state else {
+        return ModelState::default();
+    };
+    ModelState {
+        current_model_id: state.current_model_id.clone(),
+        current_model_name: state.current_name().to_string(),
+        models: state
+            .models
+            .iter()
+            .map(|model| ModelOptionEntry {
+                id: model.id.clone(),
+                name: model.name.clone(),
+                description: model.description.clone().unwrap_or_default(),
+            })
+            .collect(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_model_state(
+    webview: Entity,
+    model_state: Option<&AcpModelState>,
+    cross_runtime: bool,
+    commands: &mut Commands,
+) {
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        webview,
+        MODEL_STATE_EVENT,
+        &model_state_of(model_state),
+    ));
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        webview,
+        SLASH_COMMANDS_EVENT,
+        &SlashCommands {
+            commands: slash_commands_for(cross_runtime, model_state.is_some()),
+        },
+    ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_acp_model_state_to_page(
+    sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
+    children: Query<&Children>,
+    is_browser: Query<(), With<vmux_layout::Browser>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (stack, session, model_state) in &sessions {
+        let Ok(kids) = children.get(stack) else {
+            continue;
+        };
+        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+            continue;
+        };
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            SLASH_COMMANDS_EVENT,
-            &SlashCommands {
-                commands: slash_commands_for(cross),
-            },
-        ));
-        commands.entity(webview).insert(ChatSynced);
+        emit_model_state(webview, Some(model_state), cross, &mut commands);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_removed_acp_model_state_to_page(
+    mut removed: RemovedComponents<AcpModelState>,
+    sessions: Query<&AcpSession>,
+    children: Query<&Children>,
+    is_browser: Query<(), With<vmux_layout::Browser>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for stack in removed.read() {
+        let Ok(session) = sessions.get(stack) else {
+            continue;
+        };
+        let Ok(kids) = children.get(stack) else {
+            continue;
+        };
+        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
+            continue;
+        };
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        let cross = acp_agent_kind(&session.agent_id)
+            .map(kind_supports_cross_runtime)
+            .unwrap_or(false);
+        emit_model_state(webview, None, cross, &mut commands);
     }
 }
 
@@ -600,14 +700,19 @@ fn relative_time(mtime: std::time::SystemTime) -> String {
     }
 }
 
-/// The slash commands offered on an ACP pane: `/resume` always, `/cli` only when the agent's
-/// runtime shares session ids with its CLI (so the handoff actually continues the conversation).
+/// The slash commands offered on an ACP pane.
 #[cfg(not(target_arch = "wasm32"))]
-fn slash_commands_for(cross_runtime: bool) -> Vec<SlashCommandEntry> {
+fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommandEntry> {
     let mut v = vec![SlashCommandEntry {
         name: "resume".into(),
         description: "Resume a past session".into(),
     }];
+    if has_models {
+        v.push(SlashCommandEntry {
+            name: "model".into(),
+            description: "Select model".into(),
+        });
+    }
     if cross_runtime {
         v.push(SlashCommandEntry {
             name: "cli".into(),
@@ -615,6 +720,33 @@ fn slash_commands_for(cross_runtime: bool) -> Vec<SlashCommandEntry> {
         });
     }
     v
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_select_model(
+    trigger: On<BinReceive<SelectModel>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<(&AcpSession, &AcpModelState)>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((session, model_state)) = sessions.get(parent.parent()) else {
+        return;
+    };
+    let model_id = trigger.event().payload.model_id.clone();
+    if !model_state.models.iter().any(|model| model.id == model_id) {
+        return;
+    }
+    service.0.send(ClientMessage::AcpSetModel {
+        sid: session.sid.clone(),
+        config_id: model_state.config_id.clone(),
+        model_id,
+    });
 }
 
 /// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
@@ -938,8 +1070,11 @@ mod native_tests {
 
     #[test]
     fn slash_commands_include_cli_only_when_cross_runtime() {
-        assert_eq!(slash_commands_for(false).len(), 1);
-        let with_cli = slash_commands_for(true);
+        assert_eq!(slash_commands_for(false, false).len(), 1);
+        let with_model = slash_commands_for(false, true);
+        assert_eq!(with_model.len(), 2);
+        assert_eq!(with_model[1].name, "model");
+        let with_cli = slash_commands_for(true, false);
         assert_eq!(with_cli.len(), 2);
         assert_eq!(with_cli[1].name, "cli");
     }

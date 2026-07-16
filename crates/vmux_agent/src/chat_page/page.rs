@@ -2,15 +2,17 @@
 
 use crate::chat_page::composer::{
     PromptEdit, ResumeMenuState, SelectorMode, ToolActivity, chat_page_title, edit_prompt,
-    filter_sessions, is_handoff_boundary, menu_direction, move_selection, resume_menu_state,
-    selector_mode, should_clear_draft_on_escape, should_fetch_resume, tool_activity,
+    filter_models, filter_sessions, is_handoff_boundary, menu_direction, move_selection,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
+    tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
     ChatClearQueue, ChatEscape, ChatItem, ChatResume, ChatSnapshot, ChatSubmit, ChatTurn,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -88,6 +90,7 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
 
         let selector_open = match selector_mode(&draft.peek()) {
             SelectorMode::Resume(_) => true,
+            SelectorMode::Models(_) => true,
             SelectorMode::Commands(query) => {
                 let query = query.to_lowercase();
                 slash_cmds
@@ -169,6 +172,9 @@ pub fn Page() -> Element {
     let mut paused = use_signal(|| false);
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
+    let mut models = use_signal(Vec::<ModelOptionEntry>::new);
+    let mut current_model_id = use_signal(String::new);
+    let mut current_model = use_signal(String::new);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
@@ -242,6 +248,12 @@ pub fn Page() -> Element {
     let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
         slash_cmds.set(s.commands.clone());
     });
+    let _models = use_bin_event_listener::<ModelState, _>(MODEL_STATE_EVENT, move |state| {
+        models.set(state.models.clone());
+        current_model_id.set(state.current_model_id.clone());
+        current_model.set(state.current_model_name.clone());
+        menu_sel.set(0);
+    });
     let _sess =
         use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
             sessions.set(s.sessions.clone());
@@ -301,6 +313,10 @@ pub fn Page() -> Element {
         SelectorMode::Resume(query) => Some(query),
         _ => None,
     };
+    let model_query = match selector {
+        SelectorMode::Models(query) => Some(query),
+        _ => None,
+    };
     let filtered_cmds: Vec<SlashCommandEntry> = command_query
         .map(|query| {
             let query = query.to_lowercase();
@@ -315,8 +331,12 @@ pub fn Page() -> Element {
     let filtered_sessions = resume_query
         .map(|query| filter_sessions(&sessions.read(), query))
         .unwrap_or_default();
+    let filtered_models = model_query
+        .map(|query| filter_models(&models.read(), query))
+        .unwrap_or_default();
     let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
     let session_menu_open = resume_query.is_some();
+    let model_menu_open = model_query.is_some();
     let resume_state = resume_query.map(|_| {
         resume_menu_state(
             resume_requested(),
@@ -330,6 +350,7 @@ pub fn Page() -> Element {
         let selected = menu_sel();
         let _ = draft.read();
         let _ = sessions.read().len();
+        let _ = models.read().len();
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| {
@@ -363,6 +384,11 @@ pub fn Page() -> Element {
                     span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                     span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
                         "{header_name}"
+                    }
+                    if !current_model().is_empty() {
+                        span { class: "min-w-0 truncate rounded-md bg-foreground/[0.06] px-2 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                            "{current_model}"
+                        }
                     }
                 }
             }
@@ -553,6 +579,37 @@ pub fn Page() -> Element {
                             }
                         }
                     }
+                    if model_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            if filtered_models.is_empty() {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching models" }
+                            } else {
+                                for (i , model) in filtered_models.iter().enumerate() {
+                                    {
+                                        let model = model.clone();
+                                        let selected = model.id == current_model_id();
+                                        rsx! {
+                                            div {
+                                                key: "model{i}",
+                                                id: "agent-selector-item-{i}",
+                                                class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                                                onclick: move |_| select_model(&model, draft),
+                                                div { class: "flex min-w-0 items-baseline gap-2",
+                                                    span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }
+                                                    if selected {
+                                                        span { class: "shrink-0 text-[10px] uppercase tracking-wide text-emerald-500", "current" }
+                                                    }
+                                                }
+                                                if !model.description.is_empty() {
+                                                    span { class: "truncate text-xs text-muted-foreground", "{model.description}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for queued_prompt in queued.read().iter().cloned() {
@@ -644,7 +701,7 @@ pub fn Page() -> Element {
                                 onkeydown: move |e| {
                                     let streaming = matches!(status().as_str(), "streaming" | "awaiting");
                                     let draft_now = draft.peek().clone();
-                                    let (cmd_items, sess_items, session_selector_open) = match selector_mode(&draft_now) {
+                                    let (cmd_items, sess_items, model_items, session_selector_open, model_selector_open) = match selector_mode(&draft_now) {
                                         SelectorMode::Commands(query) => {
                                             let query = query.to_lowercase();
                                             (
@@ -655,19 +712,34 @@ pub fn Page() -> Element {
                                                     .cloned()
                                                     .collect::<Vec<_>>(),
                                                 Vec::new(),
+                                                Vec::new(),
+                                                false,
                                                 false,
                                             )
                                         }
                                         SelectorMode::Resume(query) => (
                                             Vec::new(),
                                             filter_sessions(&sessions.peek(), query),
+                                            Vec::new(),
+                                            true,
+                                            false,
+                                        ),
+                                        SelectorMode::Models(query) => (
+                                            Vec::new(),
+                                            Vec::new(),
+                                            filter_models(&models.peek(), query),
+                                            false,
                                             true,
                                         ),
-                                        SelectorMode::None => (Vec::new(), Vec::new(), false),
+                                        SelectorMode::None => (Vec::new(), Vec::new(), Vec::new(), false, false),
                                     };
-                                    let selector_open = session_selector_open || !cmd_items.is_empty();
+                                    let selector_open = session_selector_open
+                                        || model_selector_open
+                                        || !cmd_items.is_empty();
                                     let selector_len = if session_selector_open {
                                         sess_items.len()
+                                    } else if model_selector_open {
+                                        model_items.len()
                                     } else {
                                         cmd_items.len()
                                     };
@@ -698,6 +770,10 @@ pub fn Page() -> Element {
                                             if let Some(session) = sess_items.get(selected) {
                                                 select_resume_session(session, draft);
                                             }
+                                        } else if model_selector_open {
+                                            if let Some(model) = model_items.get(selected) {
+                                                select_model(model, draft);
+                                            }
                                         } else if let Some(command) = cmd_items.get(selected) {
                                             run_slash_command(&command.name, draft, menu_sel);
                                         }
@@ -709,7 +785,7 @@ pub fn Page() -> Element {
                                         menu_sel.set(0);
                                         return;
                                     }
-                                    if session_selector_open
+                                    if (session_selector_open || model_selector_open)
                                         && matches!(e.key(), Key::Enter | Key::Escape)
                                     {
                                         return;
@@ -816,6 +892,10 @@ fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal
             menu_sel.set(0);
             draft.set("/resume ".to_string());
         }
+        "model" => {
+            menu_sel.set(0);
+            draft.set("/model ".to_string());
+        }
         "cli" => {
             let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
             draft.set(String::new());
@@ -826,6 +906,13 @@ fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal
         }
         _ => {}
     }
+}
+
+fn select_model(model: &ModelOptionEntry, mut draft: Signal<String>) {
+    let _ = try_cef_bin_emit_rkyv(&SelectModel {
+        model_id: model.id.clone(),
+    });
+    draft.set(String::new());
 }
 
 fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<String>) {

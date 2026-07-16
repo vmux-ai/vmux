@@ -465,6 +465,12 @@ pub enum ClientMessage {
         text: String,
         context: Option<String>,
     },
+    /// Select a model exposed by an ACP session's model configuration option.
+    AcpSetModel {
+        sid: String,
+        config_id: String,
+        model_id: String,
+    },
     /// Interrupt the session's in-flight turn without tearing the session down.
     AgentCancel {
         sid: String,
@@ -781,6 +787,21 @@ pub enum ServiceMessage {
         sid: String,
         name: String,
     },
+    /// Current model and selectable models reported by an ACP session.
+    AcpModelInfo {
+        sid: String,
+        config_id: String,
+        current_model_id: String,
+        models: Vec<AcpModelOption>,
+    },
+}
+
+/// One model exposed by an ACP session configuration selector.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AcpModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
 }
 
 /// Metadata about a process, returned in ProcessList.
@@ -1284,6 +1305,11 @@ mod tests {
                 text: "hi".into(),
                 context: Some("prior conversation".into()),
             },
+            ClientMessage::AcpSetModel {
+                sid: "s".into(),
+                config_id: "model".into(),
+                model_id: "sonnet".into(),
+            },
             ClientMessage::AgentApprove {
                 sid: "s".into(),
                 call_id: "c".into(),
@@ -1342,6 +1368,16 @@ mod tests {
             ServiceMessage::AcpAgentInfo {
                 sid: "s".into(),
                 name: "Antigravity".into(),
+            },
+            ServiceMessage::AcpModelInfo {
+                sid: "s".into(),
+                config_id: "model".into(),
+                current_model_id: "sonnet".into(),
+                models: vec![AcpModelOption {
+                    id: "sonnet".into(),
+                    name: "Claude Sonnet".into(),
+                    description: Some("Balanced".into()),
+                }],
             },
         ];
         for msg in services {

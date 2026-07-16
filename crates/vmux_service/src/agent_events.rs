@@ -85,6 +85,15 @@ pub struct PageAgentInfo {
     pub name: String,
 }
 
+/// Current model and selectable models reported by a running ACP session.
+#[derive(Message)]
+pub struct PageAgentModelInfo {
+    pub sid: String,
+    pub config_id: String,
+    pub current_model_id: String,
+    pub models: Vec<crate::protocol::AcpModelOption>,
+}
+
 /// The ACP session was created/loaded; carries the agent-assigned session id so the GUI can
 /// redirect the pane url to `vmux://agent/<id>/<acp_session_id>` (the persisted resume handle).
 #[derive(Message)]
