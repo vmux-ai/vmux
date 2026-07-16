@@ -1,4 +1,4 @@
-use super::event::{ChatItem, ResumableSessionEntry, SlashCommandEntry};
+use super::event::{ChatBlock, ChatItem, ResumableSessionEntry, SlashCommandEntry};
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
@@ -29,6 +29,17 @@ pub(crate) enum ResumeMenuState {
     Empty,
     NoMatch,
     Results,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolActivity {
+    Guardian,
+    ReadFile,
+    Image,
+    Browser,
+    Search,
+    Command,
+    Other,
 }
 
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
@@ -144,11 +155,73 @@ pub(crate) fn chat_page_title(items: &[ChatItem], status: &str, agent_name: &str
         .unwrap_or_else(|| normalize_chat_page_title(agent_name));
 
     match status {
-        "streaming" => format!("👷 {topic}"),
+        "streaming" => format!("{} {topic}", streaming_title_emoji(items)),
         "installing" => format!("📦 {topic}"),
         "awaiting" => format!("✋ {topic}"),
         "errored" => format!("❌ {topic}"),
         _ => topic,
+    }
+}
+
+fn streaming_title_emoji(items: &[ChatItem]) -> &'static str {
+    let block = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            ChatItem::Turn(turn) if turn.running => Some(turn.blocks.last()),
+            _ => None,
+        })
+        .flatten();
+
+    match block {
+        Some(ChatBlock::Text(_)) => "✍️",
+        Some(ChatBlock::Thinking(_)) | Some(ChatBlock::ToolResult { .. }) | None => "🧠",
+        Some(ChatBlock::ToolUse { name, .. }) => tool_activity_emoji(tool_activity(name)),
+        Some(ChatBlock::Diff { .. }) => "✏️",
+        Some(ChatBlock::Plan { .. }) => "📋",
+        Some(ChatBlock::Reconnect { .. }) => "🛜",
+    }
+}
+
+pub(crate) fn tool_activity(name: &str) -> ToolActivity {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("guardian")
+        || lower.contains("approval")
+        || lower == "review"
+        || lower.ends_with("_review")
+        || lower.ends_with(".review")
+        || lower.ends_with(":review")
+    {
+        ToolActivity::Guardian
+    } else if lower.contains("read_file") || lower.contains("read file") {
+        ToolActivity::ReadFile
+    } else if lower.contains("view_image") || lower.contains("view image") {
+        ToolActivity::Image
+    } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
+        ToolActivity::Browser
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
+        ToolActivity::Search
+    } else if lower.contains("run")
+        || lower.contains("exec")
+        || lower.contains("command")
+        || lower.contains("shell")
+        || lower.contains("terminal")
+    {
+        ToolActivity::Command
+    } else {
+        ToolActivity::Other
+    }
+}
+
+fn tool_activity_emoji(activity: ToolActivity) -> &'static str {
+    match activity {
+        ToolActivity::Guardian => "🛡️",
+        ToolActivity::ReadFile => "📄",
+        ToolActivity::Image => "🖼️",
+        ToolActivity::Browser => "🌐",
+        ToolActivity::Search => "🔎",
+        ToolActivity::Command => "💻",
+        ToolActivity::Other => "🛠️",
     }
 }
 
@@ -374,7 +447,10 @@ mod tests {
             ChatItem::User {
                 text: "  Fix the\ndynamic   agent page title  ".into(),
             },
-            ChatItem::Turn(ChatTurn::default()),
+            ChatItem::Turn(ChatTurn {
+                running: true,
+                ..Default::default()
+            }),
             ChatItem::User {
                 text: "continue".into(),
             },
@@ -382,11 +458,76 @@ mod tests {
 
         assert_eq!(
             chat_page_title(&items, "streaming", "Codex"),
-            "👷 Fix the dynamic agent page title"
+            "🧠 Fix the dynamic agent page title"
         );
         assert_eq!(
             chat_page_title(&items, "awaiting", "Codex"),
             "✋ Fix the dynamic agent page title"
+        );
+    }
+
+    #[test]
+    fn chat_page_title_tracks_live_timeline_activity() {
+        fn title(block: ChatBlock) -> String {
+            chat_page_title(
+                &[
+                    ChatItem::User {
+                        text: "Ship dynamic titles".into(),
+                    },
+                    ChatItem::Turn(ChatTurn {
+                        blocks: vec![block],
+                        running: true,
+                        ..Default::default()
+                    }),
+                ],
+                "streaming",
+                "Codex",
+            )
+        }
+
+        assert_eq!(
+            title(ChatBlock::Thinking("hmm".into())),
+            "🧠 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::ToolUse {
+                call_id: "1".into(),
+                name: "functions.exec_command".into(),
+                args: "{}".into(),
+            }),
+            "💻 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::ToolUse {
+                call_id: "2".into(),
+                name: "search_files".into(),
+                args: "{}".into(),
+            }),
+            "🔎 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Plan { steps: Vec::new() }),
+            "📋 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Diff {
+                call_id: "3".into(),
+                path: "page.rs".into(),
+                old_text: None,
+                new_text: String::new(),
+            }),
+            "✏️ Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Text("done soon".into())),
+            "✍️ Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Reconnect {
+                attempt: 2,
+                total: 5,
+            }),
+            "🛜 Ship dynamic titles"
         );
     }
 
