@@ -37,8 +37,27 @@ license = "Apache-2.0 OR MIT"
 repository = "https://github.com/not-elm/bevy_cef"
 
 [features]
+browser-process = [
+    "dep:async-channel",
+    "dep:bevy",
+    "dep:bevy_remote",
+    "dep:bevy_winit",
+    "dep:raw-window-handle",
+    "dep:winit",
+    "cef/accelerated_osr",
+    "cef/build-util",
+    "cef/sandbox",
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-foundation",
+    "dep:objc2-quartz-core",
+    "dep:objc2-core-graphics",
+    "dep:objc2-core-foundation",
+    "dep:objc2-av-foundation",
+    "dep:objc2-av-kit",
+]
 debug = []
-default = []
+default = ["browser-process"]
 
 [lib]
 name = "bevy_cef_core"
@@ -46,6 +65,7 @@ path = "src/lib.rs"
 
 [dependencies.async-channel]
 version = "2.5"
+optional = true
 
 [dependencies.bevy]
 version = "0.19.0"
@@ -56,6 +76,7 @@ features = [
     "bevy_picking",
 ]
 default-features = false
+optional = true
 
 [dependencies.bevy_winit]
 version = "0.19.0"
@@ -64,10 +85,12 @@ features = [
     "x11",
     "wayland",
 ]
+optional = true
 
 [dependencies.winit]
 version = "0.30"
 default-features = false
+optional = true
 
 [dependencies.bevy_remote]
 version = "0.19.0"
@@ -76,10 +99,11 @@ features = [
     "bevy_asset",
     "bevy_render",
 ]
+optional = true
 
 [dependencies.cef]
 version = "148.2.0"
-features = ["accelerated_osr"]
+default-features = false
 
 [dependencies.cef-dll-sys]
 version = "148.2.0"
@@ -87,6 +111,7 @@ features = ["sandbox"]
 
 [dependencies.raw-window-handle]
 version = "0.6"
+optional = true
 
 [dependencies.serde]
 version = "1"
@@ -100,9 +125,11 @@ version = "1"
 
 [dependencies.uuid]
 version = "1"
+features = ["v4"]
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6"
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 version = "0.3"
@@ -114,27 +141,34 @@ features = [
     "NSColor",
     "objc2-quartz-core",
 ]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-foundation]
 version = "0.3"
 features = ["NSGeometry", "NSString", "NSURL"]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-quartz-core]
 version = "0.3"
 features = ["CALayer", "CAShapeLayer", "objc2-core-graphics"]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-graphics]
 version = "0.3"
 features = ["CGPath", "CGImage", "CGColorSpace", "CGContext", "CGBitmapContext"]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-foundation]
 version = "0.3"
 features = ["CFBase"]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-av-foundation]
 version = "0.3"
 features = ["AVPlayer", "AVPlayerItem", "objc2-core-media"]
+optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-av-kit]
 version = "0.3"
 features = ["AVPlayerView", "objc2-app-kit"]
+optional = true

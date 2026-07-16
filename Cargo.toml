@@ -114,6 +114,10 @@ codegen-units = 1
 strip = true
 lto = "thin"
 
+[profile.cef-helper]
+inherits = "release"
+lto = "off"
+
 [profile.release.package.vmux_history]
 opt-level = "z"
 codegen-units = 1

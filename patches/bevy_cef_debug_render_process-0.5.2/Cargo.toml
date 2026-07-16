@@ -20,6 +20,6 @@ name = "bevy_cef_debug_render_process"
 path = "src/main.rs"
 
 [dependencies]
-bevy_cef_core = { path = "../bevy_cef_core-0.5.2" }
-cef = "148.2.0"
+bevy_cef_core = { path = "../bevy_cef_core-0.5.2", default-features = false }
+cef = { version = "148.2.0", default-features = false }
 cef-dll-sys = { version = "148.2.0", features = ["sandbox"] }

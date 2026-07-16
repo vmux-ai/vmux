@@ -1,5 +1,6 @@
 #![allow(clippy::all)]
 
+#[cfg(feature = "browser-process")]
 mod browser_process;
 #[cfg(target_os = "macos")]
 mod debug;
@@ -9,6 +10,7 @@ mod render_process;
 mod util;
 
 pub mod prelude {
+    #[cfg(feature = "browser-process")]
     pub use crate::browser_process::*;
     #[cfg(target_os = "macos")]
     pub use crate::debug::*;

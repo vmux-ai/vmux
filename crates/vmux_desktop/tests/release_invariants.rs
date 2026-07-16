@@ -150,6 +150,44 @@ fn debug_render_process_install_uses_fingerprint_cache() {
 }
 
 #[test]
+fn package_builds_cef_helper_separately_without_lto() {
+    let manifest = include_str!("../../../Cargo.toml");
+    let core_manifest = include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
+    let core_source = include_str!("../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
+    let handler = include_str!(
+        "../../../patches/bevy_cef_core-0.5.2/src/render_process/render_process_handler.rs"
+    );
+    let helper_manifest =
+        include_str!("../../../patches/bevy_cef_debug_render_process-0.5.2/Cargo.toml");
+    let script = include_str!("../../../scripts/build-package-binaries.sh");
+
+    assert!(script.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --release"));
+    assert!(script.contains("build -p bevy_cef_debug_render_process --profile cef-helper"));
+    assert!(script.contains(
+        "cp -f target/cef-helper/bevy_cef_debug_render_process target/release/bevy_cef_debug_render_process"
+    ));
+    assert!(!script.contains("-p vmux_service -p bevy_cef_debug_render_process --release"));
+    assert!(manifest.contains("[profile.cef-helper]\ninherits = \"release\"\nlto = \"off\""));
+    assert!(core_manifest.contains("default = [\"browser-process\"]"));
+    for dependency in [
+        "dep:async-channel",
+        "dep:bevy",
+        "dep:bevy_remote",
+        "dep:bevy_winit",
+        "dep:raw-window-handle",
+        "dep:winit",
+        "cef/accelerated_osr",
+    ] {
+        assert!(core_manifest.contains(dependency));
+    }
+    assert!(core_source.contains("#[cfg(feature = \"browser-process\")]\nmod browser_process;"));
+    assert!(helper_manifest.contains("default-features = false"));
+    assert!(helper_manifest.contains("cef = { version = \"148.2.0\", default-features = false }"));
+    assert!(!handler.contains("use bevy::"));
+    assert!(!handler.contains("use bevy_remote::"));
+}
+
+#[test]
 fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
     let makefile = include_str!("../../../Makefile");
     let stop_idx = makefile
