@@ -8,15 +8,17 @@ use crate::{
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     tab::Tab,
 };
+#[cfg(feature = "player-mode")]
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::{
     ecs::{
         lifecycle::HookContext, message::Messages, relationship::Relationship, world::DeferredWorld,
     },
-    input::mouse::AccumulatedMouseMotion,
     prelude::*,
     ui::{FlexDirection, UiGlobalTransform},
     window::PrimaryWindow,
 };
+#[cfg(feature = "player-mode")]
 use bevy_cef::prelude::CefKeyboardTarget;
 use moonshine_save::prelude::*;
 use std::time::Instant;
@@ -79,7 +81,6 @@ impl Plugin for PanePlugin {
             .add_systems(
                 Update,
                 (
-                    click_pane_in_player_mode,
                     pane_gap_drag_resize,
                     process_pending_pane_closes,
                     process_force_pane_closes,
@@ -95,6 +96,8 @@ impl Plugin for PanePlugin {
                     warp_cursor_to_active_pane,
                 ),
             );
+        #[cfg(feature = "player-mode")]
+        app.add_systems(Update, click_pane_in_player_mode);
         #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
@@ -2257,6 +2260,7 @@ fn apply_pending_hover(
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn click_pane_in_player_mode(
     mode: Res<crate::scene::InteractionMode>,
     mouse: Res<ButtonInput<MouseButton>>,

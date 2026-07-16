@@ -9,6 +9,14 @@ build = "build.rs"
 [features]
 default = []
 debug = []
+player-mode = [
+    "bevy/bevy_animation",
+    "bevy/bevy_camera_controller",
+    "bevy/bevy_pbr",
+    "bevy/bevy_post_process",
+    "bevy/free_camera",
+    "bevy_cef/pbr",
+]
 web = []
 
 [lib]

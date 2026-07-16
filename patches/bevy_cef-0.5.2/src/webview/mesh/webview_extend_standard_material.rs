@@ -1,16 +1,24 @@
+#[cfg(feature = "pbr")]
 use crate::common::WebviewSource;
-use crate::prelude::{WebviewMaterial, WebviewSurface, webview_placeholder_image};
+use crate::prelude::{
+    WebviewMaterial, WebviewMaterialHandle, WebviewSurface, webview_placeholder_image,
+};
 use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
 use bevy::asset::*;
+#[cfg(feature = "pbr")]
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
+#[cfg(feature = "pbr")]
 use bevy::shader::ShaderRef;
 use bevy_cef_core::prelude::*;
 
+#[cfg(feature = "pbr")]
 const FRAGMENT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("b231681f-9c17-4df6-89c9-9dc353e85a08");
 
+#[cfg(feature = "pbr")]
 pub(super) struct WebviewExtendStandardMaterialPlugin;
 
+#[cfg(feature = "pbr")]
 impl Plugin for WebviewExtendStandardMaterialPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<WebviewExtendStandardMaterial>::default())
@@ -25,21 +33,60 @@ impl Plugin for WebviewExtendStandardMaterialPlugin {
     }
 }
 
+#[cfg(feature = "pbr")]
 impl MaterialExtension for WebviewMaterial {
     fn fragment_shader() -> ShaderRef {
         FRAGMENT_SHADER_HANDLE.into()
     }
 }
 
+#[cfg(feature = "pbr")]
 pub type WebviewExtendStandardMaterial = ExtendedMaterial<StandardMaterial, WebviewMaterial>;
+
+#[cfg(not(feature = "pbr"))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct WebviewBaseMaterial {
+    pub base_color: Color,
+    pub alpha_mode: bevy::material::AlphaMode,
+    pub unlit: bool,
+    pub depth_bias: f32,
+    pub cull_mode: Option<bevy::render::render_resource::Face>,
+}
+
+#[cfg(not(feature = "pbr"))]
+impl Default for WebviewBaseMaterial {
+    fn default() -> Self {
+        Self {
+            base_color: Color::WHITE,
+            alpha_mode: bevy::material::AlphaMode::Opaque,
+            unlit: false,
+            depth_bias: 0.0,
+            cull_mode: Some(bevy::render::render_resource::Face::Back),
+        }
+    }
+}
+
+#[cfg(not(feature = "pbr"))]
+#[derive(Asset, TypePath, Debug, Clone, PartialEq, Default)]
+pub struct WebviewExtendStandardMaterial {
+    pub base: WebviewBaseMaterial,
+    pub extension: WebviewMaterial,
+}
 
 /// While [`WebviewMaterial::surface`] is [`None`], Bevy binds a default **white** texture — assign
 /// our dark placeholder before the first frame is drawn (see [`webview_placeholder_image`]).
+#[cfg(feature = "pbr")]
 fn ensure_mesh_webview_placeholder(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    webviews: Query<(Entity, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<WebviewSource>>,
+    webviews: Query<
+        (
+            Entity,
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+        ),
+        With<WebviewSource>,
+    >,
 ) {
     for (entity, mesh_mat) in &webviews {
         let Some(mut mat) = materials.get_mut(mesh_mat.id()) else {
@@ -63,7 +110,7 @@ pub fn render_standard_materials(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut uploads: ResMut<WebviewTextureUploads>,
-    webviews: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>>,
+    webviews: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>>,
     mut logged: Local<bevy::platform::collections::HashSet<Entity>>,
 ) {
     for texture in er.read() {

@@ -1,9 +1,10 @@
-.PHONY: dev test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
+.PHONY: dev dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
 
 .DEFAULT_GOAL := dev
 
 VMUX_PROFILE ?= personal
 VMUX_TEST ?=
+VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 CARGO_WITH_CEF_CACHE := CARGO_BIN="$(CARGO_BIN)" ./scripts/cargo-with-cef-cache.sh
@@ -23,7 +24,7 @@ CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
 dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop --features dev
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
 	APPLE_SIGNING_IDENTITY="$$identity" \
 	APP_BINARY="target/debug/vmux_desktop" \
@@ -41,6 +42,9 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 		dylib_path="$$dylib_path:$$DYLD_LIBRARY_PATH"; \
 	fi; \
 	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" VMUX_TEST="$(VMUX_TEST)" ./target/debug/vmux_desktop
+
+dev-player:
+	$(MAKE) dev VMUX_DESKTOP_FEATURES="--features dev"
 
 test-app:
 	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1

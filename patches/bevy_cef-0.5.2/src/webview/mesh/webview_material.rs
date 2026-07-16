@@ -4,6 +4,7 @@ use bevy::render::render_resource::{AsBindGroup, Extent3d, TextureDimension, Tex
 use bevy_cef_core::prelude::*;
 use std::hash::{Hash, Hasher};
 
+#[cfg(feature = "pbr")]
 const WEBVIEW_UTIL_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("6c7cb871-4208-4407-9c25-306c6f069e2b");
 
@@ -11,9 +12,13 @@ pub(super) struct WebviewMaterialPlugin;
 
 impl Plugin for WebviewMaterialPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<WebviewMaterial>::default())
-            .add_message::<RenderTextureMessage>()
+        app.add_message::<RenderTextureMessage>()
             .add_systems(Update, send_render_textures);
+
+        #[cfg(feature = "pbr")]
+        app.add_plugins(MaterialPlugin::<WebviewMaterial>::default());
+
+        #[cfg(feature = "pbr")]
         load_internal_asset!(
             app,
             WEBVIEW_UTIL_SHADER_HANDLE,
@@ -47,6 +52,7 @@ impl Hash for WebviewMaterial {
     }
 }
 
+#[cfg(feature = "pbr")]
 impl Material for WebviewMaterial {}
 
 /// Solid dark placeholder until the first CEF frame arrives (`Image::default()` is 1×1 white).

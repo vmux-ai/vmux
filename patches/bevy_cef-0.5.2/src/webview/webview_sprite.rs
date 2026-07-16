@@ -2,6 +2,11 @@ use crate::common::{
     CefIgnorePinchZoom, CefPointerTarget, CefSuppressPointerInput, HistorySwipeVisualOffset,
     WebviewSize, WebviewSource, ZoomLevel,
 };
+use crate::prelude::{
+    WebviewExtendStandardMaterial, WebviewMaterialHandle, WebviewSurface, webview_placeholder_image,
+};
+#[cfg(not(feature = "pbr"))]
+use crate::webview::history_swipe::return_history_swipe_visual;
 use crate::webview::history_swipe::{HistorySwipeAction, HistorySwipeOutcome, HistorySwipeState};
 use crate::webview::pinch_zoom::zoom_level_after_pinch;
 use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
@@ -23,6 +28,7 @@ impl Plugin for WebviewSpritePlugin {
         app.add_systems(
             Update,
             (
+                ensure_sprite_webview_placeholder,
                 setup_observers,
                 on_mouse_wheel.run_if(on_message::<MouseWheel>),
                 on_pinch_zoom.run_if(on_message::<PinchGesture>),
@@ -30,21 +36,84 @@ impl Plugin for WebviewSpritePlugin {
         )
         .add_systems(
             PostUpdate,
-            render.run_if(on_message::<RenderTextureMessage>),
+            (
+                render.run_if(on_message::<RenderTextureMessage>),
+                sync_sprite_material_alpha,
+            ),
         );
+
+        #[cfg(not(feature = "pbr"))]
+        app.add_systems(Update, return_history_swipe_visual);
+    }
+}
+
+fn ensure_sprite_webview_placeholder(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut webviews: Query<
+        (
+            Entity,
+            &mut Sprite,
+            Option<&WebviewMaterialHandle<WebviewExtendStandardMaterial>>,
+        ),
+        Added<WebviewSource>,
+    >,
+) {
+    for (entity, mut sprite, material_handle) in &mut webviews {
+        if sprite.image == Handle::default() {
+            sprite.image = images.add(webview_placeholder_image());
+        }
+        if let Some(material_handle) = material_handle
+            && let Some(mut material) = materials.get_mut(material_handle.id())
+        {
+            material.extension.surface = Some(sprite.image.clone());
+        }
+        commands
+            .entity(entity)
+            .insert(WebviewSurface(sprite.image.clone()));
+    }
+}
+
+fn sync_sprite_material_alpha(
+    materials: Res<Assets<WebviewExtendStandardMaterial>>,
+    mut webviews: Query<
+        (
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+            &mut Sprite,
+        ),
+        With<WebviewSource>,
+    >,
+) {
+    for (material_handle, mut sprite) in &mut webviews {
+        let Some(material) = materials.get(material_handle.id()) else {
+            continue;
+        };
+        let alpha = material.base.base_color.alpha();
+        if sprite.color.alpha() != alpha {
+            sprite.color.set_alpha(alpha);
+        }
     }
 }
 
 fn render(
+    mut commands: Commands,
     mut er: MessageReader<RenderTextureMessage>,
     mut images: ResMut<Assets<bevy::prelude::Image>>,
     mut uploads: ResMut<WebviewTextureUploads>,
-    webviews: Query<&Sprite, With<WebviewSource>>,
+    mut webviews: Query<&mut Sprite, With<WebviewSource>>,
 ) {
     for texture in er.read() {
-        if let Ok(sprite) = webviews.get(texture.webview) {
-            apply_webview_texture(texture, &mut images, &sprite.image, &mut uploads);
+        let Ok(mut sprite) = webviews.get_mut(texture.webview) else {
+            continue;
+        };
+        if sprite.image == Handle::default() {
+            sprite.image = images.add(webview_placeholder_image());
         }
+        apply_webview_texture(texture, &mut images, &sprite.image, &mut uploads);
+        commands
+            .entity(texture.webview)
+            .insert(WebviewSurface(sprite.image.clone()));
     }
 }
 

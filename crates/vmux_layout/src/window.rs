@@ -1,4 +1,6 @@
 use crate::event::COMMAND_BAR_PAGE_URL;
+#[cfg(feature = "player-mode")]
+use crate::unit::PIXELS_PER_METER;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::{Browser, layout_cef_bundle},
@@ -8,19 +10,23 @@ use crate::{
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::stack_bundle,
     tab::{Tab, tab_bundle},
-    unit::{PIXELS_PER_METER, WindowExt},
+    unit::WindowExt,
 };
 use bevy::{
-    asset::{Asset, load_internal_asset, uuid_handle},
-    material::AlphaMode,
-    pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial},
+    asset::Asset,
     picking::Pickable,
     prelude::*,
-    render::render_resource::AsBindGroup,
-    shader::ShaderRef,
     ui::{FlexDirection, UiTargetCamera},
     window::PrimaryWindow,
     winit::WINIT_WINDOWS,
+};
+#[cfg(feature = "player-mode")]
+use bevy::{
+    asset::{load_internal_asset, uuid_handle},
+    material::AlphaMode,
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialPlugin, StandardMaterial},
+    render::render_resource::AsBindGroup,
+    shader::ShaderRef,
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
@@ -38,6 +44,7 @@ pub const WEBVIEW_Z_SIDE_SHEET: f32 = 0.022;
 pub const WEBVIEW_Z_MODAL: f32 = 0.06;
 pub const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
 
+#[cfg(feature = "player-mode")]
 const WINDOW_SHADER_HANDLE: Handle<Shader> = uuid_handle!("a3e43dbf-9f06-4d0b-8a17-ef8d5ad4d1f4");
 
 const _: () = {
@@ -51,6 +58,7 @@ const _: () = {
 
 pub struct WindowPlugin;
 
+#[cfg(feature = "player-mode")]
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
 pub struct WindowCorners {
     #[uniform(100)]
@@ -59,6 +67,7 @@ pub struct WindowCorners {
     pub corner_mode: Vec4,
 }
 
+#[cfg(feature = "player-mode")]
 impl Default for WindowCorners {
     fn default() -> Self {
         Self {
@@ -68,21 +77,29 @@ impl Default for WindowCorners {
     }
 }
 
+#[cfg(feature = "player-mode")]
 impl MaterialExtension for WindowCorners {
     fn fragment_shader() -> ShaderRef {
         WINDOW_SHADER_HANDLE.into()
     }
 }
 
+#[cfg(feature = "player-mode")]
 pub type WindowMaterial = ExtendedMaterial<StandardMaterial, WindowCorners>;
+
+#[cfg(not(feature = "player-mode"))]
+#[derive(Asset, TypePath)]
+pub struct WindowMaterial;
 
 pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
 
+#[cfg(feature = "player-mode")]
 fn window_background_color() -> Color {
     let [r, g, b] = WINDOW_BACKGROUND_SRGB;
     Color::srgba(r, g, b, 1.0)
 }
 
+#[cfg(feature = "player-mode")]
 fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {
     match mode {
         crate::scene::InteractionMode::User => 0.0,
@@ -90,6 +107,7 @@ fn window_surface_alpha(mode: crate::scene::InteractionMode) -> f32 {
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn window_surface_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
     if alpha < 1.0 {
         AlphaMode::Blend
@@ -100,6 +118,7 @@ fn window_surface_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn window_background_material(
     radius: f32,
     size_m: Vec2,
@@ -123,10 +142,10 @@ fn window_background_material(
 
 impl Plugin for WindowPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(feature = "player-mode")]
         load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
 
-        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
-            .register_type::<WindowGeometry>()
+        app.register_type::<WindowGeometry>()
             .register_type::<Option<IVec2>>()
             .register_type::<Option<Vec2>>()
             .add_systems(
@@ -159,9 +178,6 @@ impl Plugin for WindowPlugin {
                 PostUpdate,
                 (
                     fit_window_to_screen,
-                    sync_window_surface_clip,
-                    sync_window_surface_alpha,
-                    apply_webview_material_defaults,
                     sync_window_layout_to_settings,
                     sync_main_column_gap_to_pane_count,
                 ),
@@ -176,6 +192,20 @@ impl Plugin for WindowPlugin {
                 ),
             )
             .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+
+        #[cfg(feature = "player-mode")]
+        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_window_surface_clip,
+                    sync_window_surface_alpha,
+                    apply_webview_material_defaults,
+                ),
+            );
+
+        #[cfg(not(feature = "player-mode"))]
+        app.init_resource::<Assets<WindowMaterial>>();
     }
 }
 
@@ -197,14 +227,9 @@ fn handle_window_commands(
 }
 
 #[derive(Bundle)]
-struct WindowBundle<M>
-where
-    M: Material,
-{
+struct WindowBundle {
     marker: VmuxWindow,
     surface: WindowSurface,
-    mesh: Mesh3d,
-    material: MeshMaterial3d<M>,
     transform: Transform,
     node: Node,
     ui_target: UiTargetCamera,
@@ -251,39 +276,45 @@ fn setup(
 ) {
     let m = window.meters();
     let pw = *primary_window;
+    #[cfg(not(feature = "player-mode"))]
+    let _ = (&mode, &mut materials);
 
-    let root = commands
-        .spawn(WindowBundle {
-            marker: VmuxWindow,
-            surface: WindowSurface,
-            mesh: Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-            material: MeshMaterial3d(materials.add(window_background_material(
-                settings.radius,
-                Vec2::new(m.x, m.y),
-                *mode,
-            ))),
-            transform: Transform {
-                translation: Vec3::new(0.0, m.y * 0.5, 0.0),
-                scale: Vec3::new(m.x, m.y, 1.0),
-                ..default()
+    let root_commands = commands.spawn(WindowBundle {
+        marker: VmuxWindow,
+        surface: WindowSurface,
+        transform: Transform {
+            translation: Vec3::new(0.0, m.y * 0.5, 0.0),
+            scale: Vec3::new(m.x, m.y, 1.0),
+            ..default()
+        },
+        node: Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Relative,
+            flex_direction: FlexDirection::Row,
+            padding: UiRect {
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                right: Val::Px(settings.window.pad_right()),
+                bottom: Val::Px(settings.window.pad_bottom()),
             },
-            node: Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Relative,
-                flex_direction: FlexDirection::Row,
-                padding: UiRect {
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    right: Val::Px(settings.window.pad_right()),
-                    bottom: Val::Px(settings.window.pad_bottom()),
-                },
-                column_gap: Val::Px(crate::event::PANE_GAP_PX),
-                ..default()
-            },
-            ui_target: UiTargetCamera(*main_camera),
-        })
-        .id();
+            column_gap: Val::Px(crate::event::PANE_GAP_PX),
+            ..default()
+        },
+        ui_target: UiTargetCamera(*main_camera),
+    });
+    #[cfg(feature = "player-mode")]
+    let mut root_commands = root_commands;
+    #[cfg(feature = "player-mode")]
+    root_commands.insert((
+        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
+        MeshMaterial3d(materials.add(window_background_material(
+            settings.radius,
+            Vec2::new(m.x, m.y),
+            *mode,
+        ))),
+    ));
+    let root = root_commands.id();
 
     let _left_side_sheet = commands
         .spawn((
@@ -410,7 +441,7 @@ fn setup(
         ZIndex(3),
         WebviewSource::new(COMMAND_BAR_PAGE_URL),
         Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
-        MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+        WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
         Transform::default(),
         GlobalTransform::default(),
@@ -606,6 +637,7 @@ pub fn spawn_requested_tab_layouts(
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn sync_window_surface_clip(
     settings: Res<LayoutSettings>,
     mut materials: ResMut<Assets<WindowMaterial>>,
@@ -626,6 +658,7 @@ fn sync_window_surface_clip(
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn sync_window_surface_alpha(
     mode: Res<crate::scene::InteractionMode>,
     mut materials: ResMut<Assets<WindowMaterial>>,
@@ -643,13 +676,14 @@ fn sync_window_surface_alpha(
     }
 }
 
+#[cfg(feature = "player-mode")]
 fn apply_webview_material_defaults(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     q: Query<
-        &MeshMaterial3d<WebviewExtendStandardMaterial>,
+        &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
         Or<(
             Added<WebviewSource>,
-            Changed<MeshMaterial3d<WebviewExtendStandardMaterial>>,
+            Changed<WebviewMaterialHandle<WebviewExtendStandardMaterial>>,
         )>,
     >,
 ) {
@@ -776,6 +810,7 @@ fn sync_main_column_gap_to_pane_count(
     }
 }
 
+#[cfg(feature = "player-mode")]
 pub fn fit_window_to_screen(
     window: Single<&bevy::window::Window, With<PrimaryWindow>>,
     settings: Res<LayoutSettings>,
@@ -799,6 +834,24 @@ pub fn fit_window_to_screen(
             mat.extension.clip = Vec4::new(r, m.x, m.y, PIXELS_PER_METER);
             mat.base.alpha_mode = window_surface_alpha_mode(mat.base.base_color.alpha(), r);
         }
+    }
+}
+
+#[cfg(not(feature = "player-mode"))]
+pub fn fit_window_to_screen(
+    window: Single<&bevy::window::Window, With<PrimaryWindow>>,
+    mut last_size: Local<Vec2>,
+    mut q: Query<&mut Transform, With<VmuxWindow>>,
+) {
+    let m = window.meters();
+    if (m.x - last_size.x).abs() < 0.001 && (m.y - last_size.y).abs() < 0.001 {
+        return;
+    }
+    *last_size = m;
+
+    for mut transform in &mut q {
+        transform.translation = Vec3::new(0.0, m.y * 0.5, 0.0);
+        transform.scale = Vec3::new(m.x, m.y, 1.0);
     }
 }
 
@@ -871,6 +924,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_uses_dark_finder_style_background() {
         assert_eq!(
@@ -879,6 +933,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_surface_is_transparent_in_user_mode() {
         assert_eq!(
@@ -887,6 +942,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_surface_is_opaque_in_player_mode() {
         assert_eq!(
@@ -895,6 +951,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_background_material_is_opaque_in_player_mode() {
         let material = window_background_material(
@@ -910,6 +967,7 @@ mod tests {
         assert_eq!(material.base.diffuse_transmission, 0.0);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_background_material_alpha_to_coverage_for_rounded_player_corners() {
         let material = window_background_material(
@@ -922,6 +980,7 @@ mod tests {
         assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn sync_window_surface_alpha_preserves_rounded_player_corner_alpha_to_coverage() {
         let mut app = App::new();
@@ -957,6 +1016,7 @@ mod tests {
         assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_background_material_is_transparent_in_user_mode() {
         let material = window_background_material(
@@ -969,6 +1029,7 @@ mod tests {
         assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn window_background_material_keeps_corner_clip() {
         let material = window_background_material(
@@ -984,6 +1045,7 @@ mod tests {
         assert_eq!(material.extension.corner_mode, Vec4::ZERO);
     }
 
+    #[cfg(feature = "player-mode")]
     #[test]
     fn apply_webview_material_defaults_renders_from_both_sides() {
         let mut app = App::new();
@@ -996,7 +1058,7 @@ mod tests {
             .add(WebviewExtendStandardMaterial::default());
         app.world_mut().spawn((
             WebviewSource::new("https://example.com/"),
-            MeshMaterial3d(handle.clone()),
+            WebviewMaterialHandle(handle.clone()),
         ));
         app.update();
 

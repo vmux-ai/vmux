@@ -43,7 +43,11 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
     let makefile = include_str!("../../../Makefile");
 
     assert!(makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli"));
-    assert!(makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop --features dev"));
+    assert!(
+        makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)")
+    );
+    assert!(makefile.contains("VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev"));
+    assert!(makefile.contains("dev-player:"));
     assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
 
@@ -205,15 +209,12 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "std",
         "multi_threaded",
         "async_executor",
-        "bevy_animation",
         "bevy_asset",
         "bevy_log",
         "bevy_winit",
         "bevy_window",
         "bevy_render",
         "bevy_core_pipeline",
-        "bevy_pbr",
-        "bevy_post_process",
         "bevy_mesh",
         "bevy_sprite",
         "bevy_ui",
@@ -229,8 +230,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "custom_cursor",
         "reflect_auto_register",
         "default_font",
-        "bevy_camera_controller",
-        "free_camera",
         "https",
         "x11",
         "wayland",
@@ -261,6 +260,11 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
         "webgl2",
         "default_platform",
         "bevy_text",
+        "bevy_animation",
+        "bevy_camera_controller",
+        "bevy_pbr",
+        "bevy_post_process",
+        "free_camera",
         "png",
     ] {
         assert!(
@@ -268,6 +272,32 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
             "workspace bevy dependency should not enable feature {feature}"
         );
     }
+}
+
+#[test]
+fn player_mode_owns_player_only_bevy_features() {
+    let desktop = include_str!("../Cargo.toml");
+    let layout = include_str!("../../vmux_layout/Cargo.toml");
+
+    assert!(desktop.contains("default = [\"player-mode\"]"));
+    assert!(desktop.contains("player-mode = [\"vmux_layout/player-mode\"]"));
+    for feature in [
+        "bevy/bevy_animation",
+        "bevy/bevy_camera_controller",
+        "bevy/bevy_pbr",
+        "bevy/bevy_post_process",
+        "bevy/free_camera",
+        "bevy_cef/pbr",
+    ] {
+        assert!(layout.contains(feature));
+    }
+}
+
+#[test]
+fn patched_bevy_remote_does_not_pull_bevy_dev_tools() {
+    let manifest = include_str!("../../../patches/bevy_remote-0.19.0/Cargo.toml");
+
+    assert!(!manifest.contains("bevy_dev_tools"));
 }
 
 #[test]
@@ -299,6 +329,20 @@ fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
         assert!(!block.contains("\"picking\""));
         assert!(!block.contains("default-features = true"));
     }
+}
+
+#[test]
+fn patched_bevy_cef_sprite_backend_enables_render_support_without_pbr() {
+    let manifest = include_str!("../../../patches/bevy_cef-0.5.2/Cargo.toml");
+    let start = manifest
+        .find("[dependencies.bevy]")
+        .expect("bevy_cef bevy dependency");
+    let rest = &manifest[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    let bevy_block = &rest[..end];
+
+    assert!(bevy_block.contains("\"bevy_sprite_render\""));
+    assert!(!bevy_block.contains("\"bevy_pbr\""));
 }
 
 #[test]

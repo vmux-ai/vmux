@@ -17,15 +17,12 @@ bevy = { version = "0.19.0", default-features = false, features = [
     "std",
     "multi_threaded",
     "async_executor",
-    "bevy_animation",
     "bevy_asset",
     "bevy_log",
     "bevy_winit",
     "bevy_window",
     "bevy_render",
     "bevy_core_pipeline",
-    "bevy_pbr",
-    "bevy_post_process",
     "bevy_mesh",
     "bevy_sprite",
     "bevy_ui",
@@ -41,8 +38,6 @@ bevy = { version = "0.19.0", default-features = false, features = [
     "custom_cursor",
     "reflect_auto_register",
     "default_font",
-    "bevy_camera_controller",
-    "free_camera",
     "https",
     "x11",
     "wayland",
@@ -152,4 +147,5 @@ codegen-units = 1
 [patch.crates-io]
 bevy_cef = { path = "patches/bevy_cef-0.5.2" }
 bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }
+bevy_remote = { path = "patches/bevy_remote-0.19.0" }
 bevy_window = { path = "patches/bevy_window-0.19.0" }

@@ -967,7 +967,7 @@ fn sync_windowed_content_mesh_materials(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     browsers: Query<
         (
-            &MeshMaterial3d<WebviewExtendStandardMaterial>,
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
             Has<WebviewWindowed>,
         ),
         (
@@ -995,7 +995,7 @@ fn sync_windowed_content_mesh_materials(
 /// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
 /// transparent areas.
 fn sync_layout_mesh_visibility(
-    layout_q: Query<&MeshMaterial3d<WebviewExtendStandardMaterial>, With<LayoutCef>>,
+    layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let want_alpha = 1.0;
@@ -2073,13 +2073,22 @@ fn sync_webview_pane_corner_clip(
         (
             Entity,
             &WebviewSize,
-            &MeshMaterial3d<WebviewExtendStandardMaterial>,
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
         ),
         (With<Browser>, Without<LayoutCef>, Without<Modal>),
     >,
-    status: Query<(&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>), With<Header>>,
+    status: Query<
+        (
+            &WebviewSize,
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+        ),
+        With<Header>,
+    >,
     side_sheet: Query<
-        (&WebviewSize, &MeshMaterial3d<WebviewExtendStandardMaterial>),
+        (
+            &WebviewSize,
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+        ),
         With<SideSheet>,
     >,
     child_of_q: Query<&ChildOf>,
@@ -4228,7 +4237,7 @@ mod tests {
             .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
             .add(material);
         app.world_mut()
-            .spawn((LayoutCef, MeshMaterial3d(handle.clone())));
+            .spawn((LayoutCef, WebviewMaterialHandle(handle.clone())));
 
         app.update();
 
@@ -4723,7 +4732,7 @@ mod tests {
         app.world_mut().spawn((
             Browser,
             WebviewSize(Vec2::new(320.0, 240.0)),
-            MeshMaterial3d(handle.clone()),
+            WebviewMaterialHandle(handle.clone()),
             ChildOf(stack),
         ));
 
@@ -4762,7 +4771,7 @@ mod tests {
             Browser,
             LayoutCef,
             WebviewSize(Vec2::new(320.0, 240.0)),
-            MeshMaterial3d(handle.clone()),
+            WebviewMaterialHandle(handle.clone()),
         ));
 
         app.update();

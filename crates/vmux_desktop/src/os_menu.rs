@@ -69,7 +69,10 @@ struct InteractiveModeMenuItems {
 impl InteractiveModeMenuItems {
     fn sync(&self, mode: &InteractionMode) {
         self.user.set_enabled(*mode != InteractionMode::User);
+        #[cfg(feature = "player-mode")]
         self.player.set_enabled(*mode != InteractionMode::Player);
+        #[cfg(not(feature = "player-mode"))]
+        self.player.set_enabled(false);
     }
 }
 

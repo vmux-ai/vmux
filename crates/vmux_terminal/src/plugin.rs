@@ -766,7 +766,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),
@@ -869,7 +869,7 @@ pub fn reattach_terminal_bundle(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),

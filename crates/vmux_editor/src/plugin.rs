@@ -209,7 +209,7 @@ fn new_file_view_bundle(
             ))),
         ),
         (
-            MeshMaterial3d(webview_mt.add(WebviewExtendStandardMaterial::default())),
+            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
