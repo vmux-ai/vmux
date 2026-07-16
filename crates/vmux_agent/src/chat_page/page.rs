@@ -1,9 +1,9 @@
 #![allow(non_snake_case)]
 
 use crate::chat_page::composer::{
-    PromptEdit, ResumeMenuState, SelectorMode, edit_prompt, filter_sessions, is_handoff_boundary,
-    menu_direction, move_selection, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_fetch_resume,
+    PromptEdit, ResumeMenuState, SelectorMode, chat_page_title, edit_prompt, filter_sessions,
+    is_handoff_boundary, menu_direction, move_selection, resume_menu_state, selector_mode,
+    should_clear_draft_on_escape, should_fetch_resume,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
@@ -263,21 +263,15 @@ pub fn Page() -> Element {
         }
     });
 
-    // Drive the document (→ tab) title from the agent + its live run-state, so the user can see
-    // what each agent is doing without opening the pane.
     use_effect(move || {
         let name = {
             let n = agent_name();
             if n.is_empty() { current_agent() } else { n }
         };
-        let title = match status().as_str() {
-            "streaming" => format!("● {name}"),
-            "installing" => format!("{name} — Installing…"),
-            "awaiting" => format!("{name} — Approve?"),
-            "errored" => format!("{name} — Error"),
-            _ => name,
-        };
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        let title = chat_page_title(&items.read(), &status(), &name);
+        if let Some(doc) = web_sys::window().and_then(|w| w.document())
+            && doc.title() != title
+        {
             doc.set_title(&title);
         }
     });
