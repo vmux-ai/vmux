@@ -140,8 +140,8 @@ esac
 
 vmux_target_lock_release 9
 
-find "$staging_target" -type d \( -name incremental -o -path '*/build/cef-dll-sys-*' -o -path '*/.fingerprint/cef-dll-sys-*' \) -prune -exec rm -rf -- {} \;
-find "$staging_target" -type f \( -name 'cef_dll_sys-*' -o -name 'libcef_dll_sys-*' \) -delete
+find "$staging_target" -type d -name incremental -prune -exec rm -rf -- {} \;
+"$root/scripts/relocate-cef-target.sh" "$staging_target" "$source_target" "$destination_target"
 
 mv -n "$staging_target" "$destination_target"
 if [[ -e "$staging_target" ]]; then
