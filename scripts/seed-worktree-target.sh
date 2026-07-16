@@ -71,7 +71,7 @@ esac
 
 while IFS= read -r path; do
     rm -rf "$path"
-done < <(find "$destination_target" -type d \( -path '*/build/cef-dll-sys-*' -o -path '*/.fingerprint/cef-dll-sys-*' \) -prune -print)
+done < <(find "$destination_target" -type d \( -name incremental -o -path '*/build/cef-dll-sys-*' -o -path '*/.fingerprint/cef-dll-sys-*' \) -prune -print)
 
 find "$destination_target" -type f \( -name 'cef_dll_sys-*' -o -name 'libcef_dll_sys-*' \) -delete
 
