@@ -11,14 +11,16 @@ if [[ "${CARGO_PACKAGER_FORMAT:-}" != "dmg" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT/scripts/cargo-target-paths.sh"
 export PATH="${HOME}/.cargo/bin:${PATH}"
 # Wrong CEF_PATH breaks cef-dll-sys; default macOS layout is ~/.local/share.
 unset CEF_PATH
 
-APP_BUNDLE="${VMUX_APP_BUNDLE:-${ROOT}/target/release/Vmux.app}"
+RELEASE_DIR="${VMUX_CARGO_RELEASE_DIR:-$(vmux_cargo_profile_dir "$ROOT" release)}"
+APP_BUNDLE="${VMUX_APP_BUNDLE:-$RELEASE_DIR/Vmux.app}"
 BUNDLE_ID_BASE="${VMUX_BUNDLE_ID:-ai.vmux.desktop}"
 CEF_FRAMEWORK="${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}"
-HELPER_BIN="${ROOT}/target/release/bevy_cef_debug_render_process"
+HELPER_BIN="${VMUX_CEF_HELPER_BIN:-$RELEASE_DIR/bevy_cef_debug_render_process}"
 
 if [[ ! -d "$APP_BUNDLE" ]]; then
     echo "inject-cef: .app not found at $APP_BUNDLE, skipping"

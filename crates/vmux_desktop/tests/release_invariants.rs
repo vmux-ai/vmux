@@ -165,9 +165,9 @@ fn package_builds_cef_helper_separately_without_lto() {
     assert!(script.contains("build -p vmux_desktop -p vmux_service --release"));
     assert!(!script.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --release"));
     assert!(script.contains("build -p bevy_cef_debug_render_process --profile cef-helper"));
-    assert!(script.contains(
-        "cp -f target/cef-helper/bevy_cef_debug_render_process target/release/bevy_cef_debug_render_process"
-    ));
+    assert!(script.contains("$helper_dir/bevy_cef_debug_render_process"));
+    assert!(script.contains("$release_dir/bevy_cef_debug_render_process"));
+    assert!(!script.contains("target/cef-helper"));
     assert!(!script.contains("-p vmux_service -p bevy_cef_debug_render_process --release"));
     assert!(manifest.contains("[profile.cef-helper]\ninherits = \"release\"\nlto = \"off\""));
     assert!(core_manifest.contains("default = [\"browser-process\"]"));
@@ -187,6 +187,23 @@ fn package_builds_cef_helper_separately_without_lto() {
     assert!(helper_manifest.contains("cef = { version = \"148.2.0\", default-features = false }"));
     assert!(!handler.contains("use bevy::"));
     assert!(!handler.contains("use bevy_remote::"));
+}
+
+#[test]
+fn macos_ci_shares_cef_sdk_without_installing_unused_render_process() {
+    let workflow = include_str!("../../../.github/workflows/ci.yml");
+
+    assert!(workflow.contains("VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk"));
+    assert!(!workflow.contains("- name: Cache CEF SDK"));
+    assert!(!workflow.contains("cargo install bevy_cef_render_process"));
+}
+
+#[test]
+fn cef_debug_loader_requires_debug_feature() {
+    let core_source = include_str!("../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
+    let feature_gate = "#[cfg(all(target_os = \"macos\", feature = \"debug\"))]";
+
+    assert_eq!(core_source.matches(feature_gate).count(), 2);
 }
 
 #[test]
@@ -225,7 +242,8 @@ fn build_git_env_uses_github_style_short_hash() {
 fn local_package_only_builds_app_bundle() {
     let package_script = include_str!("../../../scripts/package.sh");
 
-    assert!(package_script.contains("cargo-with-cef-cache.sh\" packager --release --formats app"));
+    assert!(package_script.contains("packager_args=(packager --release)"));
+    assert!(package_script.contains("packager_args+=(--formats app)"));
     assert!(package_script.contains("if [[ \"$PROFILE\" == \"local\" ]]"));
 }
 

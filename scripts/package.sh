@@ -14,6 +14,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${1:-local}"
 export PATH="${HOME}/.cargo/bin:${PATH}"
+source "$ROOT/scripts/cargo-target-paths.sh"
 
 CARGO_TOML="$ROOT/crates/vmux_desktop/Cargo.toml"
 INFO_PLIST="$ROOT/packaging/macos/Info.plist"
@@ -68,23 +69,20 @@ sed -i '' "/<key>CFBundleName<\/key>/{n;s|<string>.*</string>|<string>$PRODUCT_N
 export VMUX_BUNDLE_ID="$BUNDLE_ID"
 export VMUX_BUILD_PROFILE="$PROFILE"
 
-# The app bundle path uses the product name from packager metadata.
-# cargo-packager always outputs to target/release/<product-name>.app
 APP_NAME="$PRODUCT_NAME"
-export VMUX_APP_BUNDLE="$ROOT/target/release/$APP_NAME.app"
+export VMUX_CARGO_RELEASE_DIR="$(vmux_cargo_profile_dir "$ROOT" release)"
+export VMUX_APP_BUNDLE="$VMUX_CARGO_RELEASE_DIR/$APP_NAME.app"
 
 echo "==> Running cargo packager"
 cd "$ROOT"
-if [[ "$PROFILE" == "local" ]]; then
-    # Local skips the dmg pass; `make build-local` ad-hoc-signs the
-    # .app separately via sign-and-notarize.sh + SKIP_NOTARIZE=1.
-    VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" packager --release --formats app
-else
-    # Release: single invocation builds the .app, then the dmg pass'
-    # before-each hook injects CEF + signs + notarizes before
-    # dmg::package wraps it. Uses formats=["app","dmg"] from Cargo.toml.
-    VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" packager --release
+packager_args=(packager --release)
+if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
+    packager_args+=(--target "$CARGO_BUILD_TARGET")
 fi
+if [[ "$PROFILE" == "local" ]]; then
+    packager_args+=(--formats app)
+fi
+VMUX_BUILD_PROFILE="$PROFILE" "$ROOT/scripts/cargo-with-cef-cache.sh" "${packager_args[@]}"
 
 # inject-cef only meaningfully runs in the dmg-format pass (the .app
 # doesn't exist during the app-format pass). For local app-only builds,

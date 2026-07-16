@@ -156,7 +156,7 @@ fi
 
 echo "==> Creating zip for notarization"
 APP_BASENAME="$(basename "$APP_BUNDLE" .app)"
-NOTARIZE_ZIP="$ROOT/target/release/${APP_BASENAME// /_}-notarize.zip"
+NOTARIZE_ZIP="$(dirname "$APP_BUNDLE")/${APP_BASENAME// /_}-notarize.zip"
 rm -f "$NOTARIZE_ZIP"
 ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_ZIP"
 ls -lh "$NOTARIZE_ZIP"

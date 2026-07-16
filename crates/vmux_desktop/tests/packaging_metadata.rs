@@ -36,11 +36,95 @@ fn before_packaging_command_prepares_named_binaries() {
     let script = include_str!("../../../scripts/build-package-binaries.sh");
     assert!(script.contains("-p vmux_desktop"));
     assert!(script.contains("-p vmux_cli"));
-    assert!(script.contains(r#"target/release/Vmux Service"#));
+    assert!(script.contains(r#"$release_dir/Vmux Service"#));
     assert!(
         !script.contains("target/release/vmux_desktop target/release/Vmux"),
         "must not copy the GUI binary over the vmux name (case-insensitive clash)"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn package_binary_paths_honor_target_dir_and_triple() {
+    use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let cargo = temp.path().join("cargo");
+    let target = temp.path().join("custom target");
+    let cache = temp.path().join("cef sdk");
+    let log = temp.path().join("cargo.log");
+    fs::write(
+        &cargo,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+profile=release
+while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--profile" ]]; then
+        profile="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+out="$CARGO_TARGET_DIR/${CARGO_BUILD_TARGET:-}/$profile"
+mkdir -p "$out"
+if [[ "$profile" == "cef-helper" ]]; then
+    : > "$out/bevy_cef_debug_render_process"
+else
+    : > "$out/vmux_service"
+fi
+printf '%s\n' "${CEF_PATH:-}" >> "$FAKE_CARGO_LOG"
+"#,
+    )
+    .expect("write fake cargo");
+    let mut permissions = fs::metadata(&cargo)
+        .expect("fake cargo metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&cargo, permissions).expect("make fake cargo executable");
+
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/build-package-binaries.sh");
+    let status = Command::new("bash")
+        .arg(script)
+        .env("CI", "true")
+        .env("CARGO_BIN", &cargo)
+        .env("CARGO_TARGET_DIR", &target)
+        .env("CARGO_BUILD_TARGET", "aarch64-apple-darwin")
+        .env("VMUX_CEF_SDK_CACHE", &cache)
+        .env("FAKE_CARGO_LOG", &log)
+        .status()
+        .expect("run package binary build");
+    assert!(status.success());
+
+    let release = target.join("aarch64-apple-darwin/release");
+    assert!(release.join("bevy_cef_debug_render_process").is_file());
+    assert!(release.join("Vmux Service").is_file());
+    let cargo_log = fs::read_to_string(log).expect("read cargo log");
+    let cef_paths = cargo_log.lines().collect::<Vec<_>>();
+    let expected = cache.display().to_string();
+    assert!(cef_paths.len() >= 2);
+    assert!(cef_paths.iter().all(|path| *path == expected));
+}
+
+#[test]
+fn packaging_scripts_share_resolved_release_dir() {
+    let paths = include_str!("../../../scripts/cargo-target-paths.sh");
+    let build = include_str!("../../../scripts/build-package-binaries.sh");
+    let package = include_str!("../../../scripts/package.sh");
+    let inject = include_str!("../../../scripts/inject-cef.sh");
+    let before_each = include_str!("../../../scripts/before-each-package.sh");
+    let signing = include_str!("../../../scripts/sign-and-notarize.sh");
+
+    assert!(paths.contains("CARGO_TARGET_DIR"));
+    assert!(paths.contains("CARGO_BUILD_TARGET"));
+    assert!(build.contains("vmux_cargo_profile_dir \"$ROOT\" release"));
+    assert!(package.contains("VMUX_CARGO_RELEASE_DIR"));
+    assert!(package.contains("packager_args+=(--target \"$CARGO_BUILD_TARGET\")"));
+    assert!(inject.contains("VMUX_CARGO_RELEASE_DIR"));
+    assert!(inject.contains("$RELEASE_DIR/bevy_cef_debug_render_process"));
+    assert!(before_each.contains("$release_dir/Vmux.app"));
+    assert!(signing.contains("$(dirname \"$APP_BUNDLE\")"));
 }
 
 #[test]

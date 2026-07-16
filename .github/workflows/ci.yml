@@ -363,6 +363,7 @@ jobs:
       contents: write
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
+      VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk
     steps:
       - uses: actions/checkout@v5
         with:
@@ -456,10 +457,8 @@ jobs:
       - name: Install binaryen
         run: ./scripts/install-dioxus-binaryen.sh
 
-      - name: Install bevy_cef tools
-        run: |
-          command -v bevy_cef_render_process >/dev/null 2>&1 || cargo install bevy_cef_render_process
-          command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
+      - name: Install bevy_cef bundle tool
+        run: command -v bevy_cef_bundle_app >/dev/null 2>&1 || cargo install bevy_cef_bundle_app
 
       - name: Install cargo-packager (patched for macOS Tahoe)
         run: |
