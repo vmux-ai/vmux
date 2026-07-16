@@ -9665,6 +9665,7 @@ dependencies = [
  "similar",
  "tokio",
  "toml",
+ "unicode-segmentation",
  "url",
  "uuid",
  "vmux_command",

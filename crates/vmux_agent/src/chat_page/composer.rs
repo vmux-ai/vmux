@@ -1,4 +1,7 @@
-use super::event::{ResumableSessionEntry, SlashCommandEntry};
+use super::event::{ChatBlock, ChatItem, ResumableSessionEntry, SlashCommandEntry};
+use unicode_segmentation::UnicodeSegmentation;
+
+const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SelectorMode<'a> {
@@ -26,6 +29,17 @@ pub(crate) enum ResumeMenuState {
     Empty,
     NoMatch,
     Results,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ToolActivity {
+    Guardian,
+    ReadFile,
+    Image,
+    Browser,
+    Search,
+    Command,
+    Other,
 }
 
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
@@ -129,6 +143,150 @@ pub(crate) fn should_clear_draft_on_escape(
     !streaming && queue_empty && !draft_empty
 }
 
+pub(crate) fn chat_page_title(items: &[ChatItem], status: &str, agent_name: &str) -> String {
+    let topic = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::User { text } => Some(text.as_str()),
+            ChatItem::Turn(_) => None,
+        })
+        .map(normalize_chat_page_title)
+        .find(|title| !title.is_empty())
+        .unwrap_or_else(|| normalize_chat_page_title(agent_name));
+
+    match status {
+        "streaming" => format!("{} {topic}", streaming_title_emoji(items)),
+        "installing" => format!("📦 {topic}"),
+        "awaiting" => format!("✋ {topic}"),
+        "errored" => format!("❌ {topic}"),
+        _ => topic,
+    }
+}
+
+fn streaming_title_emoji(items: &[ChatItem]) -> &'static str {
+    let block = items
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            ChatItem::Turn(turn) if turn.running => Some(turn.blocks.last()),
+            _ => None,
+        })
+        .flatten();
+
+    match block {
+        Some(ChatBlock::Text(_)) => "✍️",
+        Some(ChatBlock::Thinking(_)) | Some(ChatBlock::ToolResult { .. }) | None => "🧠",
+        Some(ChatBlock::ToolUse { name, .. }) => tool_activity_emoji(tool_activity(name)),
+        Some(ChatBlock::Diff { .. }) => "✏️",
+        Some(ChatBlock::Plan { .. }) => "📋",
+        Some(ChatBlock::Reconnect { .. }) => "🛜",
+    }
+}
+
+pub(crate) fn tool_activity(name: &str) -> ToolActivity {
+    let lower = name.to_ascii_lowercase();
+    if lower.contains("guardian")
+        || lower.contains("approval")
+        || lower == "review"
+        || lower.ends_with("_review")
+        || lower.ends_with(".review")
+        || lower.ends_with(":review")
+    {
+        ToolActivity::Guardian
+    } else if lower.contains("read_file") || lower.contains("read file") {
+        ToolActivity::ReadFile
+    } else if lower.contains("view_image") || lower.contains("view image") {
+        ToolActivity::Image
+    } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
+        ToolActivity::Browser
+    } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
+        ToolActivity::Search
+    } else if lower.contains("run")
+        || lower.contains("exec")
+        || lower.contains("command")
+        || lower.contains("shell")
+        || lower.contains("terminal")
+    {
+        ToolActivity::Command
+    } else {
+        ToolActivity::Other
+    }
+}
+
+fn tool_activity_emoji(activity: ToolActivity) -> &'static str {
+    match activity {
+        ToolActivity::Guardian => "🛡️",
+        ToolActivity::ReadFile => "📄",
+        ToolActivity::Image => "🖼️",
+        ToolActivity::Browser => "🌐",
+        ToolActivity::Search => "🔎",
+        ToolActivity::Command => "💻",
+        ToolActivity::Other => "🛠️",
+    }
+}
+
+fn normalize_chat_page_title(value: &str) -> String {
+    let mut title = String::new();
+    let mut graphemes_written = 0;
+    let mut pending_space = false;
+    let mut truncated = false;
+
+    for grapheme in value.graphemes(true) {
+        if grapheme.chars().all(char::is_whitespace) {
+            pending_space = !title.is_empty();
+            continue;
+        }
+        let grapheme = grapheme
+            .chars()
+            .filter(|character| !is_disallowed_chat_page_title_char(*character))
+            .collect::<String>();
+        if grapheme.is_empty() {
+            continue;
+        }
+        if pending_space {
+            if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
+                truncated = true;
+                break;
+            }
+            title.push(' ');
+            graphemes_written += 1;
+            pending_space = false;
+        }
+        if graphemes_written >= CHAT_PAGE_TITLE_MAX_GRAPHEMES {
+            truncated = true;
+            break;
+        }
+        title.push_str(&grapheme);
+        graphemes_written += 1;
+    }
+
+    if truncated {
+        if let Some((start, _)) = title.grapheme_indices(true).next_back() {
+            title.truncate(start);
+        }
+        title.push('…');
+    }
+    title
+}
+
+fn is_disallowed_chat_page_title_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+        )
+}
+
 pub(crate) fn edit_prompt(
     value: &str,
     selection_start: u32,
@@ -187,7 +345,7 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat_page::event::SlashCommandEntry;
+    use crate::chat_page::event::{ChatTurn, SlashCommandEntry};
 
     fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
         ResumableSessionEntry {
@@ -281,6 +439,134 @@ mod tests {
         assert!(!should_clear_draft_on_escape(true, true, false));
         assert!(!should_clear_draft_on_escape(false, false, false));
         assert!(!should_clear_draft_on_escape(false, true, true));
+    }
+
+    #[test]
+    fn chat_page_title_uses_first_prompt_as_stable_topic() {
+        let items = vec![
+            ChatItem::User {
+                text: "  Fix the\ndynamic   agent page title  ".into(),
+            },
+            ChatItem::Turn(ChatTurn {
+                running: true,
+                ..Default::default()
+            }),
+            ChatItem::User {
+                text: "continue".into(),
+            },
+        ];
+
+        assert_eq!(
+            chat_page_title(&items, "streaming", "Codex"),
+            "🧠 Fix the dynamic agent page title"
+        );
+        assert_eq!(
+            chat_page_title(&items, "awaiting", "Codex"),
+            "✋ Fix the dynamic agent page title"
+        );
+    }
+
+    #[test]
+    fn chat_page_title_tracks_live_timeline_activity() {
+        fn title(block: ChatBlock) -> String {
+            chat_page_title(
+                &[
+                    ChatItem::User {
+                        text: "Ship dynamic titles".into(),
+                    },
+                    ChatItem::Turn(ChatTurn {
+                        blocks: vec![block],
+                        running: true,
+                        ..Default::default()
+                    }),
+                ],
+                "streaming",
+                "Codex",
+            )
+        }
+
+        assert_eq!(
+            title(ChatBlock::Thinking("hmm".into())),
+            "🧠 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::ToolUse {
+                call_id: "1".into(),
+                name: "functions.exec_command".into(),
+                args: "{}".into(),
+            }),
+            "💻 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::ToolUse {
+                call_id: "2".into(),
+                name: "search_files".into(),
+                args: "{}".into(),
+            }),
+            "🔎 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Plan { steps: Vec::new() }),
+            "📋 Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Diff {
+                call_id: "3".into(),
+                path: "page.rs".into(),
+                old_text: None,
+                new_text: String::new(),
+            }),
+            "✏️ Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Text("done soon".into())),
+            "✍️ Ship dynamic titles"
+        );
+        assert_eq!(
+            title(ChatBlock::Reconnect {
+                attempt: 2,
+                total: 5,
+            }),
+            "🛜 Ship dynamic titles"
+        );
+    }
+
+    #[test]
+    fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
+        assert_eq!(chat_page_title(&[], "idle", "Codex"), "Codex");
+
+        let items = vec![ChatItem::User {
+            text: "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
+        }];
+        let title = chat_page_title(&items, "idle", "Codex");
+        assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
+        assert!(title.ends_with('…'));
+        assert_eq!(
+            chat_page_title(
+                &[ChatItem::User {
+                    text: "Fix \u{202E}\x1b title".into(),
+                }],
+                "idle",
+                "Codex"
+            ),
+            "Fix title"
+        );
+        assert_eq!(
+            chat_page_title(
+                &[
+                    ChatItem::User {
+                        text: "\u{202E}".into(),
+                    },
+                    ChatItem::User {
+                        text: "Keep 👩‍💻 and فارسی\u{200C}".into(),
+                    },
+                ],
+                "errored",
+                "Codex"
+            ),
+            "❌ Keep 👩‍💻 and فارسی\u{200C}"
+        );
+        assert_eq!(chat_page_title(&[], "installing", "Codex"), "📦 Codex");
     }
 
     #[test]

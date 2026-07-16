@@ -13,6 +13,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rkyv = { workspace = true }
 similar = "2"
+unicode-segmentation = "1"
 vmux_terminal = { path = "../vmux_terminal" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
