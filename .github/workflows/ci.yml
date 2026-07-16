@@ -27,7 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Resolve cef crate version from Cargo.lock
         id: resolve
@@ -49,7 +49,7 @@ jobs:
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Free disk space
         run: |
@@ -88,19 +88,19 @@ jobs:
           shared-key: lint
 
       - name: Cache cargo binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache CEF framework
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
 
       - name: Cache tailwindcss
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
@@ -145,7 +145,7 @@ jobs:
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Free disk space
         run: |
@@ -183,19 +183,19 @@ jobs:
           shared-key: test
 
       - name: Cache cargo binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache CEF framework
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
 
       - name: Cache tailwindcss
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
@@ -229,8 +229,8 @@ jobs:
       packaging: ${{ steps.filter.outputs.packaging }}
       code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -327,7 +327,7 @@ jobs:
     if: needs.changes.outputs.website == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
@@ -339,7 +339,7 @@ jobs:
           shared-key: website
 
       - name: Cache binaryen
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
@@ -364,7 +364,7 @@ jobs:
     env:
       CEF_VERSION: ${{ needs.cef-version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -415,25 +415,25 @@ jobs:
           shared-key: build-mac
 
       - name: Cache cargo binaries
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin
           key: cargo-bin-${{ runner.os }}-dx${{ env.DIOXUS_CLI_VERSION }}-cp0.11.9-cef${{ env.CEF_VERSION }}-v3
 
       - name: Cache binaryen
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .dx/tools/binaryen-${{ env.BINARYEN_VERSION }}
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-${{ env.BINARYEN_VERSION }}
 
       - name: Cache CEF framework
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
 
       - name: Cache tailwindcss
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bin/tailwindcss
           key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
@@ -528,7 +528,7 @@ jobs:
 
       - name: Upload .dmg artifact
         if: env.PREP_DONE != '1' && env.IS_RELEASE_PR != '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Vmux-${{ github.sha }}.dmg
           path: target/release/Vmux_*.dmg

@@ -31,7 +31,7 @@ jobs:
       version: ${{ steps.detect.outputs.version }}
       tag: ${{ steps.detect.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -63,7 +63,7 @@ jobs:
     env:
       TAG: ${{ needs.detect-version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify draft release exists with all assets
         env:
