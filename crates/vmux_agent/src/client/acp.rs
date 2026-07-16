@@ -75,6 +75,14 @@ fn display_install_progress(
     }
 }
 
+fn ready_agent_message(resume: Option<&str>) -> &'static str {
+    if resume.is_some() {
+        "Loading session history…"
+    } else {
+        "Starting agent…"
+    }
+}
+
 impl Default for AcpInstallChannel {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -196,7 +204,7 @@ fn auto_allow_acp_approval(
 /// Marks an `AcpSession` whose install has already been kicked off, so
 /// [`install_acp_session_when_focused`] starts it exactly once.
 #[derive(Component)]
-struct AcpInstallStarted;
+pub(crate) struct AcpInstallStarted;
 
 /// Install (and spawn) an ACP agent only once its stack is actually focused — i.e. the user
 /// opened it. Background or restored agent tabs stay idle until visited, so vmux never installs
@@ -482,7 +490,11 @@ fn drain_acp_installs(
                 let Some(service) = service.as_ref() else {
                     continue;
                 };
-                if let Some((session, _)) = q.iter().find(|(s, _)| s.sid == sid) {
+                if let Some((session, mut state)) = q.iter_mut().find(|(s, _)| s.sid == sid) {
+                    *state = AgentRunState::Installing {
+                        pct: None,
+                        message: ready_agent_message(session.resume.as_deref()).to_string(),
+                    };
                     let mcp = crate::mcp::resolve_acp(
                         &session.cwd,
                         session.anchor,
@@ -712,6 +724,11 @@ mod tests {
         assert_eq!(
             display_install_progress(InstallPhase::Downloading, Some(42), "downloading"),
             (Some(42), "downloading".to_string())
+        );
+        assert_eq!(ready_agent_message(None), "Starting agent…");
+        assert_eq!(
+            ready_agent_message(Some("session-1")),
+            "Loading session history…"
         );
     }
 

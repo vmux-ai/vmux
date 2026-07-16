@@ -3093,6 +3093,7 @@ fn handle_swap_stack_session(
         commands
             .entity(ev.stack)
             .remove::<crate::client::acp::AcpSession>()
+            .remove::<crate::client::acp::AcpInstallStarted>()
             .remove::<crate::components::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
@@ -3844,6 +3845,33 @@ mod tests {
             .unwrap();
         assert_eq!(pending.context, "prior conversation");
         assert!(!pending.sent);
+    }
+
+    #[test]
+    fn acp_swap_resets_install_marker() {
+        let mut app = swap_test_app();
+        let (stack, _child) = spawn_stack_child(&mut app);
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(crate::client::acp::AcpInstallStarted);
+        app.world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .write(vmux_core::agent::SwapStackSession {
+                stack,
+                target_url: "vmux://agent/codex/session-2".to_string(),
+                cwd: std::path::PathBuf::from("/work"),
+                handoff: None,
+            });
+
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<crate::client::acp::AcpInstallStarted>(stack)
+                .is_none()
+        );
+        let session = app.world().get::<crate::AcpSession>(stack).unwrap();
+        assert_eq!(session.resume.as_deref(), Some("session-2"));
     }
 
     #[test]
