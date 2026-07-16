@@ -1022,7 +1022,20 @@ fn reattach_along_path(
     }
     let anchor = parent;
     if depth == path.len() {
-        return Some((parent, anchor));
+        let leaf = if layout.leaf_panes.contains(parent) {
+            parent
+        } else if let Some(leaf) = first_leaf_descendant(parent, layout) {
+            leaf
+        } else {
+            commands
+                .spawn((
+                    leaf_pane_bundle(),
+                    vmux_history::LastActivatedAt::now(),
+                    ChildOf(parent),
+                ))
+                .id()
+        };
+        return Some((leaf, anchor));
     }
 
     if layout.leaf_panes.contains(parent) {
@@ -1071,6 +1084,18 @@ fn reattach_along_path(
         parent = new_child;
     }
     Some((parent, anchor))
+}
+
+fn first_leaf_descendant(root: Entity, layout: &ReopenLayout) -> Option<Entity> {
+    if layout.leaf_panes.contains(root) {
+        return Some(root);
+    }
+    for child in layout.children_q.get(root).ok()?.iter() {
+        if let Some(leaf) = first_leaf_descendant(child, layout) {
+            return Some(leaf);
+        }
+    }
+    None
 }
 
 fn clamp_child_index(parent: Entity, idx: usize, children_q: &Query<&Children>) -> usize {
@@ -2234,6 +2259,79 @@ mod tests {
                 .get::<vmux_history::LastActivatedAt>()
                 .is_some(),
             "reattached intermediate split is activated through the restored chain"
+        );
+    }
+
+    #[test]
+    fn reopen_stale_leaf_id_that_is_now_split_uses_descendant_leaf() {
+        let mut app = reopen_app();
+        let space = app
+            .world_mut()
+            .spawn((Space, SpaceId("s1".to_string())))
+            .id();
+        let tab = app.world_mut().spawn((Tab::default(), ChildOf(space))).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Row,
+                },
+                PaneId("root".to_string()),
+                ChildOf(tab),
+            ))
+            .id();
+        let promoted = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: PaneSplitDirection::Column,
+                },
+                PaneId("old-leaf".to_string()),
+                ChildOf(root),
+            ))
+            .id();
+        let survivor = app
+            .world_mut()
+            .spawn((Pane, PaneId("survivor".to_string()), ChildOf(promoted)))
+            .id();
+        app.world_mut().spawn((Stack::default(), ChildOf(survivor)));
+        app.world_mut().spawn((
+            ArchivedPage {
+                url: "https://reopened.example".to_string(),
+                space_id: "s1".to_string(),
+                closed_at: 5,
+                ..default()
+            },
+            ArchivedPagePosition {
+                leaf_pane_id: "old-leaf".to_string(),
+                stack_index: 0,
+                pane_path: vec![PaneStep {
+                    split_id: "root".to_string(),
+                    axis: SplitAxis::Row,
+                    child_index: 0,
+                    flex_weights: vec![1.0],
+                }],
+            },
+        ));
+
+        dispatch_reopen(&mut app);
+
+        let reopened = app
+            .world_mut()
+            .query::<(Entity, &PageMetadata)>()
+            .iter(app.world())
+            .find(|(_, metadata)| metadata.url == "https://reopened.example")
+            .map(|(entity, _)| entity)
+            .expect("reopened stack");
+        let parent = app.world().get::<ChildOf>(reopened).unwrap().parent();
+        assert_eq!(parent, survivor);
+        assert!(app.world().get::<PaneSplit>(parent).is_none());
+        assert!(
+            app.world()
+                .get::<Children>(promoted)
+                .is_some_and(|children| !children.contains(&reopened))
         );
     }
 
