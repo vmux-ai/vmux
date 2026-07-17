@@ -759,7 +759,7 @@ pub fn Page() -> Element {
                                                 id: "agent-selector-item-{i}",
                                                 class: if i == menu_sel() { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
                                                 onclick: move |_| select_media_entry(&entry, draft, menu_sel),
-                                                div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-muted-foreground",
+                                                div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
                                                     if entry.is_dir {
                                                         svg {
                                                             class: "h-4 w-4",
@@ -770,6 +770,12 @@ pub fn Page() -> Element {
                                                             stroke_linecap: "round",
                                                             stroke_linejoin: "round",
                                                             path { d: "M3 6h6l2 2h10v10H3z" }
+                                                        }
+                                                    } else if !entry.preview_data_url.is_empty() {
+                                                        img {
+                                                            src: "{entry.preview_data_url}",
+                                                            alt: "{entry.name}",
+                                                            class: "h-full w-full object-contain",
                                                         }
                                                     } else {
                                                         span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }

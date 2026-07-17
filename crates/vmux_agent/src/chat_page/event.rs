@@ -82,6 +82,7 @@ pub struct ChatMediaEntry {
     pub parent: String,
     pub mime_type: String,
     pub is_dir: bool,
+    pub preview_data_url: String,
 }
 
 #[derive(
@@ -696,12 +697,18 @@ mod tests {
                 parent: "~/Pictures".into(),
                 mime_type: "image/png".into(),
                 is_dir: false,
+                preview_data_url: "data:image/png;base64,cG5n".into(),
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
         let back = rkyv::from_bytes::<ChatMediaEntries, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.request_id, 7);
         assert_eq!(back.entries[0].name, "screenshot.png");
+        assert!(
+            back.entries[0]
+                .preview_data_url
+                .starts_with("data:image/png")
+        );
     }
 
     #[test]

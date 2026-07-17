@@ -289,6 +289,12 @@ struct ChatMediaListTask {
 
 #[cfg(not(target_arch = "wasm32"))]
 const ATTACHMENT_PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn attachment_mime(path: &std::path::Path) -> String {
@@ -348,6 +354,37 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
         size: metadata.len(),
         preview_data_url,
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String {
+    if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
+        return String::new();
+    }
+    let Some(mime) = vmux_core::media::image_mime(&path.to_string_lossy()) else {
+        return String::new();
+    };
+    if mime == "image/svg+xml" || mime == "image/avif" {
+        return String::new();
+    }
+    let Ok(bytes) = std::fs::read(path) else {
+        return String::new();
+    };
+    let Ok(image) = image::load_from_memory(&bytes) else {
+        return String::new();
+    };
+    let thumbnail = image.thumbnail(MEDIA_THUMBNAIL_MAX_EDGE, MEDIA_THUMBNAIL_MAX_EDGE);
+    let mut output = std::io::Cursor::new(Vec::new());
+    if thumbnail
+        .write_to(&mut output, image::ImageFormat::Png)
+        .is_err()
+    {
+        return String::new();
+    }
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(output.into_inner())
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -499,6 +536,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
                 parent,
                 mime_type,
                 is_dir,
+                preview_data_url: String::new(),
             })
         })
         .collect::<Vec<_>>();
@@ -510,6 +548,23 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
         })
     });
     entries.truncate(100);
+    let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
+    for entry in &mut entries {
+        if entry.is_dir || !entry.mime_type.starts_with("image/") {
+            continue;
+        }
+        let source_size = std::fs::metadata(&entry.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(u64::MAX);
+        if source_size > remaining_thumbnail_bytes {
+            continue;
+        }
+        entry.preview_data_url =
+            media_thumbnail_data_url(std::path::Path::new(&entry.path), source_size);
+        if !entry.preview_data_url.is_empty() {
+            remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
+        }
+    }
     ChatMediaEntries {
         request_id,
         query,
@@ -1508,6 +1563,25 @@ mod native_tests {
     }
 
     #[test]
+    fn media_thumbnail_is_small_png_data_url() {
+        let path =
+            std::env::temp_dir().join(format!("vmux-media-thumbnail-{}.png", uuid::Uuid::new_v4()));
+        let image = image::RgbaImage::from_pixel(240, 120, image::Rgba([20, 40, 60, 255]));
+        image.save(&path).unwrap();
+        let source_size = std::fs::metadata(&path).unwrap().len();
+
+        let data_url = media_thumbnail_data_url(&path, source_size);
+
+        std::fs::remove_file(path).unwrap();
+        let encoded = data_url.strip_prefix("data:image/png;base64,").unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let thumbnail = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(thumbnail.width().max(thumbnail.height()), 96);
+    }
+
+    #[test]
     fn runtime_switch_builtin_acp_agents_to_cli() {
         let cases = [
             ("claude", "claude"),
@@ -2044,6 +2118,8 @@ mod native_tests {
         assert!(source.contains("attachments_to_submit"));
         assert!(source.contains("ChatMediaListRequest"));
         assert!(source.contains("select_media_entry"));
+        assert!(source.contains("entry.preview_data_url"));
+        assert!(source.contains("h-12 w-16"));
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
         assert!(source.contains("max-h-80 max-w-full object-contain"));
