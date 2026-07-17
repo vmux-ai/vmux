@@ -4641,7 +4641,7 @@ mod tests {
         );
         assert!(source.contains("random_prompt_example_index"));
         assert!(source.contains("js_sys::Math::random()"));
-        assert!(source.contains("h-5 w-px align-middle bg-foreground/80"));
+        assert!(source.contains("relative top-px ml-px h-4 w-1.5 shrink-0"));
         assert!(source.contains("vmux-prompt-caret-blink 1s step-end infinite"));
     }
 

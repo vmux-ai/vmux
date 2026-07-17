@@ -1092,18 +1092,18 @@ pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
     let ghost_class = if terminal {
         "w-80 whitespace-pre-wrap break-words font-mono text-sm text-muted-foreground/50"
     } else {
-        "max-w-full whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
+        "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
     };
     let caret_class = if terminal {
         format!("vmux-prompt-caret ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}")
     } else {
-        "vmux-prompt-caret ml-px inline-block h-5 w-px align-middle bg-foreground/80".to_string()
+        format!("vmux-prompt-caret relative top-px ml-px h-4 w-1.5 shrink-0 {accent_bg}")
     };
     rsx! {
         style { dangerous_inner_html: PROMPT_CARET_CSS }
         div {
             class: "{ghost_class}",
-            "{shown}"
+            span { class: if terminal { "" } else { "min-w-0 truncate" }, "{shown}" }
             span { class: "{caret_class}" }
         }
     }
