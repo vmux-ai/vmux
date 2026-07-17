@@ -1193,14 +1193,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
 }
 
 #[component]
-fn SheetEntryRow(
-    active: bool,
-    onclick: EventHandler<MouseEvent>,
-    #[props(extends = GlobalAttributes)]
-    #[props(extends = div)]
-    attributes: Vec<Attribute>,
-    children: Element,
-) -> Element {
+fn SheetEntryRow(active: bool, onclick: EventHandler<MouseEvent>, children: Element) -> Element {
     rsx! {
         div {
             class: if active {
@@ -1209,7 +1202,6 @@ fn SheetEntryRow(
                 "group flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
             },
             onclick: move |e| onclick.call(e),
-            ..attributes,
             {children}
         }
     }
@@ -1333,9 +1325,13 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     };
 
     rsx! {
-        SheetEntryRow {
+        div {
             id: "sidesheet-stack-{pane_id}-{stack_index}",
-            active: is_active,
+            class: if is_active {
+                "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+            } else {
+                "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+            },
             onmouseenter: move |_| hovered.set(true),
             onmouseleave: move |_| hovered.set(false),
             onclick: move |_| {
