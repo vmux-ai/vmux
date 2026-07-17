@@ -72,7 +72,10 @@ impl Plugin for StackPlugin {
                 Update,
                 compute_focused_stack
                     .in_set(ComputeFocusSet)
-                    .after(ReadAppCommands),
+                    .after(ReadAppCommands)
+                    .after(crate::active::ensure_active_tab)
+                    .after(crate::active::ensure_active_stack)
+                    .after(crate::active::ensure_active_branch),
             )
             .add_systems(PostUpdate, sync_stack_picking);
     }

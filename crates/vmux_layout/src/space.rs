@@ -26,7 +26,8 @@ impl Plugin for SpacePlugin {
                     crate::active::ensure_active_stack,
                     crate::active::ensure_active_branch,
                 )
-                    .after(ReadAppCommands),
+                    .after(ReadAppCommands)
+                    .after(crate::window::spawn_requested_tab_layouts),
             )
             .add_systems(
                 PostUpdate,

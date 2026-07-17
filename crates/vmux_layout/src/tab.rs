@@ -733,6 +733,53 @@ mod tests {
     }
 
     #[test]
+    fn new_tab_becomes_active_in_single_update() {
+        let mut app = build_app();
+        app.init_resource::<crate::pane::PendingCursorWarp>()
+            .add_plugins((crate::space::SpacePlugin, crate::stack::StackPlugin));
+        build_main_and_tab(&mut app);
+        let old_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .expect("initial tab");
+        app.world_mut()
+            .entity_mut(old_tab)
+            .insert(vmux_core::Active);
+        let old_pane = app
+            .world_mut()
+            .spawn((crate::pane::Pane, LastActivatedAt(1), ChildOf(old_tab)))
+            .id();
+        let old_stack = app
+            .world_mut()
+            .spawn((
+                crate::stack::stack_bundle(),
+                LastActivatedAt(1),
+                ChildOf(old_pane),
+            ))
+            .id();
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let new_tab = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Tab>, With<vmux_core::Active>)>()
+            .single(app.world())
+            .expect("one active tab");
+        assert_ne!(new_tab, old_tab);
+        let focused = app.world().resource::<crate::stack::FocusedStack>();
+        assert_eq!(focused.tab, Some(new_tab));
+        assert!(focused.pane.is_some_and(|pane| pane != old_pane));
+        assert!(focused.stack.is_some_and(|stack| stack != old_stack));
+    }
+
+    #[test]
     fn new_tab_parents_under_active_space_container() {
         let mut app = build_app();
         let window = app.world_mut().spawn(PrimaryWindow).id();
