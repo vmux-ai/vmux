@@ -1,4 +1,4 @@
-use crate::event::BookmarksCommandEvent;
+use crate::event::{BookmarkTextInputEvent, BookmarksCommandEvent};
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
 use bevy::prelude::*;
@@ -59,14 +59,21 @@ pub enum BookmarkOp {
 #[derive(Message, Clone, Debug, Default)]
 pub struct ShowBookmarkMenuRequest;
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BookmarkTextInputActive;
+
 pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<BookmarkOp>()
             .add_message::<ShowBookmarkMenuRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(BookmarksCommandEvent,)>::for_hosts(&["layout"]))
+            .add_plugins(BinEventEmitterPlugin::<(
+                BookmarksCommandEvent,
+                BookmarkTextInputEvent,
+            )>::for_hosts(&["layout"]))
             .add_observer(on_bookmarks_command_emit)
+            .add_observer(on_bookmark_text_input_emit)
             .add_systems(
                 Update,
                 (
@@ -75,6 +82,20 @@ impl Plugin for BookmarkPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+fn on_bookmark_text_input_emit(
+    trigger: On<BinReceive<BookmarkTextInputEvent>>,
+    mut commands: Commands,
+) {
+    let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
+        return;
+    };
+    if trigger.event().payload.active {
+        webview.insert(BookmarkTextInputActive);
+    } else {
+        webview.remove::<BookmarkTextInputActive>();
     }
 }
 
@@ -510,6 +531,36 @@ mod tests {
                     url: Some("https://a.test".into()),
                 }
             ))]
+        );
+    }
+
+    #[test]
+    fn text_input_event_toggles_layout_keyboard_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_observer(on_bookmark_text_input_emit);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(BinReceive::<BookmarkTextInputEvent> {
+                webview,
+                payload: BookmarkTextInputEvent { active: true },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .entity(webview)
+                .contains::<BookmarkTextInputActive>()
+        );
+        app.world_mut()
+            .trigger(BinReceive::<BookmarkTextInputEvent> {
+                webview,
+                payload: BookmarkTextInputEvent { active: false },
+            });
+        app.update();
+        assert!(
+            !app.world()
+                .entity(webview)
+                .contains::<BookmarkTextInputActive>()
         );
     }
 
