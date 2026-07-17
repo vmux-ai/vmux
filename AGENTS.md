@@ -16,6 +16,8 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 ## Debugging
 
+**Never launch or run vmux yourself.** Do not execute `make dev`, `vmux_desktop`, `Vmux.app`, or automate input against the app. Build it when needed, then ask the user to run the normal build. After the user runs it, inspect the app logs directly.
+
 When adding temporary diagnostics to investigate a bug, make logging unconditional (default-on) — never gate it behind an env var or flag the user must set. The user runs the normal build; logs must appear without extra setup. Strip every temporary diagnostic before committing the fix.
 
 **Always read the app's own logs in Application Support first** — do not ask the user to capture stderr. After the user runs the app, read these files yourself directly; never ask them to paste, relay, or summarize log contents. vmux writes them to:

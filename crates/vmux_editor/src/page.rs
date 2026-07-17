@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::explorer::ExplorerPanel;
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, image_mime, line_severity,
-    severity_color_class, span_style, squiggle_style,
+    severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -319,6 +319,152 @@ fn render_preview(preview: &Preview) -> Element {
     }
 }
 
+fn explorer_client_id() -> u64 {
+    ((js_sys::Date::now() as u64) << 12) ^ (js_sys::Math::random() * 4096.0) as u64
+}
+
+fn set_explorer_visible(
+    next: bool,
+    mut visible: Signal<bool>,
+    client_id: Signal<u64>,
+    mut request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    let next_request_id = request_id().wrapping_add(1);
+    request_id.set(next_request_id);
+    visible.set(next);
+    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
+        visible: next,
+        client_id: client_id(),
+        request_id: next_request_id,
+    });
+    if !next {
+        match mode() {
+            Mode::Text => focus_file_input(),
+            Mode::Dir | Mode::Media(_) => focus_container(),
+        }
+    }
+}
+
+fn toggle_explorer(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    set_explorer_visible(!visible(), visible, client_id, request_id, mode);
+}
+
+fn reveal_current_in_explorer(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    if visible() {
+        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
+    } else {
+        set_explorer_visible(true, visible, client_id, request_id, mode);
+    }
+}
+
+fn handle_explorer_shortcut(
+    event: &Event<KeyboardData>,
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> bool {
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+        return false;
+    };
+    let key = raw.key();
+    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
+        event.prevent_default();
+        reveal_current_in_explorer(visible, client_id, request_id, mode);
+        return true;
+    }
+    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
+        event.prevent_default();
+        toggle_explorer(visible, client_id, request_id, mode);
+        return true;
+    }
+    false
+}
+
+#[component]
+fn ExplorerSidebar(
+    visible: Signal<bool>,
+    width: Signal<u32>,
+    mut resizing: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> Element {
+    let open = visible();
+    let panel_width = width();
+    let wrapper_style = if open {
+        format!("width:{panel_width}px;contain:layout style;")
+    } else {
+        "width:0px;contain:layout style;".to_string()
+    };
+    let panel_style = format!("width:{panel_width}px;");
+    let panel_class = if open {
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    } else {
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    };
+    rsx! {
+        div {
+            class: "relative z-[2] h-full shrink-0",
+            style: "{wrapper_style}",
+            onkeydown: move |event| {
+                handle_explorer_shortcut(&event, visible, client_id, request_id, mode);
+            },
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
+        }
+        div {
+            class: if open {
+                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+            } else {
+                "pointer-events-none h-full w-0 shrink-0 opacity-0"
+            },
+            onmousedown: move |e: Event<MouseData>| {
+                e.prevent_default();
+                resizing.set(true);
+            },
+        }
+    }
+}
+
+#[component]
+fn ExplorerToggleButton(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            title: "Toggle Explorer (Cmd+B)",
+            onclick: move |_| toggle_explorer(visible, client_id, request_id, mode),
+            svg {
+                class: "h-4 w-4",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -377,12 +523,24 @@ pub fn Page() -> Element {
     let mut explorer_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
+    let explorer_client_id = use_signal(explorer_client_id);
+    let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
 
     let _chrome =
         use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
-            explorer_visible.set(c.visible);
-            explorer_width.set(c.width);
+            if should_apply_explorer_chrome(
+                explorer_client_id(),
+                explorer_request_id(),
+                c.client_id,
+                c.request_id,
+            ) && explorer_visible() != c.visible
+            {
+                explorer_visible.set(c.visible);
+            }
+            if explorer_width() != c.width {
+                explorer_width.set(c.width);
+            }
         });
 
     let _tidy =
@@ -640,12 +798,6 @@ pub fn Page() -> Element {
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
     let comp_keys = comp_filtered.clone();
 
-    let explorer_panel_style = if explorer_visible() {
-        format!("width:{}px;", explorer_width())
-    } else {
-        "width:0px;".to_string()
-    };
-
     rsx! {
         div {
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
@@ -662,19 +814,13 @@ pub fn Page() -> Element {
                 }
             },
 
-            div {
-                class: "h-full shrink-0 overflow-hidden",
-                style: "{explorer_panel_style}",
-                ExplorerPanel {}
-            }
-            if explorer_visible() {
-                div {
-                    class: "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] hover:bg-cyan-400/40",
-                    onmousedown: move |e: Event<MouseData>| {
-                        e.prevent_default();
-                        explorer_resizing.set(true);
-                    },
-                }
+            ExplorerSidebar {
+                visible: explorer_visible,
+                width: explorer_width,
+                resizing: explorer_resizing,
+                client_id: explorer_client_id,
+                request_id: explorer_request_id,
+                mode,
             }
 
         div {
@@ -698,17 +844,20 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
+                if handle_explorer_shortcut(
+                    &e,
+                    explorer_visible,
+                    explorer_client_id,
+                    explorer_request_id,
+                    mode,
+                ) {
+                    return;
+                }
                 let data = e.data();
                 let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
                     return;
                 };
                 let key = raw.key();
-                if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
-                    e.prevent_default();
-                    explorer_visible.set(!explorer_visible());
-                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
-                    return;
-                }
                 match mode() {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
@@ -824,24 +973,11 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
-                button {
-                    class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: "Toggle Explorer",
-                    onclick: move |_| {
-                        explorer_visible.set(!explorer_visible());
-                        let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
-                    },
-                    svg {
-                        class: "h-4 w-4",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                        line { x1: "9", y1: "3", x2: "9", y2: "21" }
-                    }
+                ExplorerToggleButton {
+                    visible: explorer_visible,
+                    client_id: explorer_client_id,
+                    request_id: explorer_request_id,
+                    mode,
                 }
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }

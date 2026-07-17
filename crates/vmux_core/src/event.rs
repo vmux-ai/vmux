@@ -69,10 +69,18 @@ pub const LSP_UPDATE_REQUEST: &str = "lsp_update_request";
 pub const LSP_INSTALL_PROGRESS_EVENT: &str = "lsp_install_progress";
 pub const LSP_PKG_STATUS_EVENT: &str = "lsp_pkg_status";
 pub const EXPLORER_TREE_EVENT: &str = "explorer_tree";
+pub const EXPLORER_FOCUS_EVENT: &str = "explorer_focus";
 pub const EXPLORER_OPEN_EDITORS_EVENT: &str = "explorer_open_editors";
 pub const EXPLORER_OUTLINE_EVENT: &str = "explorer_outline";
 pub const EXPLORER_CHROME_EVENT: &str = "explorer_chrome";
+pub const EXPLORER_FS_RESULT_EVENT: &str = "explorer_fs_result";
 pub const EXPLORER_TREE_TOGGLE_EVENT: &str = "explorer_tree_toggle";
+pub const EXPLORER_TREE_PREFETCH_EVENT: &str = "explorer_tree_prefetch";
+pub const EXPLORER_TREE_REFRESH_EVENT: &str = "explorer_tree_refresh";
+pub const EXPLORER_REVEAL_CURRENT_EVENT: &str = "explorer_reveal_current";
+pub const EXPLORER_CREATE_EVENT: &str = "explorer_create";
+pub const EXPLORER_RENAME_EVENT: &str = "explorer_rename";
+pub const EXPLORER_DELETE_EVENT: &str = "explorer_delete";
 pub const EXPLORER_CLOSE_EDITOR_EVENT: &str = "explorer_close_editor";
 pub const EXPLORER_PANEL_TOGGLE_EVENT: &str = "explorer_panel_toggle";
 pub const EXPLORER_PANEL_WIDTH_EVENT: &str = "explorer_panel_width";
@@ -708,6 +716,7 @@ pub struct TreeRow {
     pub depth: u16,
     pub is_dir: bool,
     pub expanded: bool,
+    pub loading: bool,
 }
 
 #[derive(
@@ -759,7 +768,43 @@ pub struct OutlineRow {
 )]
 pub struct ExplorerTreeEvent {
     pub root_name: String,
+    pub root_path: String,
+    pub current_path: String,
+    pub focus_path: String,
+    pub loading: bool,
     pub rows: Vec<TreeRow>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerFocusEvent {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerFsResult {
+    pub ok: bool,
+    pub message: String,
+    pub open_path: String,
 }
 
 #[derive(
@@ -807,6 +852,8 @@ pub struct OutlineEvent {
 pub struct ExplorerChromeEvent {
     pub visible: bool,
     pub width: u32,
+    pub client_id: u64,
+    pub request_id: u64,
 }
 
 #[derive(
@@ -821,6 +868,99 @@ pub struct ExplorerChromeEvent {
     rkyv::Deserialize,
 )]
 pub struct ExplorerTreeToggle {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerTreePrefetch {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerTreeRefresh {
+    pub path: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerRevealCurrent;
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerCreate {
+    pub parent: String,
+    pub name: String,
+    pub is_dir: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerRename {
+    pub path: String,
+    pub name: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerDelete {
     pub path: String,
 }
 
@@ -852,7 +992,11 @@ pub struct ExplorerCloseEditor {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ExplorerPanelToggle;
+pub struct ExplorerPanelSetVisible {
+    pub visible: bool,
+    pub client_id: u64,
+    pub request_id: u64,
+}
 
 #[derive(
     Debug,
@@ -894,12 +1038,17 @@ mod file_event_tests {
     fn explorer_tree_event_rkyv_roundtrip() {
         let e = ExplorerTreeEvent {
             root_name: "VMUX".into(),
+            root_path: "/r".into(),
+            current_path: "/r/src/lib.rs".into(),
+            focus_path: "/r/src/lib.rs".into(),
+            loading: false,
             rows: vec![TreeRow {
                 name: "src".into(),
                 path: "/r/src".into(),
                 depth: 0,
                 is_dir: true,
                 expanded: true,
+                loading: false,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).expect("ser");

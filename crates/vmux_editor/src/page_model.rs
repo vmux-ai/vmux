@@ -1,4 +1,8 @@
-use vmux_core::event::{DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, StyledSpan};
+use std::collections::{HashMap, HashSet};
+
+use vmux_core::event::{
+    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, StyledSpan, TreeRow,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgAction {
@@ -6,6 +10,42 @@ pub enum PkgAction {
     Update,
     Uninstall,
     None,
+}
+
+pub fn should_apply_explorer_chrome(
+    local_client_id: u64,
+    latest_request_id: u64,
+    event_client_id: u64,
+    event_request_id: u64,
+) -> bool {
+    event_client_id != local_client_id || event_request_id >= latest_request_id
+}
+
+pub fn merge_tree_motion_rows(current: &[TreeRow], next: &[TreeRow]) -> Vec<(TreeRow, bool)> {
+    let current_paths: HashSet<&str> = current.iter().map(|row| row.path.as_str()).collect();
+    let next_indices: HashMap<&str, usize> = next
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.path.as_str(), index))
+        .collect();
+    let mut exiting_after = vec![Vec::new(); next.len() + 1];
+    let mut anchor = 0usize;
+    for row in current {
+        if let Some(index) = next_indices.get(row.path.as_str()) {
+            anchor = index + 1;
+        } else {
+            exiting_after[anchor].push(row.clone());
+        }
+    }
+    let exiting_count = exiting_after.iter().map(Vec::len).sum::<usize>();
+    let mut merged = Vec::with_capacity(next.len() + exiting_count);
+    merged.extend(exiting_after[0].drain(..).map(|row| (row, false)));
+    for (index, row) in next.iter().cloned().enumerate() {
+        let visible = current_paths.contains(row.path.as_str());
+        merged.push((row, visible));
+        merged.extend(exiting_after[index + 1].drain(..).map(|row| (row, false)));
+    }
+    merged
 }
 
 pub fn pkg_status_label(status: LspPkgStatus) -> &'static str {
@@ -210,6 +250,42 @@ mod tests {
         assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
         assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
         assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
+    }
+
+    #[test]
+    fn rapid_explorer_toggle_ignores_stale_echoes() {
+        assert!(!should_apply_explorer_chrome(7, 3, 7, 1));
+        assert!(!should_apply_explorer_chrome(7, 3, 7, 2));
+        assert!(should_apply_explorer_chrome(7, 3, 7, 3));
+        assert!(should_apply_explorer_chrome(7, 3, 9, 1));
+    }
+
+    #[test]
+    fn tree_motion_merge_is_linear_ordered_and_marks_entries() {
+        let row = |path: &str| TreeRow {
+            name: path.to_string(),
+            path: path.to_string(),
+            depth: 0,
+            is_dir: false,
+            expanded: false,
+            loading: false,
+        };
+        let current = vec![row("a"), row("b"), row("c"), row("d")];
+        let next = vec![row("a"), row("x"), row("d")];
+        let merged = merge_tree_motion_rows(&current, &next);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|(row, visible)| (row.path.as_str(), *visible))
+                .collect::<Vec<_>>(),
+            vec![
+                ("a", true),
+                ("b", false),
+                ("c", false),
+                ("x", false),
+                ("d", true)
+            ]
+        );
     }
 }
 

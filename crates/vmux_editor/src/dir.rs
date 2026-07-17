@@ -10,8 +10,15 @@ pub fn list_dir(path: &Path) -> Vec<FileDirEntry> {
         .flatten()
         .map(|e| {
             let path = e.path();
-            let is_dir = std::fs::metadata(&path)
-                .map(|m| m.is_dir())
+            let is_dir = e
+                .file_type()
+                .map(|kind| {
+                    kind.is_dir()
+                        || kind.is_symlink()
+                            && std::fs::metadata(&path)
+                                .map(|metadata| metadata.is_dir())
+                                .unwrap_or(false)
+                })
                 .unwrap_or(false);
             FileDirEntry {
                 name: e.file_name().to_string_lossy().to_string(),

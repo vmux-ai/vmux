@@ -13,10 +13,11 @@ use vmux_core::event::{FileDirEntry, OutlineRow, TreeRow};
 pub fn flatten_tree(
     root: &Path,
     expanded: &HashSet<PathBuf>,
+    loading: &HashSet<PathBuf>,
     children: &HashMap<PathBuf, Vec<FileDirEntry>>,
 ) -> Vec<TreeRow> {
     let mut out = Vec::new();
-    walk(root, 0, expanded, children, &mut out);
+    walk(root, 0, expanded, loading, children, &mut out);
     out
 }
 
@@ -24,6 +25,7 @@ fn walk(
     dir: &Path,
     depth: u16,
     expanded: &HashSet<PathBuf>,
+    loading: &HashSet<PathBuf>,
     children: &HashMap<PathBuf, Vec<FileDirEntry>>,
     out: &mut Vec<TreeRow>,
 ) {
@@ -39,9 +41,10 @@ fn walk(
             depth,
             is_dir: e.is_dir,
             expanded: is_open,
+            loading: loading.contains(&p),
         });
         if is_open {
-            walk(&p, depth + 1, expanded, children, out);
+            walk(&p, depth + 1, expanded, loading, children, out);
         }
     }
 }
@@ -173,7 +176,7 @@ mod tests {
             vec![entry("b.rs", "/r/src/b.rs", false)],
         );
         let expanded = HashSet::from([PathBuf::from("/r/src")]);
-        let rows = flatten_tree(&root, &expanded, &children);
+        let rows = flatten_tree(&root, &expanded, &HashSet::new(), &children);
         let got: Vec<_> = rows.iter().map(|r| (r.name.as_str(), r.depth)).collect();
         assert_eq!(got, vec![("src", 0), ("b.rs", 1), ("a.rs", 0)]);
         assert!(rows[0].expanded);
@@ -188,15 +191,35 @@ mod tests {
             PathBuf::from("/r/src"),
             vec![entry("b.rs", "/r/src/b.rs", false)],
         );
-        let rows = flatten_tree(&root, &HashSet::new(), &children);
+        let rows = flatten_tree(&root, &HashSet::new(), &HashSet::new(), &children);
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].expanded);
     }
 
     #[test]
     fn missing_cache_yields_no_rows() {
-        let rows = flatten_tree(&PathBuf::from("/r"), &HashSet::new(), &HashMap::new());
+        let rows = flatten_tree(
+            &PathBuf::from("/r"),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
         assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn loading_dir_is_marked() {
+        let root = PathBuf::from("/r");
+        let src = PathBuf::from("/r/src");
+        let children = HashMap::from([(root.clone(), vec![entry("src", "/r/src", true)])]);
+        let rows = flatten_tree(
+            &root,
+            &HashSet::from([src.clone()]),
+            &HashSet::from([src]),
+            &children,
+        );
+        assert!(rows[0].expanded);
+        assert!(rows[0].loading);
     }
 
     #[test]

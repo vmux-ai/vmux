@@ -21,15 +21,47 @@ fn explorer_rows_emit_intents() {
     assert!(s.contains("FileOpenEvent"));
     assert!(s.contains("ExplorerCloseEditor"));
     assert!(s.contains("ExplorerGoto"));
+    assert!(s.contains("ExplorerTreePrefetch"));
+    assert!(s.contains("ExplorerTreeRefresh"));
+    assert!(s.contains("ExplorerCreate"));
+    assert!(s.contains("ExplorerRename"));
+    assert!(s.contains("ExplorerDelete"));
+    assert!(s.contains("EXPLORER_FS_RESULT_EVENT"));
+}
+
+#[test]
+fn explorer_animates_tree_and_sections() {
+    let s = explorer_source();
+    assert!(s.contains("reconcile_rows"));
+    assert!(s.contains("merge_tree_motion_rows"));
+    assert!(s.contains("grid-rows-[0fr]"));
+    assert!(s.contains("grid-rows-[1fr]"));
+    assert!(s.contains("transition-[opacity,translate]"));
+    assert!(!s.contains("transition-[grid-template-rows,opacity,translate]"));
+    assert!(s.contains("transition-[rotate] duration-150"));
+    assert!(s.contains("schedule_tree_focus"));
+    assert!(s.contains("current_path"));
 }
 
 #[test]
 fn page_mounts_panel_and_wires_toggle() {
     let s = page_source();
-    assert!(s.contains("ExplorerPanel {}"));
-    assert!(s.contains("ExplorerPanelToggle"));
+    assert!(s.contains("ExplorerPanel { visible }"));
+    assert!(s.contains("ExplorerPanelSetVisible"));
     assert!(s.contains("ExplorerChromeEvent"));
+    assert!(explorer_source().contains("ExplorerFocusEvent"));
     assert!(s.contains("ExplorerPanelWidth"));
+    assert!(s.contains("ExplorerSidebar"));
+    assert!(s.contains("-translate-x-full"));
+    assert!(s.contains("transition-[translate,opacity]"));
+    assert!(!s.contains("transition-[width] duration-200"));
+    assert!(s.contains("width:0px;contain:layout style;"));
+    assert!(s.contains("relative z-[2] h-full shrink-0"));
+    assert!(s.contains("ExplorerRevealCurrent"));
+    assert!(s.contains("handle_explorer_shortcut"));
+    assert!(s.contains("Mode::Text => focus_file_input()"));
+    assert!(s.contains("raw.shift_key()"));
+    assert!(s.contains("key.eq_ignore_ascii_case(\"e\")"));
 }
 
 #[test]
