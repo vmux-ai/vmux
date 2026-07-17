@@ -719,10 +719,7 @@ pub fn Page() -> Element {
                                             terminal: false,
                                         }
                                     } else {
-                                        div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
-                                            span { class: "min-w-0 truncate", "Type / for quick access" }
-                                            span { class: "agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0 {agent_accent.accent_bg}" }
-                                        }
+                                        div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for quick access" }
                                     }
                                 }
                             }

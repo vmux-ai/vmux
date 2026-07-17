@@ -1587,6 +1587,7 @@ mod native_tests {
         ));
         assert!(source.contains("if show_capability_examples"));
         assert!(source.contains("Type / for quick access"));
+        assert!(!source.contains("agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0"));
         assert!(source.contains("prompt_prefix_at_utf16"));
         assert!(source.contains("agent-chat-caret"));
         assert!(source.contains("caret-color:transparent"));
