@@ -32,9 +32,7 @@ use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{
-    AgentKind, PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
-};
+use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -203,30 +201,9 @@ fn command_shortcut(id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Launcher entries for the built-in CLI agents: `vmux://agent/<kind>/cli` opens a fresh
-/// terminal-hosted CLI session (distinct from the single-segment ACP entries).
-fn agent_pages() -> Vec<CommandBarPage> {
-    AgentKind::all()
-        .iter()
-        .map(|kind| CommandBarPage {
-            host: "agent".to_string(),
-            url: format!("{}cli", kind.cli_url_prefix()),
-            title: format!("{} (CLI)", kind.display_name()),
-            keywords: vec![
-                kind.as_url_segment().to_string(),
-                "cli".to_string(),
-                "agent".to_string(),
-            ],
-            icon: vmux_core::PageIcon::None,
-            shortcut: String::new(),
-        })
-        .collect()
-}
-
-/// Launcher entries for configured ACP agents (`settings.agent.acp`), each opening the native
-/// chat at its single-segment `vmux://agent/<id>` url.
-fn acp_agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBarPage> {
-    agents_snapshot
+/// Launcher entries for installed ACP and CLI agents, most recently used first.
+fn agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBarPage> {
+    let mut pages: Vec<CommandBarPage> = agents_snapshot
         .acp
         .iter()
         .map(|agent| CommandBarPage {
@@ -241,7 +218,41 @@ fn acp_agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBar
             },
             shortcut: String::new(),
         })
-        .collect()
+        .collect();
+    pages.extend(
+        agents_snapshot
+            .providers
+            .iter()
+            .map(|agent| CommandBarPage {
+                host: "agent".to_string(),
+                url: agent.url.clone(),
+                title: format!("{} (CLI)", agent.name),
+                keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
+                icon: vmux_core::PageIcon::None,
+                shortcut: String::new(),
+            }),
+    );
+    let recent_rank: std::collections::HashMap<String, usize> = agents_snapshot
+        .recent
+        .iter()
+        .enumerate()
+        .map(|(rank, target)| {
+            let url = match target {
+                AgentPromptTarget::Cli(kind) => format!("{}cli", kind.cli_url_prefix()),
+                AgentPromptTarget::Acp { id } => format!("vmux://agent/{id}"),
+            };
+            (url, rank)
+        })
+        .collect();
+    pages.sort_by(|a, b| {
+        recent_rank
+            .get(&a.url)
+            .copied()
+            .unwrap_or(usize::MAX)
+            .cmp(&recent_rank.get(&b.url).copied().unwrap_or(usize::MAX))
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
+    pages
 }
 
 pub fn match_command(id: &str) -> Option<AppCommand> {
@@ -1130,8 +1141,7 @@ pub(crate) fn build_command_bar_open_payload(
         })
         .collect();
     let mut pages = pages_snapshot.pages.clone();
-    pages.extend(acp_agent_pages(agents_snapshot));
-    pages.extend(agent_pages());
+    pages.extend(agent_pages(agents_snapshot));
     let history_shortcut = command_shortcut("browser_open_history");
     if !history_shortcut.is_empty()
         && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
@@ -1231,28 +1241,8 @@ fn normalize_url(value: &str) -> String {
     }
 }
 
-fn prompt_agent_url(snapshot: &CommandBarAgentsSnapshot, sid: &str) -> String {
-    match snapshot.last_active.as_ref() {
-        Some(AgentPromptTarget::Cli(kind)) => format!("{}cli", kind.cli_url_prefix()),
-        Some(AgentPromptTarget::Acp { id }) => format!("vmux://agent/{id}"),
-        Some(AgentPromptTarget::Page { provider, model }) => {
-            format!("vmux://agent/{provider}/{model}/{sid}")
-        }
-        None => snapshot
-            .acp
-            .first()
-            .map(|agent| agent.url.clone())
-            .or_else(|| snapshot.providers.first().map(|agent| agent.url.clone()))
-            .or_else(|| {
-                snapshot.strategies.first().map(|strategy| {
-                    format!(
-                        "vmux://agent/{}/{}/{sid}",
-                        strategy.provider, strategy.model
-                    )
-                })
-            })
-            .unwrap_or_else(|| "vmux://agent/".to_string()),
-    }
+fn prompt_agent_url(snapshot: &CommandBarAgentsSnapshot) -> Option<String> {
+    agent_pages(snapshot).first().map(|page| page.url.clone())
 }
 
 fn on_command_bar_action(
@@ -1310,9 +1300,9 @@ fn on_command_bar_action(
                     &queries.pane_children,
                     &queries.stack_ts,
                 );
-                if let Some(stack) = empty_stack.or(focused_stack) {
-                    let sid = uuid::Uuid::new_v4().to_string();
-                    let url = prompt_agent_url(&resource_params.p2(), &sid);
+                if let Some(stack) = empty_stack.or(focused_stack)
+                    && let Some(url) = prompt_agent_url(&resource_params.p2())
+                {
                     commands
                         .entity(stack)
                         .insert(PendingAgentPrompt(prompt.to_string()));
@@ -1997,6 +1987,7 @@ mod tests {
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use vmux_command::event::CommandBarSpace;
     use vmux_command::{CommandPlugin, ReadAppCommands};
+    use vmux_core::agent::AgentKind;
 
     #[test]
     fn command_bar_open_does_not_block_on_command_bar_listener() {
@@ -2915,40 +2906,47 @@ mod tests {
     }
 
     #[test]
-    fn prompt_prefers_last_active_agent() {
+    fn prompt_prefers_most_recent_installed_agent() {
         let snapshot = CommandBarAgentsSnapshot {
-            last_active: Some(AgentPromptTarget::Page {
-                provider: "openai".to_string(),
-                model: "gpt-5".to_string(),
-            }),
+            recent: vec![AgentPromptTarget::Cli(AgentKind::Codex)],
+            providers: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                url: "vmux://agent/codex/cli".to_string(),
+                icon: String::new(),
+            }],
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
-                id: "claude".to_string(),
-                name: "Claude Code".to_string(),
-                url: "vmux://agent/claude".to_string(),
+                id: "claude-acp".to_string(),
+                name: "Claude Agent".to_string(),
+                url: "vmux://agent/claude-acp".to_string(),
                 icon: String::new(),
             }],
             ..Default::default()
         };
 
         assert_eq!(
-            prompt_agent_url(&snapshot, "new-session"),
-            "vmux://agent/openai/gpt-5/new-session"
+            prompt_agent_url(&snapshot).as_deref(),
+            Some("vmux://agent/codex/cli")
         );
     }
 
     #[test]
-    fn prompt_falls_back_to_available_acp_agent() {
+    fn prompt_falls_back_to_installed_agent() {
         let snapshot = CommandBarAgentsSnapshot {
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
-                id: "claude".to_string(),
-                name: "Claude Code".to_string(),
-                url: "vmux://agent/claude".to_string(),
+                id: "claude-acp".to_string(),
+                name: "Claude Agent".to_string(),
+                url: "vmux://agent/claude-acp".to_string(),
                 icon: String::new(),
             }],
             ..Default::default()
         };
 
-        assert_eq!(prompt_agent_url(&snapshot, "unused"), "vmux://agent/claude");
+        assert_eq!(
+            prompt_agent_url(&snapshot).as_deref(),
+            Some("vmux://agent/claude-acp")
+        );
+        assert_eq!(prompt_agent_url(&CommandBarAgentsSnapshot::default()), None);
     }
 
     #[test]
@@ -2972,41 +2970,35 @@ mod tests {
     }
 
     #[test]
-    fn agent_pages_lists_all_kinds_with_favicon() {
-        let pages = agent_pages();
-        assert_eq!(pages.len(), 3);
-        assert!(
-            pages
-                .iter()
-                .all(|p| matches!(p.icon, vmux_core::PageIcon::None) && p.host == "agent")
-        );
-        assert!(
-            pages
-                .iter()
-                .any(|p| p.url == "vmux://agent/vibe/cli" && p.title == "Vibe (CLI)")
-        );
-        assert!(pages.iter().any(|p| p.url == "vmux://agent/claude/cli"));
-        assert!(pages.iter().any(|p| p.url == "vmux://agent/codex/cli"));
-    }
-
-    #[test]
-    fn acp_agent_pages_maps_configured_agents() {
+    fn agent_pages_lists_only_snapshot_agents_in_recent_order() {
         let snapshot = CommandBarAgentsSnapshot {
+            providers: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                url: "vmux://agent/codex/cli".to_string(),
+                icon: String::new(),
+            }],
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
-                id: "claude".to_string(),
-                name: "Claude Code".to_string(),
-                url: "vmux://agent/claude".to_string(),
+                id: "claude-acp".to_string(),
+                name: "Claude Agent".to_string(),
+                url: "vmux://agent/claude-acp".to_string(),
                 icon: "https://cdn.example/claude-acp.svg".to_string(),
             }],
+            recent: vec![
+                AgentPromptTarget::Cli(AgentKind::Codex),
+                AgentPromptTarget::Acp {
+                    id: "claude-acp".to_string(),
+                },
+            ],
             ..Default::default()
         };
-        let pages = acp_agent_pages(&snapshot);
-        assert_eq!(pages.len(), 1);
-        assert_eq!(pages[0].url, "vmux://agent/claude");
-        assert_eq!(pages[0].title, "Claude Code");
+        let pages = agent_pages(&snapshot);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].url, "vmux://agent/codex/cli");
+        assert_eq!(pages[0].title, "Codex (CLI)");
         assert_eq!(pages[0].host, "agent");
         assert!(matches!(
-            pages[0].icon,
+            pages[1].icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
         ));
     }

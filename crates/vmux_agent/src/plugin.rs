@@ -308,7 +308,7 @@ impl Plugin for AgentPlugin {
                 Update,
                 (
                     crate::snapshot_updater::update_agents_snapshot,
-                    crate::snapshot_updater::update_last_active_agent,
+                    crate::snapshot_updater::update_recent_agents,
                     crate::snapshot_updater::update_agent_sessions_snapshot,
                 )
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),

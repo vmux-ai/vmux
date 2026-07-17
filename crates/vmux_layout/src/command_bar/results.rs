@@ -126,6 +126,21 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
+/// Installed agent launcher rows in input order, filtered by the start-page query.
+pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
+    let search_lower = query.trim().to_lowercase();
+    pages
+        .iter()
+        .filter(|page| page.host == "agent" && page_matches(page, &search_lower))
+        .map(|page| CommandBarResultItem::Page {
+            url: page.url.clone(),
+            title: page.title.clone(),
+            icon: page.icon.clone(),
+            shortcut: page.shortcut.clone(),
+        })
+        .collect()
+}
+
 fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
     dirs.iter()
         .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
@@ -614,6 +629,30 @@ mod tests {
             CommandBarResultItem::Page { title, icon, .. }
                 if title == "Vibe" && matches!(icon, vmux_core::PageIcon::None)
         )));
+    }
+
+    #[test]
+    fn start_agent_pages_preserve_input_order_and_exclude_other_pages() {
+        let mut pages = sample_pages();
+        pages.push(CommandBarPage {
+            host: "agent".into(),
+            url: "vmux://agent/codex/cli".into(),
+            title: "Codex (CLI)".into(),
+            keywords: vec!["codex".into(), "agent".into()],
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        });
+
+        let results = agent_page_results(&pages, "");
+        let urls: Vec<_> = results
+            .iter()
+            .filter_map(|result| match result {
+                CommandBarResultItem::Page { url, .. } => Some(url.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://agent/codex/cli"]);
     }
 
     #[test]

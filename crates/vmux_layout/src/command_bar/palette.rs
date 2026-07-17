@@ -5,7 +5,8 @@ use crate::command_bar::keyboard::{
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, filter_results, space_switch_results,
+    CommandBarResultItem as ResultItem, active_space_index, agent_page_results, filter_results,
+    space_switch_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -167,6 +168,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let q = query();
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
+    } else if matches!(variant, PaletteVariant::Start)
+        && !q.trim_start().starts_with('>')
+        && !looks_like_url(q.trim())
+        && completion_query(&q).is_none()
+    {
+        agent_page_results(&pages, &q)
     } else {
         let history = history_suggestions();
         let r = filter_results(

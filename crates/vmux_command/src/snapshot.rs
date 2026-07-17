@@ -11,22 +11,19 @@ pub struct WriteCommandBarSnapshots;
 pub struct CommandBarAgentsSnapshot {
     pub providers: Vec<AgentProviderSummary>,
     pub strategies: Vec<AgentStrategySummary>,
-    /// Configured ACP agents (`settings.agent.acp`): `id`, display `name`, and the
-    /// single-segment `vmux://agent/<id>` launch url.
+    /// Installed registry ACP agents and their single-segment launch URLs.
     pub acp: Vec<AgentProviderSummary>,
-    /// Fresh-session target matching the most recently activated agent session.
-    pub last_active: Option<AgentPromptTarget>,
+    /// Installed ACP and CLI agents with open sessions, most recently used first.
+    pub recent: Vec<AgentPromptTarget>,
 }
 
-/// Agent runtime used when the start launcher submits a prompt.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Agent identity used for recent-first launcher ordering.
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum AgentPromptTarget {
     /// Built-in terminal CLI.
     Cli(AgentKind),
     /// Registry-driven ACP agent.
     Acp { id: String },
-    /// Provider-direct Page agent.
-    Page { provider: String, model: String },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -115,7 +112,7 @@ mod tests {
         assert!(s.providers.is_empty());
         assert!(s.strategies.is_empty());
         assert!(s.acp.is_empty());
-        assert!(s.last_active.is_none());
+        assert!(s.recent.is_empty());
     }
 
     #[test]

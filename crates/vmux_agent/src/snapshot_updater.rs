@@ -19,17 +19,12 @@ pub(crate) fn update_agents_snapshot(
         ),
     >,
     page_idx: Option<Res<PageStrategyIndex>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
     install_generation: Option<Res<crate::client::acp::AcpInstallGeneration>>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
 ) {
     let providers_changed = !changed_q.is_empty();
     let idx_changed = page_idx
-        .as_ref()
-        .map(|r| r.is_changed() || r.is_added())
-        .unwrap_or(false);
-    let settings_changed = settings
         .as_ref()
         .map(|r| r.is_changed() || r.is_added())
         .unwrap_or(false);
@@ -43,7 +38,6 @@ pub(crate) fn update_agents_snapshot(
         .unwrap_or(false);
     if !providers_changed
         && !idx_changed
-        && !settings_changed
         && !catalog_changed
         && !installs_changed
         && (!snapshot.providers.is_empty()
@@ -57,11 +51,7 @@ pub(crate) fn update_agents_snapshot(
         .as_ref()
         .map(|c| c.agents.as_slice())
         .unwrap_or_default();
-    let configured = settings
-        .as_ref()
-        .map(|s| s.agent.acp.as_slice())
-        .unwrap_or_default();
-    snapshot.acp = acp_agent_summaries(configured, catalog_agents, |agent| {
+    snapshot.acp = acp_agent_summaries(catalog_agents, |agent| {
         crate::acp_install::is_agent_installed(agent)
     });
 
@@ -92,49 +82,24 @@ pub(crate) fn update_agents_snapshot(
 }
 
 fn acp_agent_summaries(
-    configured: &[vmux_setting::AcpAgentConfig],
     catalog: &[crate::acp_registry::RegistryAgent],
     is_installed: impl Fn(&crate::acp_registry::RegistryAgent) -> bool,
 ) -> Vec<AgentProviderSummary> {
-    let mut seen_registry_ids = std::collections::HashSet::new();
-    let mut agents = Vec::new();
-    for cfg in configured {
-        let registry_id = crate::acp_install::registry_id_alias(&cfg.id);
-        let registry = catalog.iter().find(|agent| agent.id == registry_id);
-        seen_registry_ids.insert(registry_id.to_string());
-        agents.push(AgentProviderSummary {
-            id: cfg.id.clone(),
-            name: registry
-                .map(|agent| agent.name.clone())
-                .unwrap_or_else(|| cfg.name.clone()),
-            url: format!("vmux://agent/{}", cfg.id),
-            icon: registry
-                .and_then(|agent| agent.icon.clone())
-                .unwrap_or_default(),
-        });
-    }
-    agents.extend(
-        catalog
-            .iter()
-            .filter(|agent| !seen_registry_ids.contains(&agent.id))
-            .filter(|agent| is_installed(agent))
-            .map(|agent| AgentProviderSummary {
-                id: agent.id.clone(),
-                name: agent.name.clone(),
-                url: format!("vmux://agent/{}", agent.id),
-                icon: agent.icon.clone().unwrap_or_default(),
-            }),
-    );
+    let mut agents: Vec<AgentProviderSummary> = catalog
+        .iter()
+        .filter(|agent| is_installed(agent))
+        .map(|agent| AgentProviderSummary {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            url: format!("vmux://agent/{}", agent.id),
+            icon: agent.icon.clone().unwrap_or_default(),
+        })
+        .collect();
     agents.sort_by_key(|agent| agent.name.to_lowercase());
     agents
 }
 
-pub(crate) fn update_last_active_agent(
-    page_sessions: Query<(
-        Entity,
-        &crate::components::AgentSession,
-        Option<&LastActivatedAt>,
-    )>,
+pub(crate) fn update_recent_agents(
     acp_sessions: Query<(
         Entity,
         &crate::client::acp::AcpSession,
@@ -144,35 +109,20 @@ pub(crate) fn update_last_active_agent(
     stack_times: Query<&LastActivatedAt>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
 ) {
-    let mut newest: Option<(i64, u64, AgentPromptTarget)> = None;
+    let mut newest = std::collections::HashMap::<AgentPromptTarget, (i64, u64)>::new();
     let mut consider = |entity: Entity, timestamp: i64, target: AgentPromptTarget| {
         let key = (timestamp, entity.to_bits());
-        if newest
-            .as_ref()
-            .is_none_or(|(current_timestamp, current_entity, _)| {
-                key > (*current_timestamp, *current_entity)
-            })
-        {
-            newest = Some((key.0, key.1, target));
+        if newest.get(&target).is_none_or(|current| key > *current) {
+            newest.insert(target, key);
         }
     };
 
-    for (entity, session, timestamp) in &page_sessions {
-        consider(
-            entity,
-            timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
-            AgentPromptTarget::Page {
-                provider: session.provider.clone(),
-                model: session.model.clone(),
-            },
-        );
-    }
     for (entity, session, timestamp) in &acp_sessions {
         consider(
             entity,
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
-                id: session.agent_id.clone(),
+                id: crate::acp_install::registry_id_alias(&session.agent_id).to_string(),
             },
         );
     }
@@ -187,8 +137,11 @@ pub(crate) fn update_last_active_agent(
         );
     }
 
-    if let Some((_, _, target)) = newest {
-        snapshot.last_active = Some(target);
+    let mut recent: Vec<(AgentPromptTarget, (i64, u64))> = newest.into_iter().collect();
+    recent.sort_by_key(|(_, key)| std::cmp::Reverse(*key));
+    let recent = recent.into_iter().map(|(target, _)| target).collect();
+    if snapshot.recent != recent {
+        snapshot.recent = recent;
     }
 }
 
@@ -225,17 +178,6 @@ mod tests {
         }
     }
 
-    fn configured_agent(id: &str, name: &str) -> vmux_setting::AcpAgentConfig {
-        vmux_setting::AcpAgentConfig {
-            id: id.to_string(),
-            name: name.to_string(),
-            command: "agent".to_string(),
-            args: Vec::new(),
-            env: Vec::new(),
-            cwd: None,
-        }
-    }
-
     #[test]
     fn writes_empty_snapshot_when_no_resources() {
         let mut app = App::new();
@@ -258,10 +200,32 @@ mod tests {
     }
 
     #[test]
+    fn cli_snapshot_only_contains_ready_providers() {
+        let mut app = App::new();
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .add_systems(Update, update_agents_snapshot);
+        app.world_mut().spawn((
+            AgentProviderTargetKind(vmux_core::agent::AgentKind::Codex),
+            Name::new("Codex"),
+            Ready,
+        ));
+        app.world_mut().spawn((
+            AgentProviderTargetKind(vmux_core::agent::AgentKind::Claude),
+            Name::new("Claude"),
+        ));
+
+        app.update();
+
+        let providers = &app.world().resource::<CommandBarAgentsSnapshot>().providers;
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "codex");
+    }
+
+    #[test]
     fn installed_unconfigured_acp_is_in_snapshot() {
         let catalog = vec![registry_agent("new-agent", "New Agent")];
 
-        let agents = acp_agent_summaries(&[], &catalog, |_| true);
+        let agents = acp_agent_summaries(&catalog, |_| true);
 
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].id, "new-agent");
@@ -269,35 +233,23 @@ mod tests {
     }
 
     #[test]
-    fn configured_acp_alias_is_not_duplicated() {
-        let configured = vec![configured_agent("claude", "Claude Code")];
-        let catalog = vec![registry_agent("claude-acp", "Claude Agent")];
+    fn uninstalled_acp_is_not_in_snapshot() {
+        let catalog = vec![
+            registry_agent("installed", "Installed"),
+            registry_agent("available", "Available"),
+        ];
 
-        let agents = acp_agent_summaries(&configured, &catalog, |_| true);
+        let agents = acp_agent_summaries(&catalog, |agent| agent.id == "installed");
 
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, "claude");
-        assert_eq!(agents[0].name, "Claude Agent");
+        assert_eq!(agents[0].id, "installed");
     }
 
     #[test]
-    fn last_active_agent_tracks_most_recent_session() {
+    fn recent_agents_are_deduped_and_sorted_by_last_use() {
         let mut app = App::new();
         app.init_resource::<CommandBarAgentsSnapshot>()
-            .add_systems(Update, update_last_active_agent);
-        let page = app
-            .world_mut()
-            .spawn((
-                crate::components::AgentSession {
-                    kind: vmux_core::agent::AgentKind::Vibe,
-                    variant: crate::AgentVariant::Page,
-                    sid: "page-session".to_string(),
-                    provider: "openai".to_string(),
-                    model: "gpt-5".to_string(),
-                },
-                LastActivatedAt(10),
-            ))
-            .id();
+            .add_systems(Update, update_recent_agents);
         let cli_stack = app.world_mut().spawn(LastActivatedAt(20)).id();
         app.world_mut().spawn((
             vmux_core::agent::AgentSession {
@@ -305,27 +257,37 @@ mod tests {
             },
             ChildOf(cli_stack),
         ));
+        app.world_mut().spawn((
+            crate::client::acp::AcpSession {
+                agent_id: "claude".to_string(),
+                sid: "acp-session".to_string(),
+                cwd: std::path::PathBuf::new(),
+                anchor: vmux_service::protocol::ProcessId::new(),
+                resume: None,
+            },
+            LastActivatedAt(30),
+        ));
+        app.world_mut().spawn((
+            crate::client::acp::AcpSession {
+                agent_id: "claude-acp".to_string(),
+                sid: "older-acp-session".to_string(),
+                cwd: std::path::PathBuf::new(),
+                anchor: vmux_service::protocol::ProcessId::new(),
+                resume: None,
+            },
+            LastActivatedAt(10),
+        ));
 
         app.update();
 
         assert_eq!(
-            app.world()
-                .resource::<CommandBarAgentsSnapshot>()
-                .last_active,
-            Some(AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex))
-        );
-
-        app.world_mut().entity_mut(page).insert(LastActivatedAt(30));
-        app.update();
-
-        assert_eq!(
-            app.world()
-                .resource::<CommandBarAgentsSnapshot>()
-                .last_active,
-            Some(AgentPromptTarget::Page {
-                provider: "openai".to_string(),
-                model: "gpt-5".to_string(),
-            })
+            app.world().resource::<CommandBarAgentsSnapshot>().recent,
+            vec![
+                AgentPromptTarget::Acp {
+                    id: "claude-acp".to_string(),
+                },
+                AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
+            ]
         );
     }
 }
