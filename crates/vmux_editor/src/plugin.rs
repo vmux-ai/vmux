@@ -150,6 +150,8 @@ struct ExplorerChromeSent;
 struct ExplorerChrome {
     visible: bool,
     width: u32,
+    client_id: u64,
+    request_id: u64,
 }
 
 #[derive(Resource, Default)]
@@ -2496,6 +2498,8 @@ fn emit_explorer_chrome(
             &ExplorerChromeEvent {
                 visible: chrome.visible,
                 width: chrome.width,
+                client_id: chrome.client_id,
+                request_id: chrome.request_id,
             },
         ));
         commands.entity(entity).insert(ExplorerChromeSent);
@@ -2523,8 +2527,8 @@ fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Comm
     }
 }
 
-fn on_explorer_panel_toggle(
-    trigger: On<BinReceive<ExplorerPanelToggle>>,
+fn on_explorer_panel_set_visible(
+    trigger: On<BinReceive<ExplorerPanelSetVisible>>,
     mut chrome: ResMut<ExplorerChrome>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
@@ -2532,7 +2536,9 @@ fn on_explorer_panel_toggle(
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
-    chrome.visible = !chrome.visible;
+    chrome.visible = trigger.event().payload.visible;
+    chrome.client_id = trigger.event().payload.client_id;
+    chrome.request_id = trigger.event().payload.request_id;
     persist_chrome(*chrome, settings, saves);
     mark_chrome_unsent(&views, &mut commands);
     if chrome.visible {
@@ -2717,6 +2723,8 @@ impl Plugin for EditorPlugin {
             .insert_resource(ExplorerChrome {
                 visible: false,
                 width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
+                client_id: 0,
+                request_id: 0,
             })
             .init_resource::<ExplorerChromeSynced>()
             .init_resource::<SharedFileViewMode>()
@@ -2752,7 +2760,7 @@ impl Plugin for EditorPlugin {
                 ExplorerRename,
                 ExplorerDelete,
                 ExplorerCloseEditor,
-                ExplorerPanelToggle,
+                ExplorerPanelSetVisible,
                 ExplorerPanelWidth,
                 ExplorerGoto,
             )>::default())
@@ -2824,7 +2832,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_explorer_create)
             .add_observer(on_explorer_rename)
             .add_observer(on_explorer_delete)
-            .add_observer(on_explorer_panel_toggle)
+            .add_observer(on_explorer_panel_set_visible)
             .add_observer(on_explorer_panel_width)
             .add_observer(on_explorer_close_editor)
             .add_observer(on_explorer_goto);
@@ -3225,14 +3233,16 @@ mod explorer_tests {
     }
 
     #[test]
-    fn panel_toggle_flips_chrome() {
+    fn panel_visibility_is_idempotent() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(ExplorerChrome {
                 visible: true,
                 width: 240,
+                client_id: 0,
+                request_id: 0,
             })
-            .add_observer(on_explorer_panel_toggle);
+            .add_observer(on_explorer_panel_set_visible);
         let e = app
             .world_mut()
             .spawn(FileView {
@@ -3241,9 +3251,25 @@ mod explorer_tests {
             .id();
         app.world_mut().trigger(BinReceive {
             webview: e,
-            payload: ExplorerPanelToggle,
+            payload: ExplorerPanelSetVisible {
+                visible: false,
+                client_id: 7,
+                request_id: 1,
+            },
         });
         assert!(!app.world().resource::<ExplorerChrome>().visible);
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelSetVisible {
+                visible: false,
+                client_id: 7,
+                request_id: 2,
+            },
+        });
+        let chrome = app.world().resource::<ExplorerChrome>();
+        assert!(!chrome.visible);
+        assert_eq!(chrome.client_id, 7);
+        assert_eq!(chrome.request_id, 2);
     }
 
     #[test]
@@ -3255,9 +3281,11 @@ mod explorer_tests {
             .insert_resource(ExplorerChrome {
                 visible: false,
                 width: 240,
+                client_id: 0,
+                request_id: 0,
             })
             .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
-            .add_observer(on_explorer_panel_toggle);
+            .add_observer(on_explorer_panel_set_visible);
         let e = app
             .world_mut()
             .spawn((FileView { path: file.clone() }, ExplorerState::default()))
@@ -3265,7 +3293,11 @@ mod explorer_tests {
         wait_for_children(&mut app, e, tmp.path());
         app.world_mut().trigger(BinReceive {
             webview: e,
-            payload: ExplorerPanelToggle,
+            payload: ExplorerPanelSetVisible {
+                visible: true,
+                client_id: 9,
+                request_id: 1,
+            },
         });
         wait_for_children(&mut app, e, &tmp.path().join("src"));
         assert!(app.world().resource::<ExplorerChrome>().visible);
@@ -3280,6 +3312,8 @@ mod explorer_tests {
             .insert_resource(ExplorerChrome {
                 visible: true,
                 width: 240,
+                client_id: 0,
+                request_id: 0,
             })
             .add_observer(on_explorer_panel_width);
         let e = app

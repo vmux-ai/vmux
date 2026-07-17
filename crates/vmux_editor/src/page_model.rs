@@ -8,6 +8,15 @@ pub enum PkgAction {
     None,
 }
 
+pub fn should_apply_explorer_chrome(
+    local_client_id: u64,
+    latest_request_id: u64,
+    event_client_id: u64,
+    event_request_id: u64,
+) -> bool {
+    event_client_id != local_client_id || event_request_id >= latest_request_id
+}
+
 pub fn pkg_status_label(status: LspPkgStatus) -> &'static str {
     match status {
         LspPkgStatus::Available => "Available",
@@ -210,6 +219,14 @@ mod tests {
         assert_eq!(pkg_status_label(LspPkgStatus::OnPath), "On PATH");
         assert_eq!(pkg_status_label(LspPkgStatus::Installed), "Installed");
         assert_eq!(pkg_status_label(LspPkgStatus::Available), "Available");
+    }
+
+    #[test]
+    fn rapid_explorer_toggle_ignores_stale_echoes() {
+        assert!(!should_apply_explorer_chrome(7, 3, 7, 1));
+        assert!(!should_apply_explorer_chrome(7, 3, 7, 2));
+        assert!(should_apply_explorer_chrome(7, 3, 7, 3));
+        assert!(should_apply_explorer_chrome(7, 3, 9, 1));
     }
 }
 

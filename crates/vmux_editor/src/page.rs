@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::explorer::ExplorerPanel;
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, image_mime, line_severity,
-    severity_color_class, span_style, squiggle_style,
+    severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -319,17 +319,39 @@ fn render_preview(preview: &Preview) -> Element {
     }
 }
 
-fn toggle_explorer(mut visible: Signal<bool>) {
-    visible.set(!visible());
-    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+fn explorer_client_id() -> u64 {
+    ((js_sys::Date::now() as u64) << 12) ^ (js_sys::Math::random() * 4096.0) as u64
 }
 
-fn reveal_current_in_explorer(mut visible: Signal<bool>) {
+fn set_explorer_visible(
+    next: bool,
+    mut visible: Signal<bool>,
+    client_id: Signal<u64>,
+    mut request_id: Signal<u64>,
+) {
+    let next_request_id = request_id().wrapping_add(1);
+    request_id.set(next_request_id);
+    visible.set(next);
+    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
+        visible: next,
+        client_id: client_id(),
+        request_id: next_request_id,
+    });
+}
+
+fn toggle_explorer(visible: Signal<bool>, client_id: Signal<u64>, request_id: Signal<u64>) {
+    set_explorer_visible(!visible(), visible, client_id, request_id);
+}
+
+fn reveal_current_in_explorer(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+) {
     if visible() {
         let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
     } else {
-        visible.set(true);
-        let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+        set_explorer_visible(true, visible, client_id, request_id);
     }
 }
 
@@ -348,9 +370,9 @@ fn ExplorerSidebar(
     };
     let panel_style = format!("width:{panel_width}px;");
     let panel_class = if open {
-        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[transform,opacity] duration-200 ease-out will-change-transform"
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[transform,opacity] duration-200 ease-out will-change-transform"
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     };
     rsx! {
         div { class: "relative z-[2] h-full shrink-0", style: "{wrapper_style}",
@@ -371,12 +393,16 @@ fn ExplorerSidebar(
 }
 
 #[component]
-fn ExplorerToggleButton(mut visible: Signal<bool>) -> Element {
+fn ExplorerToggleButton(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+) -> Element {
     rsx! {
         button {
             class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
             title: "Toggle Explorer (Cmd+B)",
-            onclick: move |_| toggle_explorer(visible),
+            onclick: move |_| toggle_explorer(visible, client_id, request_id),
             svg {
                 class: "h-4 w-4",
                 view_box: "0 0 24 24",
@@ -450,11 +476,20 @@ pub fn Page() -> Element {
     let mut explorer_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
+    let explorer_client_id = use_signal(explorer_client_id);
+    let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
 
     let _chrome =
         use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
-            explorer_visible.set(c.visible);
+            if should_apply_explorer_chrome(
+                explorer_client_id(),
+                explorer_request_id(),
+                c.client_id,
+                c.request_id,
+            ) {
+                explorer_visible.set(c.visible);
+            }
             explorer_width.set(c.width);
         });
 
@@ -766,12 +801,16 @@ pub fn Page() -> Element {
                     && key.eq_ignore_ascii_case("e")
                 {
                     e.prevent_default();
-                    reveal_current_in_explorer(explorer_visible);
+                    reveal_current_in_explorer(
+                        explorer_visible,
+                        explorer_client_id,
+                        explorer_request_id,
+                    );
                     return;
                 }
                 if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
                     e.prevent_default();
-                    toggle_explorer(explorer_visible);
+                    toggle_explorer(explorer_visible, explorer_client_id, explorer_request_id);
                     return;
                 }
                 match mode() {
@@ -889,7 +928,11 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
-                ExplorerToggleButton { visible: explorer_visible }
+                ExplorerToggleButton {
+                    visible: explorer_visible,
+                    client_id: explorer_client_id,
+                    request_id: explorer_request_id,
+                }
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {

@@ -286,9 +286,9 @@ fn chevron(expanded: bool, loading: bool) -> Element {
         };
     }
     let class = if expanded {
-        "inline-block w-4 shrink-0 rotate-90 text-center text-base leading-none text-foreground/60 transition-transform duration-150 ease-out"
+        "inline-block w-4 shrink-0 rotate-90 text-center text-base leading-none text-foreground/60 transition-[rotate] duration-150 ease-out"
     } else {
-        "inline-block w-4 shrink-0 rotate-0 text-center text-base leading-none text-foreground/60 transition-transform duration-150 ease-out"
+        "inline-block w-4 shrink-0 rotate-0 text-center text-base leading-none text-foreground/60 transition-[rotate] duration-150 ease-out"
     };
     rsx! {
         span { class: "{class}", "\u{203A}" }
@@ -465,9 +465,9 @@ pub fn ExplorerPanel() -> Element {
                                 let active = row.path == current_path();
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
-                                    "grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform] duration-150 ease-out"
+                                    "grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,translate] duration-150 ease-out"
                                 } else {
-                                    "grid grid-rows-[0fr] opacity-0 -translate-y-1 transition-[grid-template-rows,opacity,transform] duration-150 ease-out"
+                                    "grid grid-rows-[0fr] opacity-0 -translate-y-1 transition-[grid-template-rows,opacity,translate] duration-150 ease-out"
                                 };
                                 rsx! {
                                     div { key: "{row.path}", class: "{motion_class}",

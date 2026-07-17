@@ -836,6 +836,8 @@ pub struct OutlineEvent {
 pub struct ExplorerChromeEvent {
     pub visible: bool,
     pub width: u32,
+    pub client_id: u64,
+    pub request_id: u64,
 }
 
 #[derive(
@@ -974,7 +976,11 @@ pub struct ExplorerCloseEditor {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct ExplorerPanelToggle;
+pub struct ExplorerPanelSetVisible {
+    pub visible: bool,
+    pub client_id: u64,
+    pub request_id: u64,
+}
 
 #[derive(
     Debug,
