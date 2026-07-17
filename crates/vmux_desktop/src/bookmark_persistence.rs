@@ -66,25 +66,35 @@ fn mark_bookmarks_dirty(
     mut auto: ResMut<BookmarkAutoSave>,
     changed: Query<
         (),
-        Or<(
-            Added<Pin>,
-            Added<Bookmark>,
-            Added<Folder>,
-            Added<Collapsed>,
-            Changed<Name>,
-            Changed<Order>,
-            Changed<PageMetadata>,
-        )>,
+        (
+            BookmarkFilter,
+            Or<(
+                Added<Pin>,
+                Added<Bookmark>,
+                Added<Folder>,
+                Added<Collapsed>,
+                Changed<Name>,
+                Changed<Order>,
+                Changed<PageMetadata>,
+                Changed<ChildOf>,
+            )>,
+        ),
     >,
+    bookmark_items: Query<(), Or<(With<Bookmark>, With<Pin>)>>,
     mut removed_pin: RemovedComponents<Pin>,
     mut removed_bookmark: RemovedComponents<Bookmark>,
     mut removed_folder: RemovedComponents<Folder>,
     mut removed_collapsed: RemovedComponents<Collapsed>,
+    mut removed_child_of: RemovedComponents<ChildOf>,
 ) {
+    let removed_child_of_bookmark = removed_child_of
+        .read()
+        .any(|entity| bookmark_items.get(entity).is_ok());
     let any_removed = removed_pin.read().next().is_some()
         | removed_bookmark.read().next().is_some()
         | removed_folder.read().next().is_some()
-        | removed_collapsed.read().next().is_some();
+        | removed_collapsed.read().next().is_some()
+        | removed_child_of_bookmark;
     if any_removed || !changed.is_empty() {
         auto.dirty = true;
         auto.debounce.reset();
@@ -146,7 +156,9 @@ mod tests {
             },
             Order(1),
         ));
-        save_app.world_mut().spawn(Save);
+        save_app
+            .world_mut()
+            .spawn((Save, Name::new("excluded-save-entity")));
         let p = path.clone();
         save_app.add_systems(Update, move |mut c: Commands| {
             let mut s = SaveWorld::<BookmarkFilter>::into_file(p.clone());
@@ -187,6 +199,12 @@ mod tests {
             .count();
         assert_eq!(bookmarks, 1, "bookmark rebuilt");
         assert_eq!(folders, 1, "folder rebuilt");
+        let excluded = load_app
+            .world_mut()
+            .query::<&Name>()
+            .iter(load_app.world())
+            .any(|name| name.as_str() == "excluded-save-entity");
+        assert!(!excluded, "Save-only entity excluded");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

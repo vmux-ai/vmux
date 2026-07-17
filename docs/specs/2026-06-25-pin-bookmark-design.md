@@ -124,12 +124,13 @@ context menu issue the same effect via Channel 2.
 - `ToggleForUrl { url, title, favicon_url }` — add if no bookmark matches `url`, else remove.
 - `Add { url, title, favicon_url, folder: Option<Uuid> }` — default top level.
 - `Remove { uuid }`
+- `Rename { uuid, name }`
 - `AddFolder { name }`
 - `RemoveFolder { uuid }` — children re-parented to top level.
 - `RenameFolder { uuid, name }`
 - `ToggleFolder { uuid }` — add/remove `Collapsed`.
 - `Pin { uuid }` / `PinUrl { url, title, favicon_url }` (ad-hoc, e.g. a tab) / `Unpin { uuid }`
-- `Move { uuid, folder: Option<Uuid>, before: Option<Uuid> }`
+- `Move { uuid, folder: Option<Uuid> }`
 
 Sources of `BookmarkOp`: the Channel-1 adapter; the page (command-bar icon, tab/entry/folder
 context menus) via rkyv `BookmarkCommandEvent` → translated host-side; MCP tool dispatch.
@@ -188,9 +189,9 @@ Insert a pins+bookmarks section **above** the tab list:
 
 ### Context menus (`vmux_ui::ContextMenu`, not yet used on tabs)
 
-- **Pin square**: Open · Unpin.
-- **Bookmark row**: Open · Pin · Remove · Move to folder ▸.
-- **Folder header**: Rename · New bookmark · Remove · Collapse/Expand.
+- **Pin square**: Open · Unpin · Remove.
+- **Bookmark row**: Open · Rename · Pin · Remove · Move to folder.
+- **Folder header**: Collapse/Expand · Bookmark current page · New folder · Rename · Remove.
 - **Tab** (wrap `fn Tab`, `page.rs:404`): existing Close + **Pin** + **Bookmark** (emit
   `BookmarkCommandEvent` from the tab's url/title/favicon, available client-side).
 

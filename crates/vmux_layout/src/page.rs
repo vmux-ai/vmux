@@ -372,6 +372,7 @@ fn HeaderView(
                                     url: None,
                                     title: None,
                                     favicon_url: None,
+                                    folder: None,
                                 });
                             },
                             Icon { class: "h-4 w-4",
@@ -618,14 +619,14 @@ fn Tab(tab: TabRow) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("add", bm_url.clone(), bm_title.clone(), bm_favicon.clone()),
+                    on_select: move |_: String| add_to_bookmarks("add", bm_url.clone(), bm_title.clone(), bm_favicon.clone(), None),
                     attributes: vec![],
                     "Bookmark"
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_url.clone(), pin_title.clone(), pin_favicon.clone()),
+                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_url.clone(), pin_title.clone(), pin_favicon.clone(), None),
                     attributes: vec![],
                     "Pin"
                 }
@@ -749,6 +750,12 @@ fn SideSheetView(
     bookmarks: BookmarksHostEvent,
     pane_tree_error: Option<String>,
 ) -> Element {
+    let active_page = panes
+        .iter()
+        .find(|pane| pane.is_active)
+        .and_then(|pane| pane.stacks.iter().find(|stack| stack.is_active))
+        .filter(|stack| !stack.url.is_empty())
+        .cloned();
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
@@ -771,7 +778,7 @@ fn SideSheetView(
                     }
                 }
             }
-            BookmarksSection { bookmarks }
+            BookmarksSection { bookmarks, active_page }
             div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
                 if let Some(err) = pane_tree_error {
                     div { class: "flex items-center px-2 py-1",
@@ -789,6 +796,12 @@ fn SideSheetView(
             }
         }
     }
+}
+
+#[derive(Clone, PartialEq)]
+struct BookmarkFolderChoice {
+    uuid: String,
+    name: String,
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the
@@ -849,6 +862,7 @@ fn open_bookmark(url: String) {
         name: None,
         title: None,
         favicon_url: None,
+        folder: None,
     });
 }
 
@@ -860,10 +874,17 @@ fn bookmark_cmd(command: &str, uuid: Option<String>) {
         url: None,
         title: None,
         favicon_url: None,
+        folder: None,
     });
 }
 
-fn add_to_bookmarks(command: &str, url: String, title: String, favicon_url: String) {
+fn add_to_bookmarks(
+    command: &str,
+    url: String,
+    title: String,
+    favicon_url: String,
+    folder: Option<String>,
+) {
     let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
         command: command.into(),
         uuid: None,
@@ -871,6 +892,47 @@ fn add_to_bookmarks(command: &str, url: String, title: String, favicon_url: Stri
         url: Some(url),
         title: Some(title),
         favicon_url: Some(favicon_url),
+        folder,
+    });
+}
+
+fn move_bookmark(uuid: String, folder: Option<String>) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "move".into(),
+        uuid: Some(uuid),
+        name: None,
+        url: None,
+        title: None,
+        favicon_url: None,
+        folder,
+    });
+}
+
+fn commit_bookmark_rename(uuid: String, name: String) {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "rename".into(),
+        uuid: Some(uuid),
+        name: Some(name),
+        url: None,
+        title: None,
+        favicon_url: None,
+        folder: None,
+    });
+}
+
+fn create_bookmark_folder() {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "new_folder".into(),
+        uuid: None,
+        name: Some("New Folder".to_string()),
+        url: None,
+        title: None,
+        favicon_url: None,
+        folder: None,
     });
 }
 
@@ -882,6 +944,7 @@ fn request_bookmark_menu() {
         url: None,
         title: None,
         favicon_url: None,
+        folder: None,
     });
 }
 
@@ -899,12 +962,23 @@ fn commit_folder_rename(uuid: String, name: String) {
         url: None,
         title: None,
         favicon_url: None,
+        folder: None,
     });
 }
 
 #[component]
-fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
+fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode>) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
+    let folders: Vec<BookmarkFolderChoice> = roots
+        .iter()
+        .filter_map(|node| match node {
+            BookmarkNode::Folder(folder) => Some(BookmarkFolderChoice {
+                uuid: folder.uuid.clone(),
+                name: folder.name.clone(),
+            }),
+            BookmarkNode::Entry(_) => None,
+        })
+        .collect();
 
     if pins.is_empty() && roots.is_empty() {
         return rsx! {
@@ -943,8 +1017,22 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
             div { class: "flex flex-col gap-1",
                 for node in roots.iter() {
                     match node {
-                        BookmarkNode::Folder(f) => rsx! { BookmarkFolder { key: "{f.uuid}", folder: f.clone() } },
-                        BookmarkNode::Entry(b) => rsx! { BookmarkEntry { key: "{b.uuid}", row: b.clone() } },
+                        BookmarkNode::Folder(f) => rsx! {
+                            BookmarkFolder {
+                                key: "{f.uuid}",
+                                folder: f.clone(),
+                                folders: folders.clone(),
+                                active_page: active_page.clone(),
+                            }
+                        },
+                        BookmarkNode::Entry(b) => rsx! {
+                            BookmarkEntry {
+                                key: "{b.uuid}",
+                                row: b.clone(),
+                                folder_uuid: None,
+                                folders: folders.clone(),
+                            }
+                        },
                     }
                 }
             }
@@ -955,7 +1043,8 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent) -> Element {
 #[component]
 fn PinTile(row: BookmarkRow) -> Element {
     let url_open = row.url.clone();
-    let uuid = row.uuid.clone();
+    let uuid_unpin = row.uuid.clone();
+    let uuid_remove = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
     rsx! {
         ContextMenu { attributes: vec![],
@@ -986,59 +1075,9 @@ fn PinTile(row: BookmarkRow) -> Element {
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("unpin", Some(id.clone())) },
+                    on_select: { let id = uuid_unpin.clone(); move |_: String| bookmark_cmd("unpin", Some(id.clone())) },
                     attributes: vec![],
                     "Unpin"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn BookmarkEntry(row: BookmarkRow) -> Element {
-    let url_open = row.url.clone();
-    let uuid_pin = row.uuid.clone();
-    let uuid_remove = row.uuid.clone();
-    let menu_val = use_signal(|| row.uuid.clone());
-    let title = if row.title.is_empty() {
-        row.url.clone()
-    } else {
-        row.title.clone()
-    };
-    let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
-    rsx! {
-        ContextMenu { attributes: vec![],
-            ContextMenuTrigger { attributes: vec![],
-                SheetEntryRow {
-                    active: false,
-                    onclick: {
-                        let u = url_open.clone();
-                        move |_| open_bookmark(u.clone())
-                    },
-                    Favicon {
-                        favicon_url: row.favicon_url.clone(),
-                        url: row.url.clone(),
-                        class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                        globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
-                    }
-                    span { class: "{title_class}", "{title}" }
-                }
-            }
-            ContextMenuContent { attributes: vec![],
-                ContextMenuItem {
-                    index: 0usize,
-                    value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
-                    attributes: vec![],
-                    "Open"
-                }
-                ContextMenuItem {
-                    index: 1usize,
-                    value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: { let id = uuid_pin.clone(); move |_: String| bookmark_cmd("pin", Some(id.clone())) },
-                    attributes: vec![],
-                    "Pin"
                 }
                 ContextMenuItem {
                     index: 2usize,
@@ -1053,7 +1092,168 @@ fn BookmarkEntry(row: BookmarkRow) -> Element {
 }
 
 #[component]
-fn BookmarkFolder(folder: FolderRow) -> Element {
+fn BookmarkEntry(
+    row: BookmarkRow,
+    folder_uuid: Option<String>,
+    folders: Vec<BookmarkFolderChoice>,
+) -> Element {
+    let url_open = row.url.clone();
+    let uuid_pin = row.uuid.clone();
+    let uuid_remove = row.uuid.clone();
+    let uuid_rename = row.uuid.clone();
+    let menu_val = use_signal(|| row.uuid.clone());
+    let title = if row.title.is_empty() {
+        row.url.clone()
+    } else {
+        row.title.clone()
+    };
+    let mut editing = use_signal(|| false);
+    let mut draft = use_signal(|| title.clone());
+    let mut move_targets: Vec<(Option<String>, String)> = Vec::new();
+    if folder_uuid.is_some() {
+        move_targets.push((None, "Move to Bookmarks".to_string()));
+    }
+    move_targets.extend(
+        folders
+            .iter()
+            .filter(|folder| Some(folder.uuid.as_str()) != folder_uuid.as_deref())
+            .map(|folder| {
+                (
+                    Some(folder.uuid.clone()),
+                    format!("Move to {}", folder.name),
+                )
+            }),
+    );
+    let remove_index = 3 + move_targets.len();
+    let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
+    rsx! {
+        if editing() {
+            div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                Favicon {
+                    favicon_url: row.favicon_url.clone(),
+                    url: row.url.clone(),
+                    class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                    globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                }
+                input {
+                    r#type: "text",
+                    class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none",
+                    value: "{draft}",
+                    autofocus: true,
+                    oncontextmenu: move |e| e.prevent_default(),
+                    onmounted: move |e: Event<MountedData>| {
+                        if let Some(el) = e.downcast::<web_sys::Element>()
+                            && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
+                        {
+                            let _ = input.focus();
+                        }
+                    },
+                    oninput: move |e| draft.set(e.value()),
+                    onkeydown: {
+                        let id = uuid_rename.clone();
+                        move |e: Event<KeyboardData>| match e.key() {
+                            Key::Enter => {
+                                e.prevent_default();
+                                editing.set(false);
+                                commit_bookmark_rename(id.clone(), draft());
+                            }
+                            Key::Escape => {
+                                e.prevent_default();
+                                editing.set(false);
+                            }
+                            _ => {}
+                        }
+                    },
+                    onblur: {
+                        let id = uuid_rename.clone();
+                        move |_| {
+                            if editing() {
+                                editing.set(false);
+                                commit_bookmark_rename(id.clone(), draft());
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            ContextMenu { attributes: vec![],
+                ContextMenuTrigger { attributes: vec![],
+                    SheetEntryRow {
+                        active: false,
+                        onclick: {
+                            let u = url_open.clone();
+                            move |_| open_bookmark(u.clone())
+                        },
+                        Favicon {
+                            favicon_url: row.favicon_url.clone(),
+                            url: row.url.clone(),
+                            class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                            globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                        }
+                        span { class: "{title_class}", "{title}" }
+                    }
+                }
+                ContextMenuContent { attributes: vec![],
+                    ContextMenuItem {
+                        index: 0usize,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
+                        attributes: vec![],
+                        "Open"
+                    }
+                    ContextMenuItem {
+                        index: 1usize,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: {
+                            let name = title.clone();
+                            move |_: String| {
+                                draft.set(name.clone());
+                                editing.set(true);
+                            }
+                        },
+                        attributes: vec![],
+                        "Rename"
+                    }
+                    ContextMenuItem {
+                        index: 2usize,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: { let id = uuid_pin.clone(); move |_: String| bookmark_cmd("pin", Some(id.clone())) },
+                        attributes: vec![],
+                        "Pin"
+                    }
+                    for (index, (target_folder, label)) in move_targets.iter().enumerate() {
+                        ContextMenuItem {
+                            key: "{index}",
+                            index: 3usize + index,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: {
+                                let id = row.uuid.clone();
+                                let folder = target_folder.clone();
+                                move |_: String| move_bookmark(id.clone(), folder.clone())
+                            },
+                            attributes: vec![],
+                            "{label}"
+                        }
+                    }
+                    ContextMenuItem {
+                        index: remove_index,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
+                        attributes: vec![],
+                        "Remove"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn BookmarkFolder(
+    folder: FolderRow,
+    folders: Vec<BookmarkFolderChoice>,
+    active_page: Option<StackNode>,
+) -> Element {
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
     let mut editing = use_signal(|| false);
@@ -1134,6 +1334,35 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
                         ContextMenuItem {
                             index: 1usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
+                            disabled: active_page.is_none(),
+                            on_select: {
+                                let id = uuid.clone();
+                                let page = active_page.clone();
+                                move |_: String| {
+                                    if let Some(page) = page.clone() {
+                                        add_to_bookmarks(
+                                            "add",
+                                            page.url,
+                                            page.title,
+                                            page.icon.favicon_url().to_string(),
+                                            Some(id.clone()),
+                                        );
+                                    }
+                                }
+                            },
+                            attributes: vec![],
+                            "Bookmark Current Page"
+                        }
+                        ContextMenuItem {
+                            index: 2usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
+                            on_select: move |_: String| create_bookmark_folder(),
+                            attributes: vec![],
+                            "New Folder"
+                        }
+                        ContextMenuItem {
+                            index: 3usize,
+                            value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: {
                                 let name = folder.name.clone();
                                 move |_: String| {
@@ -1145,7 +1374,7 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
                             "Rename Folder"
                         }
                         ContextMenuItem {
-                            index: 2usize,
+                            index: 4usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
                             attributes: vec![],
@@ -1157,7 +1386,12 @@ fn BookmarkFolder(folder: FolderRow) -> Element {
             if !collapsed {
                 div { class: "ml-3 flex flex-col gap-1",
                     for b in folder.children.iter() {
-                        BookmarkEntry { key: "{b.uuid}", row: b.clone() }
+                        BookmarkEntry {
+                            key: "{b.uuid}",
+                            row: b.clone(),
+                            folder_uuid: Some(folder.uuid.clone()),
+                            folders: folders.clone(),
+                        }
                     }
                 }
             }

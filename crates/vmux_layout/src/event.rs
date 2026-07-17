@@ -733,6 +733,8 @@ pub struct BookmarksCommandEvent {
     pub title: Option<String>,
     #[serde(default)]
     pub favicon_url: Option<String>,
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 #[cfg(test)]
