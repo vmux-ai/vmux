@@ -80,7 +80,7 @@ fn mark_bookmarks_dirty(
             )>,
         ),
     >,
-    bookmark_items: Query<(), Or<(With<Bookmark>, With<Pin>)>>,
+    bookmark_items: Query<(), Or<(With<Bookmark>, With<Pin>, With<Folder>)>>,
     mut removed_pin: RemovedComponents<Pin>,
     mut removed_bookmark: RemovedComponents<Bookmark>,
     mut removed_folder: RemovedComponents<Folder>,

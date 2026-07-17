@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    BOOKMARKS_EVENT, BookmarkNode, BookmarkRow, BookmarkTextInputEvent, BookmarksCommandEvent,
-    BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
-    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode,
-    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
+    BookmarksCommandEvent, BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT,
+    LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent,
+    STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent,
+    TabsHostEvent,
 };
 use dioxus::prelude::*;
 use vmux_core::PageIcon;
@@ -294,11 +295,7 @@ fn HeaderView(
         .map(|r| r.url.clone())
         .unwrap_or_default();
     let show_bookmark = !active_url.is_empty();
-    let is_bookmarked = show_bookmark
-        && bookmarks.roots.iter().any(|n| match n {
-            BookmarkNode::Entry(b) => b.url == active_url,
-            BookmarkNode::Folder(f) => f.children.iter().any(|b| b.url == active_url),
-        });
+    let is_bookmarked = show_bookmark && bookmark_nodes_contain_url(&bookmarks.roots, &active_url);
 
     let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
@@ -568,7 +565,7 @@ fn Tab(tab: TabRow) -> Element {
     let menu_val = use_signal(|| tab.id.clone());
 
     rsx! {
-        ContextMenu { attributes: vec![],
+        LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
         div {
             class: "{tab_class}",
@@ -757,6 +754,11 @@ fn SideSheetView(
         .and_then(|pane| pane.stacks.iter().find(|stack| stack.is_active))
         .filter(|stack| !stack.url.is_empty())
         .cloned();
+    let folders = bookmark_folder_choices(&bookmarks.roots);
+    let initial_folders = folders.clone();
+    let mut folder_context = use_signal(|| initial_folders);
+    use_context_provider(|| folder_context);
+    use_effect(move || folder_context.set(folders.clone()));
     rsx! {
         div { class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
             if let Some(space) = active_space {
@@ -779,7 +781,7 @@ fn SideSheetView(
                     }
                 }
             }
-            BookmarksSection { bookmarks, active_page }
+            BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
                 if let Some(err) = pane_tree_error {
                     div { class: "flex items-center px-2 py-1",
@@ -802,7 +804,77 @@ fn SideSheetView(
 #[derive(Clone, PartialEq)]
 struct BookmarkFolderChoice {
     uuid: String,
-    name: String,
+    label: String,
+    ancestors: Vec<String>,
+}
+
+fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
+    nodes.iter().any(|node| match node {
+        BookmarkNode::Entry(bookmark) => bookmark.url == url,
+        BookmarkNode::Folder(folder) => folder.children.iter().any(|bookmark| bookmark.url == url),
+    })
+}
+
+fn bookmark_folder_rows(nodes: &[BookmarkNode]) -> Vec<FolderRow> {
+    nodes
+        .iter()
+        .filter_map(|node| match node {
+            BookmarkNode::Folder(folder) => Some(folder.clone()),
+            BookmarkNode::Entry(_) => None,
+        })
+        .collect()
+}
+
+fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> {
+    fn collect(
+        folders: &[FolderRow],
+        parent: Option<&str>,
+        parent_label: &str,
+        ancestors: &[String],
+        visited: &mut std::collections::HashSet<String>,
+        output: &mut Vec<BookmarkFolderChoice>,
+    ) {
+        for folder in folders
+            .iter()
+            .filter(|folder| folder.parent.as_deref() == parent)
+        {
+            if !visited.insert(folder.uuid.clone()) {
+                continue;
+            }
+            let label = if parent_label.is_empty() {
+                folder.name.clone()
+            } else {
+                format!("{parent_label} / {}", folder.name)
+            };
+            output.push(BookmarkFolderChoice {
+                uuid: folder.uuid.clone(),
+                label: label.clone(),
+                ancestors: ancestors.to_vec(),
+            });
+            let mut child_ancestors = ancestors.to_vec();
+            child_ancestors.push(folder.uuid.clone());
+            collect(
+                folders,
+                Some(&folder.uuid),
+                &label,
+                &child_ancestors,
+                visited,
+                output,
+            );
+        }
+    }
+
+    let folders = bookmark_folder_rows(nodes);
+    let mut output = Vec::new();
+    collect(
+        &folders,
+        None,
+        "",
+        &[],
+        &mut std::collections::HashSet::new(),
+        &mut output,
+    );
+    output
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the
@@ -909,6 +981,18 @@ fn move_bookmark(uuid: String, folder: Option<String>) {
     });
 }
 
+fn move_bookmark_folder(uuid: String, folder: Option<String>) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "move_folder".into(),
+        uuid: Some(uuid),
+        name: None,
+        url: None,
+        title: None,
+        favicon_url: None,
+        folder,
+    });
+}
+
 fn commit_bookmark_rename(uuid: String, name: String) {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -925,7 +1009,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     });
 }
 
-fn create_bookmark_folder(name: String) {
+fn create_bookmark_folder(name: String, parent: Option<String>) {
     let name = name.trim().to_string();
     if name.is_empty() {
         return;
@@ -937,12 +1021,86 @@ fn create_bookmark_folder(name: String) {
         url: None,
         title: None,
         favicon_url: None,
-        folder: None,
+        folder: parent,
     });
+}
+
+const BOOKMARK_DRAG_KIND: &str = "application/x-vmux-bookmark-kind";
+const BOOKMARK_DRAG_UUID: &str = "application/x-vmux-bookmark-uuid";
+const BOOKMARK_DRAG_URL: &str = "application/x-vmux-bookmark-url";
+const BOOKMARK_DRAG_TITLE: &str = "application/x-vmux-bookmark-title";
+const BOOKMARK_DRAG_FAVICON: &str = "application/x-vmux-bookmark-favicon";
+
+fn set_page_drag_data(event: &Event<DragData>, page: &StackNode) {
+    set_page_drag_fields(event, &page.url, &page.title, page.icon.favicon_url());
+}
+
+fn set_page_drag_fields(event: &Event<DragData>, url: &str, title: &str, favicon_url: &str) {
+    let transfer = event.data_transfer();
+    transfer.set_effect_allowed("copyMove");
+    let _ = transfer.set_data(BOOKMARK_DRAG_KIND, "page");
+    let _ = transfer.set_data(BOOKMARK_DRAG_URL, url);
+    let _ = transfer.set_data(BOOKMARK_DRAG_TITLE, title);
+    let _ = transfer.set_data(BOOKMARK_DRAG_FAVICON, favicon_url);
+    let _ = transfer.set_data("text/plain", url);
+}
+
+fn set_bookmark_drag_data(event: &Event<DragData>, kind: &str, uuid: &str) {
+    let transfer = event.data_transfer();
+    transfer.set_effect_allowed("move");
+    let _ = transfer.set_data(BOOKMARK_DRAG_KIND, kind);
+    let _ = transfer.set_data(BOOKMARK_DRAG_UUID, uuid);
+    let _ = transfer.set_data("text/plain", uuid);
+}
+
+fn drop_bookmark_item(event: &Event<DragData>, folder: Option<String>) {
+    event.prevent_default();
+    let transfer = event.data_transfer();
+    transfer.set_drop_effect("move");
+    match transfer.get_data(BOOKMARK_DRAG_KIND).as_deref() {
+        Some("page") => {
+            let Some(url) = transfer.get_data(BOOKMARK_DRAG_URL) else {
+                return;
+            };
+            add_to_bookmarks(
+                "add",
+                url,
+                transfer.get_data(BOOKMARK_DRAG_TITLE).unwrap_or_default(),
+                transfer.get_data(BOOKMARK_DRAG_FAVICON).unwrap_or_default(),
+                folder,
+            );
+        }
+        Some("bookmark") => {
+            if let Some(uuid) = transfer.get_data(BOOKMARK_DRAG_UUID) {
+                move_bookmark(uuid, folder);
+            }
+        }
+        Some("folder") => {
+            if let Some(uuid) = transfer.get_data(BOOKMARK_DRAG_UUID) {
+                move_bookmark_folder(uuid, folder);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn set_bookmark_text_input_active(active: bool) {
     let _ = try_cef_bin_emit_rkyv(&BookmarkTextInputEvent { active });
+}
+
+fn set_bookmark_context_menu_active(active: bool) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarkContextMenuEvent { active });
+}
+
+#[component]
+fn LayoutContextMenu(children: Element) -> Element {
+    rsx! {
+        ContextMenu {
+            attributes: vec![],
+            on_open_change: set_bookmark_context_menu_active,
+            {children}
+        }
+    }
 }
 
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
@@ -1113,20 +1271,20 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
     let BookmarksHostEvent { pins, roots } = bookmarks;
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| "New Folder".to_string());
-    let folders: Vec<BookmarkFolderChoice> = roots
-        .iter()
-        .filter_map(|node| match node {
-            BookmarkNode::Folder(folder) => Some(BookmarkFolderChoice {
-                uuid: folder.uuid.clone(),
-                name: folder.name.clone(),
-            }),
-            BookmarkNode::Entry(_) => None,
-        })
-        .collect();
+    let folders = bookmark_folder_choices(&roots);
+    let folder_rows = bookmark_folder_rows(&roots);
 
     rsx! {
         div {
             class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
+            ondragover: move |event: Event<DragData>| {
+                event.prevent_default();
+                event.data_transfer().set_drop_effect("move");
+            },
+            ondrop: move |event: Event<DragData>| {
+                event.stop_propagation();
+                drop_bookmark_item(&event, None);
+            },
             oncontextmenu: move |e: Event<MouseData>| {
                 let data = e.data();
                 let on_card = data
@@ -1158,7 +1316,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                 }
             }
             if !pins.is_empty() {
-                div { class: "mb-1 grid grid-cols-3 gap-2 p-1",
+                div { class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
                     for p in pins.iter() {
                         PinTile { key: "{p.uuid}", row: p.clone() }
                     }
@@ -1175,7 +1333,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                         placeholder: "Folder name".to_string(),
                         on_commit: move |name| {
                             creating_folder.set(false);
-                            create_bookmark_folder(name);
+                            create_bookmark_folder(name, None);
                         },
                         on_cancel: move |_| creating_folder.set(false),
                     }
@@ -1187,15 +1345,17 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                 div { class: "flex flex-col gap-1",
                     for node in roots.iter() {
                         match node {
-                            BookmarkNode::Folder(f) => rsx! {
+                            BookmarkNode::Folder(f) if f.parent.is_none() => rsx! {
                                 BookmarkFolder {
                                     key: "{f.uuid}",
                                     folder: f.clone(),
+                                    parent_uuid: None,
                                     folders: folders.clone(),
+                                    folder_rows: folder_rows.clone(),
                                     active_page: active_page.clone(),
-                                    on_new_folder: move |_| begin_new_folder(creating_folder, new_folder_draft),
                                 }
                             },
+                            BookmarkNode::Folder(_) => rsx! {},
                             BookmarkNode::Entry(b) => rsx! {
                                 BookmarkEntry {
                                     key: "{b.uuid}",
@@ -1219,10 +1379,19 @@ fn PinTile(row: BookmarkRow) -> Element {
     let uuid_remove = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
     rsx! {
-        ContextMenu { attributes: vec![],
+        LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
                 div {
-                    class: "flex aspect-square cursor-pointer items-center justify-center rounded-lg bg-white/5 hover:bg-white/10",
+                    draggable: "true",
+                    ondragstart: {
+                        let url = row.url.clone();
+                        let title = row.title.clone();
+                        let favicon = row.favicon_url.clone();
+                        move |event: Event<DragData>| {
+                            set_page_drag_fields(&event, &url, &title, &favicon)
+                        }
+                    },
+                    class: "flex aspect-square cursor-pointer items-center justify-center rounded-md bg-white/5 hover:bg-white/10",
                     onclick: {
                         let u = url_open.clone();
                         move |_| open_bookmark(u.clone())
@@ -1231,8 +1400,8 @@ fn PinTile(row: BookmarkRow) -> Element {
                     Favicon {
                         favicon_url: row.favicon_url.clone(),
                         url: row.url.clone(),
-                        class: "h-6 w-6 shrink-0 rounded-sm object-contain".to_string(),
-                        globe_class: "h-6 w-6 shrink-0 text-muted-foreground".to_string(),
+                        class: "h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
+                        globe_class: "h-5 w-5 shrink-0 text-muted-foreground".to_string(),
                     }
                 }
             }
@@ -1292,7 +1461,7 @@ fn BookmarkEntry(
             .map(|folder| {
                 (
                     Some(folder.uuid.clone()),
-                    format!("Move to {}", folder.name),
+                    format!("Move to {}", folder.label),
                 )
             }),
     );
@@ -1322,21 +1491,31 @@ fn BookmarkEntry(
                 }
             }
         } else {
-            ContextMenu { attributes: vec![],
-                ContextMenuTrigger { attributes: vec![],
-                    SheetEntryRow {
-                        active: false,
-                        onclick: {
-                            let u = url_open.clone();
-                            move |_| open_bookmark(u.clone())
+            LayoutContextMenu {
+                ContextMenuTrigger {
+                    attributes: vec![],
+                    div {
+                        draggable: "true",
+                        ondragstart: {
+                            let id = row.uuid.clone();
+                            move |event: Event<DragData>| {
+                                set_bookmark_drag_data(&event, "bookmark", &id)
+                            }
                         },
-                        Favicon {
-                            favicon_url: row.favicon_url.clone(),
-                            url: row.url.clone(),
-                            class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                            globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                        SheetEntryRow {
+                            active: false,
+                            onclick: {
+                                let u = url_open.clone();
+                                move |_| open_bookmark(u.clone())
+                            },
+                            Favicon {
+                                favicon_url: row.favicon_url.clone(),
+                                url: row.url.clone(),
+                                class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                            }
+                            span { class: "{title_class}", "{title}" }
                         }
-                        span { class: "{title_class}", "{title}" }
                     }
                 }
                 SideSheetContextMenuContent {
@@ -1394,15 +1573,35 @@ fn BookmarkEntry(
 #[component]
 fn BookmarkFolder(
     folder: FolderRow,
+    parent_uuid: Option<String>,
     folders: Vec<BookmarkFolderChoice>,
+    folder_rows: Vec<FolderRow>,
     active_page: Option<StackNode>,
-    on_new_folder: EventHandler<()>,
 ) -> Element {
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| folder.name.clone());
+    let mut creating_child = use_signal(|| false);
+    let child_draft = use_signal(|| "New Folder".to_string());
     let menu_val = use_signal(|| folder.uuid.clone());
+    let new_folder_uuid = uuid.clone();
+    let mut move_targets = Vec::new();
+    if parent_uuid.is_some() {
+        move_targets.push((None, "Move to Bookmarks".to_string()));
+    }
+    move_targets.extend(
+        folders
+            .iter()
+            .filter(|target| target.uuid != folder.uuid && !target.ancestors.contains(&folder.uuid))
+            .map(|target| {
+                (
+                    Some(target.uuid.clone()),
+                    format!("Move to {}", target.label),
+                )
+            }),
+    );
+    let remove_index = 4 + move_targets.len();
 
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -1426,18 +1625,40 @@ fn BookmarkFolder(
                     }
                 }
             } else {
-                ContextMenu { attributes: vec![],
-                    ContextMenuTrigger { attributes: vec![],
-                        SheetEntryRow {
-                            active: false,
-                            onclick: {
+                LayoutContextMenu {
+                    ContextMenuTrigger {
+                        attributes: vec![],
+                        div {
+                            draggable: "true",
+                            ondragstart: {
                                 let id = uuid.clone();
-                                move |_| bookmark_cmd("toggle_folder", Some(id.clone()))
+                                move |event: Event<DragData>| {
+                                    set_bookmark_drag_data(&event, "folder", &id)
+                                }
                             },
-                            Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                            ondragover: move |event: Event<DragData>| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                event.data_transfer().set_drop_effect("move");
+                            },
+                            ondrop: {
+                                let id = uuid.clone();
+                                move |event: Event<DragData>| {
+                                    event.stop_propagation();
+                                    drop_bookmark_item(&event, Some(id.clone()));
+                                }
+                            },
+                            SheetEntryRow {
+                                active: false,
+                                onclick: {
+                                    let id = uuid.clone();
+                                    move |_| bookmark_cmd("toggle_folder", Some(id.clone()))
+                                },
+                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                    path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                                }
+                                span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
                             }
-                            span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
                         }
                     }
                     SideSheetContextMenuContent {
@@ -1473,7 +1694,12 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: 2usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: move |_: String| on_new_folder.call(()),
+                            on_select: move |_: String| {
+                                if collapsed {
+                                    bookmark_cmd("toggle_folder", Some(new_folder_uuid.clone()));
+                                }
+                                begin_new_folder(creating_child, child_draft);
+                            },
                             attributes: vec![],
                             "New Folder"
                         }
@@ -1487,8 +1713,22 @@ fn BookmarkFolder(
                             attributes: vec![],
                             "Rename Folder"
                         }
+                        for (index, (target_folder, label)) in move_targets.iter().enumerate() {
+                            ContextMenuItem {
+                                key: "{index}",
+                                index: 4usize + index,
+                                value: Into::<ReadSignal<String>>::into(menu_val),
+                                on_select: {
+                                    let id = uuid.clone();
+                                    let folder = target_folder.clone();
+                                    move |_: String| move_bookmark_folder(id.clone(), folder.clone())
+                                },
+                                attributes: vec![],
+                                "{label}"
+                            }
+                        }
                         ContextMenuItem {
-                            index: 4usize,
+                            index: remove_index,
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
                             attributes: vec![],
@@ -1497,12 +1737,45 @@ fn BookmarkFolder(
                     }
                 }
             }
+            if creating_child() {
+                div { class: "ml-3 flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    }
+                    BookmarkNameInput {
+                        draft: child_draft,
+                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                        placeholder: "Folder name".to_string(),
+                        on_commit: {
+                            let parent = uuid.clone();
+                            move |name| {
+                                creating_child.set(false);
+                                create_bookmark_folder(name, Some(parent.clone()));
+                            }
+                        },
+                        on_cancel: move |_| creating_child.set(false),
+                    }
+                }
+            }
             if !collapsed {
                 div { class: "ml-3 flex flex-col gap-1",
-                    for b in folder.children.iter() {
+                    for child_folder in folder_rows
+                        .iter()
+                        .filter(|child| child.parent.as_deref() == Some(folder.uuid.as_str()))
+                    {
+                        BookmarkFolder {
+                            key: "{child_folder.uuid}",
+                            folder: child_folder.clone(),
+                            parent_uuid: Some(folder.uuid.clone()),
+                            folders: folders.clone(),
+                            folder_rows: folder_rows.clone(),
+                            active_page: active_page.clone(),
+                        }
+                    }
+                    for bookmark in folder.children.iter() {
                         BookmarkEntry {
-                            key: "{b.uuid}",
-                            row: b.clone(),
+                            key: "{bookmark.uuid}",
+                            row: bookmark.clone(),
                             folder_uuid: Some(folder.uuid.clone()),
                             folders: folders.clone(),
                         }
@@ -1656,9 +1929,20 @@ fn NewStackRow(pane_id: u64) -> Element {
 
 #[component]
 fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
+    let folder_context: Signal<Vec<BookmarkFolderChoice>> = use_context();
+    let folders = folder_context();
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
     let mut hovered = use_signal(|| false);
+    let menu_val = use_signal(|| stack.url.clone());
+    let drag_page = stack.clone();
+    let bookmark_url = stack.url.clone();
+    let bookmark_title = stack.title.clone();
+    let bookmark_favicon = stack.icon.favicon_url().to_string();
+    let pin_url = stack.url.clone();
+    let pin_title = stack.title.clone();
+    let pin_favicon = stack.icon.favicon_url().to_string();
+    let pin_index = 1 + folders.len();
 
     let title_class = if is_active {
         format!(
@@ -1673,49 +1957,106 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     };
 
     rsx! {
-        div {
-            id: "sidesheet-stack-{pane_id}-{stack_index}",
-            class: if is_active {
-                "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
-            } else {
-                "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
-            },
-            onmouseenter: move |_| hovered.set(true),
-            onmouseleave: move |_| hovered.set(false),
-            onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
-                    command: "activate_stack".to_string(),
-                    pane_id: pane_id.to_string(),
-                    stack_index,
-                });
-            },
-            StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-            span { class: "{title_class}", "{stack.title}" }
-            button {
-                r#type: "button",
-                aria_label: "Close stack",
-                title: "Close stack",
-                class: if hovered() {
-                    "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-100 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
-                } else {
-                    "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
-                },
-                onmousedown: move |evt| {
-                    evt.prevent_default();
-                    evt.stop_propagation();
-                },
-                onclick: move |evt| {
-                    evt.prevent_default();
-                    evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
-                        command: "close_stack".to_string(),
-                        pane_id: pane_id.to_string(),
-                        stack_index,
-                    });
-                },
-                Icon { class: "h-3 w-3 pointer-events-none",
-                    path { d: "M18 6 6 18" }
-                    path { d: "m6 6 12 12" }
+        LayoutContextMenu {
+            ContextMenuTrigger {
+                attributes: vec![],
+                div {
+                    draggable: "true",
+                    ondragstart: move |event: Event<DragData>| set_page_drag_data(&event, &drag_page),
+                    id: "sidesheet-stack-{pane_id}-{stack_index}",
+                    class: if is_active {
+                        "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
+                    } else {
+                        "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
+                    },
+                    onmouseenter: move |_| hovered.set(true),
+                    onmouseleave: move |_| hovered.set(false),
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                            command: "activate_stack".to_string(),
+                            pane_id: pane_id.to_string(),
+                            stack_index,
+                        });
+                    },
+                    StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
+                    span { class: "{title_class}", "{stack.title}" }
+                    button {
+                        r#type: "button",
+                        aria_label: "Close stack",
+                        title: "Close stack",
+                        class: if hovered() {
+                            "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-100 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
+                        } else {
+                            "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
+                        },
+                        onmousedown: move |evt| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                        },
+                        onclick: move |evt| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                            let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                                command: "close_stack".to_string(),
+                                pane_id: pane_id.to_string(),
+                                stack_index,
+                            });
+                        },
+                        Icon { class: "h-3 w-3 pointer-events-none",
+                            path { d: "M18 6 6 18" }
+                            path { d: "m6 6 12 12" }
+                        }
+                    }
+                }
+            }
+            SideSheetContextMenuContent {
+                ContextMenuItem {
+                    index: 0usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: move |_: String| add_to_bookmarks(
+                        "add",
+                        bookmark_url.clone(),
+                        bookmark_title.clone(),
+                        bookmark_favicon.clone(),
+                        None,
+                    ),
+                    attributes: vec![],
+                    "Bookmark"
+                }
+                for (index, folder) in folders.iter().enumerate() {
+                    ContextMenuItem {
+                        key: "{folder.uuid}",
+                        index: 1usize + index,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: {
+                            let url = stack.url.clone();
+                            let title = stack.title.clone();
+                            let favicon = stack.icon.favicon_url().to_string();
+                            let folder_uuid = folder.uuid.clone();
+                            move |_: String| add_to_bookmarks(
+                                "add",
+                                url.clone(),
+                                title.clone(),
+                                favicon.clone(),
+                                Some(folder_uuid.clone()),
+                            )
+                        },
+                        attributes: vec![],
+                        "Bookmark in {folder.label}"
+                    }
+                }
+                ContextMenuItem {
+                    index: pin_index,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: move |_: String| add_to_bookmarks(
+                        "pin_url",
+                        pin_url.clone(),
+                        pin_title.clone(),
+                        pin_favicon.clone(),
+                        None,
+                    ),
+                    attributes: vec![],
+                    "Pin"
                 }
             }
         }
