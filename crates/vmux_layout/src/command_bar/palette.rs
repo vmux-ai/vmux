@@ -505,6 +505,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     if should_submit_start_prompt(
                                         matches!(variant, PaletteVariant::Start),
                                         nav_mode(),
+                                        results.get(sel).is_some(),
                                         &q,
                                     ) {
                                         on_close.call(());

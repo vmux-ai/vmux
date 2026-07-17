@@ -251,10 +251,16 @@ pub fn should_open_typed_query_on_enter(
         && looks_like_url(query.trim())
 }
 
-pub fn should_submit_start_prompt(is_start: bool, nav_mode: bool, query: &str) -> bool {
+pub fn should_submit_start_prompt(
+    is_start: bool,
+    nav_mode: bool,
+    has_result: bool,
+    query: &str,
+) -> bool {
     let query = query.trim();
     is_start
         && !nav_mode
+        && !has_result
         && !query.is_empty()
         && !query.starts_with('>')
         && !looks_like_url(query)
@@ -585,8 +591,14 @@ mod tests {
         assert!(should_submit_start_prompt(
             true,
             false,
+            false,
             "fix the failing test"
         ));
+    }
+
+    #[test]
+    fn start_enter_opens_matching_launcher_result() {
+        assert!(!should_submit_start_prompt(true, false, true, "codex"));
     }
 
     #[test]
@@ -601,14 +613,22 @@ mod tests {
             "../repo",
             "> close tab",
         ] {
-            assert!(!should_submit_start_prompt(true, false, query), "{query}");
+            assert!(
+                !should_submit_start_prompt(true, false, false, query),
+                "{query}"
+            );
         }
     }
 
     #[test]
     fn start_enter_keeps_keyboard_selected_result() {
-        assert!(!should_submit_start_prompt(true, true, "terminal"));
-        assert!(!should_submit_start_prompt(false, false, "ask the agent"));
+        assert!(!should_submit_start_prompt(true, true, false, "terminal"));
+        assert!(!should_submit_start_prompt(
+            false,
+            false,
+            false,
+            "ask the agent"
+        ));
     }
 
     #[test]
