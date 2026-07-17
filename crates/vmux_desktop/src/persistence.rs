@@ -18,7 +18,7 @@ use vmux_layout::{
     LayoutStartupSet, Open, SpaceFilePresent,
     pane::{Pane, PaneId, PaneSize, PaneSplit, PaneSplitDirection, pane_split_gaps},
     stack::Stack,
-    tab::{Tab, TabDirDecided, TabWorktree},
+    tab::{Tab, TabDirDecided, TabWorkspace, TabWorktree},
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
@@ -97,6 +97,14 @@ struct AutoSave {
     dirty: bool,
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct TabPersistenceChanges<'w, 's> {
+    changed_workspaces: Query<'w, 's, (), Changed<TabWorkspace>>,
+    changed_worktrees: Query<'w, 's, (), Changed<TabWorktree>>,
+    removed_workspaces: RemovedComponents<'w, 's, TabWorkspace>,
+    removed_worktrees: RemovedComponents<'w, 's, TabWorktree>,
+}
+
 // v4: agent URL grammar changed (CLI moved to `vmux://agent/<kind>/cli/<sid>`, freeing the
 // two-segment form for ACP sessions). Persisted stores from v3 reference the old grammar, so
 // they are reset on upgrade rather than migrated in place.
@@ -137,10 +145,9 @@ fn mark_dirty_on_change(
     added_panes: Query<(), Added<Pane>>,
     added_tabs: Query<(), Added<Tab>>,
     changed_tabs: Query<(), Changed<Tab>>,
-    changed_tab_worktrees: Query<(), Changed<TabWorktree>>,
+    mut tab_changes: TabPersistenceChanges,
     removed_stacks: RemovedComponents<Stack>,
     removed_panes: RemovedComponents<Pane>,
-    mut removed_tab_worktrees: RemovedComponents<TabWorktree>,
     changed_meta: Query<(), (Changed<PageMetadata>, With<Stack>)>,
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
@@ -153,10 +160,12 @@ fn mark_dirty_on_change(
         || !added_panes.is_empty()
         || !added_tabs.is_empty()
         || !changed_tabs.is_empty()
-        || !changed_tab_worktrees.is_empty()
+        || !tab_changes.changed_workspaces.is_empty()
+        || !tab_changes.changed_worktrees.is_empty()
         || !removed_stacks.is_empty()
         || !removed_panes.is_empty()
-        || removed_tab_worktrees.read().count() > 0
+        || tab_changes.removed_worktrees.read().count() > 0
+        || tab_changes.removed_workspaces.read().count() > 0
         || !changed_meta.is_empty()
         || !changed_size.is_empty()
         || !changed_children.is_empty()
@@ -214,6 +223,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<Name>()
         .allow::<Stack>()
         .allow::<Tab>()
+        .allow::<TabWorkspace>()
         .allow::<TabWorktree>()
         .allow::<TabDirDecided>()
         .allow::<Pane>()
@@ -749,6 +759,27 @@ mod tests {
     }
 
     #[test]
+    fn adding_tab_workspace_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        let tab = app.world_mut().spawn(Tab::default()).id();
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut().entity_mut(tab).insert(TabWorkspace {
+            project_dir: "/tmp/project".into(),
+        });
+
+        app.update();
+
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
+
+    #[test]
     fn removing_tab_worktree_marks_store_dirty() {
         let mut app = App::new();
         app.insert_resource(AutoSave {
@@ -763,6 +794,7 @@ mod tests {
                 Tab::default(),
                 TabWorktree {
                     repo_root: "/tmp/repo".into(),
+                    checkout_dir: "/tmp/worktree".into(),
                     branch: "vmux/test".into(),
                     base_ref: "main".into(),
                 },

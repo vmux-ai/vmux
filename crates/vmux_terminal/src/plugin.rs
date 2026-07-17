@@ -1169,6 +1169,8 @@ struct PollServiceWriters<'w> {
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
+    page_agent_workspace_changed:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentWorkspaceChanged>,
     page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
     page_agent_model_selection_result:
         MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
@@ -1672,6 +1674,23 @@ fn poll_service_messages(
                 writers
                     .page_agent_info
                     .write(vmux_service::agent_events::PageAgentInfo { sid, name });
+            }
+            ServiceMessage::AcpWorkspaceChanged {
+                sid,
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } => {
+                writers.page_agent_workspace_changed.write(
+                    vmux_service::agent_events::PageAgentWorkspaceChanged {
+                        sid,
+                        name,
+                        branch,
+                        cwd,
+                        workspace_cwd,
+                    },
+                );
             }
             ServiceMessage::AcpModelInfo {
                 sid,

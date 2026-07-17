@@ -2,6 +2,7 @@
 //! the chat UI already renders (the same shape the provider-direct path produces).
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
 
 use crate::message::{AssistantBlock, Message, PlanStep};
 use crate::protocol::AgentAttachment;
@@ -31,6 +32,50 @@ pub enum Intent {
         line: Option<u32>,
         kind: crate::protocol::FileTouchKind,
     },
+    WorkspaceChanged {
+        name: String,
+        branch: String,
+        cwd: String,
+        workspace_cwd: String,
+    },
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AcpWorktreeMetadata {
+    name: String,
+    branch: String,
+    cwd: String,
+    workspace_cwd: String,
+}
+
+fn workspace_changed_intent(
+    update: agent_client_protocol::schema::v1::SessionInfoUpdate,
+) -> Vec<Intent> {
+    let Some(value) = update
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.get("worktree"))
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let Ok(worktree) = serde_json::from_value::<AcpWorktreeMetadata>(value) else {
+        return Vec::new();
+    };
+    if worktree.name.trim().is_empty()
+        || worktree.branch.trim().is_empty()
+        || !Path::new(&worktree.cwd).is_absolute()
+        || !Path::new(&worktree.workspace_cwd).is_absolute()
+    {
+        return Vec::new();
+    }
+    vec![Intent::WorkspaceChanged {
+        name: worktree.name,
+        branch: worktree.branch,
+        cwd: worktree.cwd,
+        workspace_cwd: worktree.workspace_cwd,
+    }]
 }
 
 /// Map an ACP `ToolKind` to a follow-pane touch kind. Only file-affecting kinds open a
@@ -175,6 +220,7 @@ impl AcpProjector {
             SessionUpdate::ToolCall(tc) => self.apply_tool_call(tc),
             SessionUpdate::ToolCallUpdate(update) => self.apply_tool_call_update(update),
             SessionUpdate::Plan(plan) => self.upsert_plan(plan),
+            SessionUpdate::SessionInfoUpdate(update) => workspace_changed_intent(update),
             _ => Vec::new(),
         }
     }
@@ -538,13 +584,64 @@ fn tool_output_text(content: &[ToolCallContent]) -> String {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        ContentChunk, Diff, SessionUpdate, Terminal, TextContent, ToolCall, ToolCallContent,
+        ContentChunk, Diff, SessionInfoUpdate, SessionUpdate, Terminal, TextContent, ToolCall,
+        ToolCallContent,
     };
 
     fn chunk(text: &str) -> SessionUpdate {
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
             text,
         ))))
+    }
+
+    #[test]
+    fn session_info_worktree_metadata_emits_workspace_change() {
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "worktree".to_string(),
+            serde_json::json!({
+                "name": "quiet-amber-wolf",
+                "branch": "vibe/quiet-amber-wolf",
+                "cwd": "/worktrees/quiet-amber-wolf/subdir",
+                "workspaceCwd": "/repo/subdir"
+            }),
+        );
+        let mut projector = AcpProjector::new();
+
+        let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().meta(meta),
+        ));
+
+        assert_eq!(
+            intents,
+            vec![Intent::WorkspaceChanged {
+                name: "quiet-amber-wolf".to_string(),
+                branch: "vibe/quiet-amber-wolf".to_string(),
+                cwd: "/worktrees/quiet-amber-wolf/subdir".to_string(),
+                workspace_cwd: "/repo/subdir".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn session_info_rejects_relative_worktree_paths() {
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            "worktree".to_string(),
+            serde_json::json!({
+                "name": "quiet-amber-wolf",
+                "branch": "vibe/quiet-amber-wolf",
+                "cwd": "worktrees/quiet-amber-wolf",
+                "workspaceCwd": "/repo"
+            }),
+        );
+        let mut projector = AcpProjector::new();
+
+        let intents = projector.apply(SessionUpdate::SessionInfoUpdate(
+            SessionInfoUpdate::new().meta(meta),
+        ));
+
+        assert!(intents.is_empty());
     }
 
     #[test]

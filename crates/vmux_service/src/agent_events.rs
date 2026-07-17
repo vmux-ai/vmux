@@ -85,6 +85,15 @@ pub struct PageAgentInfo {
     pub name: String,
 }
 
+#[derive(Message)]
+pub struct PageAgentWorkspaceChanged {
+    pub sid: String,
+    pub name: String,
+    pub branch: String,
+    pub cwd: String,
+    pub workspace_cwd: String,
+}
+
 /// Current model and selectable models reported by a running ACP session.
 #[derive(Message)]
 pub struct PageAgentModelInfo {

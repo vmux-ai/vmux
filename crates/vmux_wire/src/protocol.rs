@@ -839,6 +839,13 @@ pub enum ServiceMessage {
         sid: String,
         name: String,
     },
+    AcpWorkspaceChanged {
+        sid: String,
+        name: String,
+        branch: String,
+        cwd: String,
+        workspace_cwd: String,
+    },
     /// Current model and selectable models reported by an ACP session.
     AcpModelInfo {
         sid: String,
@@ -917,6 +924,34 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&st).unwrap();
         let back = rkyv::from_bytes::<AgentRunStatus, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, AgentRunStatus::Interrupted);
+    }
+
+    #[test]
+    fn acp_workspace_changed_roundtrips() {
+        let message = ServiceMessage::AcpWorkspaceChanged {
+            sid: "s1".into(),
+            name: "quiet-amber-wolf".into(),
+            branch: "vibe/quiet-amber-wolf".into(),
+            cwd: "/worktrees/quiet-amber-wolf".into(),
+            workspace_cwd: "/repo".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&message).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert!(matches!(
+            decoded,
+            ServiceMessage::AcpWorkspaceChanged {
+                sid,
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } if sid == "s1"
+                && name == "quiet-amber-wolf"
+                && branch == "vibe/quiet-amber-wolf"
+                && cwd == "/worktrees/quiet-amber-wolf"
+                && workspace_cwd == "/repo"
+        ));
     }
 
     #[test]

@@ -31,6 +31,7 @@ impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .register_type::<Option<String>>()
+            .register_type::<TabWorkspace>()
             .register_type::<TabWorktree>()
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
@@ -66,6 +67,16 @@ pub struct Tab {
     pub startup_dir: Option<String>,
 }
 
+/// Stable project directory for a tab. Unlike [`Tab::startup_dir`], this does not change when
+/// the tab is rebound to a managed worktree.
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabWorkspace {
+    pub project_dir: String,
+}
+
 /// Present iff a tab's `startup_dir` points at a vmux-managed git worktree.
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
@@ -73,8 +84,16 @@ pub struct Tab {
 #[require(Save)]
 pub struct TabWorktree {
     pub repo_root: String,
+    #[reflect(default)]
+    pub checkout_dir: String,
     pub branch: String,
     pub base_ref: String,
+}
+
+/// Runtime failure state for a persisted managed worktree. Ownership metadata remains attached.
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct TabWorktreeUnavailable {
+    pub message: String,
 }
 
 /// Marks that the worktree/work-here decision has been made for a tab, so the isolate offer
@@ -426,8 +445,39 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use crate::window::Main as MainNode;
+    use bevy::reflect::{FromReflect, TypeRegistry, serde::TypedReflectDeserializer};
+    use serde::de::DeserializeSeed;
     use vmux_command::CommandPlugin;
     use vmux_core::PageOpenRequest;
+
+    #[test]
+    fn tab_worktree_deserializes_legacy_metadata_without_checkout_dir() {
+        let mut registry = TypeRegistry::default();
+        registry.register::<TabWorktree>();
+        let registration = registry.get(std::any::TypeId::of::<TabWorktree>()).unwrap();
+        let mut deserializer = ron::de::Deserializer::from_str(
+            r#"(
+                repo_root: "/repo",
+                branch: "vmux/task",
+                base_ref: "main",
+            )"#,
+        )
+        .unwrap();
+        let reflected = TypedReflectDeserializer::new(registration, &registry)
+            .deserialize(&mut deserializer)
+            .unwrap();
+        let metadata = TabWorktree::from_reflect(reflected.as_partial_reflect()).unwrap();
+
+        assert_eq!(
+            metadata,
+            TabWorktree {
+                repo_root: "/repo".into(),
+                checkout_dir: String::new(),
+                branch: "vmux/task".into(),
+                base_ref: "main".into(),
+            }
+        );
+    }
 
     #[test]
     fn tab_target_uses_event_tab_id() {

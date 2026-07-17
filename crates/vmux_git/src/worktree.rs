@@ -29,6 +29,30 @@ pub struct CheckoutInfo {
     pub common_dir: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeRegistration {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    pub prunable: bool,
+}
+
+fn normalize_worktree_path(path: &Path) -> Result<PathBuf, GitError> {
+    if path.is_dir() {
+        return path
+            .canonicalize()
+            .map_err(|error| GitError(format!("invalid worktree path: {error}")));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| GitError("worktree path has no parent".to_string()))?
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid worktree parent: {error}")))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| GitError("worktree path has no file name".to_string()))?;
+    Ok(parent.join(name))
+}
+
 fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitError> {
     let (stdout, stderr, ok) = git(dir, &["rev-parse", "--path-format=absolute", flag])?;
     if !ok {
@@ -116,6 +140,69 @@ pub fn worktree_add(
     })
 }
 
+/// Recreate a worktree at `path` from an existing local `branch`.
+pub fn worktree_add_existing(
+    root: &Path,
+    path: &Path,
+    branch: &str,
+    base_ref: &str,
+) -> Result<WorktreeInfo, GitError> {
+    if path.symlink_metadata().is_ok() {
+        return Err(GitError(format!(
+            "worktree recovery path already exists: {}",
+            path.display()
+        )));
+    }
+    let normalized_path = normalize_worktree_path(path)?;
+    let registrations = worktree_registrations(root)?;
+    let target_registration = registrations
+        .iter()
+        .find(|registration| registration.path == normalized_path);
+    if let Some(registration) = target_registration
+        && registration.branch.as_deref() != Some(branch)
+    {
+        return Err(GitError(format!(
+            "worktree path is registered to a different branch: {}",
+            normalized_path.display()
+        )));
+    }
+    if let Some(registration) = registrations.iter().find(|registration| {
+        registration.branch.as_deref() == Some(branch) && registration.path != normalized_path
+    }) {
+        return Err(GitError(format!(
+            "branch {branch} is registered to another worktree: {}",
+            registration.path.display()
+        )));
+    }
+    if target_registration.is_some() {
+        let path_str = normalized_path.to_string_lossy();
+        let (stdout, stderr, ok) =
+            git(root, &["worktree", "remove", "--force", path_str.as_ref()])?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        if let Some(registration) = worktree_registrations(root)?.iter().find(|registration| {
+            registration.branch.as_deref() == Some(branch) && registration.path != normalized_path
+        }) {
+            return Err(GitError(format!(
+                "branch {branch} is registered to another worktree: {}",
+                registration.path.display()
+            )));
+        }
+    }
+    let path_str = normalized_path.to_string_lossy();
+    let (stdout, stderr, ok) = git(root, &["worktree", "add", path_str.as_ref(), branch])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(WorktreeInfo {
+        path: normalized_path,
+        branch: branch.to_string(),
+        base_ref: base_ref.to_string(),
+        repo_root: root.to_path_buf(),
+    })
+}
+
 /// Remove the worktree at `path` and delete its `branch` (best-effort branch cleanup).
 pub fn worktree_remove(
     root: &Path,
@@ -154,15 +241,41 @@ pub fn worktree_status(path: &Path) -> Result<WorktreeStatus, GitError> {
 
 /// Registered worktree checkout paths for the repo at `root` (`git worktree list`).
 pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
+    Ok(worktree_registrations(root)?
+        .into_iter()
+        .map(|registration| registration.path)
+        .collect())
+}
+
+pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, GitError> {
     let (stdout, stderr, ok) = git(root, &["worktree", "list", "--porcelain"])?;
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
-    Ok(stdout
-        .lines()
-        .filter_map(|l| l.strip_prefix("worktree "))
-        .map(PathBuf::from)
-        .collect())
+    let mut registrations = Vec::new();
+    let mut path = None;
+    let mut branch = None;
+    let mut prunable = false;
+    for line in stdout.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(path) = path.take() {
+                registrations.push(WorktreeRegistration {
+                    path,
+                    branch: branch.take(),
+                    prunable,
+                });
+            }
+            prunable = false;
+        } else if let Some(value) = line.strip_prefix("worktree ") {
+            let value = PathBuf::from(value);
+            path = Some(normalize_worktree_path(&value).unwrap_or(value));
+        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
+            branch = Some(value.to_string());
+        } else if line == "prunable" || line.starts_with("prunable ") {
+            prunable = true;
+        }
+    }
+    Ok(registrations)
 }
 
 /// Local branch names (`git branch --format=%(refname:short)`).
@@ -314,6 +427,35 @@ mod tests {
         let wt = repo.path().join(".worktrees/feat");
         worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
         assert!(is_linked_worktree(&wt), "linked worktree");
+    }
+
+    #[test]
+    fn add_existing_recovers_only_the_same_stale_registration() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let recovered = worktree_add_existing(repo.path(), &wt, "vmux/feat", "main").unwrap();
+
+        assert!(recovered.path.is_dir());
+        assert_eq!(head_ref(&recovered.path).unwrap(), "vmux/feat");
+    }
+
+    #[test]
+    fn add_existing_rejects_branch_registered_elsewhere() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let first = repo.path().join(".worktrees/first");
+        let second = repo.path().join(".worktrees/second");
+        worktree_add(repo.path(), &first, "vmux/feat", "main").unwrap();
+        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+
+        let error = worktree_add_existing(repo.path(), &second, "vmux/feat", "main").unwrap_err();
+
+        assert!(error.0.contains("registered to another worktree"));
+        assert!(!second.exists());
     }
 
     #[test]

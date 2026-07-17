@@ -1,22 +1,54 @@
-//! Per-tab worktree helpers: create a git worktree bound to a [`Tab`] (set `Tab.startup_dir` +
-//! attach [`TabWorktree`]) and reconcile away a worktree whose checkout has vanished. Creation is
-//! synchronous — the agent-facing `create_worktree` MCP command needs the path back in one call.
+//! Per-tab managed worktree lifecycle and directory rebinding.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
 #[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
 use bevy::prelude::*;
+use sha2::{Digest, Sha256};
 
-use crate::tab::{Tab, TabWorktree};
-use vmux_git::worktree::{self, CheckoutInfo, WorktreeInfo};
+use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
+use vmux_git::worktree::{self, CheckoutInfo};
 
 pub struct WorktreePlugin;
+
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub struct ManagedWorktreeRoot(pub PathBuf);
+
+impl Default for ManagedWorktreeRoot {
+    fn default() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("/"));
+        Self(home.join(".vmux/worktrees"))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TabWorktreeActivation {
+    pub execution_dir: PathBuf,
+    pub metadata: TabWorktree,
+    pub ready: TabWorktreeReady,
+}
+
+#[derive(Component, Clone, Debug)]
+pub struct TabWorktreeReady {
+    startup_dir: String,
+    project_dir: String,
+    metadata: TabWorktree,
+    checkout: CheckoutInfo,
+    checkout_fingerprint: CheckoutFingerprint,
+    execution_fingerprint: PathFingerprint,
+}
+
+#[derive(Resource, Default)]
+struct WorktreeReconcileQueue(VecDeque<Entity>);
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TabDirectoryRebindSet;
@@ -36,9 +68,24 @@ pub struct TabDirectoryObserved {
 
 impl Plugin for WorktreePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<TabDirectoryObserved>()
-            .add_systems(Update, reconcile_tab_worktrees)
-            .add_systems(Update, rebind_tab_directories.in_set(TabDirectoryRebindSet));
+        app.init_resource::<ManagedWorktreeRoot>()
+            .init_resource::<WorktreeReconcileQueue>()
+            .add_message::<TabDirectoryObserved>()
+            .add_systems(
+                Update,
+                (
+                    ensure_tab_workspaces,
+                    queue_added_tab_worktrees,
+                    reconcile_next_tab_worktree,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                rebind_tab_directories
+                    .in_set(TabDirectoryRebindSet)
+                    .after(reconcile_next_tab_worktree),
+            );
     }
 }
 
@@ -63,14 +110,137 @@ pub fn sanitize_slug(name: &str) -> String {
     }
 }
 
-/// Pick a `.worktrees/<slug>` path + `vmux/<slug>` branch that collide with neither an existing
-/// worktree path nor an existing local branch (a leftover branch would fail `git worktree add`).
-fn plan_worktree(repo_root: &Path, slug_hint: &str) -> (PathBuf, String) {
+fn repository_storage_dir(managed_root: &Path, checkout: &CheckoutInfo) -> PathBuf {
+    let repository_name = checkout
+        .common_dir
+        .parent()
+        .and_then(Path::file_name)
+        .or_else(|| checkout.root.file_name())
+        .and_then(|name| name.to_str())
+        .map(sanitize_slug)
+        .unwrap_or_else(|| "repository".to_string());
+    #[cfg(unix)]
+    let digest = Sha256::digest(checkout.common_dir.as_os_str().as_bytes());
+    #[cfg(not(unix))]
+    let digest = Sha256::digest(checkout.common_dir.to_string_lossy().as_bytes());
+    let hash = format!("{digest:x}");
+    managed_root.join(format!("{repository_name}-{}", &hash[..12]))
+}
+
+fn normalize_missing_path(path: &Path) -> Result<PathBuf, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "worktree path has no parent".to_string())?
+        .canonicalize()
+        .map_err(|error| format!("invalid worktree parent: {error}"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| "worktree path has no file name".to_string())?;
+    Ok(parent.join(name))
+}
+
+fn prepare_managed_destination(
+    managed_root: &Path,
+    checkout: &CheckoutInfo,
+    destination: &Path,
+) -> Result<PathBuf, String> {
+    if !destination.is_absolute() {
+        return Err("managed worktree path must be absolute".to_string());
+    }
+    let repository_dir = repository_storage_dir(managed_root, checkout);
+    std::fs::create_dir_all(&repository_dir)
+        .map_err(|error| format!("failed to create worktree directory: {error}"))?;
+    let repository_dir = repository_dir
+        .canonicalize()
+        .map_err(|error| format!("invalid repository storage directory: {error}"))?;
+    let destination = normalize_missing_path(destination)?;
+    if destination.parent() != Some(repository_dir.as_path()) {
+        return Err("managed worktree path escapes its repository storage directory".to_string());
+    }
+    Ok(destination)
+}
+
+fn prepare_recovery_destination(
+    managed_root: &Path,
+    checkout: &CheckoutInfo,
+    destination: &Path,
+    branch: &str,
+) -> Result<PathBuf, String> {
+    let registrations =
+        worktree::worktree_registrations(&checkout.root).map_err(|error| error.0)?;
+    if let Ok(destination) = normalize_missing_path(destination)
+        && registrations.iter().any(|registration| {
+            registration.path == destination && registration.branch.as_deref() == Some(branch)
+        })
+    {
+        return Ok(destination);
+    }
+    prepare_managed_destination(managed_root, checkout, destination)
+}
+
+fn canonical_execution_dir(checkout_root: &Path, relative_dir: &Path) -> Result<PathBuf, String> {
+    let execution_dir = checkout_root.join(relative_dir);
+    let execution_dir = execution_dir
+        .canonicalize()
+        .map_err(|error| format!("project directory is missing from worktree: {error}"))?;
+    if !execution_dir.is_dir() || !execution_dir.starts_with(checkout_root) {
+        return Err(format!(
+            "project directory escapes worktree: {}",
+            execution_dir.display()
+        ));
+    }
+    Ok(execution_dir)
+}
+
+pub struct ValidatedLinkedWorkspace {
+    pub cwd: PathBuf,
+    pub workspace_cwd: PathBuf,
+    pub checkout: CheckoutInfo,
+}
+
+pub fn validate_linked_workspace(
+    cwd: &Path,
+    workspace_cwd: &Path,
+    branch: &str,
+) -> Result<ValidatedLinkedWorkspace, String> {
+    let cwd = cwd
+        .canonicalize()
+        .map_err(|error| format!("invalid worktree directory: {error}"))?;
+    let workspace_cwd = workspace_cwd
+        .canonicalize()
+        .map_err(|error| format!("invalid workspace directory: {error}"))?;
+    let checkout = worktree::checkout_info(&cwd).map_err(|error| error.0)?;
+    let workspace = worktree::checkout_info(&workspace_cwd).map_err(|error| error.0)?;
+    if checkout.common_dir != workspace.common_dir {
+        return Err("worktree belongs to a different repository".to_string());
+    }
+    if !worktree::is_linked_worktree(&cwd) {
+        return Err("worktree directory is not a linked worktree".to_string());
+    }
+    let actual_branch = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
+    if actual_branch != branch {
+        return Err(format!(
+            "worktree is on branch {actual_branch}, expected {branch}"
+        ));
+    }
+    Ok(ValidatedLinkedWorkspace {
+        cwd,
+        workspace_cwd,
+        checkout,
+    })
+}
+
+fn plan_worktree(
+    checkout: &CheckoutInfo,
+    managed_root: &Path,
+    slug_hint: &str,
+) -> (PathBuf, String) {
     let base = sanitize_slug(slug_hint);
-    let existing = worktree::worktree_list(repo_root).unwrap_or_default();
-    let branches = worktree::local_branches(repo_root).unwrap_or_default();
+    let repository_dir = repository_storage_dir(managed_root, checkout);
+    let existing = worktree::worktree_list(&checkout.root).unwrap_or_default();
+    let branches = worktree::local_branches(&checkout.root).unwrap_or_default();
     let taken = |slug: &str| -> bool {
-        let path = repo_root.join(".worktrees").join(slug);
+        let path = repository_dir.join(slug);
         let branch = format!("vmux/{slug}");
         existing.iter().any(|p| p == &path)
             || path.exists()
@@ -82,54 +252,195 @@ fn plan_worktree(repo_root: &Path, slug_hint: &str) -> (PathBuf, String) {
         slug = format!("{base}-{n}");
         n += 1;
     }
-    let path = repo_root.join(".worktrees").join(&slug);
+    let path = repository_dir.join(&slug);
     let branch = format!("vmux/{slug}");
     (path, branch)
 }
 
-/// Create a worktree under `base_dir`'s repo, synchronously, and return its info. Backs the
-/// agent-facing `create_worktree` MCP command (which needs the path back in one call).
-pub fn create_worktree_blocking(base_dir: &Path, slug_hint: &str) -> Result<WorktreeInfo, String> {
-    let repo_root = worktree::repo_root_of(base_dir).map_err(|e| e.0)?;
-    let base_ref = worktree::head_ref(&repo_root).map_err(|e| e.0)?;
-    let (path, branch) = plan_worktree(&repo_root, slug_hint);
-    ensure_worktrees_ignored(&repo_root);
-    worktree::worktree_add(&repo_root, &path, &branch, &base_ref).map_err(|e| e.0)
+/// Create a globally stored managed worktree while preserving `base_dir`'s repository-relative
+/// directory.
+pub fn create_worktree_blocking(
+    base_dir: &Path,
+    slug_hint: &str,
+    managed_root: &Path,
+) -> Result<TabWorktreeActivation, String> {
+    let base_dir = base_dir
+        .canonicalize()
+        .map_err(|error| format!("invalid project directory: {error}"))?;
+    let checkout = worktree::checkout_info(&base_dir).map_err(|error| error.0)?;
+    let relative_dir = base_dir
+        .strip_prefix(&checkout.root)
+        .map_err(|_| "project directory is outside its checkout".to_string())?;
+    let base_ref = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
+    let (checkout_dir, branch) = plan_worktree(&checkout, managed_root, slug_hint);
+    let checkout_dir = prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
+    let info = worktree::worktree_add(&checkout.root, &checkout_dir, &branch, &base_ref)
+        .map_err(|error| error.0)?;
+    let activation = (|| {
+        let managed_checkout = worktree::checkout_info(&info.path).map_err(|error| error.0)?;
+        if managed_checkout.common_dir != checkout.common_dir {
+            return Err("managed worktree belongs to a different repository".to_string());
+        }
+        let execution_dir = canonical_execution_dir(&managed_checkout.root, relative_dir)?;
+        let metadata = TabWorktree {
+            repo_root: checkout.root.to_string_lossy().into_owned(),
+            checkout_dir: managed_checkout.root.to_string_lossy().into_owned(),
+            branch: info.branch.clone(),
+            base_ref: info.base_ref.clone(),
+        };
+        let ready = TabWorktreeReady::new(
+            &execution_dir,
+            &base_dir.to_string_lossy(),
+            &metadata,
+            &managed_checkout,
+        )?;
+        Ok(TabWorktreeActivation {
+            execution_dir,
+            metadata,
+            ready,
+        })
+    })();
+    if activation.is_err() {
+        let _ = worktree::worktree_remove(&checkout.root, &info.path, &info.branch, false);
+    }
+    activation
 }
 
-/// Add `.worktrees/` to the repo's local `info/exclude` (never the tracked `.gitignore`). The
-/// exclude path is resolved via git so it lands in the shared common dir for linked worktrees too.
-fn ensure_worktrees_ignored(repo_root: &Path) {
-    let Some(exclude) = worktree::info_exclude_path(repo_root) else {
-        return;
-    };
-    let body = std::fs::read_to_string(&exclude).unwrap_or_default();
-    if body.lines().any(|l| l.trim() == ".worktrees/") {
-        return;
-    }
-    let mut next = body;
-    if !next.is_empty() && !next.ends_with('\n') {
-        next.push('\n');
-    }
-    next.push_str(".worktrees/\n");
-    if let Some(parent) = exclude.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&exclude, next);
-}
-
-/// After load (or create), drop stale managed-worktree metadata while retaining the tab's stored
-/// workspace directory.
-fn reconcile_tab_worktrees(q: Query<(Entity, &Tab), Added<TabWorktree>>, mut commands: Commands) {
-    for (entity, tab) in &q {
-        let missing = tab
+pub fn ensure_tab_worktree_available(
+    tab: &Tab,
+    workspace: &TabWorkspace,
+    metadata: &TabWorktree,
+    managed_root: &Path,
+) -> Result<TabWorktreeActivation, String> {
+    let project_dir = Path::new(&workspace.project_dir)
+        .canonicalize()
+        .map_err(|error| format!("project directory unavailable: {error}"))?;
+    let source = worktree::checkout_info(&project_dir).map_err(|error| error.0)?;
+    let relative_dir = project_dir
+        .strip_prefix(&source.root)
+        .map_err(|_| "project directory is outside its checkout".to_string())?;
+    let mut checkout_dir = if metadata.checkout_dir.is_empty() {
+        let startup_dir = tab
             .startup_dir
             .as_deref()
-            .map(|d| !Path::new(d).is_dir())
-            .unwrap_or(true);
-        if missing {
-            commands.entity(entity).remove::<TabWorktree>();
+            .ok_or_else(|| "managed worktree checkout path is missing".to_string())?;
+        worktree::checkout_info(Path::new(startup_dir))
+            .map(|checkout| checkout.root)
+            .unwrap_or_else(|_| PathBuf::from(startup_dir))
+    } else {
+        PathBuf::from(&metadata.checkout_dir)
+    };
+    if !checkout_dir.is_dir() {
+        if checkout_dir.symlink_metadata().is_ok() {
+            return Err(format!(
+                "managed worktree path is not a directory: {}",
+                checkout_dir.display()
+            ));
         }
+        checkout_dir =
+            prepare_recovery_destination(managed_root, &source, &checkout_dir, &metadata.branch)?;
+        worktree::worktree_add_existing(
+            &source.root,
+            &checkout_dir,
+            &metadata.branch,
+            &metadata.base_ref,
+        )
+        .map_err(|error| format!("failed to recover managed worktree: {}", error.0))?;
+    }
+    let checkout = worktree::checkout_info(&checkout_dir).map_err(|error| error.0)?;
+    if checkout.common_dir != source.common_dir {
+        return Err("managed worktree belongs to a different repository".to_string());
+    }
+    if !worktree::is_linked_worktree(&checkout.root) {
+        return Err("managed worktree directory is not a linked worktree".to_string());
+    }
+    let branch = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
+    if branch != metadata.branch {
+        return Err(format!(
+            "managed worktree is on branch {branch}, expected {}",
+            metadata.branch
+        ));
+    }
+    let execution_dir = canonical_execution_dir(&checkout.root, relative_dir)?;
+    let mut normalized = metadata.clone();
+    normalized.repo_root = source.root.to_string_lossy().into_owned();
+    normalized.checkout_dir = checkout.root.to_string_lossy().into_owned();
+    let ready = TabWorktreeReady::new(
+        &execution_dir,
+        &workspace.project_dir,
+        &normalized,
+        &checkout,
+    )?;
+    Ok(TabWorktreeActivation {
+        execution_dir,
+        metadata: normalized,
+        ready,
+    })
+}
+
+fn ensure_tab_workspaces(
+    tabs: Query<(Entity, &Tab, Option<&TabWorktree>), Without<TabWorkspace>>,
+    mut commands: Commands,
+) {
+    for (entity, tab, worktree) in &tabs {
+        let Some(project_dir) = worktree
+            .map(|worktree| worktree.repo_root.as_str())
+            .filter(|path| !path.is_empty())
+            .or(tab.startup_dir.as_deref())
+        else {
+            continue;
+        };
+        let project_dir = Path::new(project_dir)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(project_dir));
+        commands.entity(entity).insert(TabWorkspace {
+            project_dir: project_dir.to_string_lossy().into_owned(),
+        });
+    }
+}
+
+fn queue_added_tab_worktrees(
+    worktrees: Query<(Entity, Option<&TabWorktreeReady>), Added<TabWorktree>>,
+    mut queue: ResMut<WorktreeReconcileQueue>,
+) {
+    for (entity, ready) in &worktrees {
+        if ready.is_none() && !queue.0.contains(&entity) {
+            queue.0.push_back(entity);
+        }
+    }
+}
+
+fn reconcile_next_tab_worktree(
+    mut queue: ResMut<WorktreeReconcileQueue>,
+    mut q: Query<(&mut Tab, &TabWorkspace, &TabWorktree), Without<TabWorktreeReady>>,
+    managed_root: Res<ManagedWorktreeRoot>,
+    mut commands: Commands,
+) {
+    while let Some(entity) = queue.0.pop_front() {
+        let Ok((mut tab, workspace, metadata)) = q.get_mut(entity) else {
+            continue;
+        };
+        match ensure_tab_worktree_available(&tab, workspace, metadata, &managed_root.0) {
+            Ok(activation) => {
+                let startup_dir = activation.execution_dir.to_string_lossy().into_owned();
+                if tab.startup_dir.as_deref() != Some(&startup_dir) {
+                    tab.startup_dir = Some(startup_dir);
+                }
+                let mut entity_commands = commands.entity(entity);
+                if metadata != &activation.metadata {
+                    entity_commands.insert(activation.metadata);
+                }
+                entity_commands
+                    .insert(activation.ready)
+                    .remove::<TabWorktreeUnavailable>();
+            }
+            Err(message) => {
+                commands
+                    .entity(entity)
+                    .insert(TabWorktreeUnavailable { message });
+            }
+        }
+        break;
     }
 }
 
@@ -157,6 +468,7 @@ struct CheckoutFingerprint {
     common_dir: PathBuf,
     commondir: Option<Vec<u8>>,
     gitdir: Option<Vec<u8>>,
+    head: Option<Vec<u8>>,
 }
 
 fn path_fingerprint(path: &Path) -> Option<PathFingerprint> {
@@ -192,6 +504,7 @@ fn checkout_fingerprint(info: &CheckoutInfo) -> Option<CheckoutFingerprint> {
     let admin_dir = git_admin_dir(&info.root)?;
     let commondir = std::fs::read(admin_dir.join("commondir")).ok();
     let gitdir = std::fs::read(admin_dir.join("gitdir")).ok();
+    let head = std::fs::read(admin_dir.join("HEAD")).ok();
     let common_dir = match commondir.as_deref() {
         Some(bytes) => {
             let value = std::str::from_utf8(bytes).ok()?.trim();
@@ -214,7 +527,39 @@ fn checkout_fingerprint(info: &CheckoutInfo) -> Option<CheckoutFingerprint> {
         common_dir,
         commondir,
         gitdir,
+        head,
     })
+}
+
+impl TabWorktreeReady {
+    pub fn new(
+        execution_dir: &Path,
+        project_dir: &str,
+        metadata: &TabWorktree,
+        checkout: &CheckoutInfo,
+    ) -> Result<Self, String> {
+        let checkout_fingerprint = checkout_fingerprint(checkout)
+            .ok_or_else(|| "failed to fingerprint managed worktree".to_string())?;
+        let execution_fingerprint = path_fingerprint(execution_dir)
+            .ok_or_else(|| "failed to fingerprint project directory".to_string())?;
+        Ok(Self {
+            startup_dir: execution_dir.to_string_lossy().into_owned(),
+            project_dir: project_dir.to_string(),
+            metadata: metadata.clone(),
+            checkout: checkout.clone(),
+            checkout_fingerprint,
+            execution_fingerprint,
+        })
+    }
+
+    pub fn is_current(&self, tab: &Tab, workspace: &TabWorkspace, metadata: &TabWorktree) -> bool {
+        tab.startup_dir.as_deref() == Some(self.startup_dir.as_str())
+            && workspace.project_dir == self.project_dir
+            && metadata == &self.metadata
+            && checkout_fingerprint(&self.checkout).as_ref() == Some(&self.checkout_fingerprint)
+            && path_fingerprint(Path::new(&self.startup_dir)).as_ref()
+                == Some(&self.execution_fingerprint)
+    }
 }
 
 fn store_cached_checkout_info(
@@ -274,6 +619,7 @@ fn is_within_checkout_without_nested_git_boundary(root: &Path, observed_dir: &Pa
 fn rebind_tab_directories(
     mut reader: MessageReader<TabDirectoryObserved>,
     mut tabs: Query<&mut Tab>,
+    mut workspaces: Query<&mut TabWorkspace>,
     managed: Query<(), With<TabWorktree>>,
     mut removed_tabs: RemovedComponents<Tab>,
     mut checkout_cache: Local<HashMap<Entity, CachedCheckoutInfo>>,
@@ -325,9 +671,21 @@ fn rebind_tab_directories(
         if !should_rebind {
             continue;
         }
+        let same_repository = current_info
+            .as_ref()
+            .is_some_and(|current| current.common_dir == observed_info.common_dir);
         let Some(startup_dir) = observed_info.root.to_str().map(str::to_owned) else {
             continue;
         };
+        if !same_repository {
+            if let Ok(mut workspace) = workspaces.get_mut(observed.tab) {
+                workspace.project_dir.clone_from(&startup_dir);
+            } else {
+                commands.entity(observed.tab).insert(TabWorkspace {
+                    project_dir: startup_dir.clone(),
+                });
+            }
+        }
         tab.startup_dir = Some(startup_dir.clone());
         store_cached_checkout_info(
             &mut checkout_cache,
@@ -336,7 +694,11 @@ fn rebind_tab_directories(
             &observed_info,
         );
         if managed.contains(observed.tab) {
-            commands.entity(observed.tab).remove::<TabWorktree>();
+            commands
+                .entity(observed.tab)
+                .remove::<TabWorktree>()
+                .remove::<TabWorktreeReady>()
+                .remove::<TabWorktreeUnavailable>();
         }
     }
 }
@@ -435,60 +797,139 @@ mod tests {
     }
 
     #[test]
-    fn create_worktree_blocking_creates_branch_and_excludes() {
+    fn create_worktree_blocking_uses_repository_hashed_global_root() {
         let repo = init_repo();
-        let info = create_worktree_blocking(repo.path(), "Auth Refactor").unwrap();
-        assert_eq!(info.branch, "vmux/auth-refactor");
-        assert!(info.path.is_dir());
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation =
+            create_worktree_blocking(repo.path(), "Auth Refactor", managed_root.path()).unwrap();
+        let checkout_dir = PathBuf::from(&activation.metadata.checkout_dir);
+        let managed_root = managed_root.path().canonicalize().unwrap();
+        assert_eq!(activation.metadata.branch, "vmux/auth-refactor");
+        assert!(checkout_dir.is_dir());
         assert!(
-            info.path.ends_with("auth-refactor")
-                && info.path.parent().unwrap().ends_with(".worktrees"),
-            "path is <root>/.worktrees/auth-refactor: {:?}",
-            info.path
+            checkout_dir.starts_with(&managed_root)
+                && checkout_dir.ends_with("auth-refactor")
+                && checkout_dir
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.rsplit_once('-')
+                            .is_some_and(|(_, hash)| hash.len() == 12)
+                    }),
+            "path is <managed-root>/<repo-hash>/auth-refactor: {checkout_dir:?}"
         );
-        let exclude =
-            std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap_or_default();
-        assert!(exclude.lines().any(|l| l.trim() == ".worktrees/"));
+        assert_eq!(activation.execution_dir, checkout_dir);
+    }
+
+    #[test]
+    fn create_worktree_preserves_nested_project_directory() {
+        let repo = init_repo();
+        let nested = repo.path().join("crates/app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}\n").unwrap();
+        git(repo.path(), &["add", "crates/app/main.rs"]);
+        git(repo.path(), &["commit", "-qm", "nested project"]);
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let activation = create_worktree_blocking(&nested, "nested", managed_root.path()).unwrap();
+
+        assert!(activation.execution_dir.ends_with("nested/crates/app"));
+        assert!(activation.execution_dir.join("main.rs").is_file());
     }
 
     #[test]
     fn plan_worktree_skips_existing_branch_name() {
         let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
         git(repo.path(), &["branch", "vmux/feat"]);
-        let (path, branch) = plan_worktree(repo.path(), "feat");
+        let checkout = worktree::checkout_info(repo.path()).unwrap();
+        let (path, branch) = plan_worktree(&checkout, managed_root.path(), "feat");
         assert_eq!(branch, "vmux/feat-2");
-        assert!(path.ends_with(".worktrees/feat-2"), "{path:?}");
+        assert!(path.starts_with(managed_root.path()));
+        assert!(path.ends_with("feat-2"), "{path:?}");
     }
 
     #[test]
-    fn reconcile_drops_worktree_when_path_missing() {
+    fn reconcile_recovers_missing_worktree_without_dropping_metadata() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation =
+            create_worktree_blocking(repo.path(), "recover", managed_root.path()).unwrap();
+        let checkout_dir = PathBuf::from(&activation.metadata.checkout_dir);
+        std::fs::remove_dir_all(&checkout_dir).unwrap();
         let mut app = App::new();
         app.add_plugins(WorktreePlugin);
-        let good = tempfile::tempdir().unwrap();
-        let kept = app
+        let tab = app
             .world_mut()
             .spawn((
                 Tab {
-                    name: "k".into(),
-                    startup_dir: Some(good.path().to_string_lossy().into_owned()),
+                    name: "recover".into(),
+                    startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
                 },
-                TabWorktree {
-                    repo_root: "r".into(),
-                    branch: "vmux/k".into(),
-                    base_ref: "main".into(),
+                TabWorkspace {
+                    project_dir: repo.path().to_string_lossy().into_owned(),
                 },
+                activation.metadata,
             ))
             .id();
-        let dropped = app
+
+        app.update();
+
+        assert!(checkout_dir.is_dir());
+        assert!(app.world().get::<TabWorktree>(tab).is_some());
+        assert!(app.world().get::<TabWorktreeUnavailable>(tab).is_none());
+    }
+
+    #[test]
+    fn recovery_recreates_pruned_managed_registration() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation =
+            create_worktree_blocking(repo.path(), "recover", managed_root.path()).unwrap();
+        std::fs::remove_dir_all(&activation.metadata.checkout_dir).unwrap();
+        git(repo.path(), &["worktree", "prune", "--expire", "now"]);
+        let tab = Tab {
+            name: "recover".into(),
+            startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
+        };
+        let workspace = TabWorkspace {
+            project_dir: repo.path().to_string_lossy().into_owned(),
+        };
+
+        let recovered = ensure_tab_worktree_available(
+            &tab,
+            &workspace,
+            &activation.metadata,
+            managed_root.path(),
+        )
+        .unwrap();
+
+        assert!(recovered.execution_dir.is_dir());
+        assert_eq!(
+            worktree::head_ref(&recovered.execution_dir).unwrap(),
+            activation.metadata.branch
+        );
+    }
+
+    #[test]
+    fn reconcile_keeps_metadata_when_recovery_fails() {
+        let mut app = App::new();
+        app.add_plugins(WorktreePlugin);
+        let tab = app
             .world_mut()
             .spawn((
                 Tab {
-                    name: "d".into(),
-                    startup_dir: Some("/no/such/vmux-xyz-dir".into()),
+                    name: "missing".into(),
+                    startup_dir: Some("/no/such/vmux-worktree".into()),
+                },
+                TabWorkspace {
+                    project_dir: "/no/such/vmux-project".into(),
                 },
                 TabWorktree {
-                    repo_root: "r".into(),
-                    branch: "vmux/d".into(),
+                    repo_root: "/no/such/vmux-project".into(),
+                    checkout_dir: "/no/such/vmux-worktree".into(),
+                    branch: "vmux/missing".into(),
                     base_ref: "main".into(),
                 },
             ))
@@ -496,14 +937,119 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get::<TabWorktree>(kept).is_some());
-        assert!(app.world().get::<TabWorktree>(dropped).is_none());
+        assert!(app.world().get::<TabWorktree>(tab).is_some());
+        assert!(app.world().get::<TabWorktreeUnavailable>(tab).is_some());
+    }
+
+    #[test]
+    fn recovery_rejects_unregistered_path_outside_managed_root() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation =
+            create_worktree_blocking(repo.path(), "managed", managed_root.path()).unwrap();
+        let outside_parent = tempfile::tempdir().unwrap();
+        let outside = outside_parent.path().join("escape");
+        let mut metadata = activation.metadata;
+        metadata.checkout_dir = outside.to_string_lossy().into_owned();
+        let tab = Tab {
+            name: "managed".into(),
+            startup_dir: Some(outside.to_string_lossy().into_owned()),
+        };
+        let workspace = TabWorkspace {
+            project_dir: repo.path().to_string_lossy().into_owned(),
+        };
+
+        let error = ensure_tab_worktree_available(&tab, &workspace, &metadata, managed_root.path())
+            .unwrap_err();
+
+        assert!(error.contains("repository storage directory"));
+        assert!(!outside.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_project_directory_cannot_escape_through_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let repo = init_repo();
+        let nested = repo.path().join("crates/app");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}\n").unwrap();
+        git(repo.path(), &["add", "crates/app/main.rs"]);
+        git(repo.path(), &["commit", "-qm", "nested project"]);
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation = create_worktree_blocking(&nested, "managed", managed_root.path()).unwrap();
+        std::fs::remove_dir_all(&activation.execution_dir).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), &activation.execution_dir).unwrap();
+        let tab = Tab {
+            name: "managed".into(),
+            startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
+        };
+        let workspace = TabWorkspace {
+            project_dir: nested.to_string_lossy().into_owned(),
+        };
+
+        let error = ensure_tab_worktree_available(
+            &tab,
+            &workspace,
+            &activation.metadata,
+            managed_root.path(),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("escapes worktree"));
+    }
+
+    #[test]
+    fn restore_reconciles_at_most_one_worktree_per_frame() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let first = create_worktree_blocking(repo.path(), "first", managed_root.path()).unwrap();
+        let second = create_worktree_blocking(repo.path(), "second", managed_root.path()).unwrap();
+        std::fs::remove_dir_all(&first.metadata.checkout_dir).unwrap();
+        std::fs::remove_dir_all(&second.metadata.checkout_dir).unwrap();
+        let mut app = App::new();
+        app.insert_resource(ManagedWorktreeRoot(managed_root.path().to_path_buf()))
+            .add_plugins(WorktreePlugin);
+        for activation in [first, second] {
+            app.world_mut().spawn((
+                Tab {
+                    name: "restore".into(),
+                    startup_dir: Some(activation.execution_dir.to_string_lossy().into_owned()),
+                },
+                TabWorkspace {
+                    project_dir: repo.path().to_string_lossy().into_owned(),
+                },
+                activation.metadata,
+            ));
+        }
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .iter_entities()
+                .filter(|entity| entity.contains::<TabWorktreeReady>())
+                .count(),
+            1
+        );
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .iter_entities()
+                .filter(|entity| entity.contains::<TabWorktreeReady>())
+                .count(),
+            2
+        );
     }
 
     #[test]
     fn observation_rebinds_managed_tab_to_same_repo_checkout() {
         let repo = init_repo();
-        let managed = create_worktree_blocking(repo.path(), "managed").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let managed =
+            create_worktree_blocking(repo.path(), "managed", managed_root.path()).unwrap();
         let touched = repo.path().join("seed.txt");
         let expected = repo
             .path()
@@ -518,13 +1064,12 @@ mod tests {
             .spawn((
                 Tab {
                     name: "tab".into(),
-                    startup_dir: Some(managed.path.to_string_lossy().into_owned()),
+                    startup_dir: Some(managed.execution_dir.to_string_lossy().into_owned()),
                 },
-                TabWorktree {
-                    repo_root: managed.repo_root.to_string_lossy().into_owned(),
-                    branch: managed.branch.clone(),
-                    base_ref: managed.base_ref.clone(),
+                TabWorkspace {
+                    project_dir: repo.path().to_string_lossy().into_owned(),
                 },
+                managed.metadata.clone(),
             ))
             .id();
 
@@ -535,13 +1080,18 @@ mod tests {
             Some(expected.as_str())
         );
         assert!(app.world().get::<TabWorktree>(tab).is_none());
-        assert!(managed.path.is_dir(), "old checkout is preserved");
+        assert!(
+            Path::new(&managed.metadata.checkout_dir).is_dir(),
+            "old checkout is preserved"
+        );
     }
 
     #[test]
     fn observation_rebinds_before_same_frame_consumers() {
         let repo = init_repo();
-        let managed = create_worktree_blocking(repo.path(), "managed").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let managed =
+            create_worktree_blocking(repo.path(), "managed", managed_root.path()).unwrap();
         let expected = repo
             .path()
             .canonicalize()
@@ -555,7 +1105,7 @@ mod tests {
             .world_mut()
             .spawn(Tab {
                 name: "tab".into(),
-                startup_dir: Some(managed.path.to_string_lossy().into_owned()),
+                startup_dir: Some(managed.execution_dir.to_string_lossy().into_owned()),
             })
             .id();
         app.insert_resource(ObservationInput {
@@ -576,7 +1126,8 @@ mod tests {
     #[test]
     fn observation_rebinds_repeatedly_within_same_repo() {
         let repo = init_repo();
-        let first = create_worktree_blocking(repo.path(), "first").unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let first = create_worktree_blocking(repo.path(), "first", managed_root.path()).unwrap();
         let second_path = repo.path().join(".worktrees/second");
         worktree::worktree_add(repo.path(), &second_path, "vmux/second", "main").unwrap();
         let second_file = second_path.join("seed.txt");
@@ -598,7 +1149,7 @@ mod tests {
             .world_mut()
             .spawn(Tab {
                 name: "tab".into(),
-                startup_dir: Some(first.path.to_string_lossy().into_owned()),
+                startup_dir: Some(first.execution_dir.to_string_lossy().into_owned()),
             })
             .id();
 
