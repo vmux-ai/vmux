@@ -3903,9 +3903,7 @@ mod tests {
     fn cross_agent_swap_attaches_fresh_target_with_imported_history() {
         let mut app = swap_test_app();
         let (stack, _child) = spawn_stack_child(&mut app);
-        let messages = vec![crate::Message::User {
-            text: "fix auth".into(),
-        }];
+        let messages = vec![crate::Message::user("fix auth")];
         app.world_mut()
             .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
             .write(vmux_core::agent::SwapStackSession {

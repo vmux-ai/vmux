@@ -266,7 +266,7 @@ pub(crate) fn chat_page_title(items: &[ChatItem], status: &str, agent_name: &str
     let topic = items
         .iter()
         .filter_map(|item| match item {
-            ChatItem::User { text } => Some(text.as_str()),
+            ChatItem::User { text, .. } => Some(text.as_str()),
             ChatItem::Turn(_) => None,
         })
         .map(normalize_chat_page_title)
@@ -685,16 +685,12 @@ mod tests {
     #[test]
     fn chat_page_title_uses_first_prompt_as_stable_topic() {
         let items = vec![
-            ChatItem::User {
-                text: "  Fix the\ndynamic   agent page title  ".into(),
-            },
+            ChatItem::user("  Fix the\ndynamic   agent page title  "),
             ChatItem::Turn(ChatTurn {
                 running: true,
                 ..Default::default()
             }),
-            ChatItem::User {
-                text: "continue".into(),
-            },
+            ChatItem::user("continue"),
         ];
 
         assert_eq!(
@@ -712,9 +708,7 @@ mod tests {
         fn title(block: ChatBlock) -> String {
             chat_page_title(
                 &[
-                    ChatItem::User {
-                        text: "Ship dynamic titles".into(),
-                    },
+                    ChatItem::user("Ship dynamic titles"),
                     ChatItem::Turn(ChatTurn {
                         blocks: vec![block],
                         running: true,
@@ -776,31 +770,21 @@ mod tests {
     fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
         assert_eq!(chat_page_title(&[], "idle", "Codex"), "Codex");
 
-        let items = vec![ChatItem::User {
-            text: "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
-        }];
+        let items = vec![ChatItem::user(
+            "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
+        )];
         let title = chat_page_title(&items, "idle", "Codex");
         assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
         assert!(title.ends_with('…'));
         assert_eq!(
-            chat_page_title(
-                &[ChatItem::User {
-                    text: "Fix \u{202E}\x1b title".into(),
-                }],
-                "idle",
-                "Codex"
-            ),
+            chat_page_title(&[ChatItem::user("Fix \u{202E}\x1b title")], "idle", "Codex"),
             "Fix title"
         );
         assert_eq!(
             chat_page_title(
                 &[
-                    ChatItem::User {
-                        text: "\u{202E}".into(),
-                    },
-                    ChatItem::User {
-                        text: "Keep 👩‍💻 and فارسی\u{200C}".into(),
-                    },
+                    ChatItem::user("\u{202E}"),
+                    ChatItem::user("Keep 👩‍💻 and فارسی\u{200C}"),
                 ],
                 "errored",
                 "Codex"

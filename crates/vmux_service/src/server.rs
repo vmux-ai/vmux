@@ -814,7 +814,10 @@ async fn handle_client(
                 } else {
                     agent_manager.lock().await.input(
                         &sid,
-                        crate::agent::SessionInput::User(page_agent_prompt(text, &attachments)),
+                        crate::agent::SessionInput::User {
+                            text: page_agent_prompt(text, &attachments),
+                            attachments,
+                        },
                     );
                 }
             }

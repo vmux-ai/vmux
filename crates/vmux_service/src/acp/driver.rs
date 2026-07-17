@@ -419,22 +419,6 @@ fn attachment_uri(path: &str) -> String {
         .unwrap_or_else(|_| format!("file://{path}"))
 }
 
-fn prompt_display_text(text: &str, attachments: &[AgentAttachment]) -> String {
-    if attachments.is_empty() {
-        return text.to_string();
-    }
-    let names = attachments
-        .iter()
-        .map(|attachment| attachment.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-    if text.is_empty() {
-        format!("Attached: {names}")
-    } else {
-        format!("{text}\n\nAttached: {names}")
-    }
-}
-
 fn prompt_content_blocks(
     text: &str,
     context: Option<&str>,
@@ -764,7 +748,7 @@ pub async fn run(
                             .projector
                             .lock()
                             .unwrap()
-                            .push_user(prompt_display_text(&text, &attachments));
+                            .push_user(text.clone(), attachments.clone());
                         main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
@@ -1472,7 +1456,6 @@ mod tests {
             ContentBlock::ResourceLink(link)
                 if link.name == "report.txt" && link.uri == "file:///tmp/report.txt"
         ));
-        assert_eq!(prompt_display_text("", &[]), "");
     }
 
     #[test]

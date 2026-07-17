@@ -315,7 +315,7 @@ pub(crate) fn load_claude_transcript(
             continue;
         };
         match value.get("type").and_then(Value::as_str) {
-            Some("user") => messages.push(Message::User { text }),
+            Some("user") => messages.push(Message::user(text)),
             Some("assistant") => messages.push(Message::Assistant {
                 blocks: vec![AssistantBlock::Text(text)],
             }),
@@ -605,9 +605,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "fix auth".into()
-                },
+                Message::user("fix auth"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
                 }
@@ -634,9 +632,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "before".into()
-                },
+                Message::user("before"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("after".into())]
                 }

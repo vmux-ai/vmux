@@ -356,7 +356,17 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
 }
 
 /// A local file attached to an agent prompt.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct AgentAttachment {
     pub path: String,
     pub name: String,

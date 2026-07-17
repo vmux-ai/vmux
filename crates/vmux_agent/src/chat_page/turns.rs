@@ -2,7 +2,7 @@
 //! user bubbles and grouped assistant turns. Pure + unit-tested — the brain for the dumb chat
 //! page (see the context-collapse design).
 
-use crate::chat_page::event::{ChatBlock, ChatItem, ChatPlanStep, ChatTurn};
+use crate::chat_page::event::{ChatBlock, ChatItem, ChatPlanStep, ChatSubmitAttachment, ChatTurn};
 use vmux_service::message::{AssistantBlock, Message, PlanStep};
 
 /// Group `messages` into `ChatItem`s: one `ChatItem::User` per user message, followed by one
@@ -16,9 +16,20 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
 
     for msg in messages {
         match msg {
-            Message::User { text } => {
+            Message::User { text, attachments } => {
                 flush(&mut items, &mut current, &mut ordinal, durations);
-                items.push(ChatItem::User { text: text.clone() });
+                items.push(ChatItem::User {
+                    text: text.clone(),
+                    attachments: attachments
+                        .iter()
+                        .map(|attachment| ChatSubmitAttachment {
+                            path: attachment.path.clone(),
+                            name: attachment.name.clone(),
+                            mime_type: attachment.mime_type.clone(),
+                            size: attachment.size,
+                        })
+                        .collect(),
+                });
                 current = Some(ChatTurn::default());
             }
             Message::Assistant { blocks } => {
@@ -162,7 +173,7 @@ mod tests {
     #[test]
     fn splits_steps_and_answer_folds_tool_result() {
         let msgs = vec![
-            Message::User { text: "hi".into() },
+            Message::user("hi"),
             assistant(vec![AssistantBlock::Thinking("t".into()), tool("c1")]),
             Message::ToolResult {
                 call_id: "c1".into(),
@@ -173,7 +184,7 @@ mod tests {
         ];
         let items = group_turns(&msgs, &[], false);
         assert_eq!(items.len(), 2);
-        assert!(matches!(&items[0], ChatItem::User { text } if text == "hi"));
+        assert!(matches!(&items[0], ChatItem::User { text, .. } if text == "hi"));
         let ChatItem::Turn(t) = &items[1] else {
             panic!()
         };
@@ -185,11 +196,34 @@ mod tests {
     }
 
     #[test]
+    fn user_attachments_are_projected_into_chat_items() {
+        let messages = vec![Message::user_with_attachments(
+            "inspect",
+            vec![vmux_service::protocol::AgentAttachment {
+                path: "/tmp/image.png".into(),
+                name: "image.png".into(),
+                mime_type: "image/png".into(),
+                size: 3,
+            }],
+        )];
+
+        let items = group_turns(&messages, &[], false);
+
+        assert!(matches!(
+            &items[0],
+            ChatItem::User { text, attachments }
+                if text == "inspect"
+                    && attachments.len() == 1
+                    && attachments[0].path == "/tmp/image.png"
+        ));
+    }
+
+    #[test]
     fn one_turn_per_user_durations_by_ordinal() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![AssistantBlock::Text("1".into())]),
-            Message::User { text: "b".into() },
+            Message::user("b"),
             assistant(vec![AssistantBlock::Text("2".into())]),
         ];
         let items = group_turns(&msgs, &[5, 9], false);
@@ -207,9 +241,9 @@ mod tests {
     #[test]
     fn missing_duration_is_none() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![AssistantBlock::Text("1".into())]),
-            Message::User { text: "b".into() },
+            Message::user("b"),
             assistant(vec![AssistantBlock::Text("2".into())]),
         ];
         let items = group_turns(&msgs, &[5], false);
@@ -222,7 +256,7 @@ mod tests {
     #[test]
     fn running_marks_and_nulls_last_turn() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![AssistantBlock::Text("1".into())]),
         ];
         let items = group_turns(&msgs, &[5], true);
@@ -235,7 +269,7 @@ mod tests {
 
     #[test]
     fn running_emits_empty_tail_turn_after_user() {
-        let msgs = vec![Message::User { text: "a".into() }];
+        let msgs = vec![Message::user("a")];
         let items = group_turns(&msgs, &[], true);
         assert_eq!(items.len(), 2);
         let ChatItem::Turn(t) = &items[1] else {
@@ -249,7 +283,7 @@ mod tests {
     #[test]
     fn preserves_step_and_prose_order() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![
                 AssistantBlock::Text("before".into()),
                 tool("c1"),
@@ -268,7 +302,7 @@ mod tests {
     #[test]
     fn unmatched_tool_result_remains_a_step() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             Message::ToolResult {
                 call_id: "missing".into(),
                 content: "output".into(),
@@ -285,7 +319,7 @@ mod tests {
     #[test]
     fn guardian_and_results_count_as_one_tool_step() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![
                 AssistantBlock::ToolUse {
                     call_id: "read-1".into(),
@@ -314,7 +348,7 @@ mod tests {
     #[test]
     fn collapses_consecutive_reconnect_updates() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![AssistantBlock::Text(
                 "Reconnecting... 1/5\n\nReconnecting… 2/5\nReconnecting 3/5".into(),
             )]),
@@ -337,7 +371,7 @@ mod tests {
     #[test]
     fn reconnect_updates_do_not_swallow_prose() {
         let msgs = vec![
-            Message::User { text: "a".into() },
+            Message::user("a"),
             assistant(vec![AssistantBlock::Text(
                 "before\nReconnecting... 2/5\nafter".into(),
             )]),

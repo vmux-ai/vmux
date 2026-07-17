@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::AgentAttachment;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Message {
     User {
         text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<AgentAttachment>,
     },
     Assistant {
         blocks: Vec<AssistantBlock>,
@@ -13,6 +17,25 @@ pub enum Message {
         content: String,
         is_error: bool,
     },
+}
+
+impl Message {
+    pub fn user(text: impl Into<String>) -> Self {
+        Self::User {
+            text: text.into(),
+            attachments: Vec::new(),
+        }
+    }
+
+    pub fn user_with_attachments(
+        text: impl Into<String>,
+        attachments: Vec<AgentAttachment>,
+    ) -> Self {
+        Self::User {
+            text: text.into(),
+            attachments,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -54,10 +77,17 @@ mod tests {
 
     #[test]
     fn user_roundtrip() {
-        let m = Message::User { text: "hi".into() };
+        let m = Message::user("hi");
         let json = serde_json::to_string(&m).unwrap();
         let back: Message = serde_json::from_str(&json).unwrap();
         assert_eq!(m, back);
+        assert!(!json.contains("attachments"));
+    }
+
+    #[test]
+    fn user_deserializes_legacy_message_without_attachments() {
+        let message: Message = serde_json::from_str(r#"{"User":{"text":"hi"}}"#).unwrap();
+        assert_eq!(message, Message::user("hi"));
     }
 
     #[test]

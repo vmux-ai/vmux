@@ -77,7 +77,7 @@ pub fn build_context(messages: &[Message], limit: usize) -> BuiltContext {
 
 fn context_segment(message: &Message) -> Option<String> {
     match message {
-        Message::User { text } if !text.trim().is_empty() => Some(format!("User:\n{text}")),
+        Message::User { text, .. } if !text.trim().is_empty() => Some(format!("User:\n{text}")),
         Message::Assistant { blocks } => {
             let text = blocks
                 .iter()
@@ -100,7 +100,7 @@ pub fn wire_prompt(context: &str, display_text: &str) -> String {
 pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option<&str>) {
     let mut fallback = first_prompt;
     for message in messages {
-        let Message::User { text } = message else {
+        let Message::User { text, .. } = message else {
             continue;
         };
         if let Some(display_text) =
@@ -186,9 +186,7 @@ mod tests {
     use crate::{AssistantBlock, Message};
 
     fn user(text: &str) -> Message {
-        Message::User {
-            text: text.to_string(),
-        }
+        Message::user(text)
     }
 
     fn assistant(text: &str) -> Message {

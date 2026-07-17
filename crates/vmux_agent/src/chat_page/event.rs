@@ -6,6 +6,8 @@
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 /// Bin-event id: native → page files selected from disk or the clipboard.
 pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
+/// Bin-event id: native → page previews for media already present in the transcript.
+pub const CHAT_ATTACHMENT_PREVIEWS_EVENT: &str = "chat_attachment_previews";
 /// Bin-event id: native → page media entries matching an inline `@` query.
 pub const CHAT_MEDIA_ENTRIES_EVENT: &str = "chat_media_entries";
 
@@ -222,6 +224,21 @@ pub struct ChatMediaListRequest {
     rkyv::Deserialize,
 )]
 pub struct ChatAttachPaths {
+    pub paths: Vec<String>,
+}
+
+/// Page → native: load previews for media already present in the transcript.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachmentPreviewRequest {
     pub paths: Vec<String>,
 }
 
@@ -523,8 +540,21 @@ pub struct ChatPlanStep {
 /// `group_turns`, carried as JSON in [`ChatSnapshot::messages_json`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatItem {
-    User { text: String },
+    User {
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<ChatSubmitAttachment>,
+    },
     Turn(ChatTurn),
+}
+
+impl ChatItem {
+    pub fn user(text: impl Into<String>) -> Self {
+        Self::User {
+            text: text.into(),
+            attachments: Vec::new(),
+        }
+    }
 }
 
 /// One assistant turn: its ordered prose/activity timeline and run-state.
@@ -677,7 +707,15 @@ mod tests {
     #[test]
     fn chat_item_turn_roundtrip() {
         let items = vec![
-            ChatItem::User { text: "hi".into() },
+            ChatItem::User {
+                text: "hi".into(),
+                attachments: vec![ChatSubmitAttachment {
+                    path: "/tmp/image.png".into(),
+                    name: "image.png".into(),
+                    mime_type: "image/png".into(),
+                    size: 3,
+                }],
+            },
             ChatItem::Turn(ChatTurn {
                 blocks: vec![
                     ChatBlock::Thinking("hmm".into()),
@@ -696,6 +734,11 @@ mod tests {
         let json = serde_json::to_string(&items).unwrap();
         let back: Vec<ChatItem> = serde_json::from_str(&json).unwrap();
         assert_eq!(back.len(), 2);
+        assert!(matches!(
+            &back[0],
+            ChatItem::User { attachments, .. }
+                if attachments.first().is_some_and(|attachment| attachment.name == "image.png")
+        ));
         let ChatItem::Turn(turn) = &back[1] else {
             panic!("expected turn")
         };

@@ -23,8 +23,9 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
-    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
     ChatClearQueue, ChatEscape, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
     ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT,
     ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
@@ -182,6 +183,7 @@ impl Plugin for AgentChatPagePlugin {
                 ChatPasteMedia,
                 ChatMediaListRequest,
                 ChatAttachPaths,
+                ChatAttachmentPreviewRequest,
             )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
@@ -194,6 +196,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_paste_media)
             .add_observer(on_chat_media_list_request)
             .add_observer(on_chat_attach_paths)
+            .add_observer(on_chat_attachment_preview_request)
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
@@ -273,6 +276,7 @@ struct ResumeHandoffTask {
 #[derive(Component)]
 struct ChatAttachmentTask {
     webview: Entity,
+    event: &'static str,
     task: Task<ChatAttachments>,
 }
 
@@ -349,6 +353,7 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn_chat_attachment_task(
     webview: Entity,
+    event: &'static str,
     paths: Vec<std::path::PathBuf>,
     commands: &mut Commands,
 ) {
@@ -360,7 +365,11 @@ fn spawn_chat_attachment_task(
             attachments: paths.into_iter().filter_map(chat_attachment).collect(),
         }
     });
-    commands.spawn(ChatAttachmentTask { webview, task });
+    commands.spawn(ChatAttachmentTask {
+        webview,
+        event,
+        task,
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -532,7 +541,33 @@ fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: 
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .collect();
-    spawn_chat_attachment_task(trigger.event().webview, paths, &mut commands);
+    spawn_chat_attachment_task(
+        trigger.event().webview,
+        CHAT_ATTACHMENTS_EVENT,
+        paths,
+        &mut commands,
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_attachment_preview_request(
+    trigger: On<BinReceive<ChatAttachmentPreviewRequest>>,
+    mut commands: Commands,
+) {
+    let paths = trigger
+        .event()
+        .payload
+        .paths
+        .iter()
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    spawn_chat_attachment_task(
+        trigger.event().webview,
+        CHAT_ATTACHMENT_PREVIEWS_EVENT,
+        paths,
+        &mut commands,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -544,7 +579,12 @@ fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Comm
     let Some(paths) = dialog.pick_files() else {
         return;
     };
-    spawn_chat_attachment_task(trigger.event().webview, paths, &mut commands);
+    spawn_chat_attachment_task(
+        trigger.event().webview,
+        CHAT_ATTACHMENTS_EVENT,
+        paths,
+        &mut commands,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -565,7 +605,12 @@ fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Co
     let Some(path) = clipboard_image_path() else {
         return;
     };
-    spawn_chat_attachment_task(trigger.event().webview, vec![path], &mut commands);
+    spawn_chat_attachment_task(
+        trigger.event().webview,
+        CHAT_ATTACHMENTS_EVENT,
+        vec![path],
+        &mut commands,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -579,7 +624,7 @@ fn drain_chat_attachment_tasks(
         };
         commands.trigger(BinHostEmitEvent::from_rkyv(
             pending.webview,
-            CHAT_ATTACHMENTS_EVENT,
+            pending.event,
             &attachments,
         ));
         commands.entity(entity).despawn();
@@ -1658,7 +1703,7 @@ mod native_tests {
             source_kind: AgentKind::Codex,
             source_sid: "codex-1".into(),
             messages: vec![
-                crate::Message::User { text: "one".into() },
+                crate::Message::user("one"),
                 crate::Message::Assistant {
                     blocks: vec![crate::AssistantBlock::ToolUse {
                         call_id: "call-1".into(),
@@ -1999,6 +2044,9 @@ mod native_tests {
         assert!(source.contains("attachments_to_submit"));
         assert!(source.contains("ChatMediaListRequest"));
         assert!(source.contains("select_media_entry"));
+        assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
+        assert!(source.contains("render_user_attachment"));
+        assert!(source.contains("max-h-80 max-w-full object-contain"));
     }
 
     #[test]

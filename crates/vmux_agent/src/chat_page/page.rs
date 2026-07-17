@@ -9,17 +9,19 @@ use crate::chat_page::composer::{
     should_expand_thinking, tool_activity,
 };
 use crate::chat_page::event::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
-    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBlock, ChatCancel,
-    ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
+    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
+    ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_terminal::page::PromptGhost;
 use vmux_ui::agent_accent::agent_accent;
@@ -96,7 +98,7 @@ fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<St
     let mut history = items
         .iter()
         .filter_map(|item| match item {
-            ChatItem::User { text } if !text.trim().is_empty() => Some(text.clone()),
+            ChatItem::User { text, .. } if !text.trim().is_empty() => Some(text.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -276,6 +278,8 @@ pub fn Page() -> Element {
     let mut handoff_message_count = use_signal(|| 0u32);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
+    let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
+    let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
     let mut prompt_caret = use_signal(|| None::<u32>);
@@ -345,6 +349,30 @@ pub fn Page() -> Element {
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
         if let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snap.messages_json) {
+            let known = attachment_previews
+                .peek()
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
+            let mut requested = attachment_preview_requests.peek().clone();
+            let paths = parsed
+                .iter()
+                .filter_map(|item| match item {
+                    ChatItem::User { attachments, .. } => Some(attachments),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|attachment| attachment.mime_type.starts_with("image/"))
+                .filter(|attachment| {
+                    !known.contains(&attachment.path) && requested.insert(attachment.path.clone())
+                })
+                .map(|attachment| attachment.path.clone())
+                .collect::<Vec<_>>();
+            if !paths.is_empty()
+                && try_cef_bin_emit_rkyv(&ChatAttachmentPreviewRequest { paths }).is_ok()
+            {
+                attachment_preview_requests.set(requested);
+            }
             items.set(parsed);
         }
         status.set(snap.status.clone());
@@ -370,14 +398,27 @@ pub fn Page() -> Element {
     let _attachments =
         use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
             let mut next = attachments.peek().clone();
+            let mut previews = attachment_previews.peek().clone();
             for attachment in &selected.attachments {
+                previews.insert(attachment.path.clone(), attachment.clone());
                 if !next.iter().any(|existing| existing.path == attachment.path) {
                     next.push(attachment.clone());
                 }
             }
+            attachment_previews.set(previews);
             attachments.set(next);
             focus_prompt_end();
         });
+    let _attachment_previews = use_bin_event_listener::<ChatAttachments, _>(
+        CHAT_ATTACHMENT_PREVIEWS_EVENT,
+        move |loaded| {
+            let mut previews = attachment_previews.peek().clone();
+            for attachment in &loaded.attachments {
+                previews.insert(attachment.path.clone(), attachment.clone());
+            }
+            attachment_previews.set(previews);
+        },
+    );
     let _media_entries =
         use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
             if response.request_id != media_request_id() {
@@ -612,7 +653,7 @@ pub fn Page() -> Element {
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
-                        {render_item(i, item, &verb(), elapsed())}
+                        {render_item(i, item, &verb(), elapsed(), attachment_previews)}
                         if !handoff_source().is_empty()
                             && is_handoff_boundary(i, handoff_message_count())
                         {
@@ -1356,16 +1397,64 @@ fn send_approval(call_id: String, decision: u8) {
     let _ = try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision });
 }
 
-fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element {
+fn render_item(
+    key: usize,
+    item: &ChatItem,
+    verb: &str,
+    elapsed: u32,
+    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+) -> Element {
     match item {
-        ChatItem::User { text } => rsx! {
+        ChatItem::User { text, attachments } => rsx! {
             div {
                 key: "{key}",
-                class: "max-w-[80%] self-end whitespace-pre-wrap rounded-2xl bg-foreground/[0.08] px-4 py-2.5 text-sm",
-                "{text}"
+                class: "flex max-w-[80%] self-end flex-col gap-2 rounded-2xl bg-foreground/[0.08] p-2.5 text-sm",
+                if !text.is_empty() {
+                    div { class: "whitespace-pre-wrap px-1.5", "{text}" }
+                }
+                if !attachments.is_empty() {
+                    div { class: "flex flex-wrap justify-end gap-2",
+                        for attachment in attachments {
+                            {render_user_attachment(attachment, attachment_previews)}
+                        }
+                    }
+                }
             }
         },
         ChatItem::Turn(turn) => render_turn(key, turn, verb, elapsed),
+    }
+}
+
+fn render_user_attachment(
+    attachment: &ChatSubmitAttachment,
+    previews: Signal<HashMap<String, ChatAttachment>>,
+) -> Element {
+    let preview_data_url = previews
+        .peek()
+        .get(&attachment.path)
+        .map(|preview| preview.preview_data_url.clone())
+        .unwrap_or_default();
+    if attachment.mime_type.starts_with("image/") && !preview_data_url.is_empty() {
+        return rsx! {
+            figure {
+                key: "message-attachment-{attachment.path}",
+                class: "max-w-full overflow-hidden rounded-xl bg-black/10 ring-1 ring-inset ring-foreground/10",
+                img {
+                    src: "{preview_data_url}",
+                    alt: "{attachment.name}",
+                    class: "max-h-80 max-w-full object-contain",
+                }
+                figcaption { class: "max-w-72 truncate px-2.5 py-1.5 text-[10px] text-muted-foreground", "{attachment.name}" }
+            }
+        };
+    }
+    rsx! {
+        div {
+            key: "message-attachment-{attachment.path}",
+            class: "flex min-w-32 max-w-64 items-center gap-2 rounded-xl bg-foreground/[0.06] px-3 py-2 ring-1 ring-inset ring-foreground/10",
+            span { class: "font-mono text-[10px] font-semibold tracking-wide text-muted-foreground", "{file_extension_label(&attachment.name)}" }
+            span { class: "truncate text-xs text-muted-foreground", "{attachment.name}" }
+        }
     }
 }
 
