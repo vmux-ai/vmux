@@ -9473,6 +9473,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vmux_agent"
 version = "0.0.25"
 dependencies = [
+ "base64 0.22.1",
  "bevy",
  "bevy_cef",
  "bevy_ecs",
@@ -9488,6 +9489,7 @@ dependencies = [
  "notify 6.1.1",
  "pulldown-cmark",
  "reqwest",
+ "rfd",
  "rkyv",
  "serde",
  "serde_json",
@@ -9846,6 +9848,7 @@ version = "0.0.25"
 dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
+ "base64 0.22.1",
  "bevy",
  "bevy_ecs",
  "chrono",
@@ -9868,6 +9871,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "vmux_core",
  "vmux_service_client",
  "vmux_ui",

@@ -791,9 +791,10 @@ fn send_acp_input(
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
-        let Some(text) = queue.take_next() else {
+        let Some(prompt) = queue.take_next() else {
             continue;
         };
+        let text = prompt.text;
         let context = pending
             .as_deref_mut()
             .and_then(PendingHandoff::context_for_send);
@@ -807,6 +808,7 @@ fn send_acp_input(
             sid: session.sid.clone(),
             text,
             context,
+            attachments: prompt.attachments,
         });
         *state = AgentRunState::Streaming;
     }

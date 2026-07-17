@@ -130,6 +130,7 @@ mod tests {
             AcpInput::User {
                 text: "x".to_string(),
                 context: None,
+                attachments: Vec::new(),
             }
         ));
         assert!(mgr.subscribe("nope").is_none());

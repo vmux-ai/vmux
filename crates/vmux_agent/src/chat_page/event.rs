@@ -4,6 +4,61 @@
 
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
+/// Bin-event id: native → page files selected from disk or the clipboard.
+pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachment {
+    pub path: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub preview_data_url: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatSubmitAttachment {
+    pub path: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachments {
+    pub attachments: Vec<ChatAttachment>,
+}
 
 #[derive(
     Clone,
@@ -18,6 +73,7 @@ pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 pub struct QueuedPromptSnapshot {
     pub id: u64,
     pub text: String,
+    pub attachment_names: Vec<String>,
 }
 
 /// Native → page: the full conversation plus run-state, pushed on every change.
@@ -71,7 +127,34 @@ pub struct ChatSnapshot {
 )]
 pub struct ChatSubmit {
     pub text: String,
+    pub attachments: Vec<ChatSubmitAttachment>,
 }
+
+/// Page → native: open a multi-select file picker rooted at the user's home directory.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatPickFiles;
+
+/// Page → native: attach image media from the system clipboard, if present.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatPasteMedia;
 
 /// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
 /// 2 = allow-always.
@@ -478,10 +561,12 @@ mod tests {
                 QueuedPromptSnapshot {
                     id: 4,
                     text: "a".into(),
+                    attachment_names: vec!["image.png".into()],
                 },
                 QueuedPromptSnapshot {
                     id: 9,
                     text: "b".into(),
+                    attachment_names: Vec::new(),
                 },
             ],
             paused: true,

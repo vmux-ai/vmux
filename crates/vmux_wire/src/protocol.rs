@@ -355,6 +355,15 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
     }
 }
 
+/// A local file attached to an agent prompt.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AgentAttachment {
+    pub path: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+}
+
 /// Messages sent from the GUI client to the service.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ClientMessage {
@@ -469,6 +478,7 @@ pub enum ClientMessage {
         sid: String,
         text: String,
         context: Option<String>,
+        attachments: Vec<AgentAttachment>,
     },
     /// Select a model exposed by an ACP session's model configuration option.
     AcpSetModel {
@@ -1317,6 +1327,12 @@ mod tests {
                 sid: "s".into(),
                 text: "hi".into(),
                 context: Some("prior conversation".into()),
+                attachments: vec![AgentAttachment {
+                    path: "/tmp/image.png".into(),
+                    name: "image.png".into(),
+                    mime_type: "image/png".into(),
+                    size: 42,
+                }],
             },
             ClientMessage::AcpSetModel {
                 sid: "s".into(),

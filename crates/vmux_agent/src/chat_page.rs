@@ -13,6 +13,8 @@ mod turns;
 pub mod page;
 
 #[cfg(not(target_arch = "wasm32"))]
+use base64::Engine;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -21,11 +23,12 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue,
-    ChatEscape, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
-    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
-    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    CHAT_ATTACHMENTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachment, ChatAttachments,
+    ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
@@ -52,7 +55,7 @@ use vmux_core::team::Profile;
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_service::client::ServiceClient;
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_service::protocol::ClientMessage;
+use vmux_service::protocol::{AgentAttachment, ClientMessage};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -173,6 +176,9 @@ impl Plugin for AgentChatPagePlugin {
                 RuntimeSwitchRequest,
                 SelectModel,
             )>::for_hosts(&["agent"]))
+            .add_plugins(
+                BinEventEmitterPlugin::<(ChatPickFiles, ChatPasteMedia)>::for_hosts(&["agent"]),
+            )
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -180,6 +186,8 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_clear_queue)
             .add_observer(on_chat_cancel_queued_prompt)
             .add_observer(on_chat_escape)
+            .add_observer(on_chat_pick_files)
+            .add_observer(on_chat_paste_media)
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
@@ -193,6 +201,7 @@ impl Plugin for AgentChatPagePlugin {
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
                     send_acp_model_requests,
+                    drain_chat_attachment_tasks,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -251,6 +260,144 @@ struct ResumeHandoffTask {
     target_url: String,
     cwd: std::path::PathBuf,
     task: Task<Result<StackSessionHandoff, String>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ChatAttachmentTask {
+    webview: Entity,
+    task: Task<ChatAttachments>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const ATTACHMENT_PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn attachment_mime(path: &std::path::Path) -> String {
+    let path_str = path.to_string_lossy();
+    if let Some(mime) = vmux_core::media::media_mime(&path_str) {
+        return mime.to_string();
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "tif" | "tiff" => "image/tiff",
+        "heic" | "heif" => "image/heic",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "html" | "htm" => "text/html",
+        "md" | "markdown" => "text/markdown",
+        "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx" | "css"
+        | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp" | "java"
+        | "kt" | "swift" => "text/plain",
+        "zip" => "application/zip",
+        "gz" => "application/gzip",
+        "tar" => "application/x-tar",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
+    let metadata = std::fs::metadata(&path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let mime_type = attachment_mime(&path);
+    let preview_data_url =
+        if mime_type.starts_with("image/") && metadata.len() <= ATTACHMENT_PREVIEW_LIMIT {
+            std::fs::read(&path)
+                .ok()
+                .map(|bytes| {
+                    format!(
+                        "data:{mime_type};base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(bytes)
+                    )
+                })
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+    Some(ChatAttachment {
+        path: path.to_string_lossy().into_owned(),
+        name,
+        mime_type,
+        size: metadata.len(),
+        preview_data_url,
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_chat_attachment_task(
+    webview: Entity,
+    paths: Vec<std::path::PathBuf>,
+    commands: &mut Commands,
+) {
+    if paths.is_empty() {
+        return;
+    }
+    let task = IoTaskPool::get().spawn(async move {
+        ChatAttachments {
+            attachments: paths.into_iter().filter_map(chat_attachment).collect(),
+        }
+    });
+    commands.spawn(ChatAttachmentTask { webview, task });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Commands) {
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        dialog = dialog.set_directory(std::path::PathBuf::from(home));
+    }
+    let Some(paths) = dialog.pick_files() else {
+        return;
+    };
+    spawn_chat_attachment_task(trigger.event().webview, paths, &mut commands);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn clipboard_image_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = vmux_terminal::clipboard::image_file_path() {
+        return Some(std::path::PathBuf::from(path));
+    }
+    let png = vmux_terminal::clipboard::read_image_png()?;
+    let directory = std::env::temp_dir().join("vmux-prompt-attachments");
+    std::fs::create_dir_all(&directory).ok()?;
+    let path = directory.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));
+    std::fs::write(&path, png).ok()?;
+    Some(path)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Commands) {
+    let Some(path) = clipboard_image_path() else {
+        return;
+    };
+    spawn_chat_attachment_task(trigger.event().webview, vec![path], &mut commands);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_chat_attachment_tasks(
+    mut tasks: Query<(Entity, &mut ChatAttachmentTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            pending.webview,
+            CHAT_ATTACHMENTS_EVENT,
+            &attachments,
+        ));
+        commands.entity(entity).despawn();
+    }
 }
 
 /// Push the current transcript + slash commands to any chat webview that is ready but not yet
@@ -492,6 +639,11 @@ fn snapshot_of(
             .map(|item| QueuedPromptSnapshot {
                 id: item.id,
                 text: item.text.clone(),
+                attachment_names: item
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.name.clone())
+                    .collect(),
             })
             .collect(),
         paused: queue.paused,
@@ -552,18 +704,38 @@ fn on_chat_submit(
     mut sessions: Query<(&mut PromptQueue, &mut AgentRunState)>,
 ) {
     let webview = trigger.event().webview;
-    let text = trigger.event().payload.text.clone();
+    let payload = &trigger.event().payload;
+    let text = payload.text.clone();
+    let attachments = payload
+        .attachments
+        .iter()
+        .filter(|attachment| !attachment.path.is_empty())
+        .map(|attachment| AgentAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        })
+        .collect::<Vec<_>>();
+    if text.trim().is_empty() && attachments.is_empty() {
+        return;
+    }
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
     if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
-        enqueue_prompt(&mut queue, &mut state, text);
+        enqueue_prompt(&mut queue, &mut state, text, attachments);
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn enqueue_prompt(queue: &mut PromptQueue, state: &mut AgentRunState, text: String) {
-    queue.enqueue(text);
+fn enqueue_prompt(
+    queue: &mut PromptQueue,
+    state: &mut AgentRunState,
+    text: String,
+    attachments: Vec<AgentAttachment>,
+) {
+    queue.enqueue_with_attachments(text, attachments);
     if matches!(state, AgentRunState::Errored(_)) {
         *state = AgentRunState::Idle;
     }
@@ -727,10 +899,16 @@ fn relative_time(mtime: std::time::SystemTime) -> String {
 /// The slash commands offered on an ACP pane.
 #[cfg(not(target_arch = "wasm32"))]
 fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommandEntry> {
-    let mut v = vec![SlashCommandEntry {
-        name: "resume".into(),
-        description: "Resume a past session".into(),
-    }];
+    let mut v = vec![
+        SlashCommandEntry {
+            name: "upload".into(),
+            description: "Attach files".into(),
+        },
+        SlashCommandEntry {
+            name: "resume".into(),
+            description: "Resume a past session".into(),
+        },
+    ];
     if has_models {
         v.push(SlashCommandEntry {
             name: "model".into(),
@@ -1118,13 +1296,15 @@ mod native_tests {
 
     #[test]
     fn slash_commands_include_cli_only_when_cross_runtime() {
-        assert_eq!(slash_commands_for(false, false).len(), 1);
+        let base = slash_commands_for(false, false);
+        assert_eq!(base.len(), 2);
+        assert_eq!(base[0].name, "upload");
         let with_model = slash_commands_for(false, true);
-        assert_eq!(with_model.len(), 2);
-        assert_eq!(with_model[1].name, "model");
+        assert_eq!(with_model.len(), 3);
+        assert_eq!(with_model[2].name, "model");
         let with_cli = slash_commands_for(true, false);
-        assert_eq!(with_cli.len(), 2);
-        assert_eq!(with_cli[1].name, "cli");
+        assert_eq!(with_cli.len(), 3);
+        assert_eq!(with_cli[2].name, "cli");
     }
 
     #[test]
@@ -1373,7 +1553,7 @@ mod native_tests {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());
 
-        enqueue_prompt(&mut queue, &mut state, "retry".into());
+        enqueue_prompt(&mut queue, &mut state, "retry".into(), Vec::new());
 
         assert!(matches!(state, AgentRunState::Idle));
         assert_eq!(
@@ -1582,9 +1762,8 @@ mod native_tests {
         assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
         assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
-        assert!(source.contains(
-            "let show_capability_examples = items.read().is_empty() && queued.read().is_empty();"
-        ));
+        assert!(source.contains("show_capability_examples"));
+        assert!(source.contains("attachments.read().is_empty()"));
         assert!(source.contains("if show_capability_examples"));
         assert!(source.contains("Type / for quick access"));
         assert!(!source.contains("agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0"));
@@ -1594,6 +1773,18 @@ mod native_tests {
         assert!(source.contains("onkeyup"));
         assert!(source.contains("onscroll"));
         assert!(source.contains("placeholder:text-transparent"));
+    }
+
+    #[test]
+    fn composer_supports_history_uploads_and_clipboard_media() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("prompt_history_direction"));
+        assert!(source.contains("move_prompt_history"));
+        assert!(source.contains("ChatPickFiles"));
+        assert!(source.contains("ChatPasteMedia"));
+        assert!(source.contains("preview_data_url"));
+        assert!(source.contains("Remove attachment"));
+        assert!(source.contains("attachments_to_submit"));
     }
 
     #[test]

@@ -1,15 +1,17 @@
 #![allow(non_snake_case)]
 
 use crate::chat_page::composer::{
-    PromptEdit, ResumeMenuState, SelectorMode, ToolActivity, chat_page_title, edit_prompt,
-    filter_models, filter_sessions, is_handoff_boundary, menu_direction, move_selection,
+    PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
+    menu_direction, move_prompt_history, move_selection, prompt_history_direction,
     prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
     should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatClearQueue, ChatEscape, ChatItem, ChatResume, ChatSnapshot, ChatSubmit, ChatTurn,
-    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    CHAT_ATTACHMENTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachment, ChatAttachments,
+    ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatItem,
+    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
     SlashCommands, WORKING_VERBS,
@@ -68,6 +70,50 @@ fn sync_prompt_caret(mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>
     let end = textarea.selection_end().ok().flatten().unwrap_or(start);
     caret.set((start == end).then_some(start));
     scroll_top.set(textarea.scroll_top());
+}
+
+fn focus_prompt_end() {
+    let closure = Closure::once(move || {
+        let Some(textarea) = prompt_textarea() else {
+            return;
+        };
+        let end = textarea.value().encode_utf16().count() as u32;
+        let _ = textarea.focus();
+        let _ = textarea.set_selection_range(end, end);
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    closure.forget();
+}
+
+fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<String> {
+    let mut history = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::User { text } if !text.trim().is_empty() => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    history.extend(
+        queued
+            .iter()
+            .filter(|prompt| !prompt.text.trim().is_empty())
+            .map(|prompt| prompt.text.clone()),
+    );
+    history
+}
+
+fn attachment_label(attachment: &ChatAttachment) -> String {
+    std::path::Path::new(&attachment.name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_uppercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| "FILE".to_string())
 }
 
 fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
@@ -131,7 +177,7 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
             && !event.alt_key()
             && matches!(key.as_str(), "Enter" | "Escape");
         let selector_key = direction.is_some() || plain_invoke_or_close;
-        if selector_open && selector_key {
+        if direction.is_some() || (selector_open && selector_key) {
             event.prevent_default();
             event.stop_propagation();
             let _ = textarea.focus();
@@ -185,6 +231,9 @@ pub fn Page() -> Element {
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
     let mut draft = use_signal(String::new);
+    let mut attachments = use_signal(Vec::<ChatAttachment>::new);
+    let mut history_cursor = use_signal(|| None::<usize>);
+    let mut history_scratch = use_signal(String::new);
     let mut prompt_caret = use_signal(|| None::<u32>);
     let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
@@ -270,6 +319,17 @@ pub fn Page() -> Element {
             approval.set(None);
         }
     });
+    let _attachments =
+        use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+            let mut next = attachments.peek().clone();
+            for attachment in &selected.attachments {
+                if !next.iter().any(|existing| existing.path == attachment.path) {
+                    next.push(attachment.clone());
+                }
+            }
+            attachments.set(next);
+            focus_prompt_end();
+        });
 
     let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
         slash_cmds.set(s.commands.clone());
@@ -321,7 +381,8 @@ pub fn Page() -> Element {
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
-    let show_capability_examples = items.read().is_empty() && queued.read().is_empty();
+    let show_capability_examples =
+        items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -646,7 +707,20 @@ pub fn Page() -> Element {
                                     key: "q{queued_prompt.id}",
                                     class: "group flex max-w-[80%] items-center gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] py-2 pl-3.5 pr-2 text-sm text-muted-foreground",
                                     span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
-                                    span { class: "min-w-0 flex-1 whitespace-pre-wrap break-words", "{queued_prompt.text}" }
+                                    span { class: "min-w-0 flex-1 whitespace-pre-wrap break-words",
+                                        if !queued_prompt.text.is_empty() {
+                                            "{queued_prompt.text}"
+                                        }
+                                        if !queued_prompt.attachment_names.is_empty() {
+                                            span { class: "block text-xs text-foreground/45",
+                                                "Attached: "
+                                                for (i , name) in queued_prompt.attachment_names.iter().enumerate() {
+                                                    if i > 0 { ", " }
+                                                    "{name}"
+                                                }
+                                            }
+                                        }
+                                    }
                                     button {
                                         class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
                                         title: "Cancel queued prompt",
@@ -707,9 +781,68 @@ pub fn Page() -> Element {
                             }
                         }
                     }
+                    if !attachments.read().is_empty() {
+                        div { class: "flex gap-2 overflow-x-auto pb-0.5",
+                            for (i , attachment) in attachments.read().iter().cloned().enumerate() {
+                                div {
+                                    key: "attachment-{attachment.path}",
+                                    class: "group relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
+                                    if attachment.preview_data_url.is_empty() {
+                                        div { class: "flex h-14 items-center justify-center bg-foreground/[0.04] font-mono text-[10px] font-semibold tracking-wide text-muted-foreground",
+                                            "{attachment_label(&attachment)}"
+                                        }
+                                    } else {
+                                        img {
+                                            src: "{attachment.preview_data_url}",
+                                            alt: "{attachment.name}",
+                                            class: "h-14 w-full object-cover",
+                                        }
+                                    }
+                                    div { class: "truncate px-2 py-1 text-[10px] text-muted-foreground", "{attachment.name}" }
+                                    button {
+                                        class: "absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/65 text-white opacity-80 transition hover:opacity-100",
+                                        title: "Remove attachment",
+                                        onclick: move |_| {
+                                            let mut next = attachments.peek().clone();
+                                            if i < next.len() {
+                                                next.remove(i);
+                                                attachments.set(next);
+                                            }
+                                        },
+                                        svg {
+                                            class: "h-3 w-3",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2.5",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     div { class: "relative flex items-center overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25",
                         div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
                         div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
+                        button {
+                            class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                            title: "Attach files (/upload)",
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                            },
+                            svg {
+                                class: "h-4 w-4",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
+                            }
+                        }
                         div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
                             if draft.read().is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-3.5",
@@ -741,8 +874,13 @@ pub fn Page() -> Element {
                                 value: "{draft}",
                                 oninput: move |e| {
                                     draft.set(e.value());
+                                    history_cursor.set(None);
+                                    history_scratch.set(String::new());
                                     menu_sel.set(0);
                                     sync_prompt_caret(prompt_caret, prompt_scroll_top);
+                                },
+                                onpaste: move |_| {
+                                    let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
                                 },
                                 onfocus: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onblur: move |_| prompt_caret.set(None),
@@ -842,9 +980,61 @@ pub fn Page() -> Element {
                                         return;
                                     }
 
+                                    if !selector_open
+                                        && !e.modifiers().meta()
+                                        && !e.modifiers().alt()
+                                        && let Some(textarea) = prompt_textarea()
+                                    {
+                                        let start = textarea
+                                            .selection_start()
+                                            .ok()
+                                            .flatten()
+                                            .unwrap_or_default();
+                                        let end = textarea
+                                            .selection_end()
+                                            .ok()
+                                            .flatten()
+                                            .unwrap_or(start);
+                                        if let Some(direction) = prompt_history_direction(
+                                            &key,
+                                            e.modifiers().ctrl(),
+                                            &draft_now,
+                                            start,
+                                            end,
+                                        ) {
+                                            let history = prompt_history(&items.peek(), &queued.peek());
+                                            let current_cursor = *history_cursor.peek();
+                                            let should_handle = match direction {
+                                                PromptHistoryDirection::Older => !history.is_empty(),
+                                                PromptHistoryDirection::Newer => current_cursor.is_some(),
+                                            };
+                                            if should_handle {
+                                                e.prevent_default();
+                                                let (value, cursor, scratch) = move_prompt_history(
+                                                    &history,
+                                                    current_cursor,
+                                                    &history_scratch.peek(),
+                                                    &draft_now,
+                                                    direction,
+                                                );
+                                                draft.set(value);
+                                                history_cursor.set(cursor);
+                                                history_scratch.set(scratch);
+                                                focus_prompt_end();
+                                                return;
+                                            }
+                                        }
+                                    }
+
                                     if e.key() == Key::Enter && !e.modifiers().shift() {
                                         e.prevent_default();
-                                        do_submit(draft, at_bottom);
+                                        do_submit(
+                                            draft,
+                                            attachments,
+                                            history_cursor,
+                                            history_scratch,
+                                            at_bottom,
+                                        );
                                     } else if e.key() == Key::Escape {
                                         e.prevent_default();
                                         let _ = try_cef_bin_emit_rkyv(&ChatEscape);
@@ -902,10 +1092,18 @@ pub fn Page() -> Element {
                             }
                         } else {
                             button {
-                                class: if draft.read().trim().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
-                                disabled: draft.read().trim().is_empty(),
+                                class: if draft.read().trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
+                                disabled: draft.read().trim().is_empty() && attachments.read().is_empty(),
                                 title: "Send (Enter)",
-                                onclick: move |_| do_submit(draft, at_bottom),
+                                onclick: move |_| {
+                                    do_submit(
+                                        draft,
+                                        attachments,
+                                        history_cursor,
+                                        history_scratch,
+                                        at_bottom,
+                                    )
+                                },
                                 svg {
                                     class: "h-4 w-4",
                                     view_box: "0 0 24 24",
@@ -931,6 +1129,10 @@ pub fn Page() -> Element {
 /// via the normal Enter path).
 fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal<usize>) {
     match name {
+        "upload" => {
+            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+            draft.set(String::new());
+        }
         "resume" => {
             menu_sel.set(0);
             draft.set("/resume ".to_string());
@@ -969,16 +1171,40 @@ fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<Stri
 
 /// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed
 /// emit never silently swallows the user's message. The queued/sent turn arrives via snapshot.
-fn do_submit(mut draft: Signal<String>, mut at_bottom: Signal<bool>) {
+fn do_submit(
+    mut draft: Signal<String>,
+    mut attachments: Signal<Vec<ChatAttachment>>,
+    mut history_cursor: Signal<Option<usize>>,
+    mut history_scratch: Signal<String>,
+    mut at_bottom: Signal<bool>,
+) {
     let text = draft.peek().trim().to_string();
-    if text.is_empty() {
+    let selected = attachments.peek().clone();
+    if text.is_empty() && selected.is_empty() {
         return;
     }
-    if try_cef_bin_emit_rkyv(&ChatSubmit { text }).is_err() {
+    let attachments_to_submit = selected
+        .iter()
+        .map(|attachment| ChatSubmitAttachment {
+            path: attachment.path.clone(),
+            name: attachment.name.clone(),
+            mime_type: attachment.mime_type.clone(),
+            size: attachment.size,
+        })
+        .collect();
+    if try_cef_bin_emit_rkyv(&ChatSubmit {
+        text,
+        attachments: attachments_to_submit,
+    })
+    .is_err()
+    {
         return;
     }
     at_bottom.set(true);
     draft.set(String::new());
+    attachments.set(Vec::new());
+    history_cursor.set(None);
+    history_scratch.set(String::new());
 }
 
 fn send_approval(call_id: String, decision: u8) {

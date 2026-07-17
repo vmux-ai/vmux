@@ -10,18 +10,20 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
-    Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
+    AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
+    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
     LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
-    PromptRequest, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption,
-    SessionConfigOptionCategory, SessionConfigSelectOptions, SessionId, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId,
-    TerminalOutputRequest, TerminalOutputResponse, TextContent, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
+    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
+    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
+use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -30,8 +32,8 @@ use vmux_core::ProcessId;
 use super::projector::{AcpProjector, Intent};
 use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
-    compose_agent_prompt,
+    AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
+    ServiceMessage, compose_agent_prompt,
 };
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
@@ -41,6 +43,7 @@ pub enum AcpInput {
     User {
         text: String,
         context: Option<String>,
+        attachments: Vec<AgentAttachment>,
     },
     Approve {
         call_id: String,
@@ -410,6 +413,80 @@ fn approval_details(
     (name, args_json)
 }
 
+fn attachment_uri(path: &str) -> String {
+    url::Url::from_file_path(path)
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| format!("file://{path}"))
+}
+
+fn prompt_display_text(text: &str, attachments: &[AgentAttachment]) -> String {
+    if attachments.is_empty() {
+        return text.to_string();
+    }
+    let names = attachments
+        .iter()
+        .map(|attachment| attachment.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if text.is_empty() {
+        format!("Attached: {names}")
+    } else {
+        format!("{text}\n\nAttached: {names}")
+    }
+}
+
+fn prompt_content_blocks(
+    text: &str,
+    context: Option<&str>,
+    attachments: &[AgentAttachment],
+    capabilities: &PromptCapabilities,
+) -> Vec<ContentBlock> {
+    let mut blocks = Vec::with_capacity(attachments.len() + 1);
+    let text = compose_agent_prompt(text, context);
+    if !text.is_empty() {
+        blocks.push(ContentBlock::Text(TextContent::new(text)));
+    }
+    for attachment in attachments {
+        let uri = attachment_uri(&attachment.path);
+        let bytes = if (capabilities.image && attachment.mime_type.starts_with("image/"))
+            || (capabilities.audio && attachment.mime_type.starts_with("audio/"))
+        {
+            std::fs::read(&attachment.path).ok()
+        } else {
+            None
+        };
+        if capabilities.image
+            && attachment.mime_type.starts_with("image/")
+            && let Some(bytes) = bytes.as_ref()
+        {
+            blocks.push(ContentBlock::Image(
+                ImageContent::new(
+                    base64::engine::general_purpose::STANDARD.encode(bytes),
+                    attachment.mime_type.clone(),
+                )
+                .uri(uri),
+            ));
+            continue;
+        }
+        if capabilities.audio
+            && attachment.mime_type.starts_with("audio/")
+            && let Some(bytes) = bytes
+        {
+            blocks.push(ContentBlock::Audio(AudioContent::new(
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+                attachment.mime_type.clone(),
+            )));
+            continue;
+        }
+        blocks.push(ContentBlock::ResourceLink(
+            ResourceLink::new(attachment.name.clone(), uri)
+                .mime_type(Some(attachment.mime_type.clone()))
+                .size(i64::try_from(attachment.size).ok()),
+        ));
+    }
+    blocks
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     command: String,
@@ -601,6 +678,7 @@ pub async fn run(
             // terminal methods, backed by real visible panes (see `create_terminal` et al.).
             init.client_capabilities.terminal = true;
             let init_resp = cx.send_request(init).block_task().await?;
+            let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
                 main_shared.publish_agent_info(name);
@@ -676,13 +754,17 @@ pub async fn run(
 
             while let Some(input) = input_rx.recv().await {
                 match input {
-                    AcpInput::User { text, context } => {
+                    AcpInput::User {
+                        text,
+                        context,
+                        attachments,
+                    } => {
                         main_shared.cancel_requested.store(false, Ordering::SeqCst);
                         main_shared
                             .projector
                             .lock()
                             .unwrap()
-                            .push_user(text.clone());
+                            .push_user(prompt_display_text(&text, &attachments));
                         main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
@@ -721,13 +803,16 @@ pub async fn run(
                         }
                         let cx_prompt = cx.clone();
                         let shared = main_shared.clone();
+                        let prompt_capabilities = prompt_capabilities.clone();
                         cx.spawn(async move {
                             let prompt = PromptRequest::new(
                                 active_session_id,
-                                vec![ContentBlock::Text(TextContent::new(compose_agent_prompt(
+                                prompt_content_blocks(
                                     &text,
                                     context.as_deref(),
-                                )))],
+                                    &attachments,
+                                    &prompt_capabilities,
+                                ),
                             );
                             let errored = match cx_prompt.send_request(prompt).block_task().await {
                                 Ok(_) => None,
@@ -1344,6 +1429,50 @@ mod tests {
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
+    }
+
+    #[test]
+    fn prompt_content_embeds_supported_images() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.png");
+        std::fs::write(&path, b"png").unwrap();
+        let attachment = AgentAttachment {
+            path: path.to_string_lossy().into_owned(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            size: 3,
+        };
+        let mut capabilities = PromptCapabilities::default();
+        capabilities.image = true;
+
+        let blocks = prompt_content_blocks("inspect", None, &[attachment], &capabilities);
+
+        assert!(matches!(&blocks[0], ContentBlock::Text(text) if text.text == "inspect"));
+        assert!(matches!(
+            &blocks[1],
+            ContentBlock::Image(image)
+                if image.data == base64::engine::general_purpose::STANDARD.encode(b"png")
+                    && image.mime_type == "image/png"
+        ));
+    }
+
+    #[test]
+    fn prompt_content_links_files_without_media_capability() {
+        let attachment = AgentAttachment {
+            path: "/tmp/report.txt".into(),
+            name: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            size: 12,
+        };
+
+        let blocks = prompt_content_blocks("", None, &[attachment], &PromptCapabilities::default());
+
+        assert!(matches!(
+            &blocks[0],
+            ContentBlock::ResourceLink(link)
+                if link.name == "report.txt" && link.uri == "file:///tmp/report.txt"
+        ));
+        assert_eq!(prompt_display_text("", &[]), "");
     }
 
     #[test]

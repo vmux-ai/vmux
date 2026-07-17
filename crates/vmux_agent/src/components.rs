@@ -2,6 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+use vmux_service::protocol::AgentAttachment;
 
 use crate::message::Message;
 use crate::{AgentKind, AgentVariant};
@@ -41,6 +42,7 @@ pub struct PromptQueue {
 pub struct QueuedPrompt {
     pub id: u64,
     pub text: String,
+    pub attachments: Vec<AgentAttachment>,
 }
 
 impl PromptQueue {
@@ -56,9 +58,18 @@ impl PromptQueue {
 
     /// Append one prompt and allow dispatch to continue.
     pub fn enqueue(&mut self, text: String) {
+        self.enqueue_with_attachments(text, Vec::new());
+    }
+
+    /// Append one prompt with local file attachments and allow dispatch to continue.
+    pub fn enqueue_with_attachments(&mut self, text: String, attachments: Vec<AgentAttachment>) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        self.items.push_back(QueuedPrompt { id, text });
+        self.items.push_back(QueuedPrompt {
+            id,
+            text,
+            attachments,
+        });
         self.paused = false;
     }
 
@@ -104,18 +115,23 @@ impl PromptQueue {
     }
 
     /// Take one FIFO prompt, or all prompts joined by blank lines for a pending flush.
-    pub fn take_next(&mut self) -> Option<String> {
+    pub fn take_next(&mut self) -> Option<QueuedPrompt> {
         if !self.flush_pending {
-            return self.items.pop_front().map(|item| item.text);
+            return self.items.pop_front();
         }
         self.flush_pending = false;
-        let mut text = self.items.pop_front()?.text;
-        text.reserve(self.items.iter().map(|item| item.text.len() + 2).sum());
+        let mut prompt = self.items.pop_front()?;
+        prompt
+            .text
+            .reserve(self.items.iter().map(|item| item.text.len() + 2).sum());
         for item in self.items.drain(..) {
-            text.push_str("\n\n");
-            text.push_str(&item.text);
+            if !prompt.text.is_empty() && !item.text.is_empty() {
+                prompt.text.push_str("\n\n");
+            }
+            prompt.text.push_str(&item.text);
+            prompt.attachments.extend(item.attachments);
         }
-        Some(text)
+        Some(prompt)
     }
 }
 
@@ -146,7 +162,10 @@ mod tests {
         let mut q = PromptQueue::default();
         q.enqueue("first".into());
         q.enqueue("second".into());
-        assert_eq!(q.take_next(), Some("first".to_string()));
+        assert_eq!(
+            q.take_next().map(|prompt| prompt.text),
+            Some("first".to_string())
+        );
         assert_eq!(
             q.items.front().map(|item| item.text.as_str()),
             Some("second")
@@ -160,9 +179,40 @@ mod tests {
         q.enqueue("second".into());
 
         assert!(q.request_flush());
-        assert_eq!(q.take_next(), Some("first\n\nsecond".to_string()));
+        assert_eq!(
+            q.take_next().map(|prompt| prompt.text),
+            Some("first\n\nsecond".to_string())
+        );
         assert!(q.items.is_empty());
         assert!(!q.flush_pending);
+    }
+
+    #[test]
+    fn take_next_merges_attachments_for_flush() {
+        let mut q = PromptQueue::default();
+        q.enqueue_with_attachments(
+            String::new(),
+            vec![AgentAttachment {
+                path: "/tmp/a.png".into(),
+                name: "a.png".into(),
+                mime_type: "image/png".into(),
+                size: 3,
+            }],
+        );
+        q.enqueue_with_attachments(
+            "describe both".into(),
+            vec![AgentAttachment {
+                path: "/tmp/b.png".into(),
+                name: "b.png".into(),
+                mime_type: "image/png".into(),
+                size: 4,
+            }],
+        );
+
+        assert!(q.request_flush());
+        let prompt = q.take_next().unwrap();
+        assert_eq!(prompt.text, "describe both");
+        assert_eq!(prompt.attachments.len(), 2);
     }
 
     #[test]
@@ -174,7 +224,10 @@ mod tests {
         q.enqueue("second".into());
 
         assert!(q.flush_pending);
-        assert_eq!(q.take_next(), Some("first\n\nsecond".to_string()));
+        assert_eq!(
+            q.take_next().map(|prompt| prompt.text),
+            Some("first\n\nsecond".to_string())
+        );
     }
 
     #[test]
