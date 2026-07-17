@@ -55,7 +55,7 @@ fn resize_prompt_textarea() {
         return;
     };
     let _ = textarea.set_attribute("style", "height:auto;overflow-y:hidden");
-    let height = textarea.scroll_height().clamp(48, 160);
+    let height = textarea.scroll_height().clamp(44, 160);
     let overflow = if height == 160 { "auto" } else { "hidden" };
     let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
 }
@@ -690,8 +690,10 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    div { class: "relative flex items-end rounded-[1.35rem] bg-background/90 p-1.5 shadow-[0_18px_55px_-28px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-foreground/15 backdrop-blur-2xl transition-all duration-200 focus-within:bg-background focus-within:ring-foreground/30 focus-within:shadow-[0_22px_65px_-28px_rgba(0,0,0,0.75)]",
-                        div { class: "relative min-w-0 flex-1 overflow-hidden",
+                    div { class: "relative flex items-center overflow-hidden rounded-[1.35rem] bg-white/45 p-1.5 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25",
+                        div { class: "pointer-events-none absolute inset-px rounded-[1.25rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
+                        div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
+                        div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
                             if installing && draft.read().is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3",
                                     PromptGhost {
@@ -702,7 +704,7 @@ pub fn Page() -> Element {
                             }
                             textarea {
                                 id: PROMPT_ID,
-                                class: if installing { "relative z-10 max-h-40 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" } else { "max-h-40 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-[15px] leading-6 placeholder:text-muted-foreground/55 focus:outline-none" },
+                                class: if installing { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" } else { "max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-muted-foreground/55 focus:outline-none" },
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -829,7 +831,7 @@ pub fn Page() -> Element {
                         if matches!(status().as_str(), "streaming" | "awaiting") {
                             if queued.read().is_empty() {
                                 button {
-                                    class: "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.08] text-foreground/70 ring-1 ring-inset ring-foreground/10 transition hover:bg-foreground/[0.14] hover:text-foreground active:scale-95",
+                                    class: "relative z-10 mr-0.5 flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-xl bg-white/40 text-foreground/70 shadow-sm ring-1 ring-inset ring-black/10 transition hover:bg-white/60 hover:text-foreground active:scale-95 dark:bg-white/[0.08] dark:ring-white/10 dark:hover:bg-white/[0.14]",
                                     title: "Stop",
                                     onclick: move |_| {
                                         let _ = try_cef_bin_emit_rkyv(&ChatCancel);
@@ -843,7 +845,7 @@ pub fn Page() -> Element {
                                 }
                             } else {
                                 button {
-                                    class: "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}",
+                                    class: "relative z-10 mr-0.5 flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}",
                                     title: "Send all queued prompts now (Esc)",
                                     onclick: move |_| {
                                         let _ = try_cef_bin_emit_rkyv(&ChatEscape);
@@ -863,7 +865,7 @@ pub fn Page() -> Element {
                             }
                         } else {
                             button {
-                                class: if draft.read().trim().is_empty() { "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 cursor-default items-center justify-center rounded-xl bg-foreground/[0.06] text-muted-foreground/35 ring-1 ring-inset ring-foreground/[0.06]" } else { "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
+                                class: if draft.read().trim().is_empty() { "relative z-10 mr-0.5 flex h-9 w-9 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-9 w-9 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
                                 disabled: draft.read().trim().is_empty(),
                                 title: "Send (Enter)",
                                 onclick: move |_| do_submit(draft, at_bottom),
