@@ -2337,8 +2337,20 @@ mod tests {
                 ty: bevy_cef_core::prelude::RenderPaintElementType::View,
                 width: 1,
                 height: 1,
-                buffer: std::sync::Arc::new(vec![0, 0, 0, 255]),
-                dirty: Vec::new(),
+                patches: std::sync::Arc::new(
+                    [bevy_cef_core::prelude::WebviewPaintPatch {
+                        rect: bevy_cef_core::prelude::WebviewDirtyRect {
+                            x: 0,
+                            y: 0,
+                            width: 1,
+                            height: 1,
+                        },
+                        buffer: std::sync::Arc::new(vec![0, 0, 0, 255]),
+                    }]
+                    .into_iter()
+                    .collect(),
+                ),
+                dirty: Default::default(),
             });
 
         app.update();

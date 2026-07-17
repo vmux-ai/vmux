@@ -72,7 +72,7 @@ pub(crate) fn webview_placeholder_image() -> Image {
 }
 
 fn send_render_textures(mut ew: MessageWriter<RenderTextureMessage>, browsers: NonSend<Browsers>) {
-    while let Ok(texture) = browsers.try_receive_texture() {
+    for texture in browsers.drain_render_textures() {
         ew.write(texture);
     }
 }
@@ -84,6 +84,18 @@ fn send_render_textures(mut ew: MessageWriter<RenderTextureMessage>, browsers: N
 /// Keeps [`RenderAssetUsages::all`]: the main-world copy must persist so the upload path can read
 /// the current surface size and so the prepared `GpuImage` is never unloaded between resizes.
 pub(crate) fn update_webview_image(texture: &RenderTextureMessage, image: &mut Image) {
+    let stride = texture.width as usize * 4;
+    let mut buffer = vec![0_u8; stride * texture.height as usize];
+    for patch in texture.patches.iter() {
+        let row_bytes = patch.rect.width as usize * 4;
+        for row in 0..patch.rect.height as usize {
+            let source_start = row * row_bytes;
+            let destination_start =
+                (patch.rect.y as usize + row) * stride + patch.rect.x as usize * 4;
+            buffer[destination_start..destination_start + row_bytes]
+                .copy_from_slice(&patch.buffer[source_start..source_start + row_bytes]);
+        }
+    }
     *image = Image::new(
         Extent3d {
             width: texture.width,
@@ -91,7 +103,7 @@ pub(crate) fn update_webview_image(texture: &RenderTextureMessage, image: &mut I
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        (*texture.buffer).clone(),
+        buffer,
         TextureFormat::Bgra8UnormSrgb,
         RenderAssetUsages::all(),
     );

@@ -451,7 +451,6 @@ struct MetalOverlayInFlight {
 #[derive(Default)]
 struct NativeOverlayPresentState {
     layers: HashMap<Entity, SendLayer>,
-    pending: HashMap<Entity, bevy_cef_core::prelude::AcceleratedFrame>,
     held: HashMap<Entity, bevy_cef_core::prelude::AcceleratedFrame>,
     metal: Option<MetalOverlayContext>,
     swapchains: HashMap<Entity, MetalOverlaySwapchain>,
@@ -463,6 +462,9 @@ struct NativeOverlayPresentState {
 
 static NATIVE_OVERLAY_PRESENT_STATE: LazyLock<Mutex<NativeOverlayPresentState>> =
     LazyLock::new(|| Mutex::new(NativeOverlayPresentState::default()));
+static NATIVE_OVERLAY_MAILBOX: LazyLock<
+    Mutex<HashMap<Entity, Option<bevy_cef_core::prelude::AcceleratedFrame>>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static NATIVE_OVERLAY_PRESENT_SCHEDULED: AtomicBool = AtomicBool::new(false);
 
 fn overlay_rect_union(left: WebviewDirtyRect, right: WebviewDirtyRect) -> Option<WebviewDirtyRect> {
@@ -537,9 +539,9 @@ fn coalesced_overlay_dirty(
     previous: &[WebviewDirtyRect],
     latest: &[WebviewDirtyRect],
     same_surface: bool,
-) -> Vec<WebviewDirtyRect> {
+) -> bevy_cef_core::prelude::WebviewDirtyRects {
     if !same_surface {
-        return Vec::new();
+        return Default::default();
     }
     OverlayDamage::from_frame(width, height, previous)
         .union(
@@ -548,6 +550,8 @@ fn coalesced_overlay_dirty(
             height,
         )
         .into_frame_dirty()
+        .into_iter()
+        .collect()
 }
 
 fn native_overlay_blit_regions<'a>(
@@ -573,25 +577,33 @@ fn native_overlay_blit_regions<'a>(
 
 fn native_overlay_presenter() -> bevy_cef_core::prelude::AcceleratedFramePresenter {
     Arc::new(|frame| {
-        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+        let mut pending = NATIVE_OVERLAY_MAILBOX
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let webview = frame.webview;
-        if let Some(previous) = state.pending.insert(webview, frame)
-            && let Some(latest) = state.pending.get_mut(&webview)
-        {
-            latest.dirty = coalesced_overlay_dirty(
-                latest.width,
-                latest.height,
-                &previous.dirty,
-                &latest.dirty,
-                previous.width == latest.width
-                    && previous.height == latest.height
-                    && previous.format == latest.format,
-            );
-        }
-        let should_schedule = !state.in_flight.contains_key(&webview);
-        drop(state);
+        let should_schedule = match pending.entry(webview) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(Some(frame));
+                true
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                if let Some(previous) = entry.get_mut().replace(frame)
+                    && let Some(latest) = entry.get_mut().as_mut()
+                {
+                    latest.dirty = coalesced_overlay_dirty(
+                        latest.width,
+                        latest.height,
+                        &previous.dirty,
+                        &latest.dirty,
+                        previous.width == latest.width
+                            && previous.height == latest.height
+                            && previous.format == latest.format,
+                    );
+                }
+                false
+            }
+        };
+        drop(pending);
         if should_schedule {
             schedule_native_overlay_present();
         }
@@ -608,27 +620,24 @@ fn schedule_native_overlay_present() {
 fn drain_native_overlay_present() {
     use objc2::runtime::AnyObject;
 
-    let ready = {
-        let mut state = NATIVE_OVERLAY_PRESENT_STATE
+    let ready_layers = {
+        let state = NATIVE_OVERLAY_PRESENT_STATE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let entities: Vec<_> = state
-            .pending
-            .keys()
-            .copied()
-            .filter(|entity| {
-                state.layers.contains_key(entity) && !state.in_flight.contains_key(entity)
-            })
-            .collect();
-        entities
+        state
+            .layers
+            .iter()
+            .filter(|(entity, _)| !state.in_flight.contains_key(entity))
+            .map(|(entity, layer)| (*entity, layer.clone()))
+            .collect::<Vec<_>>()
+    };
+    let ready = {
+        let mut pending = NATIVE_OVERLAY_MAILBOX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        ready_layers
             .into_iter()
-            .filter_map(|entity| {
-                Some((
-                    entity,
-                    state.layers.get(&entity)?.clone(),
-                    state.pending.remove(&entity)?,
-                ))
-            })
+            .filter_map(|(entity, layer)| Some((entity, layer, pending.get_mut(&entity)?.take()?)))
             .collect::<Vec<_>>()
     };
 
@@ -653,8 +662,14 @@ fn drain_native_overlay_present() {
         let state = NATIVE_OVERLAY_PRESENT_STATE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.pending.keys().any(|entity| {
-            state.layers.contains_key(entity) && !state.in_flight.contains_key(entity)
+        let mut pending = NATIVE_OVERLAY_MAILBOX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pending.retain(|entity, frame| frame.is_some() || state.in_flight.contains_key(entity));
+        pending.iter().any(|(entity, frame)| {
+            frame.is_some()
+                && state.layers.contains_key(entity)
+                && !state.in_flight.contains_key(entity)
         })
     };
     if has_ready {
@@ -673,8 +688,12 @@ fn register_native_overlay_layer(
         .layers
         .entry(entity)
         .or_insert_with(|| SendLayer(layer.clone()));
-    let should_schedule = state.pending.contains_key(&entity);
     drop(state);
+    let should_schedule = NATIVE_OVERLAY_MAILBOX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&entity)
+        .is_some_and(Option::is_some);
     if should_schedule {
         schedule_native_overlay_present();
     }
@@ -685,11 +704,15 @@ fn unregister_native_overlay_layer(entity: Entity) {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.layers.remove(&entity);
-    state.pending.remove(&entity);
     state.held.remove(&entity);
     state.swapchains.remove(&entity);
     state.source_textures.remove(&entity);
     state.in_flight.remove(&entity);
+    drop(state);
+    NATIVE_OVERLAY_MAILBOX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&entity);
 }
 
 fn create_metal_overlay_context() -> Option<MetalOverlayContext> {
@@ -869,7 +892,7 @@ fn complete_native_overlay_present(
 ) {
     use objc2::runtime::AnyObject;
 
-    let (layer, surface, should_schedule) = {
+    let (layer, surface, can_schedule) = {
         let mut state = NATIVE_OVERLAY_PRESENT_STATE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -909,16 +932,30 @@ fn complete_native_overlay_present(
         if surface.is_some() {
             state.held.remove(&entity);
         }
-        let should_schedule = state.pending.contains_key(&entity)
-            && state.layers.contains_key(&entity)
-            && !state.in_flight.contains_key(&entity);
-        (layer, surface, should_schedule)
+        let can_schedule =
+            state.layers.contains_key(&entity) && !state.in_flight.contains_key(&entity);
+        (layer, surface, can_schedule)
     };
     if let (Some(layer), Some(surface)) = (layer, surface) {
         let io_surface =
             (&*surface.io_surface as *const objc2_io_surface::IOSurfaceRef).cast::<AnyObject>();
         unsafe { layer.0.setContents(Some(&*io_surface)) };
     }
+    let should_schedule = if can_schedule {
+        let mut pending = NATIVE_OVERLAY_MAILBOX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match pending.get(&entity) {
+            Some(Some(_)) => true,
+            Some(None) => {
+                pending.remove(&entity);
+                false
+            }
+            None => false,
+        }
+    } else {
+        false
+    };
     if should_schedule {
         schedule_native_overlay_present();
     }
@@ -1120,7 +1157,7 @@ fn sync_layout_overlay(
     window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
     windows: Query<&bevy::window::Window>,
     mode: Res<InteractionMode>,
-    overlay_frames: Res<bevy_cef::prelude::NativeOverlayFrames>,
+    mut overlay_frames: ResMut<bevy_cef::prelude::NativeOverlayFrames>,
 ) {
     use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
     use objc2_app_kit::{NSColor, NSView};
@@ -1144,11 +1181,7 @@ fn sync_layout_overlay(
     let (Ok(window_e), Ok(layout_e)) = (window_q.single(), layout_e_q.single()) else {
         return;
     };
-    let next = overlay_frames
-        .0
-        .lock()
-        .ok()
-        .and_then(|mut map| map.remove(&layout_e));
+    let next = overlay_frames.0.remove(&layout_e);
     let Some(ns_view) = primary_content_view_ptr(window_e) else {
         return;
     };
@@ -1210,7 +1243,7 @@ fn sync_command_bar_overlay(
     modal_e_q: Query<Entity, With<vmux_layout::window::Modal>>,
     window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
     windows: Query<&bevy::window::Window>,
-    overlay_frames: Res<bevy_cef::prelude::NativeOverlayFrames>,
+    mut overlay_frames: ResMut<bevy_cef::prelude::NativeOverlayFrames>,
 ) {
     use objc2::{MainThreadMarker, MainThreadOnly, runtime::AnyObject};
     use objc2_app_kit::NSView;
@@ -1234,11 +1267,7 @@ fn sync_command_bar_overlay(
     };
     // Pull the latest OSR frame for the modal. A *windowed* command bar produces none, so leave the
     // overlay dormant rather than covering the native command bar with an empty input-stealing layer.
-    let next = overlay_frames
-        .0
-        .lock()
-        .ok()
-        .and_then(|mut map| map.remove(&modal_e));
+    let next = overlay_frames.0.remove(&modal_e);
     if next.is_none() && state.held.is_none() {
         return;
     }
@@ -1470,8 +1499,8 @@ mod tests {
         let dirty = coalesced_overlay_dirty(200, 100, &previous, &latest, true);
 
         assert_eq!(
-            dirty,
-            [
+            dirty.as_slice(),
+            &[
                 WebviewDirtyRect {
                     x: 10,
                     y: 20,
@@ -1504,8 +1533,8 @@ mod tests {
         }];
 
         assert_eq!(
-            coalesced_overlay_dirty(200, 100, &previous, &latest, true),
-            [WebviewDirtyRect {
+            coalesced_overlay_dirty(200, 100, &previous, &latest, true).as_slice(),
+            &[WebviewDirtyRect {
                 x: 10,
                 y: 20,
                 width: 50,

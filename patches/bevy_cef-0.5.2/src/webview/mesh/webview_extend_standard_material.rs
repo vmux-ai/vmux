@@ -107,6 +107,7 @@ fn ensure_mesh_webview_placeholder(
 pub fn render_standard_materials(
     mut commands: Commands,
     mut er: MessageReader<RenderTextureMessage>,
+    browsers: NonSend<Browsers>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut uploads: ResMut<WebviewTextureUploads>,
@@ -128,14 +129,16 @@ pub fn render_standard_materials(
         commands
             .entity(texture.webview)
             .insert(WebviewSurface(handle.clone()));
-        apply_webview_texture(texture, &mut images, &handle, &mut uploads);
+        apply_webview_texture(texture, &browsers, &mut images, &handle, &mut uploads);
         if logged.insert(texture.webview) {
+            let bytes = texture
+                .patches
+                .iter()
+                .map(|patch| patch.buffer.len())
+                .sum::<usize>();
             webview_debug_log(format!(
                 "texture applied entity={:?} size={}x{} bytes={}",
-                texture.webview,
-                texture.width,
-                texture.height,
-                texture.buffer.len()
+                texture.webview, texture.width, texture.height, bytes
             ));
         }
     }

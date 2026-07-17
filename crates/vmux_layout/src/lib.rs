@@ -55,6 +55,8 @@ pub mod active;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod archive;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native_pointer;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod pane;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod placement;

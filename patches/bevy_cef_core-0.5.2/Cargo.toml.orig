@@ -21,6 +21,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 async-channel = { workspace = true }
 raw-window-handle = { workspace = true }
+smallvec = { workspace = true }
 winit = "0.30"
 
 [features]

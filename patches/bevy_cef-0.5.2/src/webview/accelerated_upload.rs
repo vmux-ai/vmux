@@ -11,8 +11,10 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
-use bevy_cef_core::prelude::{AcceleratedFrame, AcceleratedPixelFormat, Browsers};
-use std::collections::{HashMap, HashSet};
+use bevy_cef_core::prelude::{
+    AcceleratedFrame, AcceleratedPixelFormat, Browsers, coalesce_webview_dirty_rects,
+};
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 struct PendingAcceleratedUpload {
@@ -27,7 +29,7 @@ pub struct WebviewAcceleratedQueue(Mutex<Vec<PendingAcceleratedUpload>>);
 /// display (instead of a Bevy texture). Take the frame and keep it alive while its IOSurface is set
 /// as a `CALayer`'s contents.
 #[derive(Resource, Default)]
-pub struct NativeOverlayFrames(pub Mutex<HashMap<Entity, AcceleratedFrame>>);
+pub struct NativeOverlayFrames(pub HashMap<Entity, AcceleratedFrame>);
 
 #[derive(Resource, Default)]
 struct ExtractedAcceleratedUploads(Vec<PendingAcceleratedUpload>);
@@ -56,7 +58,7 @@ fn queue_accelerated_uploads(
     browsers: NonSend<Browsers>,
     surfaces: Query<&WebviewSurface>,
     overlay_webviews: Query<Entity, With<WebviewNativeOverlay>>,
-    overlay_frames: Res<NativeOverlayFrames>,
+    mut overlay_frames: ResMut<NativeOverlayFrames>,
     mut images: ResMut<Assets<Image>>,
     queue: Res<WebviewAcceleratedQueue>,
     texture_wake: Option<Res<TextureWakeCallback>>,
@@ -64,32 +66,17 @@ fn queue_accelerated_uploads(
     let Ok(mut pending) = queue.0.lock() else {
         return;
     };
-    // Coalesce to the newest frame per webview. Each accelerated frame carries the full current
-    // surface, so older queued frames are redundant. When more than one arrived for a webview since
-    // the last upload, blit the whole surface (drop dirty rects) so no superseded region is missed.
-    let mut latest: HashMap<Entity, AcceleratedFrame> = HashMap::new();
-    let mut coalesced: HashSet<Entity> = HashSet::new();
     let mut resized = false;
-    while let Ok(frame) = browsers.try_receive_accelerated() {
+    for frame in browsers.drain_accelerated_frames() {
         let webview = frame.webview;
-        if latest.insert(webview, frame).is_some() {
-            coalesced.insert(webview);
-        }
-    }
-    for (webview, mut frame) in latest {
         let overlay = overlay_webviews.contains(webview);
         if overlay {
-            if let Ok(mut overlay) = overlay_frames.0.lock() {
-                overlay.insert(webview, frame);
-            }
+            overlay_frames.0.insert(webview, frame);
             continue;
         }
         let Ok(surface) = surfaces.get(webview) else {
             continue;
         };
-        if coalesced.contains(&webview) {
-            frame.dirty.clear();
-        }
         let id = surface.0.id();
         if let Some(mut image) = images.get_mut(id) {
             resized |= resize_surface_image_if_needed(
@@ -163,11 +150,28 @@ fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUplo
     if uploads.len() < 2 {
         return;
     }
-    let mut latest = HashMap::new();
+    let mut latest = Vec::<PendingAcceleratedUpload>::new();
     for upload in uploads.drain(..) {
-        latest.insert(upload.frame.webview, upload);
+        let key = (upload.frame.webview, upload.frame.ty);
+        let mut upload = upload;
+        if let Some(index) = latest
+            .iter()
+            .position(|pending| (pending.frame.webview, pending.frame.ty) == key)
+        {
+            let previous = latest.remove(index);
+            upload.frame.dirty = coalesce_webview_dirty_rects(
+                upload.frame.width,
+                upload.frame.height,
+                &previous.frame.dirty,
+                &upload.frame.dirty,
+                previous.frame.width == upload.frame.width
+                    && previous.frame.height == upload.frame.height
+                    && previous.frame.format == upload.frame.format,
+            );
+        }
+        latest.push(upload);
     }
-    uploads.extend(latest.into_values());
+    uploads.extend(latest);
 }
 
 fn upload_accelerated_textures(

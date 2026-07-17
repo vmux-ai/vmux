@@ -6,13 +6,11 @@ use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
 };
 #[cfg(target_os = "macos")]
-use parking_lot::Mutex;
-#[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -66,19 +64,11 @@ impl Plugin for BackgroundLifecyclePlugin {
 #[cfg(target_os = "macos")]
 static NATIVE_MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
-static LAST_NATIVE_MOUSE_WAKE: LazyLock<Mutex<Option<Instant>>> =
-    LazyLock::new(|| Mutex::new(None));
-#[cfg(target_os = "macos")]
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
-
-#[cfg(any(target_os = "macos", test))]
-fn native_mouse_move_should_wake(layout_should_wake: bool, pane_should_wake: bool) -> bool {
-    layout_should_wake || pane_should_wake
-}
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
@@ -100,8 +90,31 @@ fn activate_primary_window_on_startup() {}
 fn grab_key_window_on_pane_hover(
     intent: Res<vmux_browser::HostFocusIntent>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+    panes: Query<
+        (&ComputedNode, &bevy::ui::UiGlobalTransform),
+        (
+            With<vmux_layout::pane::Pane>,
+            Without<vmux_layout::pane::PaneSplit>,
+        ),
+    >,
 ) {
     if !HOVER_OVER_PANE.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let Some(pointer) = vmux_layout::native_pointer::snapshot() else {
+        return;
+    };
+    let over_pane = panes.iter().any(|(node, transform)| {
+        let center = transform.transform_point2(Vec2::ZERO);
+        let half = node.size * 0.5;
+        let min = center - half;
+        let max = center + half;
+        pointer.position_px.x >= min.x
+            && pointer.position_px.x <= max.x
+            && pointer.position_px.y >= min.y
+            && pointer.position_px.y <= max.y
+    });
+    if !over_pane {
         return;
     }
     if *intent == vmux_browser::HostFocusIntent::Unmanaged {
@@ -233,7 +246,10 @@ fn activate_app_during_boot(
 fn activate_app_during_boot() {}
 
 #[cfg(target_os = "macos")]
-fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_native_mouse_wake_monitor(
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
+) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
     let Some(proxy) = proxy else {
@@ -242,22 +258,53 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
     if NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
+    let Some(primary_window) = primary_window.single().ok().and_then(appkit_window_ptr) else {
+        return;
+    };
     let proxy = (**proxy).clone();
-    let wake = Arc::new(move |min_interval: Duration| {
-        let should_wake = {
-            let mut last = LAST_NATIVE_MOUSE_WAKE.lock();
-            let now = Instant::now();
-            match *last {
-                Some(prev) if now.duration_since(prev) < min_interval => false,
-                _ => {
-                    *last = Some(now);
-                    true
+    let thread_proxy = proxy.clone();
+    let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
+    let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
+    let (wake_tx, wake_rx) = std::sync::mpsc::sync_channel::<()>(1);
+    std::thread::Builder::new()
+        .name("native-mouse-wake-throttle".into())
+        .spawn(move || {
+            let mut last_fire: Option<Instant> = None;
+            while wake_rx.recv().is_ok() {
+                let mut interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
+                if interval_ns == u64::MAX {
+                    continue;
+                }
+                loop {
+                    let interval = Duration::from_nanos(interval_ns);
+                    if let Some(last) = last_fire {
+                        let elapsed = Instant::now().saturating_duration_since(last);
+                        if elapsed < interval {
+                            match wake_rx.recv_timeout(interval - elapsed) {
+                                Ok(()) => {
+                                    interval_ns = interval_ns.min(
+                                        thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel),
+                                    );
+                                    continue;
+                                }
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                            }
+                        }
+                    }
+                    while wake_rx.try_recv().is_ok() {}
+                    thread_pending_interval_ns.store(u64::MAX, Ordering::Release);
+                    let _ = thread_proxy.send_event(WinitUserEvent::WakeUp);
+                    last_fire = Some(Instant::now());
+                    break;
                 }
             }
-        };
-        if should_wake {
-            let _ = proxy.send_event(WinitUserEvent::WakeUp);
-        }
+        })
+        .expect("failed to spawn native mouse wake throttler");
+    let wake = Arc::new(move |min_interval: Duration| {
+        let min_interval = min_interval.as_nanos().min(u64::MAX as u128) as u64;
+        pending_interval_ns.fetch_min(min_interval, Ordering::Relaxed);
+        let _ = wake_tx.try_send(());
     });
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
@@ -268,51 +315,31 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         } else if event_type == NSEventType::LeftMouseUp {
             vmux_browser::set_native_left_mouse_down(false);
         }
-        if event_type == NSEventType::LeftMouseDown
-            && let Some((x_px, y_px)) = event_location_in_window_physical_px(ev)
-        {
-            vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
-        }
-        if matches!(
+        let motion = matches!(
             event_type,
             NSEventType::MouseMoved
                 | NSEventType::LeftMouseDragged
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
-        ) {
-            let location = event_location_in_window_physical_px(ev);
-            if let Some((x, y)) = location
-                && vmux_layout::pane::cursor_over_pane(x, y)
-            {
-                HOVER_OVER_PANE.store(true, Ordering::Relaxed);
-            }
-            let should_wake = location
-                .map(|(x, y)| {
-                    let result = vmux_browser::forward_native_layout_pointer_move(
-                        x,
-                        y,
-                        native_mouse_buttons(),
-                    );
-                    let layout_should_wake =
-                        result.owns_pointer && (!result.forwarded || result.changed);
-                    let pane_should_wake =
-                        !result.owns_pointer && vmux_layout::pane::wake_on_move(x, y);
-                    native_mouse_move_should_wake(layout_should_wake, pane_should_wake)
-                })
-                .unwrap_or(false);
-            if should_wake {
-                let interval = if event_type == NSEventType::MouseMoved {
-                    NATIVE_MOUSE_MOVE_WAKE_INTERVAL
-                } else {
-                    NATIVE_MOUSE_DRAG_WAKE_INTERVAL
-                };
-                local_wake(interval);
-            }
+        );
+        let location = event_location_in_window_physical_px(ev, primary_window);
+        if let Some((x, y)) = location {
+            vmux_layout::native_pointer::publish(Vec2::new(x, y), native_mouse_buttons(), motion);
+        }
+        if event_type == NSEventType::LeftMouseDown
+            && let Some((x_px, y_px)) = location
+        {
+            vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
+        }
+        if motion {
+            HOVER_OVER_PANE.store(true, Ordering::Relaxed);
+            let interval = if event_type == NSEventType::MouseMoved {
+                NATIVE_MOUSE_MOVE_WAKE_INTERVAL
+            } else {
+                NATIVE_MOUSE_DRAG_WAKE_INTERVAL
+            };
+            local_wake(interval);
         } else {
-            if let Some((x, y)) = event_location_in_window_physical_px(ev) {
-                let _ =
-                    vmux_browser::forward_native_layout_pointer_move(x, y, native_mouse_buttons());
-            }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
         event.as_ptr()
@@ -325,6 +352,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         } else if event_type == NSEventType::LeftMouseUp {
             vmux_browser::set_native_left_mouse_down(false);
         }
+        vmux_layout::native_pointer::publish_buttons(native_mouse_buttons());
         global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
     });
     let mouse_mask = NSEventMask::MouseMoved
@@ -415,9 +443,34 @@ fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
 fn install_live_resize_monitor() {}
 
 #[cfg(target_os = "macos")]
-fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Option<(f32, f32)> {
+fn appkit_window_ptr(entity: Entity) -> Option<usize> {
+    use bevy::winit::WINIT_WINDOWS;
+    use objc2_app_kit::{NSView, NSWindow};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    WINIT_WINDOWS.with_borrow(|windows| {
+        let window = windows.get_window(entity)?;
+        let handle = window.window_handle().ok()?;
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return None;
+        };
+        let view = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
+        let window = view.window()?;
+        Some((&*window as *const NSWindow) as usize)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn event_location_in_window_physical_px(
+    event: &objc2_app_kit::NSEvent,
+    expected_window: usize,
+) -> Option<(f32, f32)> {
     let mtm = objc2::MainThreadMarker::new()?;
     let window = event.window(mtm)?;
+    let window_ptr = (&*window as *const objc2_app_kit::NSWindow) as usize;
+    if window_ptr != expected_window {
+        return None;
+    }
     let content = window.contentView()?;
     let point = content.convertPoint_fromView(event.locationInWindow(), None);
     let scale = window.backingScaleFactor();
@@ -846,7 +899,7 @@ mod tests {
     }
 
     #[test]
-    fn native_mouse_motion_forwards_directly_before_waking() {
+    fn native_mouse_motion_publishes_latest_sample_before_waking() {
         let source = include_str!("background_lifecycle.rs");
         let monitor = source
             .split("fn install_native_mouse_wake_monitor")
@@ -857,17 +910,25 @@ mod tests {
         assert!(monitor.contains("NSEventMask::MouseMoved"));
         assert!(monitor.contains("NSEventMask::LeftMouseDown"));
         assert!(monitor.contains("WinitUserEvent::WakeUp"));
-        assert!(monitor.contains("vmux_browser::forward_native_layout_pointer_move"));
-        assert!(monitor.contains("!result.forwarded || result.changed"));
-        assert!(monitor.contains("vmux_layout::pane::wake_on_move"));
+        assert!(monitor.contains("vmux_layout::native_pointer::publish"));
+        assert!(!monitor.contains("forward_native_layout_pointer_move"));
+        assert!(!monitor.contains("vmux_layout::pane::wake_on_move"));
         assert!(monitor.contains("let global_mask = NSEventMask::LeftMouseDown"));
     }
 
     #[test]
-    fn native_mouse_motion_skips_active_page_without_layout() {
-        assert!(native_mouse_move_should_wake(true, false));
-        assert!(native_mouse_move_should_wake(false, true));
-        assert!(!native_mouse_move_should_wake(false, false));
+    fn native_mouse_wake_throttle_has_a_trailing_wake() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("sync_channel::<()>(1)"));
+        assert!(monitor.contains("recv_timeout"));
+        assert!(monitor.contains("pending_interval_ns.fetch_min"));
+        assert!(!monitor.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
     }
 
     #[test]
