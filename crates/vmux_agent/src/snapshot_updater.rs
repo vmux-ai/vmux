@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    AgentProviderSummary, AgentStrategySummary, CommandBarAgentsSnapshot,
+    AgentPromptTarget, AgentProviderSummary, AgentStrategySummary, CommandBarAgentsSnapshot,
 };
 
-use vmux_core::Ready;
 use vmux_core::agent::AgentProviderTargetKind;
+use vmux_core::{LastActivatedAt, Ready};
 
 use crate::client::page::strategy_index::PageStrategyIndex;
 
@@ -129,6 +129,69 @@ fn acp_agent_summaries(
     agents
 }
 
+pub(crate) fn update_last_active_agent(
+    page_sessions: Query<(
+        Entity,
+        &crate::components::AgentSession,
+        Option<&LastActivatedAt>,
+    )>,
+    acp_sessions: Query<(
+        Entity,
+        &crate::client::acp::AcpSession,
+        Option<&LastActivatedAt>,
+    )>,
+    cli_sessions: Query<(Entity, &vmux_core::agent::AgentSession, &ChildOf)>,
+    stack_times: Query<&LastActivatedAt>,
+    mut snapshot: ResMut<CommandBarAgentsSnapshot>,
+) {
+    let mut newest: Option<(i64, u64, AgentPromptTarget)> = None;
+    let mut consider = |entity: Entity, timestamp: i64, target: AgentPromptTarget| {
+        let key = (timestamp, entity.to_bits());
+        if newest
+            .as_ref()
+            .is_none_or(|(current_timestamp, current_entity, _)| {
+                key > (*current_timestamp, *current_entity)
+            })
+        {
+            newest = Some((key.0, key.1, target));
+        }
+    };
+
+    for (entity, session, timestamp) in &page_sessions {
+        consider(
+            entity,
+            timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
+            AgentPromptTarget::Page {
+                provider: session.provider.clone(),
+                model: session.model.clone(),
+            },
+        );
+    }
+    for (entity, session, timestamp) in &acp_sessions {
+        consider(
+            entity,
+            timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
+            AgentPromptTarget::Acp {
+                id: session.agent_id.clone(),
+            },
+        );
+    }
+    for (entity, session, child_of) in &cli_sessions {
+        consider(
+            entity,
+            stack_times
+                .get(child_of.parent())
+                .map(|timestamp| timestamp.0)
+                .unwrap_or(i64::MIN),
+            AgentPromptTarget::Cli(session.kind),
+        );
+    }
+
+    if let Some((_, _, target)) = newest {
+        snapshot.last_active = Some(target);
+    }
+}
+
 use crate::session::AgentSessionToEntity;
 use vmux_command::snapshot::CommandBarTerminalsSnapshot;
 
@@ -215,5 +278,54 @@ mod tests {
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].id, "claude");
         assert_eq!(agents[0].name, "Claude Agent");
+    }
+
+    #[test]
+    fn last_active_agent_tracks_most_recent_session() {
+        let mut app = App::new();
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .add_systems(Update, update_last_active_agent);
+        let page = app
+            .world_mut()
+            .spawn((
+                crate::components::AgentSession {
+                    kind: vmux_core::agent::AgentKind::Vibe,
+                    variant: crate::AgentVariant::Page,
+                    sid: "page-session".to_string(),
+                    provider: "openai".to_string(),
+                    model: "gpt-5".to_string(),
+                },
+                LastActivatedAt(10),
+            ))
+            .id();
+        let cli_stack = app.world_mut().spawn(LastActivatedAt(20)).id();
+        app.world_mut().spawn((
+            vmux_core::agent::AgentSession {
+                kind: vmux_core::agent::AgentKind::Codex,
+            },
+            ChildOf(cli_stack),
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<CommandBarAgentsSnapshot>()
+                .last_active,
+            Some(AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex))
+        );
+
+        app.world_mut().entity_mut(page).insert(LastActivatedAt(30));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<CommandBarAgentsSnapshot>()
+                .last_active,
+            Some(AgentPromptTarget::Page {
+                provider: "openai".to_string(),
+                model: "gpt-5".to_string(),
+            })
+        );
     }
 }

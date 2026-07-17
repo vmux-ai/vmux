@@ -19,7 +19,7 @@ use vmux_command::event::{
     CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_should_refocus, is_data_uri,
-    looks_like_url, should_open_typed_query_on_enter,
+    looks_like_url, should_open_typed_query_on_enter, should_submit_start_prompt,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_ui::components::icon::Icon;
@@ -495,6 +495,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         execute(item);
                                     }
                                 } else {
+                                    if should_submit_start_prompt(
+                                        matches!(variant, PaletteVariant::Start),
+                                        nav_mode(),
+                                        &q,
+                                    ) {
+                                        on_close.call(());
+                                        emit_action_with_target("prompt", q.trim(), open_target);
+                                        return;
+                                    }
                                     let prefer_page = matches!(
                                         results.get(sel),
                                         Some(ResultItem::Page { url, .. })

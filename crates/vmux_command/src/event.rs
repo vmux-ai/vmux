@@ -251,6 +251,16 @@ pub fn should_open_typed_query_on_enter(
         && looks_like_url(query.trim())
 }
 
+pub fn should_submit_start_prompt(is_start: bool, nav_mode: bool, query: &str) -> bool {
+    let query = query.trim();
+    is_start
+        && !nav_mode
+        && !query.is_empty()
+        && !query.starts_with('>')
+        && !looks_like_url(query)
+        && !looks_like_explicit_path(query)
+}
+
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
 pub const PATH_COMPLETE_RESPONSE: &str = "path-complete-response";
 
@@ -568,6 +578,37 @@ mod tests {
             false,
             "google.com"
         ));
+    }
+
+    #[test]
+    fn start_enter_submits_plain_text_as_prompt() {
+        assert!(should_submit_start_prompt(
+            true,
+            false,
+            "fix the failing test"
+        ));
+    }
+
+    #[test]
+    fn start_enter_keeps_explicit_navigation_inputs() {
+        for query in [
+            "https://example.com",
+            "example.com",
+            "vmux://settings/",
+            "/tmp/file",
+            "~/project",
+            "./src",
+            "../repo",
+            "> close tab",
+        ] {
+            assert!(!should_submit_start_prompt(true, false, query), "{query}");
+        }
+    }
+
+    #[test]
+    fn start_enter_keeps_keyboard_selected_result() {
+        assert!(!should_submit_start_prompt(true, true, "terminal"));
+        assert!(!should_submit_start_prompt(false, false, "ask the agent"));
     }
 
     #[test]

@@ -287,6 +287,14 @@ mod tests {
     }
 
     #[test]
+    fn start_enter_emits_prompt_action() {
+        let source = include_str!("palette.rs");
+
+        assert!(source.contains("should_submit_start_prompt("));
+        assert!(source.contains("emit_action_with_target(\"prompt\", q.trim(), open_target)"));
+    }
+
+    #[test]
     fn results_list_disables_horizontal_scroll() {
         let class = result_list_class();
 

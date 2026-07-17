@@ -25,14 +25,16 @@ use vmux_command::event::{
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    AgentPromptTarget, CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
     CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{AgentKind, PageAgentAttachRequest, PageAgentSpawnStackRequest};
+use vmux_core::agent::{
+    AgentKind, PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
+};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -1229,6 +1231,30 @@ fn normalize_url(value: &str) -> String {
     }
 }
 
+fn prompt_agent_url(snapshot: &CommandBarAgentsSnapshot, sid: &str) -> String {
+    match snapshot.last_active.as_ref() {
+        Some(AgentPromptTarget::Cli(kind)) => format!("{}cli", kind.cli_url_prefix()),
+        Some(AgentPromptTarget::Acp { id }) => format!("vmux://agent/{id}"),
+        Some(AgentPromptTarget::Page { provider, model }) => {
+            format!("vmux://agent/{provider}/{model}/{sid}")
+        }
+        None => snapshot
+            .acp
+            .first()
+            .map(|agent| agent.url.clone())
+            .or_else(|| snapshot.providers.first().map(|agent| agent.url.clone()))
+            .or_else(|| {
+                snapshot.strategies.first().map(|strategy| {
+                    format!(
+                        "vmux://agent/{}/{}/{sid}",
+                        strategy.provider, strategy.model
+                    )
+                })
+            })
+            .unwrap_or_else(|| "vmux://agent/".to_string()),
+    }
+}
+
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
@@ -1273,6 +1299,34 @@ fn on_command_bar_action(
     let mut custom_keyboard_restore = false;
 
     match evt.action.as_str() {
+        "prompt" => {
+            let prompt = evt.value.trim();
+            if !prompt.is_empty() {
+                let (_, _, focused_stack) = focused_stack(
+                    queries.active_tab_param.get(),
+                    &queries.all_children,
+                    &queries.leaf_panes,
+                    &queries.pane_ts,
+                    &queries.pane_children,
+                    &queries.stack_ts,
+                );
+                if let Some(stack) = empty_stack.or(focused_stack) {
+                    let sid = uuid::Uuid::new_v4().to_string();
+                    let url = prompt_agent_url(&resource_params.p2(), &sid);
+                    commands
+                        .entity(stack)
+                        .insert(PendingAgentPrompt(prompt.to_string()));
+                    writer_params.p1().write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id: None,
+                    });
+                    new_stack_ctx.stack = None;
+                    new_stack_ctx.previous_stack = None;
+                    custom_keyboard_restore = true;
+                }
+            }
+        }
         "open" => {
             let expanded = if evt.value.starts_with('~') {
                 std::env::var("HOME")
@@ -2858,6 +2912,43 @@ mod tests {
     fn normalize_url_preserves_data_scheme() {
         let data = "data:text/html,<style>body{background:white}</style><h1>x</h1>";
         assert_eq!(normalize_url(data), data);
+    }
+
+    #[test]
+    fn prompt_prefers_last_active_agent() {
+        let snapshot = CommandBarAgentsSnapshot {
+            last_active: Some(AgentPromptTarget::Page {
+                provider: "openai".to_string(),
+                model: "gpt-5".to_string(),
+            }),
+            acp: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "claude".to_string(),
+                name: "Claude Code".to_string(),
+                url: "vmux://agent/claude".to_string(),
+                icon: String::new(),
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            prompt_agent_url(&snapshot, "new-session"),
+            "vmux://agent/openai/gpt-5/new-session"
+        );
+    }
+
+    #[test]
+    fn prompt_falls_back_to_available_acp_agent() {
+        let snapshot = CommandBarAgentsSnapshot {
+            acp: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "claude".to_string(),
+                name: "Claude Code".to_string(),
+                url: "vmux://agent/claude".to_string(),
+                icon: String::new(),
+            }],
+            ..Default::default()
+        };
+
+        assert_eq!(prompt_agent_url(&snapshot, "unused"), "vmux://agent/claude");
     }
 
     #[test]
