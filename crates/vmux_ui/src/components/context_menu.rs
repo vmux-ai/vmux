@@ -45,7 +45,7 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
 pub fn ContextMenuItem(props: ContextMenuItemProps) -> Element {
     rsx! {
         context_menu::ContextMenuItem {
-            class: "flex cursor-pointer select-none items-center rounded-[calc(0.5rem-0.25rem)] px-3 py-2 text-sm text-muted-foreground outline-none transition-colors data-[disabled=true]:cursor-not-allowed data-[disabled=true]:text-muted-foreground hover:bg-accent hover:text-foreground dark:hover:bg-primary dark:hover:text-muted-foreground",
+            class: "flex cursor-pointer select-none items-center rounded-[calc(0.5rem-0.25rem)] px-3 py-2 text-sm text-muted-foreground outline-none transition-colors data-[disabled=true]:cursor-not-allowed data-[disabled=true]:text-muted-foreground hover:bg-accent hover:text-foreground dark:hover:bg-primary dark:hover:text-foreground",
             disabled: props.disabled,
             value: props.value,
             index: props.index,

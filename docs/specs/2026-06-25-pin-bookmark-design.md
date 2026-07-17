@@ -180,12 +180,13 @@ MCP tool ── dispatch ──────────────────�
 
 Insert a pins+bookmarks section **above** the tab list:
 
-1. **Pin grid** — rounded favicon squares, 3 per row (reuse `Favicon` /
+1. **Bookmarks header** — title plus an explicit New Folder button.
+2. **Pin grid** — rounded favicon squares, 3 per row (reuse `Favicon` /
    `vmux_ui::favicon`). Click opens the URL.
-2. **Bookmark roots** — folders (collapsible: chevron + folder icon + `Name`) and loose
+3. **Bookmark roots** — folders (collapsible: chevron + folder icon + `Name`) and loose
    bookmark rows (favicon + title + host subtitle). Folder children render when not
    `Collapsed`.
-3. Divider, then the existing tab list, then New Tab (unchanged).
+4. Divider, then the existing tab list, then New Tab (unchanged).
 
 ### Context menus (`vmux_ui::ContextMenu`, not yet used on tabs)
 

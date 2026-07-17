@@ -201,6 +201,7 @@ pub fn Page() -> Element {
         div { class: "fixed inset-0 pointer-events-none text-foreground",
             if overlay_ready && state.side_sheet_open {
                 aside {
+                    id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
@@ -936,6 +937,57 @@ fn create_bookmark_folder() {
     });
 }
 
+fn clamp_side_sheet_context_menu(event: Event<MountedData>) {
+    let Some(wrapper) = event.downcast::<web_sys::Element>() else {
+        return;
+    };
+    let Some(menu) = wrapper.parent_element() else {
+        return;
+    };
+    let Some(side_sheet) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("vmux-side-sheet"))
+    else {
+        return;
+    };
+    let Ok(menu) = menu.dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let side_rect = side_sheet.get_bounding_client_rect();
+    let padding = 12.0;
+    let max_width = (side_rect.width() - padding * 2.0).max(120.0);
+    let max_height = (side_rect.height() - padding * 2.0).max(120.0);
+    let style = menu.style();
+    let _ = style.set_property("max-width", &format!("{max_width}px"));
+    let _ = style.set_property("max-height", &format!("{max_height}px"));
+    let _ = style.set_property("overflow-y", "auto");
+    if max_width < 220.0 {
+        let _ = style.set_property("min-width", &format!("{max_width}px"));
+    }
+    let menu_rect = menu.get_bounding_client_rect();
+    let min_left = side_rect.left() + padding;
+    let max_left = (side_rect.right() - menu_rect.width() - padding).max(min_left);
+    let min_top = side_rect.top() + padding;
+    let max_top = (side_rect.bottom() - menu_rect.height() - padding).max(min_top);
+    let _ = style.set_property(
+        "left",
+        &format!("{}px", menu_rect.left().clamp(min_left, max_left)),
+    );
+    let _ = style.set_property(
+        "top",
+        &format!("{}px", menu_rect.top().clamp(min_top, max_top)),
+    );
+}
+
+#[component]
+fn SideSheetContextMenuContent(children: Element) -> Element {
+    rsx! {
+        ContextMenuContent { attributes: vec![],
+            div { onmounted: clamp_side_sheet_context_menu, {children} }
+        }
+    }
+}
+
 fn request_bookmark_menu() {
     let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
         command: "menu_new_folder".into(),
@@ -980,19 +1032,6 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
         })
         .collect();
 
-    if pins.is_empty() && roots.is_empty() {
-        return rsx! {
-            div {
-                class: "glass relative z-30 mb-2 flex items-center justify-center rounded-lg px-2 py-4 text-ui-xs text-muted-foreground",
-                oncontextmenu: move |e| {
-                    e.prevent_default();
-                    request_bookmark_menu();
-                },
-                "No pins or bookmarks"
-            }
-        };
-    }
-
     rsx! {
         div {
             class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
@@ -1007,6 +1046,25 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     request_bookmark_menu();
                 }
             },
+            div { class: "mb-0.5 flex h-8 items-center gap-1 px-2",
+                span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
+                button {
+                    r#type: "button",
+                    aria_label: "New bookmark folder",
+                    title: "New Folder",
+                    class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                    onclick: move |event| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        create_bookmark_folder();
+                    },
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                        path { d: "M12 10v6" }
+                        path { d: "M9 13h6" }
+                    }
+                }
+            }
             if !pins.is_empty() {
                 div { class: "mb-1 grid grid-cols-3 gap-2 p-1",
                     for p in pins.iter() {
@@ -1014,25 +1072,29 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     }
                 }
             }
-            div { class: "flex flex-col gap-1",
-                for node in roots.iter() {
-                    match node {
-                        BookmarkNode::Folder(f) => rsx! {
-                            BookmarkFolder {
-                                key: "{f.uuid}",
-                                folder: f.clone(),
-                                folders: folders.clone(),
-                                active_page: active_page.clone(),
-                            }
-                        },
-                        BookmarkNode::Entry(b) => rsx! {
-                            BookmarkEntry {
-                                key: "{b.uuid}",
-                                row: b.clone(),
-                                folder_uuid: None,
-                                folders: folders.clone(),
-                            }
-                        },
+            if pins.is_empty() && roots.is_empty() {
+                div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No pins or bookmarks" }
+            } else {
+                div { class: "flex flex-col gap-1",
+                    for node in roots.iter() {
+                        match node {
+                            BookmarkNode::Folder(f) => rsx! {
+                                BookmarkFolder {
+                                    key: "{f.uuid}",
+                                    folder: f.clone(),
+                                    folders: folders.clone(),
+                                    active_page: active_page.clone(),
+                                }
+                            },
+                            BookmarkNode::Entry(b) => rsx! {
+                                BookmarkEntry {
+                                    key: "{b.uuid}",
+                                    row: b.clone(),
+                                    folder_uuid: None,
+                                    folders: folders.clone(),
+                                }
+                            },
+                        }
                     }
                 }
             }
@@ -1064,7 +1126,7 @@ fn PinTile(row: BookmarkRow) -> Element {
                     }
                 }
             }
-            ContextMenuContent { attributes: vec![],
+            SideSheetContextMenuContent {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
@@ -1193,7 +1255,7 @@ fn BookmarkEntry(
                         span { class: "{title_class}", "{title}" }
                     }
                 }
-                ContextMenuContent { attributes: vec![],
+                SideSheetContextMenuContent {
                     ContextMenuItem {
                         index: 0usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
@@ -1323,7 +1385,7 @@ fn BookmarkFolder(
                             span { class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground", "{folder.name}" }
                         }
                     }
-                    ContextMenuContent { attributes: vec![],
+                    SideSheetContextMenuContent {
                         ContextMenuItem {
                             index: 0usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),

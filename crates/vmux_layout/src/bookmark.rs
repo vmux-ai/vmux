@@ -316,7 +316,7 @@ fn on_bookmarks_command_emit(
         "open" => {
             if let Some(url) = e.url.clone() {
                 app_cmds.write(AppCommand::Browser(BrowserCommand::Open(
-                    OpenCommand::InNewTab { url: Some(url) },
+                    OpenCommand::InNewStack { url: Some(url) },
                 )));
             }
         }
@@ -474,6 +474,43 @@ mod tests {
             .query_filtered::<Entity, F>()
             .iter(app.world())
             .count()
+    }
+
+    #[test]
+    fn open_event_requests_new_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<BookmarkOp>()
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_message::<AppCommand>()
+            .add_observer(on_bookmarks_command_emit);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(BinReceive::<BookmarksCommandEvent> {
+                webview,
+                payload: BookmarksCommandEvent {
+                    command: "open".into(),
+                    uuid: None,
+                    name: None,
+                    url: Some("https://a.test".into()),
+                    title: None,
+                    favicon_url: None,
+                    folder: None,
+                },
+            });
+        let commands: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            commands,
+            vec![AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack {
+                    url: Some("https://a.test".into()),
+                }
+            ))]
+        );
     }
 
     #[test]
