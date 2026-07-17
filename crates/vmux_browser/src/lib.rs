@@ -1640,15 +1640,12 @@ fn refresh_layout_cef_hover(
     let unchanged = state.sequence == sequence
         && state.position == Some(position)
         && state.in_region == in_region;
-    #[cfg(not(target_os = "macos"))]
     if unchanged {
         return;
     }
-    #[cfg(target_os = "macos")]
-    let _ = unchanged;
     if in_region {
         #[cfg(target_os = "macos")]
-        browsers.send_native_mouse_move_force(&layout, pointer.buttons, position, false);
+        browsers.send_native_mouse_move(&layout, pointer.buttons, position, false);
         #[cfg(not(target_os = "macos"))]
         browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
     } else if state.in_region {
@@ -5595,7 +5592,7 @@ mod tests {
         assert!(refresh_fn.contains("vmux_layout::native_pointer::snapshot()"));
         assert!(refresh_fn.contains("cef_pointer_regions_contains"));
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
-        assert!(refresh_fn.contains("browsers.send_native_mouse_move_force"));
+        assert!(refresh_fn.contains("browsers.send_native_mouse_move"));
         assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
     }
 

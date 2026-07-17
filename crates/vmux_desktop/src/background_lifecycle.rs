@@ -292,11 +292,12 @@ fn install_native_mouse_wake_monitor(
                             }
                         }
                     }
-                    while wake_rx.try_recv().is_ok() {}
-                    thread_pending_interval_ns.store(u64::MAX, Ordering::Release);
                     let _ = thread_proxy.send_event(WinitUserEvent::WakeUp);
                     last_fire = Some(Instant::now());
-                    break;
+                    interval_ns = thread_pending_interval_ns.swap(u64::MAX, Ordering::AcqRel);
+                    if interval_ns == u64::MAX {
+                        break;
+                    }
                 }
             }
         })
@@ -928,6 +929,8 @@ mod tests {
         assert!(monitor.contains("sync_channel::<()>(1)"));
         assert!(monitor.contains("recv_timeout"));
         assert!(monitor.contains("pending_interval_ns.fetch_min"));
+        assert!(!monitor.contains("while wake_rx.try_recv().is_ok()"));
+        assert!(!monitor.contains("thread_pending_interval_ns.store"));
         assert!(!monitor.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
     }
 
