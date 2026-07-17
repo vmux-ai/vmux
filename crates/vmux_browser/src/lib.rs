@@ -2560,6 +2560,7 @@ fn sync_osr_webview_focus(
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
             Has<LayoutCef>,
+            Has<BookmarkTextInputActive>,
         ),
         With<WebviewSource>,
     >,
@@ -2579,6 +2580,7 @@ fn sync_osr_webview_focus(
     ready.clear();
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
+    let mut bookmark_text_input_target = None;
     for (
         entity,
         visibility,
@@ -2589,6 +2591,7 @@ fn sync_osr_webview_focus(
         has_keyboard_target,
         is_windowed,
         is_layout,
+        bookmark_text_input_active,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -2603,6 +2606,9 @@ fn sync_osr_webview_focus(
             ready.push(entity);
             if is_layout {
                 layout_shells.push(entity);
+                if bookmark_text_input_active {
+                    bookmark_text_input_target = Some(entity);
+                }
             }
             if is_modal && has_keyboard_target {
                 modal_keyboard_target = Some((entity, is_windowed));
@@ -2625,7 +2631,8 @@ fn sync_osr_webview_focus(
             .copied()
             .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
     });
-    let active = choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]);
+    let active = bookmark_text_input_target
+        .or_else(|| choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]));
 
     if !window_visible {
         if last_active.is_some() || *last_ready_set != *ready {
@@ -2644,8 +2651,12 @@ fn sync_osr_webview_focus(
     } else if *last_active == active && *last_ready_set == *ready {
     } else {
         auxiliary.clear();
-        let (active, next_auxiliary) =
-            osr_focus_targets(ready.as_slice(), active, |e| layout_shells.contains(&e));
+        let (active, next_auxiliary) = osr_focus_targets(
+            ready.as_slice(),
+            active,
+            bookmark_text_input_target.is_some(),
+            |e| layout_shells.contains(&e),
+        );
         auxiliary.extend(next_auxiliary);
         webview_debug_log(format!(
             "osr focus active={active:?} auxiliary={:?} ready={ready:?}",
@@ -2743,9 +2754,10 @@ fn choose_osr_active_webview(
 fn osr_focus_targets(
     ready: &[Entity],
     active: Option<Entity>,
+    allow_layout_active: bool,
     mut is_layout: impl FnMut(Entity) -> bool,
 ) -> (Option<Entity>, Vec<Entity>) {
-    let active = active.filter(|&e| !is_layout(e));
+    let active = active.filter(|&e| allow_layout_active || !is_layout(e));
     let auxiliary = ready
         .iter()
         .copied()
@@ -5081,7 +5093,8 @@ mod tests {
         let sidecar = Entity::from_bits(3);
 
         assert_eq!(
-            osr_focus_targets(&[active, layout, sidecar], Some(active), |e| e == layout),
+            osr_focus_targets(&[active, layout, sidecar], Some(active), false, |e| e
+                == layout),
             (Some(active), vec![layout, sidecar])
         );
     }
@@ -5092,8 +5105,19 @@ mod tests {
         let sidecar = Entity::from_bits(2);
 
         assert_eq!(
-            osr_focus_targets(&[layout, sidecar], Some(layout), |e| e == layout),
+            osr_focus_targets(&[layout, sidecar], Some(layout), false, |e| e == layout),
             (None, vec![layout, sidecar])
+        );
+    }
+
+    #[test]
+    fn bookmark_text_input_can_make_layout_shell_active_osr_target() {
+        let layout = Entity::from_bits(1);
+        let sidecar = Entity::from_bits(2);
+
+        assert_eq!(
+            osr_focus_targets(&[layout, sidecar], Some(layout), true, |e| e == layout),
+            (Some(layout), vec![sidecar])
         );
     }
 
