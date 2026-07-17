@@ -1,6 +1,6 @@
 cask "vmux" do
   version "0.0.25"
-  sha256 "38f43c3c085a595677a96431fe852f2c57266afd1c00b63dfdcc7a7cce4abf78"
+  sha256 "3c0fb73ff83260d9f9bea87adac1d365e14964d23d520ed7ea8deb4f9664cd30"
 
   url "https://github.com/vmux-ai/vmux/releases/download/v0.0.25/Vmux_0.0.25_aarch64.dmg"
   name "Vmux"
