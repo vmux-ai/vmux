@@ -998,10 +998,54 @@ fn row_selection_cols(
 }
 
 const AGENT_PROMPT_EXAMPLES: &[&str] = &[
-    "Find me a hotel with AC near Paris for this weekend",
-    "Find the best flight from Paris to Tokyo next month",
+    "Find me the best flight from Paris to Tokyo next month",
+    "Find a quiet hotel with AC near central Paris for this weekend",
+    "Plan a five-day food and culture trip through Kyoto",
+    "Build me a relaxed weekend itinerary for Lisbon",
+    "Compare rail passes for a two-week trip around Europe",
+    "Find highly rated restaurants nearby with vegetarian options",
+    "Research the visa requirements for my next international trip",
+    "Create a lightweight packing list for a ten-day winter trip",
+    "Plan a scenic road trip from San Francisco to Portland",
+    "Compare the best neighborhoods for a month-long stay in Tokyo",
+    "Find quiet coworking spaces with day passes and fast Wi-Fi",
+    "Plan a memorable surprise birthday weekend on a sensible budget",
+    "Build a healthy weekly meal plan and shopping list for two",
+    "Turn this grocery budget into affordable meals for the week",
+    "Create a beginner workout plan I can do at home in 30 minutes",
+    "Make a six-week study plan for conversational Japanese",
+    "Compare the best noise-canceling headphones under $300",
+    "Find an ergonomic standing desk setup for a small apartment",
+    "Research the best compact camera for travel and street photography",
+    "Compare lightweight laptops for coding, travel, and battery life",
+    "Summarize these PDFs and extract the decisions and action items",
+    "Turn my meeting notes into a clear project plan with owners",
+    "Draft a concise follow-up email from these scattered notes",
+    "Organize my Downloads folder into a clean, useful structure",
+    "Find duplicate photos and help me safely clean them up",
+    "Analyze this CSV and explain the most important trends",
+    "Turn these receipts into a categorized expense report",
     "Build a landing site for my new restaurant — make it themeable",
+    "Prototype a clean dashboard from this product brief",
+    "Debug the failing tests and explain the root cause",
+    "Explain how this codebase works and where I should start",
+    "Refactor this module without changing its behavior",
+    "Add the requested feature and verify the important edge cases",
+    "Review my staged changes for bugs, security, and maintainability",
     "Open a PR for my staged changes",
+    "Generate release notes from the changes since the last version",
+    "Investigate these application logs and find the likely failure",
+    "Find the performance bottleneck and propose the smallest fix",
+    "Update outdated dependencies and resolve compatibility issues",
+    "Set up this project locally and verify the development workflow",
+    "Automate this repetitive workflow with a reliable script",
+    "Research my competitors and summarize their positioning",
+    "Create a launch plan for this product with milestones and risks",
+    "Turn this rough brief into a prioritized execution checklist",
+    "Find the latest reliable information and summarize the sources",
+    "Compare my subscriptions and identify easy ways to save money",
+    "Design a comfortable home office setup for a tight space",
+    "Create a realistic monthly budget from these transactions",
 ];
 
 const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
@@ -1011,6 +1055,8 @@ const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
     "git log --oneline -10",
 ];
 
+const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
+
 /// Placeholder that types example prompts one character at a time with a blinking caret.
 #[component]
 pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
@@ -1019,7 +1065,7 @@ pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
     } else {
         AGENT_PROMPT_EXAMPLES
     };
-    let ex_idx = use_signal(|| 0usize);
+    let ex_idx = use_signal(|| random_prompt_example_index(examples.len(), None));
     let typed = use_signal(|| 0usize);
     let cb: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
     let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
@@ -1043,12 +1089,35 @@ pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
     let example = examples[ex_idx() % examples.len()];
     let full = example.chars().count();
     let shown: String = example.chars().take(typed().min(full)).collect();
+    let ghost_class = if terminal {
+        "w-80 whitespace-pre-wrap break-words font-mono text-sm text-muted-foreground/50"
+    } else {
+        "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
+    };
+    let caret_class = if terminal {
+        format!("vmux-prompt-caret ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}")
+    } else {
+        format!("vmux-prompt-caret relative top-px ml-px h-4 w-1.5 shrink-0 {accent_bg}")
+    };
     rsx! {
+        style { dangerous_inner_html: PROMPT_CARET_CSS }
         div {
-            class: "w-80 whitespace-pre-wrap break-words font-mono text-sm text-muted-foreground/50",
-            "{shown}"
-            span { class: "ml-px inline-block h-3.5 w-1.5 align-middle animate-pulse {accent_bg}" }
+            class: "{ghost_class}",
+            span { class: if terminal { "" } else { "min-w-0 truncate" }, "{shown}" }
+            span { class: "{caret_class}" }
         }
+    }
+}
+
+fn random_prompt_example_index(len: usize, current: Option<usize>) -> usize {
+    if len <= 1 {
+        return 0;
+    }
+    let next = ((js_sys::Math::random() * len as f64) as usize).min(len - 1);
+    if current == Some(next) {
+        (next + 1) % len
+    } else {
+        next
     }
 }
 
@@ -1059,21 +1128,21 @@ fn start_prompt_typewriter(
     cb_cell: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
     timer_cell: Rc<RefCell<Option<i32>>>,
 ) {
-    const PAUSE_TICKS: usize = 28;
+    const PAUSE_TICKS: usize = 40;
     let cb = Closure::wrap(Box::new(move || {
         let idx = *ex_idx.peek();
         let full = examples[idx % examples.len()].chars().count();
         let t = *typed.peek();
         if t >= full + PAUSE_TICKS {
             typed.set(0);
-            ex_idx.set((idx + 1) % examples.len());
+            ex_idx.set(random_prompt_example_index(examples.len(), Some(idx)));
         } else {
             typed.set(t + 1);
         }
     }) as Box<dyn FnMut()>);
     if let Some(win) = web_sys::window()
         && let Ok(id) = win
-            .set_interval_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 60)
+            .set_interval_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 50)
     {
         *timer_cell.borrow_mut() = Some(id);
     }

@@ -1567,8 +1567,33 @@ mod native_tests {
         assert!(source.contains("MatrixRain {"));
         assert!(source.contains("PromptGhost {"));
         assert!(source.contains("terminal: false"));
-        assert!(source.contains("absolute inset-0 z-20 flex items-center justify-center"));
-        assert!(source.contains("type a prompt · runs when ready"));
+        assert!(source.contains("id: \"chat-scroll\""));
+        assert!(source.contains("bg-gradient-to-t from-background via-background/95"));
+        assert!(!source.contains("absolute inset-0 z-20 flex items-center justify-center"));
+    }
+
+    #[test]
+    fn composer_auto_grows_and_contains_action_button() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("fn resize_prompt_textarea()"));
+        assert!(source.contains("textarea.scroll_height().clamp(40, 160)"));
+        assert!(source.contains("max-h-40 min-h-10"));
+        assert!(source.contains("rounded-2xl"));
+        assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
+        assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
+        assert!(source.contains("if draft.read().is_empty()"));
+        assert!(source.contains(
+            "let show_capability_examples = items.read().is_empty() && queued.read().is_empty();"
+        ));
+        assert!(source.contains("if show_capability_examples"));
+        assert!(source.contains("Type / for quick access"));
+        assert!(!source.contains("agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0"));
+        assert!(source.contains("prompt_prefix_at_utf16"));
+        assert!(source.contains("agent-chat-caret"));
+        assert!(source.contains("caret-color:transparent"));
+        assert!(source.contains("onkeyup"));
+        assert!(source.contains("onscroll"));
+        assert!(source.contains("placeholder:text-transparent"));
     }
 
     #[test]
