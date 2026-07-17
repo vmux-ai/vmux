@@ -4625,6 +4625,25 @@ mod tests {
     }
 
     #[test]
+    fn prompt_ghost_rotates_many_random_agent_examples() {
+        let source = include_str!("page.rs");
+        let examples = source
+            .split("const AGENT_PROMPT_EXAMPLES")
+            .nth(1)
+            .and_then(|tail| tail.split("];").next())
+            .unwrap_or_default();
+        assert!(
+            examples
+                .lines()
+                .filter(|line| line.trim_start().starts_with('"'))
+                .count()
+                >= 40
+        );
+        assert!(source.contains("random_prompt_example_index"));
+        assert!(source.contains("js_sys::Math::random()"));
+    }
+
+    #[test]
     fn terminal_web_shortcut_wakes_next_command_frame() {
         let source = include_str!("plugin.rs");
         let on_term_key = source

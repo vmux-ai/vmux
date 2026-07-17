@@ -694,8 +694,8 @@ pub fn Page() -> Element {
                         div { class: "pointer-events-none absolute inset-px rounded-[1.25rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
                         div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
                         div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
-                            if installing && draft.read().is_empty() {
-                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3",
+                            if draft.read().is_empty() {
+                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3.5",
                                     PromptGhost {
                                         accent_bg: agent_accent.accent_bg.to_string(),
                                         terminal: false,
@@ -704,7 +704,7 @@ pub fn Page() -> Element {
                             }
                             textarea {
                                 id: PROMPT_ID,
-                                class: if installing { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" } else { "max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-muted-foreground/55 focus:outline-none" },
+                                class: "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
