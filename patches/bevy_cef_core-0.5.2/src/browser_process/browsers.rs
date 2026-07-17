@@ -581,6 +581,27 @@ impl Browsers {
         position: Vec2,
         mouse_leave: bool,
     ) {
+        self.send_native_mouse_move_inner(webview, buttons, position, mouse_leave, true);
+    }
+
+    pub fn send_native_mouse_move_force(
+        &self,
+        webview: &Entity,
+        buttons: NativeMouseButtons,
+        position: Vec2,
+        mouse_leave: bool,
+    ) {
+        self.send_native_mouse_move_inner(webview, buttons, position, mouse_leave, false);
+    }
+
+    fn send_native_mouse_move_inner(
+        &self,
+        webview: &Entity,
+        buttons: NativeMouseButtons,
+        position: Vec2,
+        mouse_leave: bool,
+        deduplicate: bool,
+    ) {
         if let Some(browser) = self.browsers.get(webview) {
             let modifiers = modifiers_from_native_mouse_buttons(buttons);
             let mouse_event = cef::MouseEvent {
@@ -589,7 +610,7 @@ impl Browsers {
                 modifiers,
             };
             let signature = (mouse_event.x, mouse_event.y, modifiers, mouse_leave);
-            if browser.last_mouse_move.replace(Some(signature)) == Some(signature) {
+            if browser.last_mouse_move.replace(Some(signature)) == Some(signature) && deduplicate {
                 return;
             }
             browser

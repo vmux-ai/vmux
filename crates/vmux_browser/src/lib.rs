@@ -1637,15 +1637,18 @@ fn refresh_layout_cef_hover(
     let position = cursor_px / scale;
     let in_region = cef_pointer_regions_contains(position, &cef_regions);
     NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
-    if state.sequence == sequence
+    let unchanged = state.sequence == sequence
         && state.position == Some(position)
-        && state.in_region == in_region
-    {
+        && state.in_region == in_region;
+    #[cfg(not(target_os = "macos"))]
+    if unchanged {
         return;
     }
+    #[cfg(target_os = "macos")]
+    let _ = unchanged;
     if in_region {
         #[cfg(target_os = "macos")]
-        browsers.send_native_mouse_move(&layout, pointer.buttons, position, false);
+        browsers.send_native_mouse_move_force(&layout, pointer.buttons, position, false);
         #[cfg(not(target_os = "macos"))]
         browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
     } else if state.in_region {
@@ -1740,7 +1743,7 @@ fn refresh_active_windowed_hover(
 }
 
 const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
-const LAYOUT_HOVER_FRAME_RATE: i32 = 60;
+const LAYOUT_HOVER_FRAME_RATE: i32 = 30;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -5592,7 +5595,7 @@ mod tests {
         assert!(refresh_fn.contains("vmux_layout::native_pointer::snapshot()"));
         assert!(refresh_fn.contains("cef_pointer_regions_contains"));
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
-        assert!(refresh_fn.contains("browsers.send_native_mouse_move"));
+        assert!(refresh_fn.contains("browsers.send_native_mouse_move_force"));
         assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
     }
 

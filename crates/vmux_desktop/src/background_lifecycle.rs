@@ -24,7 +24,7 @@ const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 #[cfg(target_os = "macos")]
-const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 #[cfg(target_os = "macos")]
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 
