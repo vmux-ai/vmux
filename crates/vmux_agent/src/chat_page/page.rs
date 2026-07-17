@@ -150,10 +150,14 @@ fn select_media_entry(
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
-        let _ = try_cef_bin_emit_rkyv(&ChatAttachPaths {
+        if try_cef_bin_emit_rkyv(&ChatAttachPaths {
             paths: vec![entry.path.clone()],
-        });
-        format!("@{reference} ")
+        })
+        .is_err()
+        {
+            return;
+        }
+        String::new()
     };
     draft.set(replace_inline_media_query(&value, query, &replacement));
     menu_sel.set(0);
@@ -955,48 +959,6 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    if !attachments.read().is_empty() {
-                        div { class: "flex gap-2 overflow-x-auto pb-0.5",
-                            for (i , attachment) in attachments.read().iter().cloned().enumerate() {
-                                div {
-                                    key: "attachment-{attachment.path}",
-                                    class: "group relative h-20 w-24 shrink-0 overflow-hidden rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
-                                    if attachment.preview_data_url.is_empty() {
-                                        div { class: "flex h-14 items-center justify-center bg-foreground/[0.04] font-mono text-[10px] font-semibold tracking-wide text-muted-foreground",
-                                            "{attachment_label(&attachment)}"
-                                        }
-                                    } else {
-                                        img {
-                                            src: "{attachment.preview_data_url}",
-                                            alt: "{attachment.name}",
-                                            class: "h-14 w-full object-cover",
-                                        }
-                                    }
-                                    div { class: "truncate px-2 py-1 text-[10px] text-muted-foreground", "{attachment.name}" }
-                                    button {
-                                        class: "absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/65 text-white opacity-80 transition hover:opacity-100",
-                                        title: "Remove attachment",
-                                        onclick: move |_| {
-                                            let mut next = attachments.peek().clone();
-                                            if i < next.len() {
-                                                next.remove(i);
-                                                attachments.set(next);
-                                            }
-                                        },
-                                        svg {
-                                            class: "h-3 w-3",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2.5",
-                                            stroke_linecap: "round",
-                                            path { d: "M6 6l12 12M18 6L6 18" }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                     div { class: "relative flex items-center overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25",
                         div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
                         div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
@@ -1017,32 +979,71 @@ pub fn Page() -> Element {
                                 path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
                             }
                         }
-                        div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
-                            if draft.read().is_empty() {
-                                div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-3.5",
-                                    if show_capability_examples {
-                                        PromptGhost {
-                                            accent_bg: agent_accent.accent_bg.to_string(),
-                                            terminal: false,
+                        div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
+                            for (i , attachment) in attachments.read().iter().cloned().enumerate() {
+                                div {
+                                    key: "attachment-pill-{attachment.path}",
+                                    class: "group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-1.5 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
+                                    if attachment.preview_data_url.is_empty() {
+                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
+                                            "{attachment_label(&attachment)}"
                                         }
                                     } else {
-                                        div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for commands or @ for media" }
+                                        img {
+                                            src: "{attachment.preview_data_url}",
+                                            alt: "{attachment.name}",
+                                            class: "h-5 w-5 rounded-full object-cover",
+                                        }
+                                    }
+                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
+                                    button {
+                                        class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Remove attachment",
+                                        onclick: move |_| {
+                                            let mut next = attachments.peek().clone();
+                                            if i < next.len() {
+                                                next.remove(i);
+                                                attachments.set(next);
+                                            }
+                                        },
+                                        svg {
+                                            class: "h-3 w-3",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2.5",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
                                     }
                                 }
                             }
-                            if let Some(prefix) = prompt_caret_prefix.as_ref() {
-                                div { class: "pointer-events-none absolute inset-0 z-20 overflow-hidden",
-                                    div {
-                                        class: "min-h-10 w-full whitespace-pre-wrap break-words px-3.5 py-2 text-[15px] leading-6 text-transparent",
-                                        style: "transform:translateY(-{prompt_scroll_offset}px);",
-                                        span { "{prefix}" }
-                                        span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle {agent_accent.accent_bg}" }
+                            div { class: "relative min-w-32 flex-1 overflow-hidden",
+                                if draft.read().is_empty() {
+                                    div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
+                                        if show_capability_examples {
+                                            PromptGhost {
+                                                accent_bg: agent_accent.accent_bg.to_string(),
+                                                terminal: false,
+                                            }
+                                        } else {
+                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for commands or @ for media" }
+                                        }
                                     }
                                 }
-                            }
-                            textarea {
+                                if let Some(prefix) = prompt_caret_prefix.as_ref() {
+                                    div { class: "pointer-events-none absolute inset-0 z-20 overflow-hidden",
+                                        div {
+                                            class: "min-h-10 w-full whitespace-pre-wrap break-words px-1.5 py-2 text-[15px] leading-6 text-transparent",
+                                            style: "transform:translateY(-{prompt_scroll_offset}px);",
+                                            span { "{prefix}" }
+                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle {agent_accent.accent_bg}" }
+                                        }
+                                    }
+                                }
+                                textarea {
                                 id: PROMPT_ID,
-                                class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-3.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                                class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -1245,6 +1246,7 @@ pub fn Page() -> Element {
                                         let _ = try_cef_bin_emit_rkyv(&ChatCancel);
                                     }
                                 },
+                                }
                             }
                         }
                         if matches!(status().as_str(), "streaming" | "awaiting") {

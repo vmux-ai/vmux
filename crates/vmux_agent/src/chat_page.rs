@@ -2120,6 +2120,8 @@ mod native_tests {
         assert!(source.contains("select_media_entry"));
         assert!(source.contains("entry.preview_data_url"));
         assert!(source.contains("h-12 w-16"));
+        assert!(source.contains("attachment-pill-{attachment.path}"));
+        assert!(source.contains("String::new()"));
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
         assert!(source.contains("max-h-80 max-w-full object-contain"));

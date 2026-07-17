@@ -522,6 +522,10 @@ mod tests {
             replace_inline_media_query(draft, query, "@Pictures/photo.png "),
             "compare this @Pictures/photo.png "
         );
+        assert_eq!(
+            replace_inline_media_query(draft, query, ""),
+            "compare this "
+        );
     }
 
     #[test]
