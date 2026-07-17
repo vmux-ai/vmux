@@ -256,6 +256,7 @@ impl Plugin for AgentPlugin {
                 (
                     forward_history_open_intent,
                     handle_agent_tool_calls,
+                    handle_resume_in_acp,
                     handle_agent_commands,
                     handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
                 )
@@ -457,6 +458,23 @@ fn acp_profile_name_for_id(
         .to_string()
 }
 
+fn acp_target_id_for_kind(
+    kind: AgentKind,
+    configs: &[vmux_setting::AcpAgentConfig],
+    catalog: Option<&crate::client::acp::AcpCatalog>,
+) -> Option<String> {
+    configs
+        .iter()
+        .find(|config| crate::strategy::acp_agent_kind(&config.id) == Some(kind))
+        .map(|config| config.id.clone())
+        .or_else(|| {
+            let id = kind.as_url_segment();
+            acp_registry_agent_for_id(catalog, id)
+                .is_some()
+                .then(|| id.to_string())
+        })
+}
+
 #[allow(dead_code)]
 pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> String {
     let html = format!(
@@ -636,6 +654,82 @@ fn handle_agent_tool_calls(
                     });
                 }
             }
+        }
+    }
+}
+
+fn handle_resume_in_acp(
+    mut reader: MessageReader<AgentCommandRequest>,
+    cli_sessions: Query<
+        (
+            &ProcessId,
+            &ChildOf,
+            &AgentSession,
+            Option<&SessionId>,
+            &TerminalLaunch,
+        ),
+        With<Terminal>,
+    >,
+    settings: Res<AppSettings>,
+    catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    mut swap: MessageWriter<vmux_core::agent::SwapStackSession>,
+    service: Option<Res<ServiceClient>>,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::ResumeInAcp { anchor } = &request.command else {
+            continue;
+        };
+        let result = if !matches!(
+            &request.origin,
+            CommandOrigin::Agent {
+                anchor: Some(origin_anchor),
+                ..
+            } if origin_anchor == anchor
+        ) {
+            AgentCommandResult::Error("resume_in_acp: caller anchor mismatch".to_string())
+        } else if let Some((_, child_of, session, session_id, launch)) = cli_sessions
+            .iter()
+            .find(|(process_id, ..)| *process_id == anchor)
+        {
+            if !crate::strategy::kind_supports_cross_runtime(session.kind) {
+                AgentCommandResult::Error(format!(
+                    "resume_in_acp: {} does not support ACP resume",
+                    session.kind.display_name()
+                ))
+            } else if let Some(session_id) = session_id {
+                if let Some(agent_id) =
+                    acp_target_id_for_kind(session.kind, &settings.agent.acp, catalog.as_deref())
+                {
+                    swap.write(vmux_core::agent::SwapStackSession {
+                        stack: child_of.parent(),
+                        target_url: crate::AgentUrl::Acp {
+                            id: agent_id,
+                            sid: Some(session_id.0.clone()),
+                        }
+                        .format(),
+                        cwd: PathBuf::from(&launch.cwd),
+                        handoff: None,
+                    });
+                    AgentCommandResult::Ok
+                } else {
+                    AgentCommandResult::Error(format!(
+                        "resume_in_acp: no ACP runtime available for {}",
+                        session.kind.display_name()
+                    ))
+                }
+            } else {
+                AgentCommandResult::Error(
+                    "resume_in_acp: current CLI session id is not available yet".to_string(),
+                )
+            }
+        } else {
+            AgentCommandResult::Error("resume_in_acp: current CLI session not found".to_string())
+        };
+        if let Some(service) = service.as_ref() {
+            service.0.send(ClientMessage::AgentCommandResponse {
+                request_id: request.request_id,
+                result,
+            });
         }
     }
 }
@@ -1737,7 +1831,8 @@ fn handle_agent_commands(
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
             | ServiceAgentCommand::RunWithPlacementOverride { .. }
-            | ServiceAgentCommand::CreateWorktree { .. } => {
+            | ServiceAgentCommand::CreateWorktree { .. }
+            | ServiceAgentCommand::ResumeInAcp { .. } => {
                 continue;
             }
         };
@@ -3991,6 +4086,74 @@ mod tests {
             acp_profile_name_for_id(&config.id, Some(&config), None),
             "claude"
         );
+    }
+
+    #[test]
+    fn acp_target_id_accepts_registry_alias_config() {
+        let config = vmux_setting::AcpAgentConfig {
+            id: "claude-acp".into(),
+            name: "Claude".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+        };
+
+        assert_eq!(
+            acp_target_id_for_kind(AgentKind::Claude, &[config], None).as_deref(),
+            Some("claude-acp")
+        );
+    }
+
+    #[test]
+    fn resume_in_acp_command_swaps_current_cli_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_core::agent::SwapStackSession>()
+            .insert_resource(test_settings())
+            .add_systems(Update, handle_resume_in_acp);
+        let stack = app.world_mut().spawn_empty().id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((
+            Terminal,
+            anchor,
+            ChildOf(stack),
+            AgentSession {
+                kind: AgentKind::Claude,
+            },
+            SessionId("session-7".into()),
+            TerminalLaunch {
+                command: "claude".into(),
+                args: vec![],
+                cwd: "/workspace/project".into(),
+                env: vec![],
+                kind: vmux_terminal::launch::TerminalKind::Claude,
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::ResumeInAcp { anchor },
+            });
+
+        app.update();
+
+        let swaps: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::agent::SwapStackSession>>()
+            .drain()
+            .collect();
+        assert_eq!(swaps.len(), 1);
+        assert_eq!(swaps[0].stack, stack);
+        assert_eq!(swaps[0].target_url, "vmux://agent/claude/session-7");
+        assert_eq!(swaps[0].cwd, PathBuf::from("/workspace/project"));
+        assert!(swaps[0].handoff.is_none());
     }
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,

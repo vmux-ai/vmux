@@ -184,6 +184,11 @@ pub enum AgentCommand {
         terminal: Option<ProcessId>,
         done_marker: Option<String>,
     },
+    /// Replace the calling CLI session with its ACP runtime, preserving session id and cwd.
+    /// Appended to keep existing rkyv variant layouts and positional discriminants stable.
+    ResumeInAcp {
+        anchor: ProcessId,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

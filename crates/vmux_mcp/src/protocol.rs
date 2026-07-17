@@ -26,6 +26,7 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
 
 pub async fn run_stdio(
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> io::Result<()> {
     let stdin = io::stdin();
@@ -34,7 +35,7 @@ pub async fn run_stdio(
     let mut writer = stdout.lock();
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(message, anchor, acp_terminals).await {
+        if let Some(response) = handle_message(message, anchor, acp_session, acp_terminals).await {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -46,6 +47,7 @@ pub async fn run_stdio(
 async fn handle_message(
     message: Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> Option<Value> {
     let id = message.get("id").cloned()?;
@@ -54,10 +56,10 @@ async fn handle_message(
 
     let result = match method {
         "initialize" => Ok(initialize_result(&params)),
-        "tools/list" => {
-            Ok(json!({ "tools": crate::tools::tool_definitions_filtered(acp_terminals) }))
-        }
-        "tools/call" => tool_call_result(&params, anchor, acp_terminals).await,
+        "tools/list" => Ok(json!({
+            "tools": crate::tools::tool_definitions_filtered(acp_session, acp_terminals)
+        })),
+        "tools/call" => tool_call_result(&params, anchor, acp_session, acp_terminals).await,
         _ => {
             return Some(json!({
                 "jsonrpc": "2.0",
@@ -104,14 +106,21 @@ fn initialize_result(params: &Value) -> Value {
 async fn tool_call_result(
     params: &Value,
     anchor: Option<vmux_service::protocol::ProcessId>,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> Result<Value, String> {
     let name = params
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| "tools/call missing name".to_string())?;
-    if acp_terminals && matches!(name, "run" | "read_terminal") {
-        return Err(format!("tool {name} is unavailable for ACP sessions"));
+    let normalized_name = name.strip_prefix("vmux_").unwrap_or(name);
+    if acp_session && normalized_name == "resume_in_acp" {
+        return Err("tool resume_in_acp is unavailable for ACP sessions".to_string());
+    }
+    if acp_terminals && matches!(normalized_name, "run" | "read_terminal") {
+        return Err(format!(
+            "tool {normalized_name} is unavailable for ACP sessions"
+        ));
     }
     let arguments = params
         .get("arguments")
@@ -801,6 +810,7 @@ mod tests {
                 }),
                 None,
                 true,
+                true,
             )
             .await
             .unwrap();
@@ -811,6 +821,29 @@ mod tests {
                 format!("tool {name} is unavailable for ACP sessions")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn acp_tools_call_rejects_resume_in_acp() {
+        let response = handle_message(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": { "name": "resume_in_acp", "arguments": {} }
+            }),
+            None,
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["result"]["isError"], true);
+        assert_eq!(
+            response["result"]["content"][0]["text"],
+            "tool resume_in_acp is unavailable for ACP sessions"
+        );
     }
 
     #[test]

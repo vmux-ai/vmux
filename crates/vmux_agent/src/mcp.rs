@@ -6,7 +6,7 @@ pub use vmux_core::agent::McpServerConfig;
 use crate::exec;
 
 pub fn resolve(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
-    resolve_inner(cwd, anchor, false)
+    resolve_inner(cwd, anchor, false, false)
 }
 
 /// Resolve the MCP sidecar for an ACP agent. Agents that use ACP client terminals hide the
@@ -16,7 +16,7 @@ pub fn resolve_acp(
     anchor: ProcessId,
     agent_id: &str,
 ) -> Result<McpServerConfig, String> {
-    resolve_inner(cwd, anchor, acp_uses_native_terminals(agent_id))
+    resolve_inner(cwd, anchor, true, acp_uses_native_terminals(agent_id))
 }
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
@@ -26,11 +26,12 @@ fn acp_uses_native_terminals(agent_id: &str) -> bool {
 fn resolve_inner(
     cwd: &Path,
     anchor: ProcessId,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;
     let profile = vmux_core::profile::active_profile_name();
-    resolve_with_sidecar(&sidecar, cwd, anchor, &profile, acp_terminals)
+    resolve_with_sidecar(&sidecar, cwd, anchor, &profile, acp_session, acp_terminals)
 }
 
 fn resolve_with_sidecar(
@@ -38,12 +39,13 @@ fn resolve_with_sidecar(
     cwd: &Path,
     anchor: ProcessId,
     profile: &str,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> Result<McpServerConfig, String> {
     if exec::is_executable_path(sidecar) {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
-            args: mcp_subcommand_args(anchor, profile, acp_terminals),
+            args: mcp_subcommand_args(anchor, profile, acp_session, acp_terminals),
             cwd: None,
         });
     }
@@ -53,7 +55,12 @@ fn resolve_with_sidecar(
         .into_iter()
         .map(str::to_string)
         .collect();
-    args.extend(mcp_subcommand_args(anchor, profile, acp_terminals));
+    args.extend(mcp_subcommand_args(
+        anchor,
+        profile,
+        acp_session,
+        acp_terminals,
+    ));
     Ok(McpServerConfig {
         command: "cargo".to_string(),
         args,
@@ -61,7 +68,12 @@ fn resolve_with_sidecar(
     })
 }
 
-fn mcp_subcommand_args(anchor: ProcessId, profile: &str, acp_terminals: bool) -> Vec<String> {
+fn mcp_subcommand_args(
+    anchor: ProcessId,
+    profile: &str,
+    acp_session: bool,
+    acp_terminals: bool,
+) -> Vec<String> {
     let mut args = vec![
         "mcp".to_string(),
         "--anchor".to_string(),
@@ -69,6 +81,9 @@ fn mcp_subcommand_args(anchor: ProcessId, profile: &str, acp_terminals: bool) ->
         "--profile".to_string(),
         profile.to_string(),
     ];
+    if acp_session {
+        args.push("--acp-session".to_string());
+    }
     if acp_terminals {
         args.push("--acp-terminals".to_string());
     }
@@ -102,7 +117,7 @@ mod tests {
     fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
         for profile in ["personal", "gregor"] {
-            let args = mcp_subcommand_args(anchor, profile, false);
+            let args = mcp_subcommand_args(anchor, profile, false, false);
             assert!(
                 args.windows(2)
                     .any(|w| w[0] == "--profile" && w[1] == profile)
@@ -113,8 +128,10 @@ mod tests {
     #[test]
     fn acp_args_append_acp_terminals_flag() {
         let anchor = ProcessId::new();
-        let plain = mcp_subcommand_args(anchor, "personal", false);
-        let acp = mcp_subcommand_args(anchor, "personal", true);
+        let plain = mcp_subcommand_args(anchor, "personal", false, false);
+        let acp = mcp_subcommand_args(anchor, "personal", true, true);
+        assert!(!plain.iter().any(|a| a == "--acp-session"));
+        assert!(acp.iter().any(|a| a == "--acp-session"));
         assert!(!plain.iter().any(|a| a == "--acp-terminals"));
         assert!(acp.iter().any(|a| a == "--acp-terminals"));
     }
@@ -141,6 +158,7 @@ mod tests {
             &workspace,
             anchor,
             "personal",
+            false,
             false,
         )
         .unwrap();
@@ -180,6 +198,7 @@ mod tests {
             &workspace,
             anchor,
             "personal",
+            false,
             false,
         )
         .unwrap();
