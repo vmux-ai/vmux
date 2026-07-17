@@ -1055,6 +1055,8 @@ const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
     "git log --oneline -10",
 ];
 
+const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
+
 /// Placeholder that types example prompts one character at a time with a blinking caret.
 #[component]
 pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
@@ -1092,11 +1094,17 @@ pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
     } else {
         "max-w-full whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
     };
+    let caret_class = if terminal {
+        format!("vmux-prompt-caret ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}")
+    } else {
+        "vmux-prompt-caret ml-px inline-block h-5 w-px align-middle bg-foreground/80".to_string()
+    };
     rsx! {
+        style { dangerous_inner_html: PROMPT_CARET_CSS }
         div {
             class: "{ghost_class}",
             "{shown}"
-            span { class: "ml-px inline-block h-3.5 w-1.5 align-middle animate-pulse {accent_bg}" }
+            span { class: "{caret_class}" }
         }
     }
 }

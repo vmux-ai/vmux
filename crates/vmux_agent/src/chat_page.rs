@@ -1582,6 +1582,7 @@ mod native_tests {
         assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
         assert!(source.contains("shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
+        assert!(source.contains("caret-transparent"));
         assert!(source.contains("placeholder:text-transparent"));
     }
 

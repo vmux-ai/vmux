@@ -704,7 +704,7 @@ pub fn Page() -> Element {
                             }
                             textarea {
                                 id: PROMPT_ID,
-                                class: "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                                class: if draft.read().is_empty() { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 caret-transparent placeholder:text-transparent focus:outline-none" } else { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" },
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
