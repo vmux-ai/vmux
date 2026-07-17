@@ -380,7 +380,7 @@ pub fn Page() -> Element {
     rsx! {
         main {
             class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
-            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
+            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);--agent-caret:rgb({agent_accent.rain_rgb});",
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
@@ -704,7 +704,7 @@ pub fn Page() -> Element {
                             }
                             textarea {
                                 id: PROMPT_ID,
-                                class: if draft.read().is_empty() { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 caret-transparent placeholder:text-transparent focus:outline-none" } else { "relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" },
+                                class: if draft.read().is_empty() { "agent-chat-prompt relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 caret-transparent placeholder:text-transparent focus:outline-none" } else { "agent-chat-prompt relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" },
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -1360,6 +1360,8 @@ fn md_to_html(src: &str) -> String {
 /// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
 /// light and dark.
 const MD_CSS: &str = r#"
+.agent-chat-prompt{caret-shape:block;caret-color:var(--agent-caret)}
+.agent-chat-prompt.caret-transparent{caret-color:transparent}
 .chat-md{line-height:1.6;word-break:break-word}
 .chat-md>*:first-child{margin-top:0}
 .chat-md>*:last-child{margin-bottom:0}
