@@ -957,10 +957,27 @@ fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element
 
 fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
+    let blocks = turn
+        .blocks
+        .iter()
+        .enumerate()
+        .filter_map(|(key, block)| {
+            if turn.parent_tool_index(key).is_some() {
+                return None;
+            }
+            let children = turn
+                .blocks
+                .iter()
+                .enumerate()
+                .filter(|(child_key, _)| turn.parent_tool_index(*child_key) == Some(key))
+                .collect::<Vec<_>>();
+            Some((key, block, children))
+        })
+        .collect::<Vec<_>>();
     rsx! {
         div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
-            for (j , block) in turn.blocks.iter().enumerate() {
-                {render_block(j, block)}
+            for (j , block , children) in blocks {
+                {render_block(j, block, &children)}
             }
             if turn.running && !reconnecting {
                 {render_working(verb, elapsed)}
@@ -1031,11 +1048,9 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
             "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z",
         ],
         ActivityIcon::ReadFile => &[
-            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
-            "M14 2v4a2 2 0 0 0 2 2h4",
-            "M16 13H8",
-            "M16 17H8",
-            "M10 9H8",
+            "M12 7v14",
+            "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
+            "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
         ],
         ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
         ActivityIcon::Image => &[
@@ -1125,7 +1140,7 @@ fn tool_presentation(name: &str) -> (ActivityIcon, Cow<'static, str>) {
     }
 }
 
-fn render_block(key: usize, block: &ChatBlock) -> Element {
+fn render_block(key: usize, block: &ChatBlock, children: &[(usize, &ChatBlock)]) -> Element {
     match block {
         ChatBlock::Text(text) => rsx! {
             div {
@@ -1151,14 +1166,23 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
                     {render_activity_icon(icon)}
-                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
-                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium", "{label}" }
-                            {render_disclosure_icon()}
+                    div { class: "min-w-0",
+                        details { class: "disclosure text-sm text-muted-foreground",
+                            summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                                span { class: "font-medium", "{label}" }
+                                {render_disclosure_icon()}
+                            }
+                            div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
+                            if !args.is_empty() && args != "{}" {
+                                pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                            }
                         }
-                        div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                        if !args.is_empty() && args != "{}" {
-                            pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                        if !children.is_empty() {
+                            div { class: "ml-0.5 mt-1.5 flex flex-col gap-1 border-l border-foreground/15 pl-3",
+                                for (child_key , child) in children {
+                                    {render_tool_child(*child_key, child)}
+                                }
+                            }
                         }
                     }
                 }
@@ -1232,37 +1256,81 @@ fn render_block(key: usize, block: &ChatBlock) -> Element {
         }
         ChatBlock::ToolResult {
             content, is_error, ..
-        } => {
-            let tone = if *is_error {
-                "text-red-500"
-            } else {
-                "text-muted-foreground"
-            };
-            let label = if *is_error { "Error" } else { "Output" };
-            let icon = if *is_error {
-                ActivityIcon::Error
-            } else {
-                ActivityIcon::Output
-            };
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon(icon)}
-                    details { class: "disclosure min-w-0 text-sm {tone}",
-                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium", "{label}" }
-                            {render_disclosure_icon()}
-                        }
-                        pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
-                    }
-                }
-            }
-        }
+        } => render_standalone_tool_result(key, content, *is_error),
         ChatBlock::Reconnect { attempt, total } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
                 {render_activity_icon(ActivityIcon::Reconnect)}
                 span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
             }
         },
+    }
+}
+
+fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
+    match block {
+        ChatBlock::ToolUse { name, args, .. } => {
+            let (_, label) = tool_presentation(name);
+            rsx! {
+                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "font-medium", "{label}" }
+                        {render_disclosure_icon()}
+                    }
+                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
+                    if !args.is_empty() && args != "{}" {
+                        pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                    }
+                }
+            }
+        }
+        ChatBlock::ToolResult {
+            content, is_error, ..
+        } => render_nested_tool_result(key, content, *is_error),
+        _ => rsx! {},
+    }
+}
+
+fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Element {
+    let tone = if is_error {
+        "text-red-500"
+    } else {
+        "text-muted-foreground"
+    };
+    let label = if is_error { "Error" } else { "Output" };
+    rsx! {
+        details { key: "{key}", class: "disclosure text-xs {tone}",
+            summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                span { class: "font-medium", "{label}" }
+                {render_disclosure_icon()}
+            }
+            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
+        }
+    }
+}
+
+fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> Element {
+    let tone = if is_error {
+        "text-red-500"
+    } else {
+        "text-muted-foreground"
+    };
+    let label = if is_error { "Error" } else { "Output" };
+    let icon = if is_error {
+        ActivityIcon::Error
+    } else {
+        ActivityIcon::Output
+    };
+    rsx! {
+        div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+            {render_activity_icon(icon)}
+            details { class: "disclosure min-w-0 text-sm {tone}",
+                summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                    span { class: "font-medium", "{label}" }
+                    {render_disclosure_icon()}
+                }
+                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
+            }
+        }
     }
 }
 

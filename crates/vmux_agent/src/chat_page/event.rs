@@ -388,6 +388,55 @@ pub struct ChatTurn {
     pub step_count: u32,
 }
 
+pub(crate) fn is_guardian_tool(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("guardian")
+        || lower.contains("approval")
+        || lower == "review"
+        || lower.ends_with("_review")
+        || lower.ends_with(".review")
+        || lower.ends_with(":review")
+}
+
+impl ChatTurn {
+    pub(crate) fn parent_tool_index(&self, index: usize) -> Option<usize> {
+        match self.blocks.get(index)? {
+            ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {
+                self.guardian_parent_index(index)
+            }
+            ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
+                let tool_index = self.blocks.iter().position(|block| {
+                    matches!(
+                        block,
+                        ChatBlock::ToolUse {
+                            call_id: tool_call_id,
+                            ..
+                        } if tool_call_id == call_id
+                    )
+                })?;
+                match &self.blocks[tool_index] {
+                    ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {
+                        self.guardian_parent_index(tool_index).or(Some(tool_index))
+                    }
+                    _ => Some(tool_index),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn guardian_parent_index(&self, index: usize) -> Option<usize> {
+        for (candidate, block) in self.blocks[..index].iter().enumerate().rev() {
+            match block {
+                ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {}
+                ChatBlock::ToolUse { .. } => return Some(candidate),
+                _ => return None,
+            }
+        }
+        None
+    }
+}
+
 /// The curated verbs the running-turn header cycles through (owned by the shared contract, not
 /// the view). The page picks one at random every few seconds while streaming.
 pub const WORKING_VERBS: &[&str] = &[
@@ -492,6 +541,84 @@ mod tests {
     #[test]
     fn working_verbs_nonempty() {
         assert!(!WORKING_VERBS.is_empty());
+    }
+
+    #[test]
+    fn tool_children_associate_with_their_parent_call() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: "read-1".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolUse {
+                    call_id: "review-1".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolResult {
+                    call_id: "read-1".into(),
+                    content: "file contents".into(),
+                    is_error: false,
+                },
+                ChatBlock::ToolResult {
+                    call_id: "review-1".into(),
+                    content: "review complete".into(),
+                    is_error: false,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.parent_tool_index(0), None);
+        assert_eq!(turn.parent_tool_index(1), Some(0));
+        assert_eq!(turn.parent_tool_index(2), Some(0));
+        assert_eq!(turn.parent_tool_index(3), Some(0));
+    }
+
+    #[test]
+    fn empty_call_ids_do_not_associate() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: String::new(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolResult {
+                    call_id: String::new(),
+                    content: "file contents".into(),
+                    is_error: false,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.parent_tool_index(0), None);
+        assert_eq!(turn.parent_tool_index(1), None);
+    }
+
+    #[test]
+    fn standalone_guardian_owns_its_result() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: "review-1".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolResult {
+                    call_id: "review-1".into(),
+                    content: "review complete".into(),
+                    is_error: false,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.parent_tool_index(0), None);
+        assert_eq!(turn.parent_tool_index(1), Some(0));
     }
 
     #[test]
