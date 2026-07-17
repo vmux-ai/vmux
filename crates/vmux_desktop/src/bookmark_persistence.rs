@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
 use vmux_core::{Bookmark, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
@@ -9,8 +10,8 @@ pub(crate) fn bookmarks_path() -> PathBuf {
     vmux_core::profile::profile_dir().join("bookmarks.ron")
 }
 
-fn bookmark_scene_filter() -> SceneFilter {
-    SceneFilter::deny_all()
+fn bookmark_scene_filter() -> WorldFilter {
+    WorldFilter::deny_all()
         .allow::<ChildOf>()
         .allow::<Children>()
         .allow::<Name>()
