@@ -1576,11 +1576,11 @@ mod native_tests {
     fn composer_auto_grows_and_contains_action_button() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("fn resize_prompt_textarea()"));
-        assert!(source.contains("textarea.scroll_height().clamp(44, 160)"));
-        assert!(source.contains("max-h-40 min-h-11"));
-        assert!(source.contains("rounded-[1.35rem]"));
+        assert!(source.contains("textarea.scroll_height().clamp(40, 160)"));
+        assert!(source.contains("max-h-40 min-h-10"));
+        assert!(source.contains("rounded-2xl"));
         assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
-        assert!(source.contains("shrink-0 self-center items-center justify-center"));
+        assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
         assert!(source.contains("prompt_prefix_at_utf16"));
         assert!(source.contains("agent-chat-caret"));
