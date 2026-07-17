@@ -69,6 +69,7 @@ pub const LSP_UPDATE_REQUEST: &str = "lsp_update_request";
 pub const LSP_INSTALL_PROGRESS_EVENT: &str = "lsp_install_progress";
 pub const LSP_PKG_STATUS_EVENT: &str = "lsp_pkg_status";
 pub const EXPLORER_TREE_EVENT: &str = "explorer_tree";
+pub const EXPLORER_FOCUS_EVENT: &str = "explorer_focus";
 pub const EXPLORER_OPEN_EDITORS_EVENT: &str = "explorer_open_editors";
 pub const EXPLORER_OUTLINE_EVENT: &str = "explorer_outline";
 pub const EXPLORER_CHROME_EVENT: &str = "explorer_chrome";
@@ -772,6 +773,21 @@ pub struct ExplorerTreeEvent {
     pub focus_path: String,
     pub loading: bool,
     pub rows: Vec<TreeRow>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerFocusEvent {
+    pub path: String,
 }
 
 #[derive(

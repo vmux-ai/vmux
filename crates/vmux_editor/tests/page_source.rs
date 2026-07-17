@@ -46,14 +46,17 @@ fn explorer_animates_tree_and_sections() {
 #[test]
 fn page_mounts_panel_and_wires_toggle() {
     let s = page_source();
-    assert!(s.contains("ExplorerPanel {}"));
+    assert!(s.contains("ExplorerPanel { visible }"));
     assert!(s.contains("ExplorerPanelSetVisible"));
     assert!(s.contains("ExplorerChromeEvent"));
+    assert!(explorer_source().contains("ExplorerFocusEvent"));
     assert!(s.contains("ExplorerPanelWidth"));
     assert!(s.contains("ExplorerSidebar"));
     assert!(s.contains("-translate-x-full"));
     assert!(s.contains("transition-[translate,opacity]"));
     assert!(!s.contains("transition-[width] duration-200"));
+    assert!(!s.contains("width:0px"));
+    assert!(s.contains("absolute inset-y-0 left-0 z-[3]"));
     assert!(s.contains("ExplorerRevealCurrent"));
     assert!(s.contains("handle_explorer_shortcut"));
     assert!(s.contains("Mode::Text => focus_file_input()"));

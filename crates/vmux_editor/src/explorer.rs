@@ -124,11 +124,16 @@ fn tree_row_id(path: &str) -> String {
     format!("explorer-row-{hash:016x}")
 }
 
-fn schedule_tree_focus(path: String) {
+fn schedule_tree_focus(path: String, mut generation: Signal<u32>) {
+    let id = generation().wrapping_add(1);
+    generation.set(id);
     let Some(window) = web_sys::window() else {
         return;
     };
     let focus = Closure::once(move || {
+        if generation() != id {
+            return;
+        }
         let Some(element) = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| document.get_element_by_id(&tree_row_id(&path)))
@@ -147,6 +152,11 @@ fn schedule_tree_focus(path: String) {
         TREE_MOTION_MS + 20,
     );
     focus.forget();
+}
+
+fn cancel_tree_focus(mut generation: Signal<u32>) {
+    let id = generation.peek().wrapping_add(1);
+    generation.set(id);
 }
 
 fn reconcile_rows(
@@ -285,13 +295,14 @@ fn prompt_title(kind: PromptKind) -> &'static str {
 }
 
 #[component]
-pub fn ExplorerPanel() -> Element {
+pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let mut root_name = use_signal(|| "Explorer".to_string());
     let mut root_path = use_signal(String::new);
     let mut current_path = use_signal(String::new);
     let mut root_loading = use_signal(|| false);
     let rows = use_signal(Vec::<MotionRow>::new);
     let row_generation = use_signal(|| 0u32);
+    let focus_generation = use_signal(|| 0u32);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
     let mut show_open = use_signal(|| true);
@@ -303,14 +314,28 @@ pub fn ExplorerPanel() -> Element {
     let mut notice = use_signal(|| None::<ExplorerNotice>);
     let notice_generation = use_signal(|| 0u32);
 
+    use_effect(move || {
+        if !visible() {
+            cancel_tree_focus(focus_generation);
+        }
+    });
+
     let _tree = use_bin_event_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
         root_loading.set(e.loading);
         reconcile_rows(rows, row_generation, e.rows);
-        if !e.focus_path.is_empty() {
-            schedule_tree_focus(e.focus_path);
+        if visible() && !e.focus_path.is_empty() {
+            schedule_tree_focus(e.focus_path, focus_generation);
+        }
+    });
+    let _focus = use_bin_event_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
+        if current_path() != e.path {
+            current_path.set(e.path.clone());
+        }
+        if visible() {
+            schedule_tree_focus(e.path, focus_generation);
         }
     });
     let _open =

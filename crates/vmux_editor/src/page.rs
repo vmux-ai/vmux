@@ -404,12 +404,9 @@ fn ExplorerSidebar(
 ) -> Element {
     let open = visible();
     let panel_width = width();
-    let wrapper_style = if open {
-        format!("width:{panel_width}px;")
-    } else {
-        "width:0px;".to_string()
-    };
+    let wrapper_style = format!("width:{panel_width}px;");
     let panel_style = format!("width:{panel_width}px;");
+    let resizer_style = format!("left:{panel_width}px;");
     let panel_class = if open {
         "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     } else {
@@ -417,19 +414,24 @@ fn ExplorerSidebar(
     };
     rsx! {
         div {
-            class: "relative z-[2] h-full shrink-0",
+            class: if open {
+                "absolute inset-y-0 left-0 z-[3] h-full pointer-events-auto"
+            } else {
+                "pointer-events-none absolute inset-y-0 left-0 z-[3] h-full"
+            },
             style: "{wrapper_style}",
             onkeydown: move |event| {
                 handle_explorer_shortcut(&event, visible, client_id, request_id, mode);
             },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel {} }
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
         }
         div {
             class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+                "absolute inset-y-0 z-[4] w-1 -translate-x-1/2 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
             } else {
-                "pointer-events-none h-full w-0 shrink-0 opacity-0"
+                "pointer-events-none absolute inset-y-0 z-[4] w-1 -translate-x-1/2 opacity-0 transition-opacity duration-150"
             },
+            style: "{resizer_style}",
             onmousedown: move |e: Event<MouseData>| {
                 e.prevent_default();
                 resizing.set(true);
@@ -534,10 +536,13 @@ pub fn Page() -> Element {
                 explorer_request_id(),
                 c.client_id,
                 c.request_id,
-            ) {
+            ) && explorer_visible() != c.visible
+            {
                 explorer_visible.set(c.visible);
             }
-            explorer_width.set(c.width);
+            if explorer_width() != c.width {
+                explorer_width.set(c.width);
+            }
         });
 
     let _tidy =
@@ -797,7 +802,7 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
-            class: "flex h-full w-full flex-row overflow-hidden bg-background",
+            class: "relative flex h-full w-full flex-row overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
                     let x = e.client_coordinates().x as i32;

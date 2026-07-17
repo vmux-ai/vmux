@@ -1225,7 +1225,7 @@ fn drain_file_changes(
                 .iter()
                 .any(|c| c.parent().map(|p| canon(p) == dc).unwrap_or(false))
             {
-                start_explorer_dir_load(entity, d, &mut st, &mut commands, true);
+                let _ = start_explorer_dir_load(entity, d, &mut st, &mut commands, true);
             }
         }
     }
@@ -1996,9 +1996,9 @@ fn start_explorer_dir_load(
     st: &mut ExplorerState,
     commands: &mut Commands,
     force: bool,
-) {
+) -> bool {
     if st.loading.contains(&path) || !force && st.children.contains_key(&path) {
-        return;
+        return false;
     }
     st.loading.insert(path.clone());
     let task_path = path.clone();
@@ -2011,6 +2011,7 @@ fn start_explorer_dir_load(
         task,
     });
     commands.entity(entity).insert(ExplorerTreeDirty);
+    true
 }
 
 fn explorer_path_allowed(st: &ExplorerState, path: &Path) -> bool {
@@ -2023,6 +2024,7 @@ fn reveal_current_in_tree(
     st: &mut ExplorerState,
     commands: &mut Commands,
 ) {
+    let mut tree_changed = false;
     let root = project_root(current);
     if st.root != root {
         st.root = root;
@@ -2030,6 +2032,7 @@ fn reveal_current_in_tree(
         st.loading.clear();
         st.children.clear();
         st.focus_path = None;
+        tree_changed = true;
     }
     let current_dir = if current.is_dir() {
         current
@@ -2040,15 +2043,34 @@ fn reveal_current_in_tree(
         return;
     };
     let mut dir = st.root.clone();
-    st.expanded.insert(dir.clone());
-    start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+    tree_changed |= st.expanded.insert(dir.clone());
+    tree_changed |= start_explorer_dir_load(entity, dir.clone(), st, commands, false);
     for component in relative.components() {
         dir.push(component);
-        st.expanded.insert(dir.clone());
-        start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+        tree_changed |= st.expanded.insert(dir.clone());
+        tree_changed |= start_explorer_dir_load(entity, dir.clone(), st, commands, false);
     }
-    st.focus_path = Some(current.to_path_buf());
-    commands.entity(entity).insert(ExplorerTreeDirty);
+    if tree_changed {
+        st.focus_path = Some(current.to_path_buf());
+        commands.entity(entity).insert(ExplorerTreeDirty);
+    }
+}
+
+fn emit_explorer_focus(
+    entity: Entity,
+    current: &Path,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) {
+    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_FOCUS_EVENT,
+            &ExplorerFocusEvent {
+                path: current.to_string_lossy().into_owned(),
+            },
+        ));
+    }
 }
 
 fn init_explorer_state(
@@ -2062,7 +2084,7 @@ fn init_explorer_state(
         let root = project_root(&fv.path);
         st.expanded.insert(root.clone());
         st.root = root.clone();
-        start_explorer_dir_load(entity, root, &mut st, &mut commands, false);
+        let _ = start_explorer_dir_load(entity, root, &mut st, &mut commands, false);
     }
 }
 
@@ -2142,7 +2164,7 @@ fn on_explorer_tree_toggle(
             return;
         }
         st.expanded.insert(path.clone());
-        start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
+        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
     }
     commands.entity(entity).insert(ExplorerTreeDirty);
 }
@@ -2158,7 +2180,7 @@ fn on_explorer_tree_prefetch(
         return;
     };
     if explorer_path_allowed(&st, &path) {
-        start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
+        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, false);
     }
 }
 
@@ -2173,13 +2195,14 @@ fn on_explorer_tree_refresh(
         return;
     };
     if explorer_path_allowed(&st, &path) {
-        start_explorer_dir_load(entity, path, &mut st, &mut commands, true);
+        let _ = start_explorer_dir_load(entity, path, &mut st, &mut commands, true);
     }
 }
 
 fn on_explorer_reveal_current(
     trigger: On<BinReceive<ExplorerRevealCurrent>>,
     mut q: Query<(&FileView, &mut ExplorerState)>,
+    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
@@ -2187,6 +2210,9 @@ fn on_explorer_reveal_current(
         return;
     };
     reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+    if let Some(browsers) = browsers {
+        emit_explorer_focus(entity, &fv.path, &browsers, &mut commands);
+    }
 }
 
 fn run_explorer_mutation(
@@ -2438,7 +2464,7 @@ fn drain_explorer_mutations(
                 evict_explorer_subtree(&mut st, old_path);
             }
         }
-        start_explorer_dir_load(
+        let _ = start_explorer_dir_load(
             webview,
             outcome.refresh_dir.clone(),
             &mut st,
@@ -2532,19 +2558,28 @@ fn on_explorer_panel_set_visible(
     mut chrome: ResMut<ExplorerChrome>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
-    mut editors: Query<(&FileView, &mut ExplorerState)>,
-    views: Query<Entity, With<FileView>>,
+    mut editors: Query<(Entity, &FileView, &mut ExplorerState)>,
+    browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
     chrome.visible = trigger.event().payload.visible;
     chrome.client_id = trigger.event().payload.client_id;
     chrome.request_id = trigger.event().payload.request_id;
     persist_chrome(*chrome, settings, saves);
-    mark_chrome_unsent(&views, &mut commands);
-    if chrome.visible {
-        let entity = trigger.event().webview;
-        if let Ok((fv, mut st)) = editors.get_mut(entity) {
-            reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+    let entity = trigger.event().webview;
+    for (view, _, _) in &mut editors {
+        if view == entity {
+            commands.entity(view).insert(ExplorerChromeSent);
+        } else {
+            commands.entity(view).remove::<ExplorerChromeSent>();
+        }
+    }
+    if chrome.visible
+        && let Ok((_, fv, mut st)) = editors.get_mut(entity)
+    {
+        reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+        if let Some(browsers) = browsers {
+            emit_explorer_focus(entity, &fv.path, &browsers, &mut commands);
         }
     }
 }
@@ -3230,6 +3265,43 @@ mod explorer_tests {
         assert!(st.expanded.contains(tmp.path()));
         assert!(st.expanded.contains(&src));
         assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
+    }
+
+    #[test]
+    fn repeated_reveal_skips_unchanged_tree_rebuild() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_reveal_current);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
+        app.world_mut()
+            .get_mut::<ExplorerState>(e)
+            .unwrap()
+            .focus_path = None;
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        assert!(app.world().get::<ExplorerTreeDirty>(e).is_none());
+        assert!(
+            app.world()
+                .get::<ExplorerState>(e)
+                .unwrap()
+                .focus_path
+                .is_none()
+        );
     }
 
     #[test]
