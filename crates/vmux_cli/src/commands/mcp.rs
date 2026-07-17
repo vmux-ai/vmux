@@ -3,6 +3,7 @@ use std::io;
 pub async fn run(
     anchor: Option<String>,
     profile: Option<String>,
+    acp_session: bool,
     acp_terminals: bool,
 ) -> io::Result<()> {
     if let Some(p) = profile
@@ -12,5 +13,5 @@ pub async fn run(
         unsafe { std::env::set_var("VMUX_PROFILE", p) };
     }
     let anchor = anchor.and_then(|s| s.parse::<vmux_service::protocol::ProcessId>().ok());
-    vmux_mcp::protocol::run_stdio(anchor, acp_terminals).await
+    vmux_mcp::protocol::run_stdio(anchor, acp_session, acp_terminals).await
 }

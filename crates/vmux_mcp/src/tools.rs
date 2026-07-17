@@ -458,6 +458,19 @@ its absolute path — do your work there. No-op-safe: returns the existing path 
     }
 }
 
+fn resume_in_acp_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "resume_in_acp".into(),
+        description: "Continue the current CLI conversation in its ACP chat runtime. Replaces this CLI page in place while preserving the session id and working directory. Call only when the user asks to switch or continue in ACP."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+        }),
+    }
+}
+
 fn read_terminal_definition() -> ToolDefinition {
     ToolDefinition {
         name: "read_terminal".into(),
@@ -593,13 +606,12 @@ name=<feature> to drop a demo straight into the repo."
 }
 
 pub fn tool_definitions() -> Vec<ToolDefinition> {
-    tool_definitions_filtered(false)
+    tool_definitions_filtered(false, false)
 }
 
-/// Build the MCP tool list. When `acp_terminals` is set (ACP sessions, which get terminals through
-/// the ACP terminal methods), `run` + `read_terminal` are omitted; `terminal_send` (no ACP
-/// equivalent for keystrokes/TUIs) is always kept.
-pub fn tool_definitions_filtered(acp_terminals: bool) -> Vec<ToolDefinition> {
+/// Build the MCP tool list. ACP sessions omit the CLI-only runtime switch. When
+/// `acp_terminals` is set, `run` + `read_terminal` are also omitted; `terminal_send` stays.
+pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = vmux_command_mcp::tool_entries()
         .into_iter()
         .chain(McpParamTool::mcp_tool_entries())
@@ -617,6 +629,9 @@ pub fn tool_definitions_filtered(acp_terminals: bool) -> Vec<ToolDefinition> {
     defs.push(open_file_definition());
     defs.push(read_file_definition());
     defs.push(grep_definition());
+    if !acp_session {
+        defs.push(resume_in_acp_definition());
+    }
     if !acp_terminals {
         defs.push(run_definition());
     }
@@ -652,6 +667,13 @@ pub fn dispatch_with_anchor(
             Some("bottom") => Ok(Some(AgentPaneDirection::Bottom)),
             Some(other) => Err(format!("unknown direction: {other}")),
         }
+    }
+    if name == "resume_in_acp" {
+        let anchor = anchor
+            .ok_or("resume_in_acp requires an agent anchor (not available to this client)")?;
+        return Ok(DispatchTarget::Command(AgentCommand::ResumeInAcp {
+            anchor,
+        }));
     }
     if name == "open_page" {
         let anchor =
@@ -1310,7 +1332,7 @@ mod tests {
 
     #[test]
     fn acp_terminals_toolset_hides_run_and_read_terminal_keeps_send() {
-        let names: Vec<String> = tool_definitions_filtered(true)
+        let names: Vec<String> = tool_definitions_filtered(true, true)
             .into_iter()
             .map(|def| def.name)
             .collect();
@@ -1318,6 +1340,24 @@ mod tests {
         assert!(!names.contains(&"read_terminal".to_string()));
         assert!(names.contains(&"terminal_send".to_string()));
         assert!(names.contains(&"open_page".to_string()));
+        assert!(!names.contains(&"resume_in_acp".to_string()));
+    }
+
+    #[test]
+    fn cli_toolset_lists_resume_in_acp() {
+        assert!(tool_names().contains(&"resume_in_acp".to_string()));
+    }
+
+    #[test]
+    fn resume_in_acp_dispatches_with_anchor() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target =
+            dispatch_with_anchor("resume_in_acp", serde_json::json!({}), Some(anchor)).unwrap();
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor: got }) if got == anchor
+        ));
+        assert!(dispatch_from_tool_call("resume_in_acp", serde_json::json!({})).is_err());
     }
 
     #[test]

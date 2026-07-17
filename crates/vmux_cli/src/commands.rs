@@ -21,6 +21,9 @@ pub enum Command {
         anchor: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        /// Serve tools to an ACP agent rather than a CLI agent.
+        #[arg(long)]
+        acp_session: bool,
         /// Serve the ACP toolset: hide `run` + `read_terminal` (ACP sessions use ACP-native
         /// terminals instead); `terminal_send` stays.
         #[arg(long)]

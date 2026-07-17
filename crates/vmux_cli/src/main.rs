@@ -14,8 +14,9 @@ async fn main() -> std::io::Result<()> {
         Some(Command::Mcp {
             anchor,
             profile,
+            acp_session,
             acp_terminals,
-        }) => commands::mcp::run(anchor, profile, acp_terminals).await,
+        }) => commands::mcp::run(anchor, profile, acp_session, acp_terminals).await,
         Some(Command::Notify {
             title,
             body,
