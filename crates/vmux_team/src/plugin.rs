@@ -9,15 +9,33 @@ use vmux_core::event::team::{
 };
 use vmux_core::page::PageReady;
 use vmux_core::team::{Agent, Profile, User};
-use vmux_core::{
-    PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, focus_pane_entity,
-};
+use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 use vmux_layout::stack::Stack;
+use vmux_layout::warm_page::{WarmPage, WarmPagePlugin};
 
 #[derive(Component)]
 struct Team;
+
+impl WarmPage for Team {
+    const HOST: &'static str = "team";
+    const URL: &'static str = TEAM_PAGE_URL;
+    const TITLE: &'static str = "Team";
+
+    fn spawn(
+        commands: &mut Commands,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) -> Entity {
+        commands
+            .spawn((
+                vmux_layout::Browser::new_with_title(meshes, webview_mt, Self::URL, Self::TITLE),
+                Team,
+            ))
+            .id()
+    }
+}
 
 #[derive(Component)]
 struct TeamListSent;
@@ -32,10 +50,7 @@ impl Plugin for TeamPlugin {
         vmux_core::register_host_spawn(app, "team");
         app.add_systems(Startup, spawn_user_profile)
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
-            .add_systems(
-                Update,
-                handle_team_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
+            .add_plugins(WarmPagePlugin::<Team>::default())
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
                 "team", "layout",
             ]))
@@ -261,42 +276,6 @@ fn emit_team(
     }
 }
 
-fn handle_team_page_open(
-    tasks: Query<(Entity, &PageOpenTask), (Without<PageOpenHandled>, Without<PageOpenError>)>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    for (entity, task) in &tasks {
-        if task.url != TEAM_PAGE_URL {
-            continue;
-        }
-        if let Ok(children) = children_q.get(task.stack) {
-            for child in children.iter() {
-                commands.entity(child).try_despawn();
-            }
-        }
-        commands.entity(task.stack).insert(PageMetadata {
-            title: "Team".to_string(),
-            url: TEAM_PAGE_URL.to_string(),
-            bg_color: None,
-            ..default()
-        });
-        commands.spawn((
-            vmux_layout::Browser::new_with_title(
-                &mut meshes,
-                &mut webview_mt,
-                TEAM_PAGE_URL,
-                "Team",
-            ),
-            Team,
-            ChildOf(task.stack),
-        ));
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
 fn reset_team_sent_on_page_ready(
     trigger: On<BinReceive<PageReady>>,
     team_views: Query<(), With<Team>>,
@@ -458,12 +437,12 @@ mod tests {
 
     #[test]
     fn team_page_open_titles_webview_team() {
-        use vmux_core::page_open::PageOpenId;
+        use vmux_core::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_team_page_open);
+            .add_plugins(WarmPagePlugin::<Team>::default());
 
         let stack = app.world_mut().spawn(Stack::default()).id();
         app.world_mut().spawn(PageOpenTask {

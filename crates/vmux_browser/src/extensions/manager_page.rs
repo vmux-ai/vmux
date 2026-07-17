@@ -14,7 +14,7 @@ use vmux_core::event::extension::{
     ExtUninstallRequest, ExtensionsEvent,
 };
 use vmux_core::extension::store;
-use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_core::page::PrewarmPage;
 
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "extensions",
@@ -49,11 +49,19 @@ pub struct ExtensionsPlugin;
 
 impl Plugin for ExtensionsPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            PrewarmPage {
+                host: "extensions",
+                url: EXTENSIONS_PAGE_URL,
+                title: "Extensions",
+                pool_size: 1,
+            },
+        ));
+        vmux_core::register_host_spawn(app, "extensions");
         app.init_resource::<ExtOutbox>()
             .init_resource::<ExtSubscribers>()
             .init_resource::<WebStoreInjectors>()
-            .add_message::<CefPageAttachRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
                 ExtToggleRequest,
                 ExtUninstallRequest,
@@ -74,33 +82,8 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_add_extension)
             .add_systems(
                 Update,
-                handle_extensions_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
                 (run_agent_installs, inject_on_cws_nav, drain_outbox),
             );
-    }
-}
-
-type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-
-fn handle_extensions_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    mut attach_writer: MessageWriter<CefPageAttachRequest>,
-    mut commands: Commands,
-) {
-    for (entity, task) in &tasks {
-        if task.url != EXTENSIONS_PAGE_URL {
-            continue;
-        }
-        attach_writer.write(CefPageAttachRequest {
-            stack: task.stack,
-            url: task.url.clone(),
-            title: "Extensions".to_string(),
-            bg_color: None,
-        });
-        commands.entity(entity).insert(PageOpenHandled);
     }
 }
 

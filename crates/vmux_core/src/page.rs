@@ -21,6 +21,14 @@ pub struct PageManifest {
     pub command_bar: bool,
 }
 
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrewarmPage {
+    pub host: &'static str,
+    pub url: &'static str,
+    pub title: &'static str,
+    pub pool_size: usize,
+}
+
 impl PageManifest {
     pub fn embedded_host(&self) -> CefEmbeddedHost {
         CefEmbeddedHost {

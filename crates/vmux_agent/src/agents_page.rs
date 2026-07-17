@@ -14,7 +14,7 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 #[cfg(not(target_arch = "wasm32"))]
 use crossbeam_channel::{Receiver, Sender};
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::acp_registry::Runtime;
@@ -27,6 +27,8 @@ use crate::agents_page::event::{
 use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::agent::AgentKind;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::page::PrewarmPage;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -37,10 +39,9 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-/// The most recent `vmux://agents` webview to push the catalog to.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
-struct AgentsPageWebview(Option<Entity>);
+struct AgentsPageWebviews(HashSet<Entity>);
 
 /// Session install status per agent id (`status`, `detail`), overlaid on the disk-derived state.
 #[cfg(not(target_arch = "wasm32"))]
@@ -85,8 +86,17 @@ pub struct AgentsManagerPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 impl Plugin for AgentsManagerPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
-        app.init_resource::<AgentsPageWebview>()
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            PrewarmPage {
+                host: "agents",
+                url: "vmux://agents/",
+                title: "Agents",
+                pool_size: 1,
+            },
+        ));
+        vmux_core::register_host_spawn(app, "agents");
+        app.init_resource::<AgentsPageWebviews>()
             .init_resource::<AgentsStatus>()
             .init_resource::<AgentsInstallChannel>()
             .init_resource::<AcpInstallGeneration>()
@@ -187,9 +197,9 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
 #[cfg(not(target_arch = "wasm32"))]
 fn on_catalog_request(
     trigger: On<BinReceive<AgentsCatalogRequest>>,
-    mut webview_res: ResMut<AgentsPageWebview>,
+    mut webviews: ResMut<AgentsPageWebviews>,
 ) {
-    webview_res.0 = Some(trigger.event().webview);
+    webviews.0.insert(trigger.event().webview);
 }
 
 /// Kick a background install (or update) for the requested agent.
@@ -270,29 +280,47 @@ fn drain_agent_installs(
 fn push_agents(
     catalog: Res<AcpCatalog>,
     status: Res<AgentsStatus>,
-    webview_res: Res<AgentsPageWebview>,
+    webviews: Res<AgentsPageWebviews>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    if !catalog.is_changed() && !status.is_changed() && !webview_res.is_changed() {
+    if !catalog.is_changed() && !status.is_changed() && !webviews.is_changed() {
         return;
     }
-    let Some(webview) = webview_res.0 else {
-        return;
-    };
-    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
-        return;
+    let payload = catalog_snapshot(&catalog, &status);
+    for &webview in &webviews.0 {
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            AGENTS_CATALOG_EVENT,
+            &payload,
+        ));
     }
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        AGENTS_CATALOG_EVENT,
-        &catalog_snapshot(&catalog, &status),
-    ));
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_tracks_multiple_webviews() {
+        let mut app = App::new();
+        app.init_resource::<AgentsPageWebviews>()
+            .add_observer(on_catalog_request);
+        let first = app.world_mut().spawn_empty().id();
+        let second = app.world_mut().spawn_empty().id();
+        for webview in [first, second] {
+            app.world_mut().trigger(BinReceive {
+                webview,
+                payload: AgentsCatalogRequest {},
+            });
+        }
+
+        let webviews = app.world().resource::<AgentsPageWebviews>();
+        assert_eq!(webviews.0, HashSet::from([first, second]));
+    }
 
     #[test]
     fn cli_catalog_rows_report_install_state() {
