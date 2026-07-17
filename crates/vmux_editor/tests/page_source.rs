@@ -33,9 +33,11 @@ fn explorer_rows_emit_intents() {
 fn explorer_animates_tree_and_sections() {
     let s = explorer_source();
     assert!(s.contains("reconcile_rows"));
+    assert!(s.contains("merge_tree_motion_rows"));
     assert!(s.contains("grid-rows-[0fr]"));
     assert!(s.contains("grid-rows-[1fr]"));
-    assert!(s.contains("transition-[grid-template-rows,opacity,translate]"));
+    assert!(s.contains("transition-[opacity,translate]"));
+    assert!(!s.contains("transition-[grid-template-rows,opacity,translate]"));
     assert!(s.contains("transition-[rotate] duration-150"));
     assert!(s.contains("schedule_tree_focus"));
     assert!(s.contains("current_path"));
@@ -53,6 +55,8 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("transition-[translate,opacity]"));
     assert!(!s.contains("transition-[width] duration-200"));
     assert!(s.contains("ExplorerRevealCurrent"));
+    assert!(s.contains("handle_explorer_shortcut"));
+    assert!(s.contains("Mode::Text => focus_file_input()"));
     assert!(s.contains("raw.shift_key()"));
     assert!(s.contains("key.eq_ignore_ascii_case(\"e\")"));
 }

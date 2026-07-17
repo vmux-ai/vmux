@@ -328,6 +328,7 @@ fn set_explorer_visible(
     mut visible: Signal<bool>,
     client_id: Signal<u64>,
     mut request_id: Signal<u64>,
+    mode: Signal<Mode>,
 ) {
     let next_request_id = request_id().wrapping_add(1);
     request_id.set(next_request_id);
@@ -337,22 +338,59 @@ fn set_explorer_visible(
         client_id: client_id(),
         request_id: next_request_id,
     });
+    if !next {
+        match mode() {
+            Mode::Text => focus_file_input(),
+            Mode::Dir | Mode::Media(_) => focus_container(),
+        }
+    }
 }
 
-fn toggle_explorer(visible: Signal<bool>, client_id: Signal<u64>, request_id: Signal<u64>) {
-    set_explorer_visible(!visible(), visible, client_id, request_id);
+fn toggle_explorer(
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    set_explorer_visible(!visible(), visible, client_id, request_id, mode);
 }
 
 fn reveal_current_in_explorer(
     visible: Signal<bool>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
+    mode: Signal<Mode>,
 ) {
     if visible() {
         let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
     } else {
-        set_explorer_visible(true, visible, client_id, request_id);
+        set_explorer_visible(true, visible, client_id, request_id, mode);
     }
+}
+
+fn handle_explorer_shortcut(
+    event: &Event<KeyboardData>,
+    visible: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> bool {
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+        return false;
+    };
+    let key = raw.key();
+    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
+        event.prevent_default();
+        reveal_current_in_explorer(visible, client_id, request_id, mode);
+        return true;
+    }
+    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
+        event.prevent_default();
+        toggle_explorer(visible, client_id, request_id, mode);
+        return true;
+    }
+    false
 }
 
 #[component]
@@ -360,6 +398,9 @@ fn ExplorerSidebar(
     visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
 ) -> Element {
     let open = visible();
     let panel_width = width();
@@ -375,7 +416,12 @@ fn ExplorerSidebar(
         "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
     };
     rsx! {
-        div { class: "relative z-[2] h-full shrink-0", style: "{wrapper_style}",
+        div {
+            class: "relative z-[2] h-full shrink-0",
+            style: "{wrapper_style}",
+            onkeydown: move |event| {
+                handle_explorer_shortcut(&event, visible, client_id, request_id, mode);
+            },
             div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel {} }
         }
         div {
@@ -397,12 +443,13 @@ fn ExplorerToggleButton(
     visible: Signal<bool>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
+    mode: Signal<Mode>,
 ) -> Element {
     rsx! {
         button {
             class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
             title: "Toggle Explorer (Cmd+B)",
-            onclick: move |_| toggle_explorer(visible, client_id, request_id),
+            onclick: move |_| toggle_explorer(visible, client_id, request_id, mode),
             svg {
                 class: "h-4 w-4",
                 view_box: "0 0 24 24",
@@ -768,6 +815,9 @@ pub fn Page() -> Element {
                 visible: explorer_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
+                client_id: explorer_client_id,
+                request_id: explorer_request_id,
+                mode,
             }
 
         div {
@@ -791,28 +841,20 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
+                if handle_explorer_shortcut(
+                    &e,
+                    explorer_visible,
+                    explorer_client_id,
+                    explorer_request_id,
+                    mode,
+                ) {
+                    return;
+                }
                 let data = e.data();
                 let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
                     return;
                 };
                 let key = raw.key();
-                if (raw.meta_key() || raw.ctrl_key())
-                    && raw.shift_key()
-                    && key.eq_ignore_ascii_case("e")
-                {
-                    e.prevent_default();
-                    reveal_current_in_explorer(
-                        explorer_visible,
-                        explorer_client_id,
-                        explorer_request_id,
-                    );
-                    return;
-                }
-                if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
-                    e.prevent_default();
-                    toggle_explorer(explorer_visible, explorer_client_id, explorer_request_id);
-                    return;
-                }
                 match mode() {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
@@ -932,6 +974,7 @@ pub fn Page() -> Element {
                     visible: explorer_visible,
                     client_id: explorer_client_id,
                     request_id: explorer_request_id,
+                    mode,
                 }
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }

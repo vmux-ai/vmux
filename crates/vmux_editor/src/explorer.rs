@@ -2,8 +2,9 @@
 
 //! Explorer panel rendering, motion, context menus, and user intents.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::type_icon;
@@ -155,48 +156,16 @@ fn reconcile_rows(
 ) {
     let id = generation().wrapping_add(1);
     generation.set(id);
-    let next_by_path: HashMap<String, TreeRow> = next
-        .iter()
-        .cloned()
-        .map(|row| (row.path.clone(), row))
-        .collect();
-    let next_paths: HashSet<String> = next_by_path.keys().cloned().collect();
-    let mut merged: Vec<MotionRow> = rows
+    let next_paths: HashSet<String> = next.iter().map(|row| row.path.clone()).collect();
+    let current = rows
         .read()
         .iter()
-        .map(|old| match next_by_path.get(&old.row.path) {
-            Some(row) => MotionRow {
-                row: row.clone(),
-                visible: true,
-            },
-            None => MotionRow {
-                row: old.row.clone(),
-                visible: false,
-            },
-        })
+        .map(|motion| motion.row.clone())
+        .collect::<Vec<_>>();
+    let merged = merge_tree_motion_rows(&current, &next)
+        .into_iter()
+        .map(|(row, visible)| MotionRow { row, visible })
         .collect();
-    for (index, row) in next.iter().enumerate() {
-        if merged.iter().any(|item| item.row.path == row.path) {
-            continue;
-        }
-        let insert_at = next[..index]
-            .iter()
-            .rev()
-            .find_map(|previous| {
-                merged
-                    .iter()
-                    .position(|item| item.row.path == previous.path)
-                    .map(|position| position + 1)
-            })
-            .unwrap_or(0);
-        merged.insert(
-            insert_at,
-            MotionRow {
-                row: row.clone(),
-                visible: false,
-            },
-        );
-    }
     rows.set(merged);
     if let Some(window) = web_sys::window() {
         let enter_paths = next_paths;
@@ -465,9 +434,9 @@ pub fn ExplorerPanel() -> Element {
                                 let active = row.path == current_path();
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
-                                    "grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,translate] duration-150 ease-out"
+                                    "opacity-100 translate-y-0 transition-[opacity,translate] duration-150 ease-out"
                                 } else {
-                                    "grid grid-rows-[0fr] opacity-0 -translate-y-1 transition-[grid-template-rows,opacity,translate] duration-150 ease-out"
+                                    "pointer-events-none opacity-0 -translate-y-1 transition-[opacity,translate] duration-150 ease-out"
                                 };
                                 rsx! {
                                     div { key: "{row.path}", class: "{motion_class}",
