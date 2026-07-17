@@ -70,6 +70,12 @@ pub struct AcpTerminal {
     pub output_byte_limit: Option<u64>,
 }
 
+#[derive(Clone)]
+struct AcpFsScope {
+    cwd: PathBuf,
+    vibe_session_id: Option<Arc<Mutex<Option<String>>>>,
+}
+
 /// State shared between the driver's request handlers and its prompt loop.
 pub struct AcpShared {
     pub sid: String,
@@ -382,6 +388,12 @@ pub async fn run(
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
+    let fs_session_id = matches!(agent_id.as_str(), "mistral-vibe" | "vibe")
+        .then(|| Arc::new(Mutex::new(resume.clone())));
+    let fs_scope = AcpFsScope {
+        cwd: shared.cwd.clone(),
+        vibe_session_id: fs_session_id.clone(),
+    };
     let session_meta = session_meta_for_agent(&agent_id);
     let mut child = match Command::new(&command)
         .args(&args)
@@ -413,8 +425,8 @@ pub async fn run(
     let wait_shared = shared.clone();
     let kill_shared = shared.clone();
     let release_shared = shared.clone();
-    let read_cwd = shared.cwd.clone();
-    let write_cwd = shared.cwd.clone();
+    let read_scope = fs_scope.clone();
+    let write_scope = fs_scope;
 
     let result = Client
         .builder()
@@ -454,7 +466,7 @@ pub async fn run(
             async move |req: ReadTextFileRequest,
                         responder: Responder<ReadTextFileResponse>,
                         _cx| {
-                match read_text_file(&read_cwd, &req) {
+                match read_text_file(&read_scope, &req) {
                     Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -465,7 +477,7 @@ pub async fn run(
             async move |req: WriteTextFileRequest,
                         responder: Responder<WriteTextFileResponse>,
                         _cx| {
-                match write_text_file(&write_cwd, &req) {
+                match write_text_file(&write_scope, &req) {
                     Ok(()) => responder.respond(WriteTextFileResponse::new()),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -571,6 +583,7 @@ pub async fn run(
                 main_shared.finish_history_replay(session_id.is_some());
             }
             if let Some(sid) = &session_id {
+                remember_acp_fs_session(&fs_session_id, sid);
                 main_shared.emit(ServiceMessage::AcpSessionCreated {
                     sid: main_shared.sid.clone(),
                     acp_session_id: sid.to_string(),
@@ -597,13 +610,15 @@ pub async fn run(
                 })
                 .await;
                 match ensured {
-                    Ok((sid, true)) => {
-                        main_shared.emit(ServiceMessage::AcpSessionCreated {
-                            sid: main_shared.sid.clone(),
-                            acp_session_id: sid.to_string(),
-                        });
+                    Ok((sid, created)) => {
+                        remember_acp_fs_session(&fs_session_id, &sid);
+                        if created {
+                            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                sid: main_shared.sid.clone(),
+                                acp_session_id: sid.to_string(),
+                            });
+                        }
                     }
-                    Ok(_) => {}
                     Err(err) => {
                         main_shared.emit_status(AgentRunStatus::Errored(format!(
                             "acp session/new failed: {err}"
@@ -653,6 +668,7 @@ pub async fn run(
                                 continue;
                             }
                         };
+                        remember_acp_fs_session(&fs_session_id, &active_session_id);
                         if created {
                             main_shared.emit(ServiceMessage::AcpSessionCreated {
                                 sid: main_shared.sid.clone(),
@@ -1128,6 +1144,61 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
     Some(abs)
 }
 
+fn remember_acp_fs_session(session: &Option<Arc<Mutex<Option<String>>>>, session_id: &SessionId) {
+    if let Some(session) = session {
+        *session.lock().unwrap() = Some(session_id.to_string());
+    }
+}
+
+fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
+    resolve_in_cwd(&scope.cwd, path).or_else(|| {
+        let session_id = scope.vibe_session_id.as_ref()?.lock().unwrap().clone()?;
+        resolve_vibe_scratchpad(&session_id, path)
+    })
+}
+
+fn resolve_vibe_scratchpad(session_id: &str, path: &std::path::Path) -> Option<PathBuf> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let short_id: String = session_id.chars().take(8).collect();
+    if short_id.len() != 8 {
+        return None;
+    }
+    let prefix = format!("vibe-scratchpad-{short_id}-");
+    let temp = std::env::temp_dir();
+    let real_temp = temp.canonicalize().ok()?;
+    for base in [&temp, &real_temp] {
+        let Ok(relative) = path.strip_prefix(base) else {
+            continue;
+        };
+        let Some(std::path::Component::Normal(root_name)) = relative.components().next() else {
+            continue;
+        };
+        let Some(root_name_str) = root_name.to_str() else {
+            continue;
+        };
+        if !root_name_str.starts_with(&prefix) || root_name_str.len() == prefix.len() {
+            continue;
+        }
+        let scratchpad = base.join(root_name);
+        let Ok(real_scratchpad) = scratchpad.canonicalize() else {
+            continue;
+        };
+        if !real_scratchpad.starts_with(&real_temp) {
+            continue;
+        }
+        if let Some(path) = resolve_in_cwd(&scratchpad, path) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
     if line.is_none() && limit.is_none() {
         return text.to_string();
@@ -1140,15 +1211,15 @@ fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
     lines.get(start..end).unwrap_or(&[]).join("\n")
 }
 
-fn read_text_file(cwd: &std::path::Path, req: &ReadTextFileRequest) -> Result<String, String> {
-    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+fn read_text_file(scope: &AcpFsScope, req: &ReadTextFileRequest) -> Result<String, String> {
+    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
     let text =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     Ok(slice_lines(&text, req.line, req.limit))
 }
 
-fn write_text_file(cwd: &std::path::Path, req: &WriteTextFileRequest) -> Result<(), String> {
-    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+fn write_text_file(scope: &AcpFsScope, req: &WriteTextFileRequest) -> Result<(), String> {
+    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
@@ -1716,6 +1787,38 @@ mod tests {
         );
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/etc/passwd")).is_none());
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/work/../etc/passwd")).is_none());
+    }
+
+    #[test]
+    fn vibe_fs_scope_allows_only_current_session_scratchpad() {
+        let scratchpad =
+            std::env::temp_dir().join(format!("vibe-scratchpad-deadbeef-{}", std::process::id()));
+        std::fs::create_dir_all(&scratchpad).unwrap();
+        let scope = AcpFsScope {
+            cwd: PathBuf::from("/work"),
+            vibe_session_id: Some(Arc::new(Mutex::new(Some(
+                "deadbeef-0000-0000-0000-000000000000".to_string(),
+            )))),
+        };
+
+        assert!(resolve_acp_fs_path(&scope, &scratchpad.join("test.nu")).is_some());
+        assert!(
+            resolve_acp_fs_path(
+                &scope,
+                &scratchpad.canonicalize().unwrap().join("canonical.nu")
+            )
+            .is_some()
+        );
+        assert!(
+            resolve_acp_fs_path(
+                &scope,
+                &std::env::temp_dir().join("vibe-scratchpad-cafebabe-x/test.nu")
+            )
+            .is_none()
+        );
+        assert!(resolve_acp_fs_path(&scope, std::path::Path::new("/etc/passwd")).is_none());
+
+        std::fs::remove_dir_all(scratchpad).unwrap();
     }
 
     #[test]

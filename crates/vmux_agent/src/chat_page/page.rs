@@ -1000,6 +1000,10 @@ fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element
 
 fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
+    let latest_thinking = turn
+        .blocks
+        .iter()
+        .rposition(|block| matches!(block, ChatBlock::Thinking(_)));
     let blocks = turn
         .blocks
         .iter()
@@ -1020,7 +1024,7 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
     rsx! {
         div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
             for (j , block , children) in blocks {
-                {render_block(j, block, &children)}
+                {render_block(j, block, &children, latest_thinking == Some(j))}
             }
             if turn.running && !reconnecting {
                 {render_working(verb, elapsed)}
@@ -1088,7 +1092,8 @@ enum ActivityIcon {
 fn render_activity_icon(kind: ActivityIcon) -> Element {
     let paths: &[&str] = match kind {
         ActivityIcon::Thinking => &[
-            "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z",
+            "M9.5 4A2.5 2.5 0 0 1 12 6.5v11a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 4.5 15.5a3 3 0 0 1 .34-5.14A2.5 2.5 0 0 1 6.5 6a3 3 0 0 1 3-2Z",
+            "M14.5 4A2.5 2.5 0 0 0 12 6.5v11a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 19.5 15.5a3 3 0 0 0-.34-5.14A2.5 2.5 0 0 0 17.5 6a3 3 0 0 0-3-2Z",
         ],
         ActivityIcon::ReadFile => &[
             "M12 7v14",
@@ -1183,7 +1188,12 @@ fn tool_presentation(name: &str) -> (ActivityIcon, Cow<'static, str>) {
     }
 }
 
-fn render_block(key: usize, block: &ChatBlock, children: &[(usize, &ChatBlock)]) -> Element {
+fn render_block(
+    key: usize,
+    block: &ChatBlock,
+    children: &[(usize, &ChatBlock)],
+    latest: bool,
+) -> Element {
     match block {
         ChatBlock::Text(text) => rsx! {
             div {
@@ -1195,7 +1205,7 @@ fn render_block(key: usize, block: &ChatBlock, children: &[(usize, &ChatBlock)])
         ChatBlock::Thinking(text) => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
                 {render_activity_icon(ActivityIcon::Thinking)}
-                details { class: "disclosure min-w-0 text-sm text-muted-foreground",
+                details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "Thinking" }
                         {render_disclosure_icon()}
