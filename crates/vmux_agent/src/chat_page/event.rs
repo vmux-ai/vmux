@@ -6,6 +6,8 @@
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 /// Bin-event id: native → page files selected from disk or the clipboard.
 pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
+/// Bin-event id: native → page media entries matching an inline `@` query.
+pub const CHAT_MEDIA_ENTRIES_EVENT: &str = "chat_media_entries";
 
 #[derive(
     Clone,
@@ -58,6 +60,42 @@ pub struct ChatSubmitAttachment {
 )]
 pub struct ChatAttachments {
     pub attachments: Vec<ChatAttachment>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaEntry {
+    pub path: String,
+    pub name: String,
+    pub parent: String,
+    pub mime_type: String,
+    pub is_dir: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaEntries {
+    pub request_id: u64,
+    pub query: String,
+    pub entries: Vec<ChatMediaEntry>,
 }
 
 #[derive(
@@ -155,6 +193,37 @@ pub struct ChatPickFiles;
     rkyv::Deserialize,
 )]
 pub struct ChatPasteMedia;
+
+/// Page → native: list media and directories for an inline `@` query.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaListRequest {
+    pub request_id: u64,
+    pub query: String,
+}
+
+/// Page → native: attach paths selected from the inline `@` menu.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachPaths {
+    pub paths: Vec<String>,
+}
 
 /// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
 /// 2 = allow-always.
@@ -584,6 +653,25 @@ mod tests {
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);
         assert_eq!(back.handoff_message_count, 2);
+    }
+
+    #[test]
+    fn chat_media_entries_rkyv_roundtrip() {
+        let value = ChatMediaEntries {
+            request_id: 7,
+            query: "Pictures/scr".into(),
+            entries: vec![ChatMediaEntry {
+                path: "/Users/me/Pictures/screenshot.png".into(),
+                name: "screenshot.png".into(),
+                parent: "~/Pictures".into(),
+                mime_type: "image/png".into(),
+                is_dir: false,
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
+        let back = rkyv::from_bytes::<ChatMediaEntries, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.request_id, 7);
+        assert_eq!(back.entries[0].name, "screenshot.png");
     }
 
     #[test]

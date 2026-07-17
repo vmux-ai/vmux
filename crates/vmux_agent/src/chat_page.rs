@@ -23,12 +23,13 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachment, ChatAttachments,
-    ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatPasteMedia, ChatPickFiles,
-    ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands,
+    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
+    ChatClearQueue, ChatEscape, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
+    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT,
+    ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
@@ -176,9 +177,12 @@ impl Plugin for AgentChatPagePlugin {
                 RuntimeSwitchRequest,
                 SelectModel,
             )>::for_hosts(&["agent"]))
-            .add_plugins(
-                BinEventEmitterPlugin::<(ChatPickFiles, ChatPasteMedia)>::for_hosts(&["agent"]),
-            )
+            .add_plugins(BinEventEmitterPlugin::<(
+                ChatPickFiles,
+                ChatPasteMedia,
+                ChatMediaListRequest,
+                ChatAttachPaths,
+            )>::for_hosts(&["agent"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -188,6 +192,8 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_escape)
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
+            .add_observer(on_chat_media_list_request)
+            .add_observer(on_chat_attach_paths)
             .add_observer(on_resume_list_request)
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
@@ -202,6 +208,7 @@ impl Plugin for AgentChatPagePlugin {
                     push_removed_acp_model_state_to_page,
                     send_acp_model_requests,
                     drain_chat_attachment_tasks,
+                    drain_chat_media_list_tasks,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -267,6 +274,13 @@ struct ResumeHandoffTask {
 struct ChatAttachmentTask {
     webview: Entity,
     task: Task<ChatAttachments>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct ChatMediaListTask {
+    webview: Entity,
+    task: Task<ChatMediaEntries>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -350,6 +364,178 @@ fn spawn_chat_attachment_task(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn decode_media_query_path(value: &str) -> std::path::PathBuf {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let (Some(high), Some(low)) = (
+                char::from(bytes[index + 1]).to_digit(16),
+                char::from(bytes[index + 2]).to_digit(16),
+            )
+        {
+            decoded.push(((high << 4) | low) as u8);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return ChatMediaEntries {
+            request_id,
+            query,
+            entries: Vec::new(),
+        };
+    };
+    let candidate = if let Some(rest) = query.strip_prefix("file://") {
+        decode_media_query_path(rest)
+    } else if let Some(rest) = query.strip_prefix("~/") {
+        home.join(decode_media_query_path(rest))
+    } else if query == "~" {
+        home.clone()
+    } else {
+        let path = decode_media_query_path(&query);
+        if path.is_absolute() {
+            path
+        } else {
+            home.join(path)
+        }
+    };
+    let query_is_dir = query.is_empty() || query.ends_with('/') || candidate.is_dir();
+    let (directory, filter) = if query_is_dir {
+        (candidate, String::new())
+    } else {
+        (
+            candidate
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| home.clone()),
+            candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+        )
+    };
+    let Ok(home) = home.canonicalize() else {
+        return ChatMediaEntries {
+            request_id,
+            query,
+            entries: Vec::new(),
+        };
+    };
+    let Ok(directory) = directory.canonicalize() else {
+        return ChatMediaEntries {
+            request_id,
+            query,
+            entries: Vec::new(),
+        };
+    };
+    if !directory.starts_with(&home) {
+        return ChatMediaEntries {
+            request_id,
+            query,
+            entries: Vec::new(),
+        };
+    }
+    let mut entries = std::fs::read_dir(&directory)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.')
+                || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
+            {
+                return None;
+            }
+            let is_dir = entry.file_type().ok()?.is_dir();
+            let mime_type = if is_dir {
+                String::new()
+            } else {
+                attachment_mime(&path)
+            };
+            if !is_dir
+                && !mime_type.starts_with("image/")
+                && !mime_type.starts_with("audio/")
+                && !mime_type.starts_with("video/")
+                && mime_type != "application/pdf"
+            {
+                return None;
+            }
+            let parent = path
+                .parent()
+                .and_then(|parent| parent.strip_prefix(&home).ok())
+                .map(|parent| {
+                    if parent.as_os_str().is_empty() {
+                        "~".to_string()
+                    } else {
+                        format!("~/{}", parent.to_string_lossy())
+                    }
+                })
+                .unwrap_or_else(|| "~".to_string());
+            Some(ChatMediaEntry {
+                path: path.to_string_lossy().into_owned(),
+                name,
+                parent,
+                mime_type,
+                is_dir,
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| {
+        b.is_dir.cmp(&a.is_dir).then_with(|| {
+            a.name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase())
+        })
+    });
+    entries.truncate(100);
+    ChatMediaEntries {
+        request_id,
+        query,
+        entries,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_media_list_request(
+    trigger: On<BinReceive<ChatMediaListRequest>>,
+    mut commands: Commands,
+) {
+    let request = trigger.event().payload.clone();
+    let task = IoTaskPool::get()
+        .spawn(async move { chat_media_entries(request.request_id, request.query) });
+    commands.spawn(ChatMediaListTask {
+        webview: trigger.event().webview,
+        task,
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: Commands) {
+    let paths = trigger
+        .event()
+        .payload
+        .paths
+        .iter()
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    spawn_chat_attachment_task(trigger.event().webview, paths, &mut commands);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Commands) {
     let mut dialog = rfd::FileDialog::new();
     if let Some(home) = std::env::var_os("HOME") {
@@ -395,6 +581,24 @@ fn drain_chat_attachment_tasks(
             pending.webview,
             CHAT_ATTACHMENTS_EVENT,
             &attachments,
+        ));
+        commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_chat_media_list_tasks(
+    mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            pending.webview,
+            CHAT_MEDIA_ENTRIES_EVENT,
+            &entries,
         ));
         commands.entity(entity).despawn();
     }
@@ -1251,6 +1455,14 @@ mod native_tests {
     use std::path::Path;
 
     #[test]
+    fn media_query_paths_decode_percent_escapes() {
+        assert_eq!(
+            decode_media_query_path("Pictures/My%20Image%25.png"),
+            std::path::PathBuf::from("Pictures/My Image%.png")
+        );
+    }
+
+    #[test]
     fn runtime_switch_builtin_acp_agents_to_cli() {
         let cases = [
             ("claude", "claude"),
@@ -1765,7 +1977,7 @@ mod native_tests {
         assert!(source.contains("show_capability_examples"));
         assert!(source.contains("attachments.read().is_empty()"));
         assert!(source.contains("if show_capability_examples"));
-        assert!(source.contains("Type / for quick access"));
+        assert!(source.contains("Type / for commands or @ for media"));
         assert!(!source.contains("agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0"));
         assert!(source.contains("prompt_prefix_at_utf16"));
         assert!(source.contains("agent-chat-caret"));
@@ -1785,6 +1997,8 @@ mod native_tests {
         assert!(source.contains("preview_data_url"));
         assert!(source.contains("Remove attachment"));
         assert!(source.contains("attachments_to_submit"));
+        assert!(source.contains("ChatMediaListRequest"));
+        assert!(source.contains("select_media_entry"));
     }
 
     #[test]

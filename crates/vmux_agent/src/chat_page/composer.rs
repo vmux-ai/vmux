@@ -27,6 +27,12 @@ pub(crate) enum PromptHistoryDirection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InlineMediaQuery<'a> {
+    pub start: usize,
+    pub query: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PromptEdit<'a> {
     Insert(&'a str),
     Backspace,
@@ -75,6 +81,30 @@ pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     } else {
         SelectorMode::Commands(token)
     }
+}
+
+pub(crate) fn inline_media_query(draft: &str) -> Option<InlineMediaQuery<'_>> {
+    draft.rmatch_indices('@').find_map(|(start, _)| {
+        let boundary = start == 0
+            || draft[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let query = &draft[start + 1..];
+        (boundary && !query.chars().any(char::is_whitespace))
+            .then_some(InlineMediaQuery { start, query })
+    })
+}
+
+pub(crate) fn replace_inline_media_query(
+    draft: &str,
+    query: InlineMediaQuery<'_>,
+    replacement: &str,
+) -> String {
+    let mut value = String::with_capacity(draft.len() + replacement.len());
+    value.push_str(&draft[..query.start]);
+    value.push_str(replacement);
+    value
 }
 
 pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -> bool {
@@ -462,6 +492,36 @@ mod tests {
     fn thinking_expands_only_until_the_next_block() {
         assert!(should_expand_thinking(0, 1));
         assert!(!should_expand_thinking(0, 2));
+    }
+
+    #[test]
+    fn inline_media_query_requires_a_token_boundary_and_open_tail() {
+        assert_eq!(
+            inline_media_query("inspect @Pictures/scr"),
+            Some(InlineMediaQuery {
+                start: 8,
+                query: "Pictures/scr",
+            })
+        );
+        assert_eq!(
+            inline_media_query("@"),
+            Some(InlineMediaQuery {
+                start: 0,
+                query: "",
+            })
+        );
+        assert_eq!(inline_media_query("mail@example.com"), None);
+        assert_eq!(inline_media_query("inspect @image.png next"), None);
+    }
+
+    #[test]
+    fn inline_media_replacement_preserves_prompt_prefix() {
+        let draft = "compare this @Pic";
+        let query = inline_media_query(draft).unwrap();
+        assert_eq!(
+            replace_inline_media_query(draft, query, "@Pictures/photo.png "),
+            "compare this @Pictures/photo.png "
+        );
     }
 
     #[test]

@@ -2,19 +2,21 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
-    menu_direction, move_prompt_history, move_selection, prompt_history_direction,
-    prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_expand_thinking, should_fetch_resume, tool_activity,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, inline_media_query,
+    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
+    prompt_history_direction, prompt_prefix_at_utf16, replace_inline_media_query,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
+    should_expand_thinking, tool_activity,
 };
 use crate::chat_page::event::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachment, ChatAttachments,
-    ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatItem,
-    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERBS,
+    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatBlock, ChatCancel,
+    ChatCancelQueuedPrompt, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
+    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -107,13 +109,53 @@ fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<St
     history
 }
 
-fn attachment_label(attachment: &ChatAttachment) -> String {
-    std::path::Path::new(&attachment.name)
+fn file_extension_label(name: &str) -> String {
+    std::path::Path::new(name)
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_ascii_uppercase())
         .filter(|extension| !extension.is_empty())
         .unwrap_or_else(|| "FILE".to_string())
+}
+
+fn attachment_label(attachment: &ChatAttachment) -> String {
+    file_extension_label(&attachment.name)
+}
+
+fn media_reference(entry: &ChatMediaEntry) -> String {
+    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+    if entry.parent == "~" {
+        format!("~/{name}", name = encode(&entry.name))
+    } else {
+        format!(
+            "{parent}/{name}",
+            parent = encode(&entry.parent),
+            name = encode(&entry.name)
+        )
+    }
+}
+
+fn select_media_entry(
+    entry: &ChatMediaEntry,
+    mut draft: Signal<String>,
+    mut menu_sel: Signal<usize>,
+) {
+    let value = draft.peek().clone();
+    let Some(query) = inline_media_query(&value) else {
+        return;
+    };
+    let reference = media_reference(entry);
+    let replacement = if entry.is_dir {
+        format!("@{reference}/")
+    } else {
+        let _ = try_cef_bin_emit_rkyv(&ChatAttachPaths {
+            paths: vec![entry.path.clone()],
+        });
+        format!("@{reference} ")
+    };
+    draft.set(replace_inline_media_query(&value, query, &replacement));
+    menu_sel.set(0);
+    focus_prompt_end();
 }
 
 fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
@@ -154,18 +196,20 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
             return;
         }
 
-        let selector_open = match selector_mode(&draft.peek()) {
-            SelectorMode::Resume(_) => true,
-            SelectorMode::Models(_) => true,
-            SelectorMode::Commands(query) => {
-                let query = query.to_lowercase();
-                slash_cmds
-                    .peek()
-                    .iter()
-                    .any(|command| command.name.starts_with(&query))
-            }
-            SelectorMode::None => false,
-        };
+        let draft_value = draft.peek();
+        let selector_open = inline_media_query(&draft_value).is_some()
+            || match selector_mode(&draft_value) {
+                SelectorMode::Resume(_) => true,
+                SelectorMode::Models(_) => true,
+                SelectorMode::Commands(query) => {
+                    let query = query.to_lowercase();
+                    slash_cmds
+                        .peek()
+                        .iter()
+                        .any(|command| command.name.starts_with(&query))
+                }
+                SelectorMode::None => false,
+            };
         let key = event.key();
         let direction = if event.meta_key() || event.alt_key() {
             None
@@ -244,6 +288,10 @@ pub fn Page() -> Element {
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
     let mut models = use_signal(Vec::<ModelOptionEntry>::new);
+    let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
+    let mut media_request_id = use_signal(|| 0u64);
+    let mut media_requested_query = use_signal(|| None::<String>);
+    let mut media_loading = use_signal(|| false);
     let mut current_model_id = use_signal(String::new);
     let mut current_model = use_signal(String::new);
     let mut menu_sel = use_signal(|| 0usize);
@@ -330,6 +378,15 @@ pub fn Page() -> Element {
             attachments.set(next);
             focus_prompt_end();
         });
+    let _media_entries =
+        use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+            if response.request_id != media_request_id() {
+                return;
+            }
+            media_entries.set(response.entries.clone());
+            media_loading.set(false);
+            menu_sel.set(0);
+        });
 
     let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
         slash_cmds.set(s.commands.clone());
@@ -358,6 +415,30 @@ pub fn Page() -> Element {
         } else if !should_fetch && resume_requested() {
             resume_requested.set(false);
             resume_loading.set(false);
+        }
+    });
+
+    use_effect(move || {
+        let value = draft();
+        let Some(query) = inline_media_query(&value).map(|query| query.query.to_string()) else {
+            media_entries.set(Vec::new());
+            if media_requested_query.peek().is_some() {
+                media_request_id.set(media_request_id().wrapping_add(1).max(1));
+            }
+            media_requested_query.set(None);
+            media_loading.set(false);
+            return;
+        };
+        if media_requested_query().as_deref() == Some(query.as_str()) {
+            return;
+        }
+        let request_id = media_request_id().wrapping_add(1).max(1);
+        media_request_id.set(request_id);
+        media_requested_query.set(Some(query.clone()));
+        media_entries.set(Vec::new());
+        media_loading.set(true);
+        if try_cef_bin_emit_rkyv(&ChatMediaListRequest { request_id, query }).is_err() {
+            media_loading.set(false);
         }
     });
 
@@ -409,6 +490,7 @@ pub fn Page() -> Element {
         SelectorMode::Models(query) => Some(query),
         _ => None,
     };
+    let media_query = inline_media_query(&draft_val);
     let filtered_cmds: Vec<SlashCommandEntry> = command_query
         .map(|query| {
             let query = query.to_lowercase();
@@ -429,6 +511,7 @@ pub fn Page() -> Element {
     let cmd_menu_open = command_query.is_some() && !filtered_cmds.is_empty();
     let session_menu_open = resume_query.is_some();
     let model_menu_open = model_query.is_some();
+    let media_menu_open = media_query.is_some();
     let resume_state = resume_query.map(|_| {
         resume_menu_state(
             resume_requested(),
@@ -443,6 +526,7 @@ pub fn Page() -> Element {
         let _ = draft.read();
         let _ = sessions.read().len();
         let _ = models.read().len();
+        let _ = media_entries.read().len();
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| {
@@ -618,6 +702,49 @@ pub fn Page() -> Element {
                 class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                 div {
                     class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+                    if media_menu_open {
+                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                            if media_loading() {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
+                            } else if media_entries.read().is_empty() {
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
+                            } else {
+                                for (i , entry) in media_entries.read().iter().cloned().enumerate() {
+                                    {
+                                        let entry = entry.clone();
+                                        rsx! {
+                                            div {
+                                                key: "media-{entry.path}",
+                                                id: "agent-selector-item-{i}",
+                                                class: if i == menu_sel() { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
+                                                onclick: move |_| select_media_entry(&entry, draft, menu_sel),
+                                                div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.06] text-muted-foreground",
+                                                    if entry.is_dir {
+                                                        svg {
+                                                            class: "h-4 w-4",
+                                                            view_box: "0 0 24 24",
+                                                            fill: "none",
+                                                            stroke: "currentColor",
+                                                            stroke_width: "2",
+                                                            stroke_linecap: "round",
+                                                            stroke_linejoin: "round",
+                                                            path { d: "M3 6h6l2 2h10v10H3z" }
+                                                        }
+                                                    } else {
+                                                        span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
+                                                    }
+                                                }
+                                                div { class: "min-w-0 flex-1",
+                                                    div { class: "truncate text-sm text-foreground", "{entry.name}" }
+                                                    div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if cmd_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
                             for (i , command) in filtered_cmds.iter().enumerate() {
@@ -852,7 +979,7 @@ pub fn Page() -> Element {
                                             terminal: false,
                                         }
                                     } else {
-                                        div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for quick access" }
+                                        div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for commands or @ for media" }
                                     }
                                 }
                             }
@@ -922,10 +1049,19 @@ pub fn Page() -> Element {
                                         ),
                                         SelectorMode::None => (Vec::new(), Vec::new(), Vec::new(), false, false),
                                     };
-                                    let selector_open = session_selector_open
+                                    let media_selector_open = inline_media_query(&draft_now).is_some();
+                                    let media_items = if media_selector_open {
+                                        media_entries.peek().clone()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    let selector_open = media_selector_open
+                                        || session_selector_open
                                         || model_selector_open
                                         || !cmd_items.is_empty();
-                                    let selector_len = if session_selector_open {
+                                    let selector_len = if media_selector_open {
+                                        media_items.len()
+                                    } else if session_selector_open {
                                         sess_items.len()
                                     } else if model_selector_open {
                                         model_items.len()
@@ -955,7 +1091,11 @@ pub fn Page() -> Element {
                                     {
                                         e.prevent_default();
                                         let selected = *menu_sel.peek();
-                                        if session_selector_open {
+                                        if media_selector_open {
+                                            if let Some(entry) = media_items.get(selected) {
+                                                select_media_entry(entry, draft, menu_sel);
+                                            }
+                                        } else if session_selector_open {
                                             if let Some(session) = sess_items.get(selected) {
                                                 select_resume_session(session, draft);
                                             }
@@ -970,11 +1110,16 @@ pub fn Page() -> Element {
                                     }
                                     if selector_open && e.key() == Key::Escape && !command_modifier {
                                         e.prevent_default();
-                                        draft.set(String::new());
+                                        if let Some(query) = inline_media_query(&draft_now) {
+                                            draft.set(replace_inline_media_query(&draft_now, query, ""));
+                                            focus_prompt_end();
+                                        } else {
+                                            draft.set(String::new());
+                                        }
                                         menu_sel.set(0);
                                         return;
                                     }
-                                    if (session_selector_open || model_selector_open)
+                                    if (media_selector_open || session_selector_open || model_selector_open)
                                         && matches!(e.key(), Key::Enter | Key::Escape)
                                     {
                                         return;
