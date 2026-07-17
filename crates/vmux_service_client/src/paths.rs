@@ -296,7 +296,7 @@ mod tests {
         assert_ne!(p.parent().unwrap(), service_dir());
         assert_eq!(
             p.file_name().unwrap().to_string_lossy(),
-            format!("vmux-{}.log", current_profile())
+            profile_file_name(current_profile(), &active_profile_name(), "log")
         );
     }
 
