@@ -561,6 +561,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 url: None,
                                 title: None,
                                 favicon_url: None,
+                                folder: None,
                             });
                         },
                         Icon { class: "h-4 w-4",

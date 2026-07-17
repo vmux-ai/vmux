@@ -3558,7 +3558,11 @@ fn handle_agent_queries(
         ),
     >,
     bm_children: Query<
-        (&vmux_core::Uuid, &vmux_core::PageMetadata),
+        (
+            &vmux_core::Uuid,
+            &vmux_core::PageMetadata,
+            &vmux_core::Order,
+        ),
         (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
     >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
@@ -3625,14 +3629,17 @@ fn handle_agent_queries(
                 let pins: Vec<serde_json::Value> = pin_rows.into_iter().map(|(_, v)| v).collect();
                 let mut roots: Vec<(u32, serde_json::Value)> = Vec::new();
                 for (uuid, name, children, collapsed, order) in bm_folders.iter() {
-                    let mut kids: Vec<serde_json::Value> = Vec::new();
+                    let mut kids: Vec<(u32, serde_json::Value)> = Vec::new();
                     if let Some(children) = children {
                         for child in children.iter() {
-                            if let Ok((u, m)) = bm_children.get(child) {
-                                kids.push(row(u, m));
+                            if let Ok((u, m, order)) = bm_children.get(child) {
+                                kids.push((order.0, row(u, m)));
                             }
                         }
                     }
+                    kids.sort_by_key(|(order, _)| *order);
+                    let kids: Vec<serde_json::Value> =
+                        kids.into_iter().map(|(_, row)| row).collect();
                     roots.push((
                         order.0,
                         serde_json::json!({

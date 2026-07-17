@@ -3525,7 +3525,7 @@ fn push_bookmarks_host_emit(
         ),
     >,
     child_bookmarks: Query<
-        (&vmux_core::Uuid, &PageMetadata),
+        (&vmux_core::Uuid, &PageMetadata, &vmux_core::Order),
         (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
     >,
     mut last: Local<String>,
@@ -3552,14 +3552,16 @@ fn push_bookmarks_host_emit(
 
     let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
     for (_entity, uuid, name, children, collapsed, order) in folders.iter() {
-        let mut kids: Vec<vmux_layout::event::BookmarkRow> = Vec::new();
+        let mut kids: Vec<(u32, vmux_layout::event::BookmarkRow)> = Vec::new();
         if let Some(children) = children {
             for child in children.iter() {
-                if let Ok((u, m)) = child_bookmarks.get(child) {
-                    kids.push(row(u, m));
+                if let Ok((u, m, order)) = child_bookmarks.get(child) {
+                    kids.push((order.0, row(u, m)));
                 }
             }
         }
+        kids.sort_by_key(|(order, _)| *order);
+        let kids = kids.into_iter().map(|(_, row)| row).collect();
         roots.push((
             order.0,
             vmux_layout::event::BookmarkNode::Folder(vmux_layout::event::FolderRow {
