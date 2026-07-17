@@ -388,6 +388,36 @@ pub struct ChatTurn {
     pub step_count: u32,
 }
 
+impl ChatTurn {
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn tool_result(&self, call_id: &str) -> Option<(&str, bool)> {
+        if call_id.is_empty() {
+            return None;
+        }
+        self.blocks.iter().find_map(|block| match block {
+            ChatBlock::ToolResult {
+                call_id: result_call_id,
+                content,
+                is_error,
+            } if result_call_id == call_id => Some((content.as_str(), *is_error)),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn has_tool_use(&self, call_id: &str) -> bool {
+        !call_id.is_empty()
+            && self.blocks.iter().any(|block| {
+                matches!(
+                    block,
+                    ChatBlock::ToolUse {
+                        call_id: tool_call_id,
+                        ..
+                    } if tool_call_id == call_id
+                )
+            })
+    }
+}
+
 /// The curated verbs the running-turn header cycles through (owned by the shared contract, not
 /// the view). The page picks one at random every few seconds while streaming.
 pub const WORKING_VERBS: &[&str] = &[
@@ -492,6 +522,57 @@ mod tests {
     #[test]
     fn working_verbs_nonempty() {
         assert!(!WORKING_VERBS.is_empty());
+    }
+
+    #[test]
+    fn tool_results_associate_by_call_id() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: "read-1".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolUse {
+                    call_id: "review-1".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolResult {
+                    call_id: "read-1".into(),
+                    content: "file contents".into(),
+                    is_error: false,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.tool_result("read-1"), Some(("file contents", false)));
+        assert_eq!(turn.tool_result("review-1"), None);
+        assert!(turn.has_tool_use("read-1"));
+        assert!(!turn.has_tool_use("missing"));
+    }
+
+    #[test]
+    fn empty_call_ids_do_not_associate() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: String::new(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                },
+                ChatBlock::ToolResult {
+                    call_id: String::new(),
+                    content: "file contents".into(),
+                    is_error: false,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.tool_result(""), None);
+        assert!(!turn.has_tool_use(""));
     }
 
     #[test]

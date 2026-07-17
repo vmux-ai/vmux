@@ -88,7 +88,11 @@ fn flush(
         turn.step_count = turn
             .blocks
             .iter()
-            .filter(|block| !matches!(block, ChatBlock::Text(_)))
+            .filter(|block| match block {
+                ChatBlock::Text(_) => false,
+                ChatBlock::ToolResult { call_id, .. } => !turn.has_tool_use(call_id),
+                _ => true,
+            })
             .count() as u32;
         turn.duration_secs = durations.get(*ordinal).copied();
         *ordinal += 1;
@@ -174,7 +178,7 @@ mod tests {
         let ChatItem::Turn(t) = &items[1] else {
             panic!()
         };
-        assert_eq!(t.step_count, 3);
+        assert_eq!(t.step_count, 2);
         assert_eq!(t.blocks.len(), 4);
         assert!(matches!(t.blocks[2], ChatBlock::ToolResult { .. }));
         assert!(matches!(&t.blocks[3], ChatBlock::Text(text) if text == "done"));
@@ -260,6 +264,23 @@ mod tests {
         assert!(matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "before"));
         assert!(matches!(&turn.blocks[1], ChatBlock::ToolUse { .. }));
         assert!(matches!(&turn.blocks[2], ChatBlock::Text(text) if text == "after"));
+    }
+
+    #[test]
+    fn unmatched_tool_result_remains_a_step() {
+        let msgs = vec![
+            Message::User { text: "a".into() },
+            Message::ToolResult {
+                call_id: "missing".into(),
+                content: "output".into(),
+                is_error: false,
+            },
+        ];
+        let items = group_turns(&msgs, &[], false);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(turn.step_count, 1);
     }
 
     #[test]
