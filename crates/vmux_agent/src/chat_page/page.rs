@@ -50,6 +50,16 @@ fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
         .ok()
 }
 
+fn resize_prompt_textarea() {
+    let Some(textarea) = prompt_textarea() else {
+        return;
+    };
+    let _ = textarea.set_attribute("style", "height:auto;overflow-y:hidden");
+    let height = textarea.scroll_height().clamp(48, 160);
+    let overflow = if height == 160 { "auto" } else { "hidden" };
+    let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
+}
+
 fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
     let init = web_sys::EventInit::new();
     init.set_bubbles(true);
@@ -181,6 +191,10 @@ pub fn Page() -> Element {
     let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(move || {
+        let _ = draft.read();
+        resize_prompt_textarea();
+    });
 
     use_future(move || async move {
         loop {
@@ -369,7 +383,7 @@ pub fn Page() -> Element {
             style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
-                div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background",
+                div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
                     MatrixRain {
                         accent_rgb: agent_accent.rain_rgb.to_string(),
                         words: vec![header_name.to_uppercase()],
@@ -379,78 +393,87 @@ pub fn Page() -> Element {
                 div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
                     div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
                 }
-                header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
-                    {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
-                    span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
-                    span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
-                        "{header_name}"
-                    }
-                    if !current_model().is_empty() {
-                        span { class: "min-w-0 truncate rounded-md bg-foreground/[0.06] px-2 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                            "{current_model}"
-                        }
+            }
+            header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
+                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
+                span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
+                span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
+                    "{header_name}"
+                }
+                if !current_model().is_empty() {
+                    span { class: "min-w-0 truncate rounded-md bg-foreground/[0.06] px-2 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                        "{current_model}"
                     }
                 }
             }
-            if !installing_splash {
-                div {
-                    id: "chat-scroll",
-                    class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
-                    onscroll: move |_| {
-                        if let Some(el) = web_sys::window()
-                            .and_then(|w| w.document())
-                            .and_then(|d| d.get_element_by_id("chat-scroll"))
+            div {
+                id: "chat-scroll",
+                class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
+                onscroll: move |_| {
+                    if let Some(el) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.get_element_by_id("chat-scroll"))
+                    {
+                        let top = el.scroll_top();
+                        let dist = el.scroll_height() - top - el.client_height();
+                        // Re-pin once the user reaches the bottom; unpin only when they scroll UP
+                        // (scroll_top decreases). Never unpin from our own programmatic
+                        // scroll-to-bottom, which only moves down and would otherwise poison
+                        // `at_bottom` with a stale, mid-stream scroll height.
+                        if dist <= 48 {
+                            at_bottom.set(true);
+                        } else if top < *last_top.peek() - 4 {
+                            at_bottom.set(false);
+                        }
+                        last_top.set(top);
+                    }
+                },
+                div { class: "mx-auto flex min-h-full max-w-3xl flex-col gap-4",
+                    if installing_splash {
+                        div { class: "my-auto flex flex-col items-center gap-3 py-16 text-center",
+                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
+                            h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
+                                "{header_name}"
+                            }
+                            div { class: "flex max-w-sm items-center gap-2 rounded-full bg-background/70 px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
+                                span { class: "h-1.5 w-1.5 shrink-0 animate-pulse rounded-full {agent_accent.accent_bg}" }
+                                span { class: "truncate", "{install_detail}" }
+                            }
+                        }
+                    } else if items.read().is_empty() && status() == "idle" {
+                        div { class: "flex flex-col items-center gap-3 py-24 text-center",
+                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
+                            h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
+                                "{header_name}"
+                            }
+                            p { class: "text-sm text-muted-foreground", "Ready when you are." }
+                        }
+                    }
+                    for (i , item) in items.read().iter().enumerate() {
+                        {render_item(i, item, &verb(), elapsed())}
+                        if !handoff_source().is_empty()
+                            && is_handoff_boundary(i, handoff_message_count())
                         {
-                            let top = el.scroll_top();
-                            let dist = el.scroll_height() - top - el.client_height();
-                            // Re-pin once the user reaches the bottom; unpin only when they scroll UP
-                            // (scroll_top decreases). Never unpin from our own programmatic
-                            // scroll-to-bottom, which only moves down and would otherwise poison
-                            // `at_bottom` with a stale, mid-stream scroll height.
-                            if dist <= 48 {
-                                at_bottom.set(true);
-                            } else if top < *last_top.peek() - 4 {
-                                at_bottom.set(false);
-                            }
-                            last_top.set(top);
-                        }
-                    },
-                    div { class: "mx-auto flex max-w-3xl flex-col gap-4",
-                        if items.read().is_empty() && status() == "idle" {
-                            div { class: "flex flex-col items-center gap-3 py-24 text-center",
-                                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
-                                h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
-                                    "{header_name}"
-                                }
-                                p { class: "text-sm text-muted-foreground", "Ready when you are." }
-                            }
-                        }
-                        for (i , item) in items.read().iter().enumerate() {
-                            {render_item(i, item, &verb(), elapsed())}
-                            if !handoff_source().is_empty()
-                                && is_handoff_boundary(i, handoff_message_count())
-                            {
-                                div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
-                                    span { class: "h-px flex-1 bg-foreground/10" }
-                                    span { "Continued from {handoff_source}" }
-                                    if handoff_truncated() {
-                                        span { class: "text-amber-500/80", "· older context omitted" }
-                                    }
-                                    span { class: "h-px flex-1 bg-foreground/10" }
-                                }
-                            }
-                        }
-                        if status() == "errored" {
-                            div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
-                                "{error}"
-                            }
-                        }
-                        if paused() {
-                            div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
+                            div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
                                 span { class: "h-px flex-1 bg-foreground/10" }
-                                span { class: "shrink-0", "interrupted" }
+                                span { "Continued from {handoff_source}" }
+                                if handoff_truncated() {
+                                    span { class: "text-amber-500/80", "· older context omitted" }
+                                }
                                 span { class: "h-px flex-1 bg-foreground/10" }
                             }
+                        }
+                    }
+                    if status() == "errored" {
+                        div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                            "{error}"
+                        }
+                    }
+                    if paused() {
+                        div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
+                            span { class: "h-px flex-1 bg-foreground/10" }
+                            span { class: "shrink-0", "interrupted" }
+                            span { class: "h-px flex-1 bg-foreground/10" }
                         }
                     }
                 }
@@ -514,20 +537,9 @@ pub fn Page() -> Element {
             }
 
             div {
-                class: if installing_splash { "absolute inset-0 z-20 flex items-center justify-center px-4" } else { "relative z-10 border-t border-foreground/10 bg-background/50 px-4 py-3 backdrop-blur-xl" },
+                class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                 div {
-                    class: if installing_splash { "relative flex w-full max-w-md flex-col gap-2 rounded-2xl bg-white/70 p-4 ring-1 ring-inset ring-black/10 backdrop-blur-md dark:bg-black/40 dark:ring-white/10" } else { "relative mx-auto flex max-w-3xl flex-col gap-2" },
-                    if installing {
-                        div { class: "mb-1 flex items-center gap-3",
-                            div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
-                                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-5 w-5 text-[10px]")}
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "truncate text-sm font-semibold {agent_accent.accent_text}", "{header_name}" }
-                                div { class: "truncate text-xs text-muted-foreground", "{install_detail}" }
-                            }
-                        }
-                    }
+                    class: "relative mx-auto flex max-w-3xl flex-col gap-2",
                     if cmd_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
                             for (i , command) in filtered_cmds.iter().enumerate() {
@@ -678,10 +690,10 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    div { class: if installing { "flex items-end gap-2 rounded-xl bg-foreground/[0.04] px-3 py-2 ring-1 ring-inset ring-foreground/10" } else { "flex items-end gap-2" },
+                    div { class: "relative flex items-end rounded-[1.35rem] bg-background/90 p-1.5 shadow-[0_18px_55px_-28px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-foreground/15 backdrop-blur-2xl transition-all duration-200 focus-within:bg-background focus-within:ring-foreground/30 focus-within:shadow-[0_22px_65px_-28px_rgba(0,0,0,0.75)]",
                         div { class: "relative min-w-0 flex-1 overflow-hidden",
                             if installing && draft.read().is_empty() {
-                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-1",
+                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3",
                                     PromptGhost {
                                         accent_bg: agent_accent.accent_bg.to_string(),
                                         terminal: false,
@@ -690,7 +702,7 @@ pub fn Page() -> Element {
                             }
                             textarea {
                                 id: PROMPT_ID,
-                                class: if installing { "relative z-10 max-h-40 min-h-9 w-full resize-none bg-transparent px-1 py-2 font-mono text-sm placeholder:text-transparent focus:outline-none" } else { "max-h-40 w-full resize-none rounded-xl bg-foreground/[0.06] px-3.5 py-2.5 text-sm ring-1 ring-inset ring-foreground/10 transition focus:bg-foreground/[0.09] focus:outline-none focus:ring-foreground/25" },
+                                class: if installing { "relative z-10 max-h-40 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" } else { "max-h-40 min-h-12 w-full resize-none bg-transparent px-3 py-3 text-[15px] leading-6 placeholder:text-muted-foreground/55 focus:outline-none" },
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -817,7 +829,7 @@ pub fn Page() -> Element {
                         if matches!(status().as_str(), "streaming" | "awaiting") {
                             if queued.read().is_empty() {
                                 button {
-                                    class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                    class: "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.08] text-foreground/70 ring-1 ring-inset ring-foreground/10 transition hover:bg-foreground/[0.14] hover:text-foreground active:scale-95",
                                     title: "Stop",
                                     onclick: move |_| {
                                         let _ = try_cef_bin_emit_rkyv(&ChatCancel);
@@ -831,7 +843,7 @@ pub fn Page() -> Element {
                                 }
                             } else {
                                 button {
-                                    class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                    class: "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}",
                                     title: "Send all queued prompts now (Esc)",
                                     onclick: move |_| {
                                         let _ = try_cef_bin_emit_rkyv(&ChatEscape);
@@ -851,7 +863,8 @@ pub fn Page() -> Element {
                             }
                         } else {
                             button {
-                                class: "flex items-center justify-center rounded-xl p-2.5 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground active:scale-[0.98]",
+                                class: if draft.read().trim().is_empty() { "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 cursor-default items-center justify-center rounded-xl bg-foreground/[0.06] text-muted-foreground/35 ring-1 ring-inset ring-foreground/[0.06]" } else { "mb-0.5 mr-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
+                                disabled: draft.read().trim().is_empty(),
                                 title: "Send (Enter)",
                                 onclick: move |_| do_submit(draft, at_bottom),
                                 svg {
@@ -865,15 +878,6 @@ pub fn Page() -> Element {
                                     path { d: "M12 19V5" }
                                     path { d: "M5 12l7-7 7 7" }
                                 }
-                            }
-                        }
-                    }
-                    if installing {
-                        div { class: "px-1 text-[10px] text-muted-foreground/70",
-                            if draft.read().is_empty() {
-                                "type a prompt · runs when ready"
-                            } else {
-                                "runs when ready · Enter sends"
                             }
                         }
                     }
