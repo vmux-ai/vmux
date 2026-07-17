@@ -14,9 +14,7 @@ use vmux_core::event::extension::{
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
-use vmux_ui::hooks::{
-    try_cef_bin_emit_rkyv, use_bin_event_listener, use_bin_event_state, use_theme,
-};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 
@@ -69,15 +67,15 @@ pub fn Page() -> Element {
         },
     );
 
-    let boundary_state = use_bin_event_state::<crate::event::TabBoundaryEvent>(
+    let boundary_state = use_event::<crate::event::TabBoundaryEvent>(
         crate::event::TAB_BOUNDARY_EVENT,
         crate::event::TabBoundaryEvent::default,
     );
 
-    let team_state = use_bin_event_state::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let extensions_state =
-        use_bin_event_state::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
+        use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
     use_effect(move || {
         let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });

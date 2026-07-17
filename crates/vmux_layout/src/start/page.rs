@@ -2,9 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
-use vmux_ui::hooks::{
-    try_cef_bin_emit_rkyv, use_bin_event_listener, use_bin_event_state, use_theme,
-};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -18,10 +16,8 @@ const START_FOCUS_PENDING: &str = "_startFocusPending";
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let state = use_bin_event_state::<CommandBarOpenEvent>(
-        COMMAND_BAR_OPEN_EVENT,
-        CommandBarOpenEvent::default,
-    );
+    let state =
+        use_event::<CommandBarOpenEvent>(COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent::default);
     let mut mounted = use_signal(|| false);
 
     let _focus_listener =

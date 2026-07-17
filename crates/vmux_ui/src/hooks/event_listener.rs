@@ -239,7 +239,7 @@ where
 }
 
 /// Maps the latest binary host event into a Dioxus signal.
-pub fn use_bin_event_state<T>(name: &'static str, init: impl FnOnce() -> T) -> Signal<T>
+pub fn use_event<T>(name: &'static str, init: impl FnOnce() -> T) -> Signal<T>
 where
     T: rkyv::Archive + 'static,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>

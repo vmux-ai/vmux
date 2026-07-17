@@ -3,12 +3,12 @@
 use dioxus::prelude::*;
 use vmux_core::event::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 use vmux_ui::favicon::favicon_src_for_url;
-use vmux_ui::hooks::{use_bin_event_state, use_theme};
+use vmux_ui::hooks::{use_event, use_theme};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let team = use_bin_event_state::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let members = team().members;
     let count = members.len();
