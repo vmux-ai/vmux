@@ -3,8 +3,8 @@
 use crate::chat_page::composer::{
     PromptEdit, ResumeMenuState, SelectorMode, ToolActivity, chat_page_title, edit_prompt,
     filter_models, filter_sessions, is_handoff_boundary, menu_direction, move_selection,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
-    tool_activity,
+    prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
+    should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
@@ -58,6 +58,16 @@ fn resize_prompt_textarea() {
     let height = textarea.scroll_height().clamp(44, 160);
     let overflow = if height == 160 { "auto" } else { "hidden" };
     let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
+}
+
+fn sync_prompt_caret(mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>) {
+    let Some(textarea) = prompt_textarea() else {
+        return;
+    };
+    let start = textarea.selection_start().ok().flatten().unwrap_or(0);
+    let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+    caret.set((start == end).then_some(start));
+    scroll_top.set(textarea.scroll_top());
 }
 
 fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
@@ -175,6 +185,8 @@ pub fn Page() -> Element {
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
     let mut draft = use_signal(String::new);
+    let mut prompt_caret = use_signal(|| None::<u32>);
+    let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
@@ -318,6 +330,10 @@ pub fn Page() -> Element {
         }
     };
     let draft_val = draft();
+    let prompt_caret_prefix = prompt_caret()
+        .filter(|_| !draft_val.is_empty())
+        .map(|offset| prompt_prefix_at_utf16(&draft_val, offset).to_string());
+    let prompt_scroll_offset = prompt_scroll_top();
     let selector = selector_mode(&draft_val);
     let command_query = match selector {
         SelectorMode::Commands(query) => Some(query),
@@ -380,7 +396,7 @@ pub fn Page() -> Element {
     rsx! {
         main {
             class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
-            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);--agent-caret:rgb({agent_accent.rain_rgb});",
+            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
@@ -695,23 +711,39 @@ pub fn Page() -> Element {
                         div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
                         div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
                             if draft.read().is_empty() {
-                                div { class: "pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3.5",
+                                div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-3.5",
                                     PromptGhost {
                                         accent_bg: agent_accent.accent_bg.to_string(),
                                         terminal: false,
                                     }
                                 }
                             }
+                            if let Some(prefix) = prompt_caret_prefix.as_ref() {
+                                div { class: "pointer-events-none absolute inset-0 z-20 overflow-hidden",
+                                    div {
+                                        class: "min-h-11 w-full whitespace-pre-wrap break-words px-3.5 py-2.5 text-[15px] leading-6 text-transparent",
+                                        style: "transform:translateY(-{prompt_scroll_offset}px);",
+                                        span { "{prefix}" }
+                                        span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle {agent_accent.accent_bg}" }
+                                    }
+                                }
+                            }
                             textarea {
                                 id: PROMPT_ID,
-                                class: if draft.read().is_empty() { "agent-chat-prompt relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 caret-transparent placeholder:text-transparent focus:outline-none" } else { "agent-chat-prompt relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none" },
+                                class: "agent-chat-prompt relative z-10 max-h-40 min-h-11 w-full resize-none bg-transparent px-3.5 py-2.5 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
                                 oninput: move |e| {
                                     draft.set(e.value());
                                     menu_sel.set(0);
+                                    sync_prompt_caret(prompt_caret, prompt_scroll_top);
                                 },
+                                onfocus: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
+                                onblur: move |_| prompt_caret.set(None),
+                                onkeyup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
+                                onmouseup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
+                                onscroll: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onkeydown: move |e| {
                                     let streaming = matches!(status().as_str(), "streaming" | "awaiting");
                                     let draft_now = draft.peek().clone();
@@ -1360,8 +1392,9 @@ fn md_to_html(src: &str) -> String {
 /// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
 /// light and dark.
 const MD_CSS: &str = r#"
-.agent-chat-prompt{caret-shape:block;caret-color:var(--agent-caret)}
-.agent-chat-prompt.caret-transparent{caret-color:transparent}
+.agent-chat-prompt{caret-color:transparent}
+.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite}
+@keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
 .chat-md{line-height:1.6;word-break:break-word}
 .chat-md>*:first-child{margin-top:0}
 .chat-md>*:last-child{margin-bottom:0}

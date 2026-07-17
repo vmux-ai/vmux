@@ -1582,9 +1582,11 @@ mod native_tests {
         assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
         assert!(source.contains("shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
-        assert!(source.contains("caret-transparent"));
-        assert!(source.contains("caret-shape:block"));
-        assert!(source.contains("--agent-caret:rgb({agent_accent.rain_rgb})"));
+        assert!(source.contains("prompt_prefix_at_utf16"));
+        assert!(source.contains("agent-chat-caret"));
+        assert!(source.contains("caret-color:transparent"));
+        assert!(source.contains("onkeyup"));
+        assert!(source.contains("onscroll"));
         assert!(source.contains("placeholder:text-transparent"));
     }
 
