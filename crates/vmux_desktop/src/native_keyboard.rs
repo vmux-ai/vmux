@@ -27,10 +27,12 @@ pub(crate) fn set_shortcut_map(map: ShortcutMap) {
     *SHORTCUT_MAP.lock() = Some(map);
 }
 
+#[cfg(feature = "native-glass")]
 pub(crate) fn set_escape_exits_fullscreen(value: bool) {
     ESC_EXITS_FULLSCREEN.store(value, Ordering::Relaxed);
 }
 
+#[cfg(feature = "native-glass")]
 pub(crate) fn take_exit_fullscreen_request() -> bool {
     EXIT_FULLSCREEN_REQUESTED.swap(false, Ordering::Relaxed)
 }
