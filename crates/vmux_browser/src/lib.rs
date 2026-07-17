@@ -45,7 +45,7 @@ use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
-    bookmark::BookmarkTextInputActive,
+    bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive},
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
         HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
@@ -635,6 +635,7 @@ fn cef_pointer_regions_contains(
 fn sync_layout_cef_pointer_target(
     windows: Query<&Window, With<PrimaryWindow>>,
     layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
+    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut commands: Commands,
@@ -645,26 +646,29 @@ fn sync_layout_cef_pointer_target(
     };
     #[cfg(target_os = "macos")]
     let should_target = {
-        let inside = windows
-            .single()
-            .ok()
-            .and_then(|window| {
-                let scale = window.resolution.scale_factor();
-                (scale.is_finite() && scale > 0.0).then_some(scale)
-            })
-            .and_then(|scale| {
-                vmux_layout::native_pointer::snapshot().map(|pointer| pointer.position_px / scale)
-            })
-            .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
+        let inside = !bookmark_context_menu_q.is_empty()
+            || windows
+                .single()
+                .ok()
+                .and_then(|window| {
+                    let scale = window.resolution.scale_factor();
+                    (scale.is_finite() && scale > 0.0).then_some(scale)
+                })
+                .and_then(|scale| {
+                    vmux_layout::native_pointer::snapshot()
+                        .map(|pointer| pointer.position_px / scale)
+                })
+                .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
         modal_pointer_targets.is_empty() && inside
     };
     #[cfg(not(target_os = "macos"))]
     let should_target = modal_pointer_targets.is_empty()
-        && windows
-            .single()
-            .ok()
-            .and_then(Window::cursor_position)
-            .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions));
+        && (!bookmark_context_menu_q.is_empty()
+            || windows
+                .single()
+                .ok()
+                .and_then(Window::cursor_position)
+                .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions)));
     NATIVE_LAYOUT_POINTER_INSIDE.store(should_target, Ordering::Relaxed);
     if should_target && !has_target {
         commands.entity(layout).insert(CefPointerTarget);
@@ -685,6 +689,7 @@ fn forward_layout_cef_cursor_move(
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
     layout_q: Query<Entity, With<LayoutCef>>,
+    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut was_in_region: Local<bool>,
@@ -700,7 +705,8 @@ fn forward_layout_cef_cursor_move(
         return;
     };
     for event in events.read() {
-        let in_region = cef_pointer_regions_contains(event.position, &cef_regions);
+        let in_region = !bookmark_context_menu_q.is_empty()
+            || cef_pointer_regions_contains(event.position, &cef_regions);
         if in_region {
             browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, false);
         } else if *was_in_region {
@@ -716,6 +722,7 @@ fn forward_layout_cef_mouse_button(
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
     layout_q: Query<Entity, With<LayoutCef>>,
+    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut captured: Local<bool>,
@@ -748,7 +755,8 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = cef_pointer_regions_contains(position, &cef_regions);
+        let inside = !bookmark_context_menu_q.is_empty()
+            || cef_pointer_regions_contains(position, &cef_regions);
         if event.state == ButtonState::Pressed && inside {
             *captured = true;
         }
@@ -872,7 +880,16 @@ fn sync_keyboard_target(
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
-    bookmark_text_input_q: Query<Entity, (With<LayoutCef>, With<BookmarkTextInputActive>)>,
+    bookmark_input_q: Query<
+        Entity,
+        (
+            With<LayoutCef>,
+            Or<(
+                With<BookmarkTextInputActive>,
+                With<BookmarkContextMenuActive>,
+            )>,
+        ),
+    >,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
@@ -882,7 +899,7 @@ fn sync_keyboard_target(
         return;
     }
 
-    if let Ok(layout) = bookmark_text_input_q.single() {
+    if let Ok(layout) = bookmark_input_q.single() {
         for (browser_e, has_kb) in &content_q {
             if browser_e == layout {
                 if !has_kb {
@@ -1858,6 +1875,7 @@ fn refresh_layout_cef_hover(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<Entity, With<LayoutCef>>,
+    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut state: Local<LayoutHoverRefreshState>,
@@ -1891,21 +1909,33 @@ fn refresh_layout_cef_hover(
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
+    let context_menu_active = !bookmark_context_menu_q.is_empty();
     #[cfg(target_os = "macos")]
     {
-        set_native_layout_pointer_regions(
-            cef_regions
-                .iter()
-                .map(
-                    |(header, side_sheet, node, computed, transform, visibility, open)| {
-                        cef_pointer_hit_rect(
-                            header, side_sheet, node, computed, transform, visibility, open,
-                        )
-                    },
-                )
-                .filter(|rect| rect.interactive)
-                .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
-        );
+        if context_menu_active {
+            set_native_layout_pointer_regions([physical_cef_pointer_hit_rect(
+                CefPointerHitRect {
+                    center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
+                    size: Vec2::new(window.width(), window.height()),
+                    interactive: true,
+                },
+                scale,
+            )]);
+        } else {
+            set_native_layout_pointer_regions(
+                cef_regions
+                    .iter()
+                    .map(
+                        |(header, side_sheet, node, computed, transform, visibility, open)| {
+                            cef_pointer_hit_rect(
+                                header, side_sheet, node, computed, transform, visibility, open,
+                            )
+                        },
+                    )
+                    .filter(|rect| rect.interactive)
+                    .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
+            );
+        }
         set_native_layout_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
         if let Some(pointer) = vmux_layout::native_pointer::snapshot() {
             let result = queue_native_layout_pointer_move(
@@ -1928,7 +1958,7 @@ fn refresh_layout_cef_hover(
         };
         let sequence = 0;
         let position = cursor_px / scale;
-        let in_region = cef_pointer_regions_contains(position, &cef_regions);
+        let in_region = context_menu_active || cef_pointer_regions_contains(position, &cef_regions);
         NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
         let unchanged = state.sequence == sequence
             && state.position == Some(position)
@@ -2568,6 +2598,7 @@ fn sync_osr_webview_focus(
             Has<WebviewWindowed>,
             Has<LayoutCef>,
             Has<BookmarkTextInputActive>,
+            Has<BookmarkContextMenuActive>,
         ),
         With<WebviewSource>,
     >,
@@ -2587,7 +2618,7 @@ fn sync_osr_webview_focus(
     ready.clear();
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
-    let mut bookmark_text_input_target = None;
+    let mut bookmark_input_target = None;
     for (
         entity,
         visibility,
@@ -2599,6 +2630,7 @@ fn sync_osr_webview_focus(
         is_windowed,
         is_layout,
         bookmark_text_input_active,
+        bookmark_context_menu_active,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -2613,8 +2645,8 @@ fn sync_osr_webview_focus(
             ready.push(entity);
             if is_layout {
                 layout_shells.push(entity);
-                if bookmark_text_input_active {
-                    bookmark_text_input_target = Some(entity);
+                if bookmark_text_input_active || bookmark_context_menu_active {
+                    bookmark_input_target = Some(entity);
                 }
             }
             if is_modal && has_keyboard_target {
@@ -2638,7 +2670,7 @@ fn sync_osr_webview_focus(
             .copied()
             .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
     });
-    let active = bookmark_text_input_target
+    let active = bookmark_input_target
         .or_else(|| choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]));
 
     if !window_visible {
@@ -2661,7 +2693,7 @@ fn sync_osr_webview_focus(
         let (active, next_auxiliary) = osr_focus_targets(
             ready.as_slice(),
             active,
-            bookmark_text_input_target.is_some(),
+            bookmark_input_target.is_some(),
             |e| layout_shells.contains(&e),
         );
         auxiliary.extend(next_auxiliary);
@@ -3541,6 +3573,7 @@ fn push_bookmarks_host_emit(
             Option<&Children>,
             Has<vmux_core::Collapsed>,
             &vmux_core::Order,
+            Option<&ChildOf>,
         ),
         With<vmux_core::Folder>,
     >,
@@ -3579,24 +3612,30 @@ fn push_bookmarks_host_emit(
         pin_entries.into_iter().map(|(_, r)| r).collect();
 
     let mut roots: Vec<(u32, vmux_layout::event::BookmarkNode)> = Vec::new();
-    for (_entity, uuid, name, children, collapsed, order) in folders.iter() {
-        let mut kids: Vec<(u32, vmux_layout::event::BookmarkRow)> = Vec::new();
+    for (_, uuid, name, children, collapsed, order, parent) in folders.iter() {
+        let mut kids = Vec::new();
         if let Some(children) = children {
             for child in children.iter() {
-                if let Ok((u, m, order)) = child_bookmarks.get(child) {
-                    kids.push((order.0, row(u, m)));
+                if let Ok((uuid, meta, order)) = child_bookmarks.get(child) {
+                    kids.push((order.0, row(uuid, meta)));
                 }
             }
         }
         kids.sort_by_key(|(order, _)| *order);
-        let kids = kids.into_iter().map(|(_, row)| row).collect();
+        let parent = parent.and_then(|parent| {
+            folders
+                .get(parent.get())
+                .ok()
+                .map(|(_, uuid, _, _, _, _, _)| uuid.0.clone())
+        });
         roots.push((
             order.0,
             vmux_layout::event::BookmarkNode::Folder(vmux_layout::event::FolderRow {
                 uuid: uuid.0.clone(),
                 name: name.as_str().to_string(),
                 collapsed,
-                children: kids,
+                parent,
+                children: kids.into_iter().map(|(_, row)| row).collect(),
             }),
         ));
     }

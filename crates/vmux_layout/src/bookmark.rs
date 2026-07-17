@@ -1,6 +1,7 @@
-use crate::event::{BookmarkTextInputEvent, BookmarksCommandEvent};
+use crate::event::{BookmarkContextMenuEvent, BookmarkTextInputEvent, BookmarksCommandEvent};
 use crate::pane::{Pane, PaneSplit};
 use crate::stack::{ActiveTabParam, Stack, focused_stack};
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
@@ -33,6 +34,14 @@ pub enum BookmarkOp {
     AddFolder {
         name: String,
     },
+    AddFolderIn {
+        name: String,
+        parent: String,
+    },
+    MoveFolder {
+        uuid: String,
+        parent: Option<String>,
+    },
     RemoveFolder {
         uuid: String,
     },
@@ -62,6 +71,9 @@ pub struct ShowBookmarkMenuRequest;
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BookmarkTextInputActive;
 
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BookmarkContextMenuActive;
+
 pub struct BookmarkPlugin;
 
 impl Plugin for BookmarkPlugin {
@@ -71,9 +83,11 @@ impl Plugin for BookmarkPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 BookmarksCommandEvent,
                 BookmarkTextInputEvent,
+                BookmarkContextMenuEvent,
             )>::for_hosts(&["layout"]))
             .add_observer(on_bookmarks_command_emit)
             .add_observer(on_bookmark_text_input_emit)
+            .add_observer(on_bookmark_context_menu_emit)
             .add_systems(
                 Update,
                 (
@@ -82,6 +96,20 @@ impl Plugin for BookmarkPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+fn on_bookmark_context_menu_emit(
+    trigger: On<BinReceive<BookmarkContextMenuEvent>>,
+    mut commands: Commands,
+) {
+    let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
+        return;
+    };
+    if trigger.event().payload.active {
+        webview.insert(BookmarkContextMenuActive);
+    } else {
+        webview.remove::<BookmarkContextMenuActive>();
     }
 }
 
@@ -122,6 +150,18 @@ fn page_metadata(title: &str, url: &str, favicon_url: &str) -> PageMetadata {
     }
 }
 
+fn can_parent_folder(folder: Entity, parent: Entity, child_of_q: &Query<&ChildOf>) -> bool {
+    let mut current = Some(parent);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(entity) = current {
+        if entity == folder || !seen.insert(entity) {
+            return false;
+        }
+        current = child_of_q.get(entity).ok().map(Relationship::get);
+    }
+    true
+}
+
 fn apply_bookmark_ops(
     mut reader: MessageReader<BookmarkOp>,
     ids: Query<(Entity, &Uuid)>,
@@ -131,6 +171,7 @@ fn apply_bookmark_ops(
     collapsed_q: Query<(), With<Collapsed>>,
     orders: Query<&Order>,
     children_q: Query<&Children>,
+    child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for op in reader.read() {
@@ -239,16 +280,59 @@ fn apply_bookmark_ops(
                 let order = next_top_order(orders.iter().map(|o| o.0));
                 commands.spawn((Folder, new_uuid(), Name::new(name.clone()), order));
             }
+            BookmarkOp::AddFolderIn { name, parent } => {
+                let Some(parent_entity) = find_by_uuid(parent, &ids) else {
+                    continue;
+                };
+                if folder_q.get(parent_entity).is_err() {
+                    continue;
+                }
+                let order = next_top_order(orders.iter().map(|o| o.0));
+                commands.spawn((
+                    Folder,
+                    new_uuid(),
+                    Name::new(name.clone()),
+                    order,
+                    ChildOf(parent_entity),
+                ));
+            }
+            BookmarkOp::MoveFolder { uuid, parent } => {
+                let Some(folder_entity) = find_by_uuid(uuid, &ids) else {
+                    continue;
+                };
+                if folder_q.get(folder_entity).is_err() {
+                    continue;
+                }
+                if let Some(parent_uuid) = parent {
+                    let Some(parent_entity) = find_by_uuid(parent_uuid, &ids) else {
+                        continue;
+                    };
+                    if folder_q.get(parent_entity).is_ok()
+                        && can_parent_folder(folder_entity, parent_entity, &child_of_q)
+                    {
+                        commands
+                            .entity(folder_entity)
+                            .insert(ChildOf(parent_entity));
+                    }
+                } else {
+                    commands.entity(folder_entity).remove::<ChildOf>();
+                }
+            }
             BookmarkOp::RemoveFolder { uuid } => {
                 if let Some(folder_entity) = find_by_uuid(uuid, &ids)
                     && folder_q.get(folder_entity).is_ok()
                 {
+                    let parent = child_of_q.get(folder_entity).ok().map(Relationship::get);
                     if let Ok(children) = children_q.get(folder_entity) {
                         for child in children.iter() {
-                            commands.entity(child).remove::<ChildOf>();
+                            if let Some(parent) = parent {
+                                commands.entity(child).insert(ChildOf(parent));
+                            } else {
+                                commands.entity(child).remove::<ChildOf>();
+                            }
                         }
                     }
-                    commands.entity(folder_entity).despawn();
+                    commands.entity(folder_entity).remove::<ChildOf>().despawn();
                 }
             }
             BookmarkOp::RenameFolder { uuid, name } => {
@@ -395,7 +479,19 @@ fn on_bookmarks_command_emit(
         }
         "new_folder" => {
             if let Some(name) = e.name.clone() {
-                ops.write(BookmarkOp::AddFolder { name });
+                if let Some(parent) = e.folder.clone() {
+                    ops.write(BookmarkOp::AddFolderIn { name, parent });
+                } else {
+                    ops.write(BookmarkOp::AddFolder { name });
+                }
+            }
+        }
+        "move_folder" => {
+            if let Some(uuid) = e.uuid.clone() {
+                ops.write(BookmarkOp::MoveFolder {
+                    uuid,
+                    parent: e.folder.clone(),
+                });
             }
         }
         "rename_folder" => {
@@ -565,6 +661,36 @@ mod tests {
     }
 
     #[test]
+    fn context_menu_event_toggles_layout_pointer_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_observer(on_bookmark_context_menu_emit);
+        let webview = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(BinReceive::<BookmarkContextMenuEvent> {
+                webview,
+                payload: BookmarkContextMenuEvent { active: true },
+            });
+        app.update();
+        assert!(
+            app.world()
+                .entity(webview)
+                .contains::<BookmarkContextMenuActive>()
+        );
+        app.world_mut()
+            .trigger(BinReceive::<BookmarkContextMenuEvent> {
+                webview,
+                payload: BookmarkContextMenuEvent { active: false },
+            });
+        app.update();
+        assert!(
+            !app.world()
+                .entity(webview)
+                .contains::<BookmarkContextMenuActive>()
+        );
+    }
+
+    #[test]
     fn add_creates_bookmark_entity() {
         let mut app = test_app();
         send(
@@ -625,6 +751,15 @@ mod tests {
             .clone()
     }
 
+    fn folder_named(app: &mut App, target: &str) -> (Entity, String) {
+        app.world_mut()
+            .query_filtered::<(Entity, &Name, &Uuid), With<Folder>>()
+            .iter(app.world())
+            .find(|(_, name, _)| name.as_str() == target)
+            .map(|(entity, _, uuid)| (entity, uuid.0.clone()))
+            .unwrap()
+    }
+
     fn bookmark_uuid(app: &mut App) -> String {
         app.world_mut()
             .query_filtered::<&Uuid, With<Bookmark>>()
@@ -649,6 +784,91 @@ mod tests {
             },
         );
         assert_eq!(count::<(With<Bookmark>, With<ChildOf>)>(&mut app), 1);
+    }
+
+    #[test]
+    fn folders_can_be_nested() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::AddFolder {
+                name: "Work".into(),
+            },
+        );
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        send(
+            &mut app,
+            BookmarkOp::AddFolderIn {
+                name: "PRs".into(),
+                parent: parent_uuid,
+            },
+        );
+        let (child, _) = folder_named(&mut app, "PRs");
+        assert_eq!(app.world().get::<ChildOf>(child).unwrap().get(), parent);
+    }
+
+    #[test]
+    fn moving_folder_rejects_descendant_cycle() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::AddFolder {
+                name: "Work".into(),
+            },
+        );
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        send(
+            &mut app,
+            BookmarkOp::AddFolderIn {
+                name: "PRs".into(),
+                parent: parent_uuid.clone(),
+            },
+        );
+        let (_, child_uuid) = folder_named(&mut app, "PRs");
+        send(
+            &mut app,
+            BookmarkOp::MoveFolder {
+                uuid: parent_uuid,
+                parent: Some(child_uuid),
+            },
+        );
+        assert!(app.world().get::<ChildOf>(parent).is_none());
+    }
+
+    #[test]
+    fn removing_nested_folder_reparents_children_to_parent() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::AddFolder {
+                name: "Work".into(),
+            },
+        );
+        let (parent, parent_uuid) = folder_named(&mut app, "Work");
+        send(
+            &mut app,
+            BookmarkOp::AddFolderIn {
+                name: "PRs".into(),
+                parent: parent_uuid,
+            },
+        );
+        let (_, child_uuid) = folder_named(&mut app, "PRs");
+        send(
+            &mut app,
+            BookmarkOp::Add {
+                url: "https://a.test".into(),
+                title: "A".into(),
+                favicon_url: String::new(),
+                folder: Some(child_uuid.clone()),
+            },
+        );
+        send(&mut app, BookmarkOp::RemoveFolder { uuid: child_uuid });
+        let bookmark = app
+            .world_mut()
+            .query_filtered::<Entity, With<Bookmark>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(app.world().get::<ChildOf>(bookmark).unwrap().get(), parent);
     }
 
     #[test]

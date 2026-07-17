@@ -676,6 +676,7 @@ pub struct FolderRow {
     pub uuid: String,
     pub name: String,
     pub collapsed: bool,
+    pub parent: Option<String>,
     pub children: Vec<BookmarkRow>,
 }
 
@@ -747,6 +748,19 @@ pub struct BookmarksCommandEvent {
     rkyv::Deserialize,
 )]
 pub struct BookmarkTextInputEvent {
+    pub active: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct BookmarkContextMenuEvent {
     pub active: bool,
 }
 
