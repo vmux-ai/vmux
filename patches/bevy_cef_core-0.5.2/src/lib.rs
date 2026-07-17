@@ -2,7 +2,7 @@
 
 #[cfg(feature = "browser-process")]
 mod browser_process;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "debug"))]
 mod debug;
 
 mod dom_snapshot;
@@ -12,7 +12,7 @@ mod util;
 pub mod prelude {
     #[cfg(feature = "browser-process")]
     pub use crate::browser_process::*;
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "debug"))]
     pub use crate::debug::*;
     pub use crate::dom_snapshot::*;
     pub use crate::render_process::app::*;
