@@ -733,6 +733,33 @@ mod tests {
     }
 
     #[test]
+    fn new_tab_becomes_active_in_single_update() {
+        let mut app = build_app();
+        app.add_plugins(crate::space::SpacePlugin);
+        build_main_and_tab(&mut app);
+        let old_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .expect("initial tab");
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewTab { url: None },
+            )));
+
+        app.update();
+
+        let new_tab = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Tab>, With<vmux_core::Active>)>()
+            .single(app.world())
+            .expect("one active tab");
+        assert_ne!(new_tab, old_tab);
+    }
+
+    #[test]
     fn new_tab_parents_under_active_space_container() {
         let mut app = build_app();
         let window = app.world_mut().spawn(PrimaryWindow).id();
