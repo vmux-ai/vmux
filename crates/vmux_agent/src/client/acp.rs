@@ -446,7 +446,12 @@ fn apply_agent_compatibility_env(
 }
 
 fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
-    let mut disabled = read_vibe_disabled_tools(&env);
+    let config = read_vibe_config(&env);
+    let mut disabled = config
+        .as_ref()
+        .and_then(|table| table.get("disabled_tools").cloned())
+        .and_then(|value| value.try_into::<Vec<String>>().ok())
+        .unwrap_or_default();
     if let Some(value) = env
         .iter()
         .rev()
@@ -466,10 +471,47 @@ fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, 
         "VIBE_DISABLED_TOOLS".to_string(),
         serde_json::to_string(&disabled).unwrap(),
     ));
+    let mut mcp_servers = config
+        .as_ref()
+        .and_then(|table| table.get("mcp_servers"))
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|server| serde_json::to_value(server).ok())
+        .collect::<Vec<_>>();
+    if let Some(value) = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+        .map(|(_, value)| value)
+    {
+        match serde_json::from_str::<Vec<serde_json::Value>>(value) {
+            Ok(existing) => {
+                for server in existing {
+                    if let Some(name) = server.get("name").and_then(serde_json::Value::as_str) {
+                        mcp_servers.retain(|candidate| {
+                            candidate.get("name").and_then(serde_json::Value::as_str) != Some(name)
+                        });
+                    }
+                    mcp_servers.push(server);
+                }
+            }
+            Err(err) => bevy::log::warn!(
+                "acp: existing VIBE_MCP_SERVERS is invalid JSON ({err}); discarding it"
+            ),
+        }
+    }
+    if !mcp_servers.is_empty() {
+        env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
+        env.push((
+            "VIBE_MCP_SERVERS".to_string(),
+            serde_json::to_string(&mcp_servers).unwrap(),
+        ));
+    }
     env
 }
 
-fn read_vibe_disabled_tools(env: &[(String, String)]) -> Vec<String> {
+fn read_vibe_config(env: &[(String, String)]) -> Option<toml::Table> {
     let value = |key: &str| {
         env.iter()
             .rev()
@@ -479,17 +521,11 @@ fn read_vibe_disabled_tools(env: &[(String, String)]) -> Vec<String> {
     let root = value("VIBE_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| value("HOME").map(|home| std::path::PathBuf::from(home).join(".vibe")));
-    let Some(path) = root.map(|root| root.join("config.toml")) else {
-        return Vec::new();
-    };
+    let path = root.map(|root| root.join("config.toml"))?;
     let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
+        return None;
     };
-    text.parse::<toml::Table>()
-        .ok()
-        .and_then(|table| table.get("disabled_tools").cloned())
-        .and_then(|value| value.try_into::<Vec<String>>().ok())
-        .unwrap_or_default()
+    text.parse::<toml::Table>().ok()
 }
 
 fn extend_unique(out: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
@@ -1222,7 +1258,11 @@ mod tests {
         std::fs::create_dir_all(&vibe_home).unwrap();
         std::fs::write(
             vibe_home.join("config.toml"),
-            "disabled_tools = [\"from-config\"]\n",
+            "disabled_tools = [\"from-config\"]\n\
+             [[mcp_servers]]\n\
+             name = \"from-config\"\n\
+             transport = \"stdio\"\n\
+             command = \"config-command\"\n",
         )
         .unwrap();
         let env = apply_agent_compatibility_env(
@@ -1230,6 +1270,10 @@ mod tests {
             vec![
                 s("HOME", tmp.to_str().unwrap()),
                 s("VIBE_DISABLED_TOOLS", r#"["from-env"]"#),
+                s(
+                    "VIBE_MCP_SERVERS",
+                    r#"[{"name":"from-env","transport":"stdio","command":"env-command"}]"#,
+                ),
             ],
         );
         let disabled = env
@@ -1239,6 +1283,13 @@ mod tests {
             .expect("Vibe ACP disabled tools");
 
         assert_eq!(disabled, vec!["from-config", "from-env", "bash"]);
+        let mcp_servers = env
+            .iter()
+            .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .expect("Vibe ACP MCP servers");
+        assert_eq!(mcp_servers[0]["name"], "from-config");
+        assert_eq!(mcp_servers[1]["name"], "from-env");
         let _ = std::fs::remove_dir_all(tmp);
     }
 

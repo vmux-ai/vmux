@@ -394,6 +394,7 @@ pub async fn run(
         cwd: shared.cwd.clone(),
         vibe_session_id: fs_session_id.clone(),
     };
+    let env = apply_vibe_mcp_env(&agent_id, env, &mcp_servers);
     let session_meta = session_meta_for_agent(&agent_id);
     let mut child = match Command::new(&command)
         .args(&args)
@@ -774,6 +775,61 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
+}
+
+fn apply_vibe_mcp_env(
+    agent_id: &str,
+    mut env: Vec<(String, String)>,
+    mcp_servers: &[McpServer],
+) -> Vec<(String, String)> {
+    if !matches!(agent_id, "mistral-vibe" | "vibe") || mcp_servers.is_empty() {
+        return env;
+    }
+    let mut configured = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+        .and_then(
+            |(_, value)| match serde_json::from_str::<Vec<serde_json::Value>>(value) {
+                Ok(servers) => Some(servers),
+                Err(err) => {
+                    tracing::warn!("invalid VIBE_MCP_SERVERS JSON; discarding it: {err}");
+                    None
+                }
+            },
+        )
+        .unwrap_or_default();
+    for server in mcp_servers {
+        let McpServer::Stdio(server) = server else {
+            continue;
+        };
+        configured.retain(|existing| {
+            existing.get("name").and_then(serde_json::Value::as_str) != Some(&server.name)
+        });
+        let server_env: serde_json::Map<String, serde_json::Value> = server
+            .env
+            .iter()
+            .map(|var| {
+                (
+                    var.name.clone(),
+                    serde_json::Value::String(var.value.clone()),
+                )
+            })
+            .collect();
+        configured.push(serde_json::json!({
+            "name": server.name,
+            "transport": "stdio",
+            "command": server.command.to_string_lossy(),
+            "args": server.args,
+            "env": server_env,
+        }));
+    }
+    env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
+    env.push((
+        "VIBE_MCP_SERVERS".to_string(),
+        serde_json::to_string(&configured).unwrap(),
+    ));
+    env
 }
 
 fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
@@ -1263,6 +1319,37 @@ mod tests {
             acp_display_name(Some(&named)).as_deref(),
             Some("claude-code-acp")
         );
+    }
+
+    #[test]
+    fn vibe_acp_injects_session_mcp_servers_into_vibe_config() {
+        let server = McpServer::Stdio(
+            agent_client_protocol::schema::v1::McpServerStdio::new("vmux", "/tmp/vmux")
+                .args(vec!["mcp".to_string(), "--profile".to_string()])
+                .env(vec![agent_client_protocol::schema::v1::EnvVariable::new(
+                    "VMUX_PROFILE",
+                    "dev",
+                )]),
+        );
+        let env = apply_vibe_mcp_env(
+            "mistral-vibe",
+            vec![(
+                "VIBE_MCP_SERVERS".to_string(),
+                r#"[{"name":"other","transport":"stdio","command":"other"}]"#.to_string(),
+            )],
+            &[server],
+        );
+        let value = env
+            .iter()
+            .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .unwrap();
+
+        assert_eq!(value[0]["name"], "other");
+        assert_eq!(value[1]["name"], "vmux");
+        assert_eq!(value[1]["command"], "/tmp/vmux");
+        assert_eq!(value[1]["args"], serde_json::json!(["mcp", "--profile"]));
+        assert_eq!(value[1]["env"]["VMUX_PROFILE"], "dev");
     }
 
     #[test]
