@@ -53,6 +53,23 @@ fn package_binary_paths_honor_target_dir_and_triple() {
     let target = temp.path().join("custom target");
     let cache = temp.path().join("cef sdk");
     let log = temp.path().join("cargo.log");
+    let dist = temp.path().join("web dist");
+    fs::create_dir_all(dist.join("assets")).expect("create web assets");
+    fs::create_dir_all(dist.join("wasm")).expect("create wasm assets");
+    fs::write(dist.join("index.html"), "").expect("write index");
+    fs::write(dist.join(".dx-profile"), "release").expect("write profile");
+    fs::write(dist.join("assets/app.js"), "").expect("write js");
+    fs::write(dist.join("wasm/app.wasm"), "").expect("write wasm");
+    fs::write(
+        dist.join(".bundle-stamp"),
+        concat!(
+            "a4d451ec23463726f72c43d64c710968f6b602cd653b4de8adee1b556240a829  .dx-profile\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  assets/app.js\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  index.html\n",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  wasm/app.wasm\n",
+        ),
+    )
+    .expect("write bundle stamp");
     fs::write(
         &cargo,
         r#"#!/usr/bin/env bash
@@ -92,6 +109,7 @@ printf '%s\n' "${CEF_PATH:-}" >> "$FAKE_CARGO_LOG"
         .env("CARGO_TARGET_DIR", &target)
         .env("CARGO_BUILD_TARGET", "aarch64-apple-darwin")
         .env("VMUX_CEF_SDK_CACHE", &cache)
+        .env("VMUX_WEB_BUNDLE_DIST", &dist)
         .env("FAKE_CARGO_LOG", &log)
         .status()
         .expect("run package binary build");

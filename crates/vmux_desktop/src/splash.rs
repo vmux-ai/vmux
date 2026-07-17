@@ -291,9 +291,9 @@ mod tests {
     #[test]
     fn desktop_enables_splash_appkit_features() {
         let manifest = include_str!("../Cargo.toml");
-        assert!(manifest.contains("\"NSProgressIndicator\""));
-        assert!(manifest.contains("\"NSVisualEffectView\""));
-        assert!(manifest.contains("\"NSTextField\""));
-        assert!(manifest.contains("\"NSFont\""));
+        assert!(manifest.contains("\"objc2-app-kit/NSProgressIndicator\""));
+        assert!(manifest.contains("\"objc2-app-kit/NSVisualEffectView\""));
+        assert!(manifest.contains("\"objc2-app-kit/NSTextField\""));
+        assert!(manifest.contains("\"objc2-app-kit/NSFont\""));
     }
 }

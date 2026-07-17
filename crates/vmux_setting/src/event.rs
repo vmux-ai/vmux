@@ -47,6 +47,7 @@ pub enum UpdateCheckStatus {
         version: String,
     },
     Failed,
+    Unavailable,
 }
 
 /// Carries updater activity to the Settings page.

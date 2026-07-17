@@ -6,10 +6,66 @@ description.workspace = true
 publish = false
 
 [features]
-default = ["player-mode"]
+default = ["full"]
 conformance = ["bevy_cef/debug", "vmux_browser/conformance"]
 dev = ["bevy_cef/debug", "bevy/dynamic_linking"]
+full = [
+    "bevy_cef_core/native-video-overlay",
+    "native-glass",
+    "native-notifications",
+    "player-mode",
+    "recording",
+    "screenshots",
+    "tray",
+    "updater",
+]
+package = ["full", "web-bundle"]
+screen-capture-backend = [
+    "dep:crossbeam-channel",
+    "dep:image",
+    "dep:objc2-screen-capture-kit",
+    "objc2-foundation/NSError",
+    "objc2-foundation/NSProcessInfo",
+]
+native-glass = [
+    "dep:objc2-io-surface",
+    "dep:objc2-metal",
+    "dep:objc2-quartz-core",
+    "objc2-app-kit/NSAnimation",
+    "objc2-app-kit/NSColor",
+    "objc2-app-kit/NSControl",
+    "objc2-app-kit/NSFont",
+    "objc2-app-kit/NSGlassEffectView",
+    "objc2-app-kit/NSImageView",
+    "objc2-app-kit/NSPanel",
+    "objc2-app-kit/NSProgressIndicator",
+    "objc2-app-kit/NSScreen",
+    "objc2-app-kit/NSText",
+    "objc2-app-kit/NSTextField",
+    "objc2-app-kit/NSVisualEffectView",
+    "objc2-foundation/NSGeometry",
+]
+native-notifications = [
+    "dep:objc2-user-notifications",
+    "objc2-foundation/NSBundle",
+    "objc2-foundation/NSError",
+]
 player-mode = ["vmux_layout/player-mode"]
+recording = [
+    "screen-capture-backend",
+    "dep:color_quant",
+    "dep:gif",
+    "dep:objc2-av-foundation",
+    "dep:objc2-core-media",
+    "dep:objc2-core-video",
+    "objc2-foundation/NSDictionary",
+    "objc2-foundation/NSValue",
+    "objc2-foundation/NSURL",
+]
+screenshots = ["screen-capture-backend"]
+tray = ["dep:tray-icon"]
+updater = ["dep:cargo-packager-updater", "dep:semver"]
+web-bundle = ["dep:vmux_server"]
 
 [[bin]]
 name = "vmux_desktop"
@@ -23,7 +79,6 @@ bevy_cef_core = { workspace = true }
 libc = "0.2"
 muda = "0.19"
 parking_lot = "0.12"
-bevy_reflect = { workspace = true }
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
@@ -39,10 +94,6 @@ vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../vmux_mcp" }
 vmux_command = { path = "../vmux_command" }
-vmux_macro = { path = "../vmux_macro" }
-vmux_ui = { path = "../vmux_ui", default-features = false }
-tokio = { workspace = true }
-uuid = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tracing-appender = "0.2"
@@ -51,23 +102,21 @@ vmux_space = { path = "../vmux_space" }
 vmux_team = { path = "../vmux_team" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
-vmux_server = { path = "../vmux_server" }
+vmux_server = { path = "../vmux_server", optional = true }
 url = { workspace = true }
 
-rfd = { workspace = true }
-notify = { workspace = true }
-tempfile = "3"
-semver = "1"
-crossbeam-channel = "0.5"
-image = { version = "0.25", default-features = false, features = ["png"] }
-gif = "0.14"
-color_quant = "2"
-cargo-packager-updater = "0.2"
-tray-icon = "0.24"
+semver = { version = "1", optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
+cargo-packager-updater = { version = "0.2", optional = true }
+tray-icon = { version = "0.24", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+color_quant = { version = "2", optional = true }
+gif = { version = "0.14", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = [
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
     "NSAlert",
     "NSAppearance",
     "NSApplication",
@@ -78,29 +127,20 @@ objc2-app-kit = { version = "0.3", features = [
     "NSWindow",
     "NSResponder",
     "NSGraphics",
-    "NSColor",
-    "NSGlassEffectView",
-    "NSPanel",
-    "NSVisualEffectView",
     "NSImage",
-    "NSImageView",
-    "NSProgressIndicator",
-    "NSScreen",
-    "NSAnimation",
-    "NSControl",
-    "NSText",
-    "NSTextField",
-    "NSFont",
 ] }
-objc2-foundation = { version = "0.3", features = [
-    "NSBundle",
-    "NSGeometry",
-    "NSData",
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSNotification",
     "NSString",
-    "NSProcessInfo",
 ] }
-objc2-quartz-core = { version = "0.3", features = ["CALayer", "objc2-core-foundation"] }
-objc2-core-graphics = { version = "0.3", features = [
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+    "objc2-core-foundation",
+], optional = true }
+objc2-core-graphics = { version = "0.3", default-features = false, features = [
+    "std",
     "CGEvent",
     "CGEventTypes",
     "CGImage",
@@ -108,38 +148,88 @@ objc2-core-graphics = { version = "0.3", features = [
     "CGContext",
     "CGBitmapContext",
 ] }
-objc2-core-foundation = { version = "0.3", features = [
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
     "CFBase",
+    "CFCGTypes",
     "CFDictionary",
     "CFRunLoop",
     "CFMachPort",
     "CFNumber",
     "CFString",
 ] }
-objc2-io-surface = "0.3"
-objc2-metal = { version = "0.3", features = ["objc2-io-surface"] }
-objc2-screen-capture-kit = { version = "0.3", features = [
+objc2-io-surface = { version = "0.3", default-features = false, features = [
+    "std",
+    "IOSurfaceAPI",
+    "IOSurfaceRef",
+    "IOSurfaceTypes",
+], optional = true }
+objc2-metal = { version = "0.3", default-features = false, features = [
+    "std",
+    "MTLBlitCommandEncoder",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLCommandQueue",
+    "MTLDevice",
+    "MTLPixelFormat",
+    "MTLResource",
+    "MTLTexture",
+    "MTLTypes",
+    "objc2-io-surface",
+], optional = true }
+objc2-screen-capture-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "SCError",
     "SCStream",
     "SCShareableContent",
     "SCScreenshotManager",
+    "dispatch2",
+    "objc2-core-foundation",
     "objc2-core-graphics",
     "objc2-core-media",
     "block2",
-] }
-objc2-av-foundation = { version = "0.3", features = ["objc2-core-media"] }
-objc2-core-media = "0.3"
-objc2-core-video = "0.3"
+], optional = true }
+objc2-av-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "AVAssetWriter",
+    "AVAssetWriterInput",
+    "AVMediaFormat",
+    "AVVideoSettings",
+    "block2",
+    "objc2-core-media",
+    "objc2-core-video",
+], optional = true }
+objc2-core-media = { version = "0.3", default-features = false, features = [
+    "std",
+    "CMSampleBuffer",
+    "CMTime",
+    "objc2-core-video",
+], optional = true }
+objc2-core-video = { version = "0.3", default-features = false, features = [
+    "std",
+    "CVBase",
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+    "CVReturn",
+], optional = true }
 dispatch2 = "0.3"
-objc2-user-notifications = { version = "0.3", features = [
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
     "UNNotificationContent",
     "UNNotificationRequest",
     "UNNotificationSound",
     "UNNotificationTrigger",
     "UNUserNotificationCenter",
     "block2",
-] }
+], optional = true }
 block2 = "0.6"
 raw-window-handle = "0.6"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+tempfile = "3"
+uuid = { workspace = true }
 
 [package.metadata.packager]
 product-name = "Vmux"

@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use regex::Regex;
+use sha2::{Digest, Sha256};
 
 pub const CEF_EMBEDDED_APP_INDEX_CSS: &str = "index.css";
 pub const SKIP_DX_BUILD_ENV: &str = "VMUX_SKIP_DX_BUILD";
@@ -33,6 +34,7 @@ pub struct PageBuilder {
     pub dx_extra_args: &'static [&'static str],
     pub cef_finalize: CefEmbeddedPageFinalize,
     pub extra_tracked: Vec<PathBuf>,
+    pub extra_dist_copies: Vec<(PathBuf, PathBuf)>,
     pub tailwind_postprocess_stale_prefixes: Option<&'static [&'static str]>,
     pub dist_subdir: &'static str,
 }
@@ -46,6 +48,7 @@ impl PageBuilder {
             dx_extra_args: &[],
             cef_finalize: CefEmbeddedPageFinalize::default(),
             extra_tracked: Vec::new(),
+            extra_dist_copies: Vec::new(),
             tailwind_postprocess_stale_prefixes: None,
             dist_subdir: "dist",
         }
@@ -73,6 +76,14 @@ impl PageBuilder {
         self
     }
 
+    pub fn copy_manifest_dir_to_dist(mut self, source_rel: &str, dest_rel: &str) -> Self {
+        let source = self.manifest_dir.join(source_rel);
+        self.extra_tracked.push(source.clone());
+        self.extra_dist_copies
+            .push((source, PathBuf::from(dest_rel)));
+        self
+    }
+
     pub fn tailwind_postprocess_after_dx(
         mut self,
         stale_hashed_css_prefixes: &'static [&'static str],
@@ -87,23 +98,36 @@ impl PageBuilder {
 
     fn run_inner(&self, warning_prefix: &'static str) {
         let workspace_root = workspace_root_from_manifest_dir(&self.manifest_dir);
-        for p in self.tracked_paths() {
-            println!("cargo:rerun-if-changed={}", p.display());
-        }
         println!("cargo:rerun-if-changed=build.rs");
         println!("cargo:rerun-if-env-changed={SKIP_DX_BUILD_ENV}");
 
+        let release = std::env::var("PROFILE").unwrap_or_default() == "release";
         if std::env::var("TARGET")
             .unwrap_or_default()
             .contains("wasm32")
         {
             return;
         }
-
-        let release = std::env::var("PROFILE").unwrap_or_default() == "release";
+        let skip_dx = skip_dx_build();
         let dist = self.manifest_dir.join(self.dist_subdir);
+        if skip_dx {
+            assert_skip_dx_allowed(release);
+            if !bundle_stamp_matches(&dist) {
+                return;
+            }
+        }
+
+        for p in self.tracked_roots() {
+            println!("cargo:rerun-if-changed={}", p.display());
+        }
+        let tracked_paths = if skip_dx {
+            Vec::new()
+        } else {
+            self.tracked_paths()
+        };
+
         let shell = self.manifest_dir.join("assets/index.html");
-        if !skip_dx_build() && self.needs_dist_rebuild(release, &workspace_root) {
+        if !skip_dx && self.needs_dist_rebuild(release, &workspace_root, &tracked_paths) {
             run_dx_web_bundle(
                 &workspace_root,
                 self.dx_package,
@@ -139,10 +163,25 @@ impl PageBuilder {
                 merge_cef_shell_index(&dist, &shell, CefMode::Browser);
             }
         }
-        emit_dist_rerun_if_changed(&dist);
+        if dist.is_dir() {
+            for (source, dest_rel) in &self.extra_dist_copies {
+                if let Err(error) = copy_dir_recursive(source, &dist.join(dest_rel)) {
+                    println!(
+                        "cargo:warning={warning_prefix}: could not copy {}: {error}",
+                        source.display()
+                    );
+                }
+            }
+        }
+        if dist.is_dir()
+            && let Err(error) = refresh_bundle_stamp(&dist)
+        {
+            println!("cargo:warning={warning_prefix}: could not write bundle stamp: {error}");
+        }
+        emit_bundle_rerun_if_changed(&dist);
     }
 
-    fn tracked_paths(&self) -> Vec<PathBuf> {
+    fn tracked_roots(&self) -> Vec<PathBuf> {
         let workspace_root = workspace_root_from_manifest_dir(&self.manifest_dir);
         let mut v = vec![
             self.manifest_dir.join("Cargo.toml"),
@@ -153,27 +192,43 @@ impl PageBuilder {
                 .join(CEF_EMBEDDED_APP_INDEX_CSS),
             self.manifest_dir.join("../vmux_ui/assets/theme.css"),
             self.manifest_dir.join("../vmux_ui/assets/fonts"),
+            self.manifest_dir.join("src"),
+            workspace_root.join("Cargo.lock"),
+            workspace_root.join("Cargo.toml"),
+            workspace_root.join("crates/vmux_ui/Cargo.toml"),
+            workspace_root.join("crates/vmux_ui/src"),
         ];
         v.extend(self.extra_tracked.iter().cloned());
-        for p in &self.extra_tracked {
-            if p.is_dir() {
-                collect_files(p, &mut v);
+        for path in &self.extra_tracked {
+            if path.file_name().is_some_and(|name| name == "src")
+                && let Some(crate_dir) = path.parent()
+            {
+                v.push(crate_dir.join("Cargo.toml"));
             }
         }
-        collect_rs_files(&self.manifest_dir.join("src"), &mut v);
-        collect_rs_files(&workspace_root.join("crates/vmux_ui/src"), &mut v);
         v.sort();
         v.dedup();
         v
     }
 
-    fn dist_dependency_paths(&self) -> Vec<PathBuf> {
-        let mut v = self.tracked_paths();
-        v.push(self.manifest_dir.join("build.rs"));
+    fn tracked_paths(&self) -> Vec<PathBuf> {
+        let mut v = self.tracked_roots();
+        for p in v.clone() {
+            if p.is_dir() {
+                collect_files(&p, &mut v);
+            }
+        }
+        v.sort();
+        v.dedup();
         v
     }
 
-    fn needs_dist_rebuild(&self, release: bool, workspace_root: &Path) -> bool {
+    fn needs_dist_rebuild(
+        &self,
+        release: bool,
+        workspace_root: &Path,
+        tracked_paths: &[PathBuf],
+    ) -> bool {
         let dist = self.manifest_dir.join(self.dist_subdir);
         let index = dist.join("index.html");
         let Some(wasm_mtime) = newest_bg_wasm_mtime(&dist) else {
@@ -186,8 +241,12 @@ impl PageBuilder {
         if !index.is_file() {
             return true;
         }
-        for p in self.dist_dependency_paths() {
-            if let Ok(t) = fs::metadata(&p).and_then(|m| m.modified())
+        if !bundle_stamp_matches(&dist) {
+            return true;
+        }
+        let build_script = self.manifest_dir.join("build.rs");
+        for p in tracked_paths.iter().chain(std::iter::once(&build_script)) {
+            if let Ok(t) = fs::metadata(p).and_then(|m| m.modified())
                 && t > wasm_mtime
             {
                 return true;
@@ -203,45 +262,72 @@ impl PageBuilder {
     }
 }
 
-fn emit_dist_rerun_if_changed(dist: &Path) {
-    if let Ok(rd) = fs::read_dir(dist) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if p.is_file() {
-                println!("cargo:rerun-if-changed={}", p.display());
-            }
-        }
-    }
-    let wasm_dir = dist.join("wasm");
-    if wasm_dir.is_dir()
-        && let Ok(rd) = fs::read_dir(&wasm_dir)
-    {
-        for e in rd.flatten() {
-            println!("cargo:rerun-if-changed={}", e.path().display());
-        }
-    }
-    let assets_dir = dist.join("assets");
-    if assets_dir.is_dir()
-        && let Ok(rd) = fs::read_dir(&assets_dir)
-    {
-        for e in rd.flatten() {
-            println!("cargo:rerun-if-changed={}", e.path().display());
-        }
+fn assert_skip_dx_allowed(release: bool) {
+    assert!(
+        !release,
+        "{SKIP_DX_BUILD_ENV} cannot be used for release builds"
+    );
+}
+
+fn emit_bundle_rerun_if_changed(dist: &Path) {
+    let mut files = vec![dist.join(DIST_PROFILE_MARKER), dist.join(DIST_BUNDLE_STAMP)];
+    collect_files(dist, &mut files);
+    files.sort();
+    files.dedup();
+    for path in files {
+        println!("cargo:rerun-if-changed={}", path.display());
     }
 }
 
-fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            collect_rs_files(&p, out);
-        } else if p.extension().is_some_and(|x| x == "rs") {
-            out.push(p);
-        }
+fn bundle_manifest(dist: &Path) -> io::Result<String> {
+    if !dist.join("index.html").is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "missing index.html",
+        ));
     }
+    let mut files = Vec::new();
+    collect_files(dist, &mut files);
+    files.retain(|path| path != &dist.join(DIST_BUNDLE_STAMP));
+    files.sort();
+    let has_wasm = files.iter().any(|path| {
+        path.extension()
+            .is_some_and(|extension| extension == "wasm")
+    });
+    let has_js = files
+        .iter()
+        .any(|path| path.extension().is_some_and(|extension| extension == "js"));
+    if !has_wasm || !has_js {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "missing wasm or JavaScript bundle",
+        ));
+    }
+
+    let mut manifest = String::new();
+    for path in files {
+        let relative = path.strip_prefix(dist).unwrap_or(&path);
+        let bytes = fs::read(&path)?;
+        let digest = Sha256::digest(&bytes);
+        manifest.push_str(&format!("{digest:x}  {}\n", relative.display()));
+    }
+    Ok(manifest)
+}
+
+fn bundle_stamp_matches(dist: &Path) -> bool {
+    let Ok(expected) = fs::read_to_string(dist.join(DIST_BUNDLE_STAMP)) else {
+        return false;
+    };
+    bundle_manifest(dist).is_ok_and(|actual| actual == expected)
+}
+
+pub fn refresh_bundle_stamp(dist: &Path) -> io::Result<()> {
+    let stamp = bundle_manifest(dist)?;
+    let path = dist.join(DIST_BUNDLE_STAMP);
+    if fs::read_to_string(&path).ok().as_deref() != Some(stamp.as_str()) {
+        fs::write(path, stamp)?;
+    }
+    Ok(())
 }
 
 fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -298,6 +384,7 @@ pub fn resolve_dx_executable() -> PathBuf {
 }
 
 pub const DIST_PROFILE_MARKER: &str = ".dx-profile";
+pub const DIST_BUNDLE_STAMP: &str = ".bundle-stamp";
 
 pub fn profile_tag(release: bool) -> &'static str {
     if release { "release" } else { "debug" }
@@ -584,6 +671,7 @@ fn find_bg_wasm_href(dist: &Path) -> String {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
+    fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let ty = entry.file_type()?;
@@ -686,6 +774,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "VMUX_SKIP_DX_BUILD cannot be used for release builds")]
+    fn skip_dx_is_rejected_for_release_builds() {
+        assert_skip_dx_allowed(true);
+    }
+
+    #[test]
     fn mismatch_true_when_marker_missing() {
         assert!(dist_profile_mismatch(None, true));
         assert!(dist_profile_mismatch(None, false));
@@ -705,7 +799,45 @@ mod tests {
     }
 
     #[test]
-    fn tracks_rs_files_under_extra_directories() {
+    fn bundle_stamp_detects_corruption() {
+        let dist =
+            std::env::temp_dir().join(format!("vmux-bundle-stamp-test-{}", std::process::id()));
+        fs::create_dir_all(dist.join("wasm")).unwrap();
+        fs::create_dir_all(dist.join("assets")).unwrap();
+        fs::write(dist.join("index.html"), "index").unwrap();
+        fs::write(dist.join(DIST_PROFILE_MARKER), "debug").unwrap();
+        fs::write(dist.join("wasm/app.wasm"), "wasm").unwrap();
+        fs::write(dist.join("assets/app.js"), "js").unwrap();
+
+        refresh_bundle_stamp(&dist).unwrap();
+        assert!(bundle_stamp_matches(&dist));
+
+        fs::write(dist.join("assets/app.js"), "changed").unwrap();
+        assert!(!bundle_stamp_matches(&dist));
+
+        let _ = fs::remove_dir_all(dist);
+    }
+
+    #[test]
+    fn recursive_copy_creates_destination() {
+        let root =
+            std::env::temp_dir().join(format!("vmux-recursive-copy-test-{}", std::process::id()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("font.woff2"), "font").unwrap();
+
+        copy_dir_recursive(&source, &destination).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(destination.join("font.woff2")).unwrap(),
+            "font"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn tracks_files_under_extra_directories() {
         let root = std::env::temp_dir().join(format!(
             "vmux-page-builder-track-test-{}",
             std::process::id()
@@ -713,9 +845,11 @@ mod tests {
         let manifest_dir = root.join("crates/vmux_server");
         let layout_src = root.join("crates/vmux_layout/src");
         let nested_src = layout_src.join("nested");
+        let terminal_fonts = root.join("crates/vmux_terminal/assets/fonts");
         fs::create_dir_all(manifest_dir.join("assets")).unwrap();
         fs::create_dir_all(manifest_dir.join("src")).unwrap();
         fs::create_dir_all(&nested_src).unwrap();
+        fs::create_dir_all(&terminal_fonts).unwrap();
         fs::write(manifest_dir.join("Cargo.toml"), "").unwrap();
         fs::write(manifest_dir.join("Dioxus.toml"), "").unwrap();
         fs::write(manifest_dir.join("assets/index.html"), "").unwrap();
@@ -723,13 +857,20 @@ mod tests {
         fs::write(manifest_dir.join("src/lib.rs"), "").unwrap();
         fs::write(layout_src.join("page.rs"), "").unwrap();
         fs::write(nested_src.join("pane.rs"), "").unwrap();
+        fs::write(nested_src.join("pane.css"), "").unwrap();
+        fs::write(terminal_fonts.join("terminal.woff2"), "").unwrap();
 
         let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
             .track_manifest_rel_paths(&["../vmux_layout/src"])
+            .copy_manifest_dir_to_dist("../vmux_terminal/assets/fonts", "assets/fonts")
             .tracked_paths();
 
         let _ = fs::remove_dir_all(&root);
         assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/page.rs")));
         assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/nested/pane.rs")));
+        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/nested/pane.css")));
+        assert!(
+            tracked.contains(&manifest_dir.join("../vmux_terminal/assets/fonts/terminal.woff2"))
+        );
     }
 }

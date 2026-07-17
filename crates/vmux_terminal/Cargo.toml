@@ -22,7 +22,6 @@ vmux_core = { path = "../vmux_core" }
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
-bevy_reflect = { workspace = true }
 portable-pty = { workspace = true }
 rfd = { workspace = true }
 sysinfo = "0.38"
@@ -42,8 +41,17 @@ tempfile = "3"
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSPasteboard",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSData",
+    "NSString",
+    "NSURL",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

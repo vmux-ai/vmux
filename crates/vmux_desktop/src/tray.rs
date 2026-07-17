@@ -5,6 +5,7 @@ use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
 use crate::background_lifecycle::LifecycleEvent;
+#[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
 
 pub(crate) static PENDING_TRAY_EVENTS: LazyLock<Mutex<Vec<String>>> =
@@ -17,13 +18,20 @@ struct TrayHandle {
     toggle: MenuItem,
     toggle_id: String,
     quit_id: String,
+    #[cfg(feature = "recording")]
     pause: MenuItem,
+    #[cfg(feature = "recording")]
     pause_id: String,
+    #[cfg(feature = "recording")]
     resume: MenuItem,
+    #[cfg(feature = "recording")]
     resume_id: String,
+    #[cfg(feature = "recording")]
     done: MenuItem,
+    #[cfg(feature = "recording")]
     done_id: String,
     last_any_visible: Option<bool>,
+    #[cfg(feature = "recording")]
     last_status: Option<RecordingStatus>,
 }
 
@@ -39,18 +47,24 @@ impl Plugin for TrayPlugin {
 fn setup_tray(world: &mut World) {
     let menu = Menu::new();
     let toggle = MenuItem::new(toggle_label(true), true, None);
-    // Recording controls: disabled until a recording is active.
+    #[cfg(feature = "recording")]
     let pause = MenuItem::new("Pause Recording", false, None);
+    #[cfg(feature = "recording")]
     let resume = MenuItem::new("Resume Recording", false, None);
+    #[cfg(feature = "recording")]
     let done = MenuItem::new("Finish Recording", false, None);
     let quit = MenuItem::new("Quit Vmux", true, None);
     let toggle_id = toggle.id().0.clone();
     let quit_id = quit.id().0.clone();
+    #[cfg(feature = "recording")]
     let pause_id = pause.id().0.clone();
+    #[cfg(feature = "recording")]
     let resume_id = resume.id().0.clone();
+    #[cfg(feature = "recording")]
     let done_id = done.id().0.clone();
 
-    if let Err(e) = menu.append_items(&[
+    #[cfg(feature = "recording")]
+    let append_result = menu.append_items(&[
         &toggle,
         &PredefinedMenuItem::separator(),
         &pause,
@@ -58,7 +72,10 @@ fn setup_tray(world: &mut World) {
         &done,
         &PredefinedMenuItem::separator(),
         &quit,
-    ]) {
+    ]);
+    #[cfg(not(feature = "recording"))]
+    let append_result = menu.append_items(&[&toggle, &PredefinedMenuItem::separator(), &quit]);
+    if let Err(e) = append_result {
         tracing::error!(error = %e, "failed to append tray menu items");
         return;
     }
@@ -83,13 +100,20 @@ fn setup_tray(world: &mut World) {
         toggle,
         toggle_id,
         quit_id,
+        #[cfg(feature = "recording")]
         pause,
+        #[cfg(feature = "recording")]
         pause_id,
+        #[cfg(feature = "recording")]
         resume,
+        #[cfg(feature = "recording")]
         resume_id,
+        #[cfg(feature = "recording")]
         done,
+        #[cfg(feature = "recording")]
         done_id,
         last_any_visible: None,
+        #[cfg(feature = "recording")]
         last_status: None,
     });
 }
@@ -98,7 +122,7 @@ fn drain_tray_events(
     handle: Option<NonSend<TrayHandle>>,
     windows: Query<&Window>,
     mut events: MessageWriter<LifecycleEvent>,
-    mut controls: MessageWriter<RecordingControl>,
+    #[cfg(feature = "recording")] mut controls: MessageWriter<RecordingControl>,
 ) {
     let Some(handle) = handle else { return };
     let drained = std::mem::take(&mut *PENDING_TRAY_EVENTS.lock());
@@ -108,13 +132,18 @@ fn drain_tray_events(
             events.write(toggle_lifecycle_event(any_visible));
         } else if event_id == handle.quit_id {
             events.write(LifecycleEvent::QuitVmux);
-        } else if event_id == handle.pause_id {
-            controls.write(RecordingControl::Pause);
-        } else if event_id == handle.resume_id {
-            controls.write(RecordingControl::Resume);
-        } else if event_id == handle.done_id {
-            controls.write(RecordingControl::Done);
         } else {
+            #[cfg(feature = "recording")]
+            if event_id == handle.pause_id {
+                controls.write(RecordingControl::Pause);
+                continue;
+            } else if event_id == handle.resume_id {
+                controls.write(RecordingControl::Resume);
+                continue;
+            } else if event_id == handle.done_id {
+                controls.write(RecordingControl::Done);
+                continue;
+            }
             tracing::debug!(id = %event_id, "unhandled tray menu event id");
         }
     }
@@ -130,6 +159,7 @@ fn sync_tray_menu_state(handle: Option<NonSendMut<TrayHandle>>, windows: Query<&
     handle.toggle.set_text(toggle_label(any_visible));
 }
 
+#[cfg(feature = "recording")]
 fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<TrayHandle>>) {
     let Some(mut handle) = handle else { return };
     if handle.last_status == Some(*status) {
@@ -156,6 +186,9 @@ fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<T
     handle.done.set_enabled(recording);
 }
 
+#[cfg(not(feature = "recording"))]
+fn sync_tray_recording() {}
+
 fn toggle_label(any_visible: bool) -> &'static str {
     if any_visible {
         "Close Window"
@@ -177,6 +210,7 @@ fn load_tray_icon() -> tray_icon::Icon {
     tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid placeholder rgba")
 }
 
+#[cfg(feature = "recording")]
 fn load_tray_icon_recording() -> tray_icon::Icon {
     let rgba = tray_icon_recording_rgba();
     tray_icon::Icon::from_rgba(rgba, 16, 16).expect("valid recording rgba")
@@ -184,6 +218,7 @@ fn load_tray_icon_recording() -> tray_icon::Icon {
 
 /// A solid red dot — the universal "recording" indicator. Shown with template
 /// mode off so the red is preserved.
+#[cfg(feature = "recording")]
 fn tray_icon_recording_rgba() -> Vec<u8> {
     let mut rgba = Vec::with_capacity(16 * 16 * 4);
     let (cx, cy, r) = (7.5_f32, 7.5_f32, 5.5_f32);

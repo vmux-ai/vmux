@@ -94,19 +94,6 @@ fn start_err(request_id: [u8; 16], message: impl Into<String>) -> RecordStartRes
     }
 }
 
-/// Configured output directory for screenshots and recordings: the
-/// `recording.output_dir` setting if set, else the default `~/.vmux/recording`.
-pub(crate) fn capture_output_dir(settings: &AppSettings) -> PathBuf {
-    settings
-        .recording
-        .output_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(vmux_core::profile::recording_dir)
-}
-
 /// Resolve dir/name into final mp4 + optional gif paths. `default_dir` is used
 /// when `dir` is not given (the configured/default output directory).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -253,7 +240,7 @@ pub(crate) fn start_recording(
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let default_dir = capture_output_dir(&settings);
+    let default_dir = crate::capture_output::output_dir(&settings);
     for req in start_reader.read() {
         let Ok((window_entity, window)) = window_q.single() else {
             start_responses.write(start_err(req.request_id, "no primary vmux window"));

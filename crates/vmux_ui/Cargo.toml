@@ -6,12 +6,17 @@ edition.workspace = true
 publish = false
 build = "build.rs"
 
+[features]
+default = []
+gallery = ["dep:regex", "dep:sha2"]
+
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
 
 [build-dependencies]
-regex = { workspace = true }
+regex = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
 
 [lib]
 path = "src/lib.rs"
@@ -32,7 +37,8 @@ dioxus = { workspace = true }
 time = { version = "0.3", default-features = false, features = [
     "wasm-bindgen",
 ] }
-dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = true, features = [
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false, features = [
+    "router",
     "web",
 ] }
 ron = { workspace = true }

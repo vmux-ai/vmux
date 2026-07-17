@@ -206,9 +206,10 @@ fn SectionView(
                 }
                 CardContent {
                     div { class: "flex flex-col divide-y divide-border",
-                        ObjectBody { value, parent_path: root_path, depth: 0, schema }
                         if show_update_check {
-                            UpdateCheckRow {}
+                            GeneralSectionBody { value, root_path, schema }
+                        } else {
+                            ObjectBody { value, parent_path: root_path, depth: 0, schema }
                         }
                     }
                 }
@@ -218,12 +219,34 @@ fn SectionView(
 }
 
 #[component]
-fn UpdateCheckRow() -> Element {
+fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -> Element {
     let mut status = use_signal(UpdateCheckStatus::default);
+    let mut updater_unavailable = use_signal(|| false);
     let _status_listener = use_bin_event_listener::<UpdateCheckStatusEvent, _>(
         UPDATE_CHECK_STATUS_EVENT,
-        move |event| status.set(event.status),
+        move |event| {
+            let unavailable = matches!(event.status, UpdateCheckStatus::Unavailable);
+            if updater_unavailable() != unavailable {
+                updater_unavailable.set(unavailable);
+            }
+            status.set(event.status);
+        },
     );
+    let mut visible_value = value;
+    if updater_unavailable()
+        && let Some(object) = visible_value.as_object_mut()
+    {
+        object.remove("auto_update");
+    }
+
+    rsx! {
+        ObjectBody { value: visible_value, parent_path: root_path, depth: 0, schema }
+        UpdateCheckRow { status }
+    }
+}
+
+#[component]
+fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
     let current = status();
     let (button_label, hint, disabled) = update_check_presentation(&current);
 
@@ -253,6 +276,11 @@ fn update_check_presentation(status: &UpdateCheckStatus) -> (&'static str, Strin
             "Checks automatically on launch and every hour when Auto-update is enabled."
                 .to_string(),
             false,
+        ),
+        UpdateCheckStatus::Unavailable => (
+            "Unavailable",
+            "Updater is not included in this build.".to_string(),
+            true,
         ),
         UpdateCheckStatus::Checking => ("Checking…", "Checking for updates…".to_string(), true),
         UpdateCheckStatus::UpToDate => ("Check Again", "Vmux is up to date.".to_string(), false),

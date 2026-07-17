@@ -26,7 +26,6 @@ serde = { workspace = true }
 bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"
-uuid = { workspace = true }
 tokio = { workspace = true, features = ["process", "io-util"] }
 alacritty_terminal = { workspace = true }
 vte = "0.15"
@@ -40,7 +39,6 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
-vmux_layout = { path = "../vmux_layout" }
 vmux_service_client = { path = "../vmux_service_client" }
 vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
@@ -53,9 +51,16 @@ wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = "0.3"
-objc2-service-management = "0.3"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+] }
+objc2-service-management = { version = "0.3", default-features = false, features = [
+    "std",
+    "SMAppService",
+    "objc2",
+    "objc2-foundation",
+] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

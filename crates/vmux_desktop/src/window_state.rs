@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowPosition};
 use vmux_layout::window::WindowGeometry;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use bevy::window::{MonitorSelection, WindowMode};
 
 /// Captures below this logical size are treated as transient and ignored.
@@ -37,12 +37,12 @@ impl Plugin for WindowStatePlugin {
             )
                 .chain(),
         );
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
         app.add_systems(
             Update,
             (
                 sync_fullscreen_signal_from_mode,
-                restore_fullscreen_non_macos,
+                restore_fullscreen_from_window_mode,
             ),
         );
     }
@@ -121,7 +121,7 @@ fn capture_window_geometry(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 fn sync_fullscreen_signal_from_mode(
     window: Query<&Window, With<PrimaryWindow>>,
     mut fullscreen: ResMut<WindowFullscreen>,
@@ -138,8 +138,8 @@ fn sync_fullscreen_signal_from_mode(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn restore_fullscreen_non_macos(
+#[cfg(not(all(target_os = "macos", feature = "native-glass")))]
+fn restore_fullscreen_from_window_mode(
     pending: Option<Res<PendingFullscreenRestore>>,
     mut window: Query<&mut Window, With<PrimaryWindow>>,
     mut commands: Commands,
@@ -248,5 +248,17 @@ mod tests {
         assert!(geom.fullscreen);
         assert_eq!(geom.position, Some(IVec2::new(7, 8)));
         assert_eq!(geom.size, Some(Vec2::new(900.0, 600.0)));
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
+    #[test]
+    fn window_mode_restore_marks_geometry_capture_ready() {
+        let mut app = app();
+        app.insert_resource(PendingFullscreenRestore(false))
+            .add_systems(Update, restore_fullscreen_from_window_mode);
+        app.update();
+
+        assert!(app.world().contains_resource::<WindowRestoreComplete>());
+        assert!(!app.world().contains_resource::<PendingFullscreenRestore>());
     }
 }

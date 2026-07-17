@@ -70,7 +70,7 @@ pub(crate) fn start_screenshots(
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    let base_dir = crate::recording::capture_output_dir(&settings);
+    let base_dir = crate::capture_output::output_dir(&settings);
     for req in reader.read() {
         let Ok((window_entity, window)) = window_q.single() else {
             let _ = bridge
@@ -170,7 +170,7 @@ pub(crate) fn crop_rect_from_node(
     }
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn encode_downscaled_png(
     img: &image::RgbaImage,
     max_edge: u32,

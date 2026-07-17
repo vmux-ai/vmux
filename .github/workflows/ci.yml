@@ -81,7 +81,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -98,17 +97,6 @@ jobs:
         with:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
-
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Compute workspace packages (excluding patches)
         id: pkgs
@@ -128,14 +116,11 @@ jobs:
             export-cef-dir --force "$HOME/.local/share"
           fi
 
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
-
       - name: Clippy
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy ${{ steps.pkgs.outputs.args }} --all-targets -- -D warnings
+
+      - name: Clippy lean desktop features
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo clippy -p vmux_desktop --lib --no-default-features -- -D warnings
 
   test-rust:
     name: Test (rust)
@@ -175,8 +160,6 @@ jobs:
             libvulkan-dev
 
       - uses: dtolnay/rust-toolchain@1.95.0
-        with:
-          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -194,17 +177,6 @@ jobs:
           path: ~/.local/share/Chromium Embedded Framework.framework
           key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
 
-      - name: Cache tailwindcss
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/bin/tailwindcss
-          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
-
-      - name: Add ~/.local/bin to PATH
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Install CEF framework
         run: |
           if [ ! -d "$HOME/.local/share/Chromium Embedded Framework.framework" ]; then
@@ -212,14 +184,11 @@ jobs:
             export-cef-dir --force "$HOME/.local/share"
           fi
 
-      - name: Install dioxus-cli
-        run: ./scripts/install-dioxus-cli.sh
-
-      - name: Install tailwindcss
-        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
-
       - name: Run tests
-        run: env -u CEF_PATH cargo test --workspace --exclude bevy_cef_core --exclude bevy_cef
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace --exclude bevy_cef_core --exclude bevy_cef
+
+      - name: Test lean desktop features
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests
 
   changes:
     name: Detect Changes
@@ -239,6 +208,7 @@ jobs:
               - 'patches/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - 'Makefile'
               - 'rust-toolchain.toml'
               - 'scripts/**'
               - '.github/workflows/ci.yml'
@@ -249,6 +219,7 @@ jobs:
               - 'patches/**'
               - 'packaging/**'
               - 'Cargo.toml'
+              - 'Makefile'
               - 'crates/vmux_desktop/Cargo.toml'
               - 'Cargo.lock'
               - '.github/workflows/release.yml'
@@ -468,6 +439,9 @@ jobs:
 
       - name: Install tailwindcss
         run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+
+      - name: Check lean macOS desktop features
+        run: env VMUX_SKIP_DX_BUILD=1 ./scripts/cargo-with-cef-cache.sh check -p vmux_desktop --no-default-features --features dev
 
       - name: Build, sign, notarize, and package DMG
         if: env.PREP_DONE != '1'
