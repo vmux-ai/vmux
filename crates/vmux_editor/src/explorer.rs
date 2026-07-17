@@ -113,6 +113,41 @@ fn menu_position(x: f64, y: f64) -> (f64, f64) {
     )
 }
 
+fn tree_row_id(path: &str) -> String {
+    let hash = path
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+    format!("explorer-row-{hash:016x}")
+}
+
+fn schedule_tree_focus(path: String) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let focus = Closure::once(move || {
+        let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&tree_row_id(&path)))
+        else {
+            return;
+        };
+        let options = web_sys::ScrollIntoViewOptions::new();
+        options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+        element.scroll_into_view_with_scroll_into_view_options(&options);
+        if let Ok(element) = element.dyn_into::<web_sys::HtmlElement>() {
+            let _ = element.focus();
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        focus.as_ref().unchecked_ref(),
+        TREE_MOTION_MS + 20,
+    );
+    focus.forget();
+}
+
 fn reconcile_rows(
     mut rows: Signal<Vec<MotionRow>>,
     mut generation: Signal<u32>,
@@ -284,6 +319,7 @@ fn prompt_title(kind: PromptKind) -> &'static str {
 pub fn ExplorerPanel() -> Element {
     let mut root_name = use_signal(|| "Explorer".to_string());
     let mut root_path = use_signal(String::new);
+    let mut current_path = use_signal(String::new);
     let mut root_loading = use_signal(|| false);
     let rows = use_signal(Vec::<MotionRow>::new);
     let row_generation = use_signal(|| 0u32);
@@ -301,8 +337,12 @@ pub fn ExplorerPanel() -> Element {
     let _tree = use_bin_event_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
+        current_path.set(e.current_path);
         root_loading.set(e.loading);
         reconcile_rows(rows, row_generation, e.rows);
+        if !e.focus_path.is_empty() {
+            schedule_tree_focus(e.focus_path);
+        }
     });
     let _open =
         use_bin_event_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
@@ -388,6 +428,9 @@ pub fn ExplorerPanel() -> Element {
                 }
 
                 div {
+                    id: "{tree_row_id(&root_path())}",
+                    tabindex: "-1",
+                    class: if current_path() == root_path() { "bg-cyan-400/10 outline-none" } else { "outline-none" },
                     oncontextmenu: move |e: Event<MouseData>| {
                         e.prevent_default();
                         let coordinates = e.client_coordinates();
@@ -419,6 +462,7 @@ pub fn ExplorerPanel() -> Element {
                                 let path_menu = row.path.clone();
                                 let name_menu = row.name.clone();
                                 let is_dir = row.is_dir;
+                                let active = row.path == current_path();
                                 let pad = (row.depth as u32) * 12 + 8;
                                 let motion_class = if motion.visible {
                                     "grid grid-rows-[1fr] opacity-100 translate-y-0 transition-[grid-template-rows,opacity,transform] duration-150 ease-out"
@@ -429,7 +473,13 @@ pub fn ExplorerPanel() -> Element {
                                     div { key: "{row.path}", class: "{motion_class}",
                                         div { class: "min-h-0 overflow-hidden",
                                             div {
-                                                class: "flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 transition-colors duration-100 hover:bg-foreground/[0.08]",
+                                                id: "{tree_row_id(&row.path)}",
+                                                tabindex: "-1",
+                                                class: if active {
+                                                    "flex h-[22px] items-center gap-1 px-1 cursor-default bg-cyan-400/12 text-foreground outline-none transition-colors duration-100"
+                                                } else {
+                                                    "flex h-[22px] items-center gap-1 px-1 cursor-default text-foreground/80 outline-none transition-colors duration-100 hover:bg-foreground/[0.08]"
+                                                },
                                                 style: "padding-left:{pad}px;",
                                                 title: "{row.path}",
                                                 onmouseenter: move |_| {

@@ -319,6 +319,79 @@ fn render_preview(preview: &Preview) -> Element {
     }
 }
 
+fn toggle_explorer(mut visible: Signal<bool>) {
+    visible.set(!visible());
+    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+}
+
+fn reveal_current_in_explorer(mut visible: Signal<bool>) {
+    if visible() {
+        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
+    } else {
+        visible.set(true);
+        let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+    }
+}
+
+#[component]
+fn ExplorerSidebar(
+    visible: Signal<bool>,
+    width: Signal<u32>,
+    mut resizing: Signal<bool>,
+) -> Element {
+    let open = visible();
+    let panel_width = width();
+    let wrapper_style = if open {
+        format!("width:{panel_width}px;")
+    } else {
+        "width:0px;".to_string()
+    };
+    let panel_style = format!("width:{panel_width}px;");
+    let panel_class = if open {
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[transform,opacity] duration-200 ease-out will-change-transform"
+    } else {
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[transform,opacity] duration-200 ease-out will-change-transform"
+    };
+    rsx! {
+        div { class: "relative z-[2] h-full shrink-0", style: "{wrapper_style}",
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel {} }
+        }
+        div {
+            class: if open {
+                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+            } else {
+                "pointer-events-none h-full w-0 shrink-0 opacity-0"
+            },
+            onmousedown: move |e: Event<MouseData>| {
+                e.prevent_default();
+                resizing.set(true);
+            },
+        }
+    }
+}
+
+#[component]
+fn ExplorerToggleButton(mut visible: Signal<bool>) -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            title: "Toggle Explorer (Cmd+B)",
+            onclick: move |_| toggle_explorer(visible),
+            svg {
+                class: "h-4 w-4",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -640,12 +713,6 @@ pub fn Page() -> Element {
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
     let comp_keys = comp_filtered.clone();
 
-    let explorer_panel_style = if explorer_visible() {
-        format!("width:{}px;", explorer_width())
-    } else {
-        "width:0px;".to_string()
-    };
-
     rsx! {
         div {
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
@@ -662,21 +729,10 @@ pub fn Page() -> Element {
                 }
             },
 
-            div {
-                class: "h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out will-change-[width]",
-                style: "{explorer_panel_style}",
-                ExplorerPanel {}
-            }
-            div {
-                class: if explorer_visible() {
-                    "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-[width,opacity,background-color] duration-200 hover:bg-cyan-400/40"
-                } else {
-                    "pointer-events-none h-full w-0 shrink-0 bg-transparent opacity-0 transition-[width,opacity,background-color] duration-200"
-                },
-                onmousedown: move |e: Event<MouseData>| {
-                    e.prevent_default();
-                    explorer_resizing.set(true);
-                },
+            ExplorerSidebar {
+                visible: explorer_visible,
+                width: explorer_width,
+                resizing: explorer_resizing,
             }
 
         div {
@@ -705,10 +761,17 @@ pub fn Page() -> Element {
                     return;
                 };
                 let key = raw.key();
+                if (raw.meta_key() || raw.ctrl_key())
+                    && raw.shift_key()
+                    && key.eq_ignore_ascii_case("e")
+                {
+                    e.prevent_default();
+                    reveal_current_in_explorer(explorer_visible);
+                    return;
+                }
                 if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
                     e.prevent_default();
-                    explorer_visible.set(!explorer_visible());
-                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
+                    toggle_explorer(explorer_visible);
                     return;
                 }
                 match mode() {
@@ -826,25 +889,7 @@ pub fn Page() -> Element {
 
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
-                button {
-                    class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
-                    title: "Toggle Explorer",
-                    onclick: move |_| {
-                        explorer_visible.set(!explorer_visible());
-                        let _ = try_cef_bin_emit_rkyv(&ExplorerPanelToggle);
-                    },
-                    svg {
-                        class: "h-4 w-4",
-                        view_box: "0 0 24 24",
-                        fill: "none",
-                        stroke: "currentColor",
-                        stroke_width: "2",
-                        stroke_linecap: "round",
-                        stroke_linejoin: "round",
-                        rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                        line { x1: "9", y1: "3", x2: "9", y2: "21" }
-                    }
-                }
+                ExplorerToggleButton { visible: explorer_visible }
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {

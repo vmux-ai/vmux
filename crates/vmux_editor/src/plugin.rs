@@ -94,6 +94,7 @@ pub(crate) struct ExplorerState {
     pub loading: HashSet<PathBuf>,
     pub children: HashMap<PathBuf, Vec<FileDirEntry>>,
     pub open_editors: Vec<PathBuf>,
+    pub focus_path: Option<PathBuf>,
 }
 
 #[derive(Component)]
@@ -2014,6 +2015,40 @@ fn explorer_path_allowed(st: &ExplorerState, path: &Path) -> bool {
     path == st.root || path.starts_with(&st.root)
 }
 
+fn reveal_current_in_tree(
+    entity: Entity,
+    current: &Path,
+    st: &mut ExplorerState,
+    commands: &mut Commands,
+) {
+    let root = project_root(current);
+    if st.root != root {
+        st.root = root;
+        st.expanded.clear();
+        st.loading.clear();
+        st.children.clear();
+        st.focus_path = None;
+    }
+    let current_dir = if current.is_dir() {
+        current
+    } else {
+        current.parent().unwrap_or(current)
+    };
+    let Ok(relative) = current_dir.strip_prefix(&st.root) else {
+        return;
+    };
+    let mut dir = st.root.clone();
+    st.expanded.insert(dir.clone());
+    start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+    for component in relative.components() {
+        dir.push(component);
+        st.expanded.insert(dir.clone());
+        start_explorer_dir_load(entity, dir.clone(), st, commands, false);
+    }
+    st.focus_path = Some(current.to_path_buf());
+    commands.entity(entity).insert(ExplorerTreeDirty);
+}
+
 fn init_explorer_state(
     mut q: Query<(Entity, &FileView, &mut ExplorerState)>,
     mut commands: Commands,
@@ -2052,21 +2087,34 @@ fn drain_explorer_dir_loads(
 }
 
 fn emit_explorer_tree(
-    q: Query<(Entity, &ExplorerState), TreeDirtyReady>,
+    mut q: Query<(Entity, &FileView, &mut ExplorerState), TreeDirtyReady>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (entity, st) in &q {
+    for (entity, fv, mut st) in &mut q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
         let rows = flatten_tree(&st.root, &st.expanded, &st.loading, &st.children);
+        let focus_ready = st.focus_path.as_ref().is_some_and(|path| {
+            path == &st.root || rows.iter().any(|row| Path::new(&row.path) == path)
+        });
+        let focus_path = if focus_ready {
+            st.focus_path
+                .take()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             EXPLORER_TREE_EVENT,
             &ExplorerTreeEvent {
                 root_name: explorer_root_name(&st.root),
                 root_path: st.root.to_string_lossy().into_owned(),
+                current_path: fv.path.to_string_lossy().into_owned(),
+                focus_path,
                 loading: st.loading.contains(&st.root),
                 rows,
             },
@@ -2125,6 +2173,18 @@ fn on_explorer_tree_refresh(
     if explorer_path_allowed(&st, &path) {
         start_explorer_dir_load(entity, path, &mut st, &mut commands, true);
     }
+}
+
+fn on_explorer_reveal_current(
+    trigger: On<BinReceive<ExplorerRevealCurrent>>,
+    mut q: Query<(&FileView, &mut ExplorerState)>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((fv, mut st)) = q.get_mut(entity) else {
+        return;
+    };
+    reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
 }
 
 fn run_explorer_mutation(
@@ -2464,16 +2524,23 @@ fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Comm
 }
 
 fn on_explorer_panel_toggle(
-    _trigger: On<BinReceive<ExplorerPanelToggle>>,
+    trigger: On<BinReceive<ExplorerPanelToggle>>,
     mut chrome: ResMut<ExplorerChrome>,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
+    mut editors: Query<(&FileView, &mut ExplorerState)>,
     views: Query<Entity, With<FileView>>,
     mut commands: Commands,
 ) {
     chrome.visible = !chrome.visible;
     persist_chrome(*chrome, settings, saves);
     mark_chrome_unsent(&views, &mut commands);
+    if chrome.visible {
+        let entity = trigger.event().webview;
+        if let Ok((fv, mut st)) = editors.get_mut(entity) {
+            reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
+        }
+    }
 }
 
 fn on_explorer_panel_width(
@@ -2680,6 +2747,7 @@ impl Plugin for EditorPlugin {
                 ExplorerTreeToggle,
                 ExplorerTreePrefetch,
                 ExplorerTreeRefresh,
+                ExplorerRevealCurrent,
                 ExplorerCreate,
                 ExplorerRename,
                 ExplorerDelete,
@@ -2752,6 +2820,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_explorer_tree_toggle)
             .add_observer(on_explorer_tree_prefetch)
             .add_observer(on_explorer_tree_refresh)
+            .add_observer(on_explorer_reveal_current)
             .add_observer(on_explorer_create)
             .add_observer(on_explorer_rename)
             .add_observer(on_explorer_delete)
@@ -3131,6 +3200,31 @@ mod explorer_tests {
     }
 
     #[test]
+    fn reveal_current_expands_ancestors_and_focuses_file() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_reveal_current);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file.clone() }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        let src = tmp.path().join("src");
+        wait_for_children(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(st.expanded.contains(tmp.path()));
+        assert!(st.expanded.contains(&src));
+        assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
+    }
+
+    #[test]
     fn panel_toggle_flips_chrome() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -3150,6 +3244,33 @@ mod explorer_tests {
             payload: ExplorerPanelToggle,
         });
         assert!(!app.world().resource::<ExplorerChrome>().visible);
+    }
+
+    #[test]
+    fn panel_open_reveals_current_file() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                visible: false,
+                width: 240,
+            })
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_panel_toggle);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file.clone() }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelToggle,
+        });
+        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        assert!(app.world().resource::<ExplorerChrome>().visible);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
     }
 
     #[test]

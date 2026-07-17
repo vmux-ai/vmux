@@ -76,6 +76,7 @@ pub const EXPLORER_FS_RESULT_EVENT: &str = "explorer_fs_result";
 pub const EXPLORER_TREE_TOGGLE_EVENT: &str = "explorer_tree_toggle";
 pub const EXPLORER_TREE_PREFETCH_EVENT: &str = "explorer_tree_prefetch";
 pub const EXPLORER_TREE_REFRESH_EVENT: &str = "explorer_tree_refresh";
+pub const EXPLORER_REVEAL_CURRENT_EVENT: &str = "explorer_reveal_current";
 pub const EXPLORER_CREATE_EVENT: &str = "explorer_create";
 pub const EXPLORER_RENAME_EVENT: &str = "explorer_rename";
 pub const EXPLORER_DELETE_EVENT: &str = "explorer_delete";
@@ -767,6 +768,8 @@ pub struct OutlineRow {
 pub struct ExplorerTreeEvent {
     pub root_name: String,
     pub root_path: String,
+    pub current_path: String,
+    pub focus_path: String,
     pub loading: bool,
     pub rows: Vec<TreeRow>,
 }
@@ -879,6 +882,21 @@ pub struct ExplorerTreePrefetch {
 pub struct ExplorerTreeRefresh {
     pub path: String,
 }
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerRevealCurrent;
 
 #[derive(
     Debug,
@@ -999,6 +1017,8 @@ mod file_event_tests {
         let e = ExplorerTreeEvent {
             root_name: "VMUX".into(),
             root_path: "/r".into(),
+            current_path: "/r/src/lib.rs".into(),
+            focus_path: "/r/src/lib.rs".into(),
             loading: false,
             rows: vec![TreeRow {
                 name: "src".into(),

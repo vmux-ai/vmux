@@ -37,6 +37,8 @@ fn explorer_animates_tree_and_sections() {
     assert!(s.contains("grid-rows-[1fr]"));
     assert!(s.contains("transition-[grid-template-rows,opacity,transform]"));
     assert!(s.contains("transition-transform duration-150"));
+    assert!(s.contains("schedule_tree_focus"));
+    assert!(s.contains("current_path"));
 }
 
 #[test]
@@ -46,7 +48,12 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("ExplorerPanelToggle"));
     assert!(s.contains("ExplorerChromeEvent"));
     assert!(s.contains("ExplorerPanelWidth"));
-    assert!(s.contains("transition-[width] duration-200"));
+    assert!(s.contains("ExplorerSidebar"));
+    assert!(s.contains("-translate-x-full"));
+    assert!(!s.contains("transition-[width] duration-200"));
+    assert!(s.contains("ExplorerRevealCurrent"));
+    assert!(s.contains("raw.shift_key()"));
+    assert!(s.contains("key.eq_ignore_ascii_case(\"e\")"));
 }
 
 #[test]
