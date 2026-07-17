@@ -321,6 +321,7 @@ pub fn Page() -> Element {
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
+    let show_capability_examples = items.read().is_empty() && queued.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -712,9 +713,16 @@ pub fn Page() -> Element {
                         div { class: "relative z-10 min-w-0 flex-1 overflow-hidden",
                             if draft.read().is_empty() {
                                 div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-3.5",
-                                    PromptGhost {
-                                        accent_bg: agent_accent.accent_bg.to_string(),
-                                        terminal: false,
+                                    if show_capability_examples {
+                                        PromptGhost {
+                                            accent_bg: agent_accent.accent_bg.to_string(),
+                                            terminal: false,
+                                        }
+                                    } else {
+                                        div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
+                                            span { class: "min-w-0 truncate", "Type / for quick access" }
+                                            span { class: "agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0 {agent_accent.accent_bg}" }
+                                        }
                                     }
                                 }
                             }

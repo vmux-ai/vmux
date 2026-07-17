@@ -1582,6 +1582,11 @@ mod native_tests {
         assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
         assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
+        assert!(source.contains(
+            "let show_capability_examples = items.read().is_empty() && queued.read().is_empty();"
+        ));
+        assert!(source.contains("if show_capability_examples"));
+        assert!(source.contains("Type / for quick access"));
         assert!(source.contains("prompt_prefix_at_utf16"));
         assert!(source.contains("agent-chat-caret"));
         assert!(source.contains("caret-color:transparent"));
