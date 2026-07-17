@@ -237,3 +237,15 @@ where
 
     BevyState { is_loading, error }
 }
+
+/// Maps the latest binary host event into a Dioxus signal.
+pub fn use_bin_event_state<T>(name: &'static str, init: impl FnOnce() -> T) -> Signal<T>
+where
+    T: rkyv::Archive + 'static,
+    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
+{
+    let mut state = use_signal(init);
+    let _listener = use_bin_event_listener::<T, _>(name, move |event| state.set(event));
+    state
+}

@@ -2,21 +2,17 @@
 
 use crate::event::*;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_state, use_theme};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut state = use_signal(|| ProcessesListEvent {
-        connected: false,
-        processes: Vec::new(),
-    });
-    let mut search = use_signal(String::new);
-
-    let _listener =
-        use_bin_event_listener::<ProcessesListEvent, _>(PROCESSES_LIST_EVENT, move |event| {
-            state.set(event);
+    let state =
+        use_bin_event_state::<ProcessesListEvent>(PROCESSES_LIST_EVENT, || ProcessesListEvent {
+            connected: false,
+            processes: Vec::new(),
         });
+    let mut search = use_signal(String::new);
 
     let data = state.read();
     let query = search.read().to_lowercase();
