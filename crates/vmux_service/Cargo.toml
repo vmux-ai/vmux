@@ -45,6 +45,7 @@ vmux_service_client = { path = "../vmux_service_client" }
 vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
+tempfile = "3.27.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
@@ -59,7 +60,6 @@ objc2-service-management = "0.3"
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tempfile = "3.27.0"
 tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
 mockito = "1"
 serial_test = "3"

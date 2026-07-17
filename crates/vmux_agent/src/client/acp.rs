@@ -436,12 +436,78 @@ fn build_agent_env(
 
 fn apply_agent_compatibility_env(
     agent_id: &str,
-    mut env: Vec<(String, String)>,
+    env: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
-    if agent_id != "codex" {
-        return env;
+    match agent_id {
+        "mistral-vibe" | "vibe" => apply_vibe_compatibility_env(env),
+        "codex" => apply_codex_compatibility_env(env),
+        _ => env,
     }
+}
 
+fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut disabled = Vec::new();
+    if let Some(value) = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "VIBE_DISABLED_TOOLS")
+        .map(|(_, value)| value)
+    {
+        match serde_json::from_str::<Vec<String>>(value) {
+            Ok(existing) => extend_unique(&mut disabled, existing),
+            Err(err) => bevy::log::warn!(
+                "acp: existing VIBE_DISABLED_TOOLS is invalid JSON ({err}); discarding it"
+            ),
+        }
+    }
+    extend_unique(&mut disabled, ["bash".to_string()]);
+    env.retain(|(key, _)| key != "VIBE_DISABLED_TOOLS");
+    env.push((
+        "VIBE_DISABLED_TOOLS".to_string(),
+        serde_json::to_string(&disabled).unwrap(),
+    ));
+    let mut mcp_servers: Vec<serde_json::Value> = Vec::new();
+    if let Some(value) = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+        .map(|(_, value)| value)
+    {
+        match serde_json::from_str::<Vec<serde_json::Value>>(value) {
+            Ok(existing) => {
+                for server in existing {
+                    if let Some(name) = server.get("name").and_then(serde_json::Value::as_str) {
+                        mcp_servers.retain(|candidate| {
+                            candidate.get("name").and_then(serde_json::Value::as_str) != Some(name)
+                        });
+                    }
+                    mcp_servers.push(server);
+                }
+            }
+            Err(err) => bevy::log::warn!(
+                "acp: existing VIBE_MCP_SERVERS is invalid JSON ({err}); discarding it"
+            ),
+        }
+    }
+    env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
+    if !mcp_servers.is_empty() {
+        env.push((
+            "VIBE_MCP_SERVERS".to_string(),
+            serde_json::to_string(&mcp_servers).unwrap(),
+        ));
+    }
+    env
+}
+
+fn extend_unique(out: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
+    for value in values {
+        if !out.contains(&value) {
+            out.push(value);
+        }
+    }
+}
+
+fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
     let existing = env
         .iter()
         .rev()
@@ -1147,6 +1213,41 @@ mod tests {
                 .unwrap()
                 .contains("mcp__vmux__run")
         );
+    }
+
+    #[test]
+    fn vibe_acp_routes_shell_commands_through_vmux_run() {
+        let env = apply_agent_compatibility_env(
+            "mistral-vibe",
+            vec![
+                s("VIBE_DISABLED_TOOLS", r#"["from-env"]"#),
+                s(
+                    "VIBE_MCP_SERVERS",
+                    r#"[{"name":"from-env","transport":"stdio","command":"env-command"}]"#,
+                ),
+            ],
+        );
+        let disabled = env
+            .iter()
+            .find(|(key, _)| key == "VIBE_DISABLED_TOOLS")
+            .map(|(_, value)| serde_json::from_str::<Vec<String>>(value).unwrap())
+            .expect("Vibe ACP disabled tools");
+
+        assert_eq!(disabled, vec!["from-env", "bash"]);
+        let mcp_servers = env
+            .iter()
+            .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .expect("Vibe ACP MCP servers");
+        assert_eq!(mcp_servers[0]["name"], "from-env");
+    }
+
+    #[test]
+    fn vibe_acp_discards_invalid_mcp_environment() {
+        let env =
+            apply_agent_compatibility_env("mistral-vibe", vec![s("VIBE_MCP_SERVERS", "not-json")]);
+
+        assert!(env.iter().all(|(key, _)| key != "VIBE_MCP_SERVERS"));
     }
 
     #[test]

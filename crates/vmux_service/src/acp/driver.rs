@@ -70,6 +70,45 @@ pub struct AcpTerminal {
     pub output_byte_limit: Option<u64>,
 }
 
+#[derive(Clone)]
+struct AcpFsScope {
+    cwd: PathBuf,
+    vibe_temp_root: Option<PathBuf>,
+}
+
+struct VibeTempRoot(tempfile::TempDir);
+
+impl VibeTempRoot {
+    fn create(agent_id: &str) -> std::io::Result<Option<Self>> {
+        if !matches!(agent_id, "mistral-vibe" | "vibe") {
+            return Ok(None);
+        }
+        tempfile::Builder::new()
+            .prefix("vmux-vibe-")
+            .tempdir()
+            .map(Self)
+            .map(Some)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self.0.path()
+    }
+
+    fn apply_env(&self, mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+        env.retain(|(key, _)| key != "TMPDIR");
+        env.push((
+            "TMPDIR".to_string(),
+            self.path().to_string_lossy().into_owned(),
+        ));
+        env
+    }
+
+    async fn cleanup(self) {
+        let path = self.0.keep();
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(path)).await;
+    }
+}
+
 /// State shared between the driver's request handlers and its prompt loop.
 pub struct AcpShared {
     pub sid: String,
@@ -382,6 +421,26 @@ pub async fn run(
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
+    let vibe_temp_root = match VibeTempRoot::create(&agent_id) {
+        Ok(root) => root,
+        Err(err) => {
+            shared.emit_status(AgentRunStatus::Errored(format!(
+                "vibe temp directory failed: {err}"
+            )));
+            return;
+        }
+    };
+    let fs_scope = AcpFsScope {
+        cwd: shared.cwd.clone(),
+        vibe_temp_root: vibe_temp_root
+            .as_ref()
+            .map(|root| root.path().to_path_buf()),
+    };
+    let env = apply_vibe_mcp_env(&agent_id, env, &mcp_servers);
+    let env = match &vibe_temp_root {
+        Some(root) => root.apply_env(env),
+        None => env,
+    };
     let session_meta = session_meta_for_agent(&agent_id);
     let mut child = match Command::new(&command)
         .args(&args)
@@ -413,8 +472,8 @@ pub async fn run(
     let wait_shared = shared.clone();
     let kill_shared = shared.clone();
     let release_shared = shared.clone();
-    let read_cwd = shared.cwd.clone();
-    let write_cwd = shared.cwd.clone();
+    let read_scope = fs_scope.clone();
+    let write_scope = fs_scope;
 
     let result = Client
         .builder()
@@ -454,7 +513,7 @@ pub async fn run(
             async move |req: ReadTextFileRequest,
                         responder: Responder<ReadTextFileResponse>,
                         _cx| {
-                match read_text_file(&read_cwd, &req) {
+                match read_text_file(&read_scope, &req) {
                     Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -465,7 +524,7 @@ pub async fn run(
             async move |req: WriteTextFileRequest,
                         responder: Responder<WriteTextFileResponse>,
                         _cx| {
-                match write_text_file(&write_cwd, &req) {
+                match write_text_file(&write_scope, &req) {
                     Ok(()) => responder.respond(WriteTextFileResponse::new()),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -597,13 +656,14 @@ pub async fn run(
                 })
                 .await;
                 match ensured {
-                    Ok((sid, true)) => {
-                        main_shared.emit(ServiceMessage::AcpSessionCreated {
-                            sid: main_shared.sid.clone(),
-                            acp_session_id: sid.to_string(),
-                        });
+                    Ok((sid, created)) => {
+                        if created {
+                            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                sid: main_shared.sid.clone(),
+                                acp_session_id: sid.to_string(),
+                            });
+                        }
                     }
-                    Ok(_) => {}
                     Err(err) => {
                         main_shared.emit_status(AgentRunStatus::Errored(format!(
                             "acp session/new failed: {err}"
@@ -758,6 +818,64 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
+    if let Some(root) = vibe_temp_root {
+        root.cleanup().await;
+    }
+}
+
+fn apply_vibe_mcp_env(
+    agent_id: &str,
+    mut env: Vec<(String, String)>,
+    mcp_servers: &[McpServer],
+) -> Vec<(String, String)> {
+    if !matches!(agent_id, "mistral-vibe" | "vibe") || mcp_servers.is_empty() {
+        return env;
+    }
+    let mut configured = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+        .and_then(
+            |(_, value)| match serde_json::from_str::<Vec<serde_json::Value>>(value) {
+                Ok(servers) => Some(servers),
+                Err(err) => {
+                    tracing::warn!("invalid VIBE_MCP_SERVERS JSON; discarding it: {err}");
+                    None
+                }
+            },
+        )
+        .unwrap_or_default();
+    for server in mcp_servers {
+        let McpServer::Stdio(server) = server else {
+            continue;
+        };
+        configured.retain(|existing| {
+            existing.get("name").and_then(serde_json::Value::as_str) != Some(&server.name)
+        });
+        let server_env: serde_json::Map<String, serde_json::Value> = server
+            .env
+            .iter()
+            .map(|var| {
+                (
+                    var.name.clone(),
+                    serde_json::Value::String(var.value.clone()),
+                )
+            })
+            .collect();
+        configured.push(serde_json::json!({
+            "name": server.name,
+            "transport": "stdio",
+            "command": server.command.to_string_lossy(),
+            "args": server.args,
+            "env": server_env,
+        }));
+    }
+    env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
+    env.push((
+        "VIBE_MCP_SERVERS".to_string(),
+        serde_json::to_string(&configured).unwrap(),
+    ));
+    env
 }
 
 fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
@@ -1128,6 +1246,55 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
     Some(abs)
 }
 
+fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
+    resolve_in_cwd(&scope.cwd, path)
+        .or_else(|| resolve_vibe_scratchpad(scope.vibe_temp_root.as_ref()?, path))
+}
+
+fn resolve_vibe_scratchpad(temp_root: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let prefix = "vibe-scratchpad-";
+    let real_temp = temp_root.canonicalize().ok()?;
+    for base in [temp_root, real_temp.as_path()] {
+        let Ok(relative) = path.strip_prefix(base) else {
+            continue;
+        };
+        let Some(std::path::Component::Normal(root_name)) = relative.components().next() else {
+            continue;
+        };
+        let Some(root_name_str) = root_name.to_str() else {
+            continue;
+        };
+        if !root_name_str.starts_with(prefix) || root_name_str.len() == prefix.len() {
+            continue;
+        }
+        let scratchpad = base.join(root_name);
+        let Ok(real_scratchpad) = scratchpad.canonicalize() else {
+            continue;
+        };
+        if !real_scratchpad.starts_with(&real_temp) {
+            continue;
+        }
+        let Some(real_root_name) = real_scratchpad.file_name().and_then(|name| name.to_str())
+        else {
+            continue;
+        };
+        if !real_root_name.starts_with(prefix) || real_root_name.len() == prefix.len() {
+            continue;
+        }
+        if let Some(path) = resolve_in_cwd(&scratchpad, path) {
+            return Some(path);
+        }
+    }
+    None
+}
+
 fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
     if line.is_none() && limit.is_none() {
         return text.to_string();
@@ -1140,15 +1307,15 @@ fn slice_lines(text: &str, line: Option<u32>, limit: Option<u32>) -> String {
     lines.get(start..end).unwrap_or(&[]).join("\n")
 }
 
-fn read_text_file(cwd: &std::path::Path, req: &ReadTextFileRequest) -> Result<String, String> {
-    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+fn read_text_file(scope: &AcpFsScope, req: &ReadTextFileRequest) -> Result<String, String> {
+    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
     let text =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     Ok(slice_lines(&text, req.line, req.limit))
 }
 
-fn write_text_file(cwd: &std::path::Path, req: &WriteTextFileRequest) -> Result<(), String> {
-    let path = resolve_in_cwd(cwd, &req.path).ok_or("path outside session cwd")?;
+fn write_text_file(scope: &AcpFsScope, req: &WriteTextFileRequest) -> Result<(), String> {
+    let path = resolve_acp_fs_path(scope, &req.path).ok_or("path outside session cwd")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
@@ -1192,6 +1359,60 @@ mod tests {
             acp_display_name(Some(&named)).as_deref(),
             Some("claude-code-acp")
         );
+    }
+
+    #[test]
+    fn vibe_acp_injects_session_mcp_servers_into_vibe_config() {
+        let server = McpServer::Stdio(
+            agent_client_protocol::schema::v1::McpServerStdio::new("vmux", "/tmp/vmux")
+                .args(vec!["mcp".to_string(), "--profile".to_string()])
+                .env(vec![agent_client_protocol::schema::v1::EnvVariable::new(
+                    "VMUX_PROFILE",
+                    "dev",
+                )]),
+        );
+        let env = apply_vibe_mcp_env(
+            "mistral-vibe",
+            vec![(
+                "VIBE_MCP_SERVERS".to_string(),
+                r#"[{"name":"other","transport":"stdio","command":"other"}]"#.to_string(),
+            )],
+            &[server],
+        );
+        let value = env
+            .iter()
+            .find(|(key, _)| key == "VIBE_MCP_SERVERS")
+            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+            .unwrap();
+
+        assert_eq!(value[0]["name"], "other");
+        assert_eq!(value[1]["name"], "vmux");
+        assert_eq!(value[1]["command"], "/tmp/vmux");
+        assert_eq!(value[1]["args"], serde_json::json!(["mcp", "--profile"]));
+        assert_eq!(value[1]["env"]["VMUX_PROFILE"], "dev");
+    }
+
+    #[test]
+    fn vibe_temp_root_overrides_child_tmpdir() {
+        let root = VibeTempRoot::create("mistral-vibe").unwrap().unwrap();
+        let env = root.apply_env(vec![
+            ("TMPDIR".to_string(), "/old".to_string()),
+            ("HOME".to_string(), "/home/test".to_string()),
+        ]);
+        let expected = root.path().to_string_lossy().into_owned();
+
+        assert_eq!(
+            env.iter()
+                .filter(|(key, _)| key == "TMPDIR")
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>(),
+            vec![expected.as_str()]
+        );
+        assert!(
+            env.iter()
+                .any(|(key, value)| key == "HOME" && value == "/home/test")
+        );
+        assert!(VibeTempRoot::create("codex").unwrap().is_none());
     }
 
     #[test]
@@ -1716,6 +1937,52 @@ mod tests {
         );
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/etc/passwd")).is_none());
         assert!(resolve_in_cwd(cwd, std::path::Path::new("/work/../etc/passwd")).is_none());
+    }
+
+    #[test]
+    fn vibe_fs_scope_allows_only_process_temp_root() {
+        let temp_root = tempfile::tempdir().unwrap();
+        let scratchpad = temp_root.path().join("vibe-scratchpad-cafebabe-runtime");
+        std::fs::create_dir_all(&scratchpad).unwrap();
+        let scope = AcpFsScope {
+            cwd: PathBuf::from("/work"),
+            vibe_temp_root: Some(temp_root.path().to_path_buf()),
+        };
+
+        assert!(resolve_acp_fs_path(&scope, &scratchpad.join("test.nu")).is_some());
+        assert!(
+            resolve_acp_fs_path(
+                &scope,
+                &scratchpad.canonicalize().unwrap().join("canonical.nu")
+            )
+            .is_some()
+        );
+        assert!(
+            resolve_acp_fs_path(
+                &scope,
+                &std::env::temp_dir().join("vibe-scratchpad-deadbeef-foreign/test.nu")
+            )
+            .is_none()
+        );
+        assert!(resolve_acp_fs_path(&scope, std::path::Path::new("/etc/passwd")).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vibe_fs_scope_rejects_scratchpad_symlink_outside_process_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp_root = tempfile::tempdir().unwrap();
+        let foreign_root = tempfile::tempdir().unwrap();
+        let target = foreign_root.path().join("vibe-scratchpad-cafebabe-target");
+        let alias = temp_root.path().join("vibe-scratchpad-deadbeef-alias");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("secret.nu"), "secret").unwrap();
+        symlink(&target, &alias).unwrap();
+
+        assert!(resolve_vibe_scratchpad(temp_root.path(), &alias.join("secret.nu")).is_none());
+
+        std::fs::remove_file(alias).unwrap();
     }
 
     #[test]
