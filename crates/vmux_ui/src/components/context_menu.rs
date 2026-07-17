@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::context_menu::{
     ContextMenuContentProps, ContextMenuItemProps, ContextMenuProps, ContextMenuTriggerProps,
 };
+use wasm_bindgen::JsCast;
 
 #[derive(Clone, Copy)]
 struct ContextMenuState {
@@ -21,6 +22,34 @@ impl ContextMenuState {
         }
         self.on_open_change.call(open);
     }
+}
+
+fn clamp_context_menu_to_viewport(event: Event<MountedData>) {
+    let Some(element) = event.downcast::<web_sys::Element>() else {
+        return;
+    };
+    let Ok(menu) = element.clone().dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(width) = window.inner_width().ok().and_then(|value| value.as_f64()) else {
+        return;
+    };
+    let Some(height) = window.inner_height().ok().and_then(|value| value.as_f64()) else {
+        return;
+    };
+    let rect = menu.get_bounding_client_rect();
+    let padding = 6.0;
+    let max_left = (width - rect.width() - padding).max(padding);
+    let max_top = (height - rect.height() - padding).max(padding);
+    let style = menu.style();
+    let _ = style.set_property(
+        "left",
+        &format!("{}px", rect.left().clamp(padding, max_left)),
+    );
+    let _ = style.set_property("top", &format!("{}px", rect.top().clamp(padding, max_top)));
 }
 
 #[component]
@@ -92,7 +121,7 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[1000]",
+            class: "fixed inset-0 z-[1000] outline-none",
             tabindex: "-1",
             onmounted: move |event| {
                 let data = event.data();
@@ -134,9 +163,10 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
                 role: "menu",
                 aria_orientation: "vertical",
                 position: "fixed",
-                left: "clamp(8px, {x}px, calc(100vw - 176px))",
-                top: "clamp(8px, {y}px, calc(100vh - 48px))",
-                class: "z-[1000] min-w-[168px] max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-y-auto rounded-md bg-background p-1 shadow-[inset_0_0_0_1px_var(--border),0_8px_24px_rgba(0,0,0,0.24)] dark:bg-muted dark:shadow-[inset_0_0_0_1px_var(--primary),0_8px_24px_rgba(0,0,0,0.4)]",
+                left: "clamp(6px, {x}px, calc(100vw - 140px))",
+                top: "clamp(6px, {y}px, calc(100vh - 32px))",
+                class: "z-[1000] min-w-[132px] max-w-[calc(100vw-12px)] max-h-[calc(100vh-12px)] overflow-y-auto rounded-md border border-border bg-background p-0.5 dark:bg-muted",
+                onmounted: clamp_context_menu_to_viewport,
                 onpointerdown: move |event| event.stop_propagation(),
                 oncontextmenu: move |event| {
                     event.prevent_default();
@@ -178,7 +208,7 @@ pub fn ContextMenuItem(props: ContextMenuItemProps) -> Element {
             tabindex: if (state.focused)() == Some(index) { "0" } else { "-1" },
             aria_disabled: disabled,
             "data-disabled": disabled,
-            class: "flex min-h-8 max-w-full cursor-pointer select-none items-center overflow-hidden text-ellipsis whitespace-nowrap rounded px-2.5 py-1.5 text-[13px] leading-5 text-muted-foreground outline-none transition-colors data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground dark:hover:bg-primary dark:hover:text-foreground dark:focus:bg-primary dark:focus:text-foreground",
+            class: "flex min-h-6 max-w-full cursor-pointer select-none items-center overflow-hidden text-ellipsis whitespace-nowrap rounded px-2 py-0.5 text-xs leading-4 text-muted-foreground outline-none transition-colors data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 hover:bg-accent hover:text-foreground focus:bg-accent focus:text-foreground dark:hover:bg-primary dark:hover:text-foreground dark:focus:bg-primary dark:focus:text-foreground",
             onmounted: move |event| item_ref.set(Some(event.data())),
             onpointerenter: move |_| state.focused.set(Some(index)),
             onpointerdown: move |event| {

@@ -7,6 +7,7 @@ use crate::event::{
     STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent,
     TabsHostEvent,
 };
+use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::PageIcon;
 use vmux_core::event::extension::{
@@ -203,7 +204,7 @@ pub fn Page() -> Element {
             if overlay_ready && state.side_sheet_open {
                 aside {
                     id: "vmux-side-sheet",
-                    class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+                    class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
@@ -757,10 +758,16 @@ fn SideSheetView(
     let folders = bookmark_folder_choices(&bookmarks.roots);
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);
+    let mut drag_state = use_signal(|| None::<BookmarkDragState>);
     use_context_provider(|| folder_context);
+    use_context_provider(|| drag_state);
     use_effect(move || folder_context.set(folders.clone()));
     rsx! {
-        div { class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
+        div {
+            class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
+            onmousemove: move |event| update_bookmark_drag(drag_state, &event, None),
+            onmouseup: move |event| end_bookmark_drag(drag_state, &event, None),
+            onmouseleave: move |_| drag_state.set(None),
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
@@ -806,6 +813,32 @@ struct BookmarkFolderChoice {
     uuid: String,
     label: String,
     ancestors: Vec<String>,
+}
+
+#[derive(Clone, PartialEq)]
+enum BookmarkDragItem {
+    Page {
+        url: String,
+        title: String,
+        favicon_url: String,
+    },
+    Bookmark(String),
+    Folder(String),
+}
+
+#[derive(Clone, PartialEq)]
+enum BookmarkDropTarget {
+    Root,
+    Folder(String),
+}
+
+#[derive(Clone, PartialEq)]
+struct BookmarkDragState {
+    item: BookmarkDragItem,
+    start_x: f64,
+    start_y: f64,
+    active: bool,
+    target: Option<BookmarkDropTarget>,
 }
 
 fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
@@ -1025,63 +1058,113 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
     });
 }
 
-const BOOKMARK_DRAG_KIND: &str = "application/x-vmux-bookmark-kind";
-const BOOKMARK_DRAG_UUID: &str = "application/x-vmux-bookmark-uuid";
-const BOOKMARK_DRAG_URL: &str = "application/x-vmux-bookmark-url";
-const BOOKMARK_DRAG_TITLE: &str = "application/x-vmux-bookmark-title";
-const BOOKMARK_DRAG_FAVICON: &str = "application/x-vmux-bookmark-favicon";
-
-fn set_page_drag_data(event: &Event<DragData>, page: &StackNode) {
-    set_page_drag_fields(event, &page.url, &page.title, page.icon.favicon_url());
-}
-
-fn set_page_drag_fields(event: &Event<DragData>, url: &str, title: &str, favicon_url: &str) {
-    let transfer = event.data_transfer();
-    transfer.set_effect_allowed("copyMove");
-    let _ = transfer.set_data(BOOKMARK_DRAG_KIND, "page");
-    let _ = transfer.set_data(BOOKMARK_DRAG_URL, url);
-    let _ = transfer.set_data(BOOKMARK_DRAG_TITLE, title);
-    let _ = transfer.set_data(BOOKMARK_DRAG_FAVICON, favicon_url);
-    let _ = transfer.set_data("text/plain", url);
-}
-
-fn set_bookmark_drag_data(event: &Event<DragData>, kind: &str, uuid: &str) {
-    let transfer = event.data_transfer();
-    transfer.set_effect_allowed("move");
-    let _ = transfer.set_data(BOOKMARK_DRAG_KIND, kind);
-    let _ = transfer.set_data(BOOKMARK_DRAG_UUID, uuid);
-    let _ = transfer.set_data("text/plain", uuid);
-}
-
-fn drop_bookmark_item(event: &Event<DragData>, folder: Option<String>) {
+fn begin_bookmark_drag(
+    mut state: Signal<Option<BookmarkDragState>>,
+    event: &Event<MouseData>,
+    item: BookmarkDragItem,
+) {
+    if event.trigger_button() != Some(MouseButton::Primary) {
+        return;
+    }
+    let coordinates = event.client_coordinates();
     event.prevent_default();
-    let transfer = event.data_transfer();
-    transfer.set_drop_effect("move");
-    match transfer.get_data(BOOKMARK_DRAG_KIND).as_deref() {
-        Some("page") => {
-            let Some(url) = transfer.get_data(BOOKMARK_DRAG_URL) else {
-                return;
-            };
-            add_to_bookmarks(
-                "add",
-                url,
-                transfer.get_data(BOOKMARK_DRAG_TITLE).unwrap_or_default(),
-                transfer.get_data(BOOKMARK_DRAG_FAVICON).unwrap_or_default(),
-                folder,
-            );
-        }
-        Some("bookmark") => {
-            if let Some(uuid) = transfer.get_data(BOOKMARK_DRAG_UUID) {
-                move_bookmark(uuid, folder);
-            }
-        }
-        Some("folder") => {
-            if let Some(uuid) = transfer.get_data(BOOKMARK_DRAG_UUID) {
+    state.set(Some(BookmarkDragState {
+        item,
+        start_x: coordinates.x,
+        start_y: coordinates.y,
+        active: false,
+        target: None,
+    }));
+}
+
+fn update_bookmark_drag(
+    mut state: Signal<Option<BookmarkDragState>>,
+    event: &Event<MouseData>,
+    target: Option<BookmarkDropTarget>,
+) {
+    let Some(mut drag) = state() else {
+        return;
+    };
+    let coordinates = event.client_coordinates();
+    let dx = coordinates.x - drag.start_x;
+    let dy = coordinates.y - drag.start_y;
+    if !drag.active && dx * dx + dy * dy < 16.0 {
+        return;
+    }
+    if !drag.active || drag.target != target {
+        drag.active = true;
+        drag.target = target;
+        state.set(Some(drag));
+    }
+}
+
+fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
+    let folder = match target {
+        BookmarkDropTarget::Root => None,
+        BookmarkDropTarget::Folder(uuid) => Some(uuid),
+    };
+    match item {
+        BookmarkDragItem::Page {
+            url,
+            title,
+            favicon_url,
+        } => add_to_bookmarks("add", url, title, favicon_url, folder),
+        BookmarkDragItem::Bookmark(uuid) => move_bookmark(uuid, folder),
+        BookmarkDragItem::Folder(uuid) => {
+            if folder.as_deref() != Some(uuid.as_str()) {
                 move_bookmark_folder(uuid, folder);
             }
         }
-        _ => {}
     }
+}
+
+fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
+    let Some(window) = web_sys::window() else {
+        state.set(None);
+        return;
+    };
+    let callback = Closure::once(move || state.set(None));
+    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+        Ok(_) => callback.forget(),
+        Err(_) => state.set(None),
+    }
+}
+
+fn end_bookmark_drag(
+    mut state: Signal<Option<BookmarkDragState>>,
+    event: &Event<MouseData>,
+    target: Option<BookmarkDropTarget>,
+) {
+    let Some(mut drag) = state() else {
+        return;
+    };
+    let coordinates = event.client_coordinates();
+    let dx = coordinates.x - drag.start_x;
+    let dy = coordinates.y - drag.start_y;
+    if !drag.active && dx * dx + dy * dy < 16.0 {
+        state.set(None);
+        return;
+    }
+    event.prevent_default();
+    event.stop_propagation();
+    drag.active = true;
+    drag.target = target.clone();
+    if let Some(target) = target {
+        perform_bookmark_drop(drag.item.clone(), target);
+    }
+    state.set(Some(drag));
+    clear_bookmark_drag_after_click(state);
+}
+
+fn bookmark_drag_blocks_click(state: Signal<Option<BookmarkDragState>>) -> bool {
+    state().is_some_and(|drag| drag.active)
+}
+
+fn bookmark_drop_targeted(
+    state: Signal<Option<BookmarkDragState>>,
+    target: &BookmarkDropTarget,
+) -> bool {
+    state().is_some_and(|drag| drag.active && drag.target.as_ref() == Some(target))
 }
 
 fn set_bookmark_text_input_active(active: bool) {
@@ -1185,54 +1268,10 @@ fn begin_new_folder(mut creating: Signal<bool>, mut draft: Signal<String>) {
     creating.set(true);
 }
 
-fn clamp_side_sheet_context_menu(event: Event<MountedData>) {
-    let Some(wrapper) = event.downcast::<web_sys::Element>() else {
-        return;
-    };
-    let Some(menu) = wrapper.parent_element() else {
-        return;
-    };
-    let Some(side_sheet) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("vmux-side-sheet"))
-    else {
-        return;
-    };
-    let Ok(menu) = menu.dyn_into::<web_sys::HtmlElement>() else {
-        return;
-    };
-    let side_rect = side_sheet.get_bounding_client_rect();
-    let padding = 12.0;
-    let max_width = (side_rect.width() - padding * 2.0).max(120.0);
-    let max_height = (side_rect.height() - padding * 2.0).max(120.0);
-    let style = menu.style();
-    let _ = style.set_property("max-width", &format!("{max_width}px"));
-    let _ = style.set_property("max-height", &format!("{max_height}px"));
-    let _ = style.set_property("overflow-y", "auto");
-    if max_width < 220.0 {
-        let _ = style.set_property("min-width", &format!("{max_width}px"));
-    }
-    let menu_rect = menu.get_bounding_client_rect();
-    let min_left = side_rect.left() + padding;
-    let max_left = (side_rect.right() - menu_rect.width() - padding).max(min_left);
-    let min_top = side_rect.top() + padding;
-    let max_top = (side_rect.bottom() - menu_rect.height() - padding).max(min_top);
-    let _ = style.set_property(
-        "left",
-        &format!("{}px", menu_rect.left().clamp(min_left, max_left)),
-    );
-    let _ = style.set_property(
-        "top",
-        &format!("{}px", menu_rect.top().clamp(min_top, max_top)),
-    );
-}
-
 #[component]
 fn SideSheetContextMenuContent(children: Element) -> Element {
     rsx! {
-        ContextMenuContent { attributes: vec![],
-            div { onmounted: clamp_side_sheet_context_menu, {children} }
-        }
+        ContextMenuContent { attributes: vec![], {children} }
     }
 }
 
@@ -1269,21 +1308,26 @@ fn commit_folder_rename(uuid: String, name: String) {
 #[component]
 fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode>) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
+    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| "New Folder".to_string());
     let folders = bookmark_folder_choices(&roots);
     let folder_rows = bookmark_folder_rows(&roots);
+    let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDropTarget::Root);
 
     rsx! {
         div {
-            class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
-            ondragover: move |event: Event<DragData>| {
-                event.prevent_default();
-                event.data_transfer().set_drop_effect("move");
+            class: if root_targeted {
+                "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
+            } else {
+                "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5"
             },
-            ondrop: move |event: Event<DragData>| {
+            onmousemove: move |event| {
+                update_bookmark_drag(drag_state, &event, Some(BookmarkDropTarget::Root));
                 event.stop_propagation();
-                drop_bookmark_item(&event, None);
+            },
+            onmouseup: move |event| {
+                end_bookmark_drag(drag_state, &event, Some(BookmarkDropTarget::Root));
             },
             oncontextmenu: move |e: Event<MouseData>| {
                 let data = e.data();
@@ -1374,27 +1418,35 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
 
 #[component]
 fn PinTile(row: BookmarkRow) -> Element {
+    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let url_open = row.url.clone();
     let uuid_unpin = row.uuid.clone();
     let uuid_remove = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
+    let drag_item = BookmarkDragItem::Page {
+        url: row.url.clone(),
+        title: row.title.clone(),
+        favicon_url: row.favicon_url.clone(),
+    };
     rsx! {
         LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
                 div {
-                    draggable: "true",
-                    ondragstart: {
-                        let url = row.url.clone();
-                        let title = row.title.clone();
-                        let favicon = row.favicon_url.clone();
-                        move |event: Event<DragData>| {
-                            set_page_drag_fields(&event, &url, &title, &favicon)
-                        }
+                    onmousedown: {
+                        let item = drag_item.clone();
+                        move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                     },
                     class: "flex aspect-square cursor-pointer items-center justify-center rounded-md bg-white/5 hover:bg-white/10",
                     onclick: {
                         let u = url_open.clone();
-                        move |_| open_bookmark(u.clone())
+                        move |event| {
+                            if bookmark_drag_blocks_click(drag_state) {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                return;
+                            }
+                            open_bookmark(u.clone());
+                        }
                     },
                     title: "{row.title}",
                     Favicon {
@@ -1438,6 +1490,7 @@ fn BookmarkEntry(
     folder_uuid: Option<String>,
     folders: Vec<BookmarkFolderChoice>,
 ) -> Element {
+    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let url_open = row.url.clone();
     let uuid_pin = row.uuid.clone();
     let uuid_remove = row.uuid.clone();
@@ -1467,6 +1520,7 @@ fn BookmarkEntry(
     );
     let remove_index = 3 + move_targets.len();
     let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
+    let drag_item = BookmarkDragItem::Bookmark(row.uuid.clone());
     rsx! {
         if editing() {
             div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
@@ -1495,18 +1549,22 @@ fn BookmarkEntry(
                 ContextMenuTrigger {
                     attributes: vec![],
                     div {
-                        draggable: "true",
-                        ondragstart: {
-                            let id = row.uuid.clone();
-                            move |event: Event<DragData>| {
-                                set_bookmark_drag_data(&event, "bookmark", &id)
-                            }
+                        onmousedown: {
+                            let item = drag_item.clone();
+                            move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                         },
                         SheetEntryRow {
                             active: false,
                             onclick: {
                                 let u = url_open.clone();
-                                move |_| open_bookmark(u.clone())
+                                move |event: MouseEvent| {
+                                    if bookmark_drag_blocks_click(drag_state) {
+                                        event.prevent_default();
+                                        event.stop_propagation();
+                                        return;
+                                    }
+                                    open_bookmark(u.clone());
+                                }
                             },
                             Favicon {
                                 favicon_url: row.favicon_url.clone(),
@@ -1578,6 +1636,7 @@ fn BookmarkFolder(
     folder_rows: Vec<FolderRow>,
     active_page: Option<StackNode>,
 ) -> Element {
+    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
     let mut editing = use_signal(|| false);
@@ -1602,9 +1661,24 @@ fn BookmarkFolder(
             }),
     );
     let remove_index = 4 + move_targets.len();
+    let drop_target = BookmarkDropTarget::Folder(uuid.clone());
+    let folder_targeted = bookmark_drop_targeted(drag_state, &drop_target);
+    let drag_item = BookmarkDragItem::Folder(uuid.clone());
 
     rsx! {
-        div { class: "flex flex-col gap-1",
+        div {
+            class: "flex flex-col gap-1",
+            onmousemove: {
+                let target = drop_target.clone();
+                move |event| {
+                    update_bookmark_drag(drag_state, &event, Some(target.clone()));
+                    event.stop_propagation();
+                }
+            },
+            onmouseup: {
+                let target = drop_target.clone();
+                move |event| end_bookmark_drag(drag_state, &event, Some(target.clone()))
+            },
             if editing() {
                 div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
@@ -1629,30 +1703,23 @@ fn BookmarkFolder(
                     ContextMenuTrigger {
                         attributes: vec![],
                         div {
-                            draggable: "true",
-                            ondragstart: {
-                                let id = uuid.clone();
-                                move |event: Event<DragData>| {
-                                    set_bookmark_drag_data(&event, "folder", &id)
-                                }
-                            },
-                            ondragover: move |event: Event<DragData>| {
-                                event.prevent_default();
-                                event.stop_propagation();
-                                event.data_transfer().set_drop_effect("move");
-                            },
-                            ondrop: {
-                                let id = uuid.clone();
-                                move |event: Event<DragData>| {
-                                    event.stop_propagation();
-                                    drop_bookmark_item(&event, Some(id.clone()));
-                                }
+                            class: if folder_targeted { "rounded-md ring-2 ring-ring" } else { "rounded-md" },
+                            onmousedown: {
+                                let item = drag_item.clone();
+                                move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
                             SheetEntryRow {
                                 active: false,
                                 onclick: {
                                     let id = uuid.clone();
-                                    move |_| bookmark_cmd("toggle_folder", Some(id.clone()))
+                                    move |event: MouseEvent| {
+                                        if bookmark_drag_blocks_click(drag_state) {
+                                            event.prevent_default();
+                                            event.stop_propagation();
+                                            return;
+                                        }
+                                        bookmark_cmd("toggle_folder", Some(id.clone()));
+                                    }
                                 },
                                 Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                                     path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
@@ -1930,12 +1997,17 @@ fn NewStackRow(pane_id: u64) -> Element {
 #[component]
 fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let folder_context: Signal<Vec<BookmarkFolderChoice>> = use_context();
+    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let folders = folder_context();
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
     let mut hovered = use_signal(|| false);
     let menu_val = use_signal(|| stack.url.clone());
-    let drag_page = stack.clone();
+    let drag_item = BookmarkDragItem::Page {
+        url: stack.url.clone(),
+        title: stack.title.clone(),
+        favicon_url: stack.icon.favicon_url().to_string(),
+    };
     let bookmark_url = stack.url.clone();
     let bookmark_title = stack.title.clone();
     let bookmark_favicon = stack.icon.favicon_url().to_string();
@@ -1961,8 +2033,10 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
             ContextMenuTrigger {
                 attributes: vec![],
                 div {
-                    draggable: "true",
-                    ondragstart: move |event: Event<DragData>| set_page_drag_data(&event, &drag_page),
+                    onmousedown: {
+                        let item = drag_item.clone();
+                        move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                    },
                     id: "sidesheet-stack-{pane_id}-{stack_index}",
                     class: if is_active {
                         "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
@@ -1971,7 +2045,12 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     },
                     onmouseenter: move |_| hovered.set(true),
                     onmouseleave: move |_| hovered.set(false),
-                    onclick: move |_| {
+                    onclick: move |event| {
+                        if bookmark_drag_blocks_click(drag_state) {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            return;
+                        }
                         let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),

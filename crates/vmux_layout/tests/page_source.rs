@@ -220,6 +220,19 @@ fn dir_path_titles_truncate_at_start() {
     assert!(server_css.contains("@source \"../../vmux_layout/src\""));
 }
 
+#[test]
+fn bookmark_drag_uses_mouse_events_instead_of_html_drag() {
+    let source = include_str!("../src/page.rs");
+
+    assert!(source.contains("fn begin_bookmark_drag"));
+    assert!(source.contains("fn update_bookmark_drag"));
+    assert!(source.contains("fn end_bookmark_drag"));
+    assert!(source.contains("onmousemove"));
+    assert!(source.contains("onmouseup"));
+    assert!(!source.contains("DragData"));
+    assert!(!source.contains("draggable: \"true\""));
+}
+
 fn tab_component_source() -> &'static str {
     include_str!("../src/page.rs")
         .split("fn Tab(tab: TabRow)")
