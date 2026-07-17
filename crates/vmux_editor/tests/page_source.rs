@@ -55,8 +55,8 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("-translate-x-full"));
     assert!(s.contains("transition-[translate,opacity]"));
     assert!(!s.contains("transition-[width] duration-200"));
-    assert!(!s.contains("width:0px"));
-    assert!(s.contains("absolute inset-y-0 left-0 z-[3]"));
+    assert!(s.contains("width:0px;contain:layout style;"));
+    assert!(s.contains("relative z-[2] h-full shrink-0"));
     assert!(s.contains("ExplorerRevealCurrent"));
     assert!(s.contains("handle_explorer_shortcut"));
     assert!(s.contains("Mode::Text => focus_file_input()"));
