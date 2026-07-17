@@ -20,7 +20,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::icon::PageIconView;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
 pub fn Page() -> Element {
@@ -204,6 +204,7 @@ pub fn Page() -> Element {
                     id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
+                    onmounted: install_side_sheet_context_menu_guard,
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
                             panes,
@@ -937,6 +938,40 @@ fn create_bookmark_folder() {
     });
 }
 
+fn install_side_sheet_context_menu_guard(event: Event<MountedData>) {
+    let Some(element) = event.downcast::<web_sys::Element>() else {
+        return;
+    };
+    let callback = Closure::wrap(Box::new(move |event: web_sys::Event| {
+        event.prevent_default();
+    }) as Box<dyn FnMut(_)>);
+    let _ =
+        element.add_event_listener_with_callback("contextmenu", callback.as_ref().unchecked_ref());
+    callback.forget();
+}
+
+fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
+    draft.set(name);
+    let Some(window) = web_sys::window() else {
+        editing.set(true);
+        return;
+    };
+    let callback = Closure::once(move || editing.set(true));
+    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+        Ok(_) => callback.forget(),
+        Err(_) => editing.set(true),
+    }
+}
+
+fn focus_and_select_inline_rename(event: Event<MountedData>) {
+    if let Some(element) = event.downcast::<web_sys::Element>()
+        && let Ok(input) = element.clone().dyn_into::<web_sys::HtmlInputElement>()
+    {
+        let _ = input.focus();
+        input.select();
+    }
+}
+
 fn clamp_side_sheet_context_menu(event: Event<MountedData>) {
     let Some(wrapper) = event.downcast::<web_sys::Element>() else {
         return;
@@ -1203,13 +1238,7 @@ fn BookmarkEntry(
                     value: "{draft}",
                     autofocus: true,
                     oncontextmenu: move |e| e.prevent_default(),
-                    onmounted: move |e: Event<MountedData>| {
-                        if let Some(el) = e.downcast::<web_sys::Element>()
-                            && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
-                        {
-                            let _ = input.focus();
-                        }
-                    },
+                    onmounted: focus_and_select_inline_rename,
                     oninput: move |e| draft.set(e.value()),
                     onkeydown: {
                         let id = uuid_rename.clone();
@@ -1268,10 +1297,7 @@ fn BookmarkEntry(
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: {
                             let name = title.clone();
-                            move |_: String| {
-                                draft.set(name.clone());
-                                editing.set(true);
-                            }
+                            move |_: String| begin_inline_rename(editing, draft, name.clone())
                         },
                         attributes: vec![],
                         "Rename"
@@ -1336,13 +1362,7 @@ fn BookmarkFolder(
                         value: "{draft}",
                         autofocus: true,
                         oncontextmenu: move |e| e.prevent_default(),
-                        onmounted: move |e: Event<MountedData>| {
-                            if let Some(el) = e.downcast::<web_sys::Element>()
-                                && let Ok(input) = el.clone().dyn_into::<web_sys::HtmlElement>()
-                            {
-                                let _ = input.focus();
-                            }
-                        },
+                        onmounted: focus_and_select_inline_rename,
                         oninput: move |e| draft.set(e.value()),
                         onkeydown: {
                             let id = uuid.clone();
@@ -1427,10 +1447,7 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: {
                                 let name = folder.name.clone();
-                                move |_: String| {
-                                    draft.set(name.clone());
-                                    editing.set(true);
-                                }
+                                move |_: String| begin_inline_rename(editing, draft, name.clone())
                             },
                             attributes: vec![],
                             "Rename Folder"
