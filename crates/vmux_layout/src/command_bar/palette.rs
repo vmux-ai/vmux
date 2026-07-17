@@ -73,6 +73,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut suggestions_request_id = use_signal(|| 0u64);
     let mut last_open_id = use_signal(|| u64::MAX);
     let mut last_focus_open_id = use_signal(|| u64::MAX);
+    let mut selected_agent_url = use_signal(String::new);
 
     use_effect(move || {
         let s = state();
@@ -145,6 +146,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
+        let pages = state().pages;
+        let current = selected_agent_url();
+        if !pages
+            .iter()
+            .any(|page| page.host == "agent" && page.url == current)
+        {
+            selected_agent_url.set(
+                pages
+                    .iter()
+                    .find(|page| page.host == "agent")
+                    .map(|page| page.url.clone())
+                    .unwrap_or_default(),
+            );
+        }
+    });
+
+    use_effect(move || {
         let _ = query();
         let _ = selected();
         let _ = nav_mode();
@@ -159,6 +177,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let tabs = state_val.tabs.clone();
     let commands = state_val.commands.clone();
     let pages = state_val.pages.clone();
+    let agent_pages: Vec<_> = pages
+        .iter()
+        .filter(|page| page.host == "agent")
+        .cloned()
+        .collect();
     let work_dirs = state_val.work_dirs.clone();
     let recent_files = state_val.recent_files.clone();
     let open_target = state_val.target;
@@ -509,7 +532,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         &q,
                                     ) {
                                         on_close.call(());
-                                        emit_action_with_target("prompt", q.trim(), open_target);
+                                        emit_prompt_action(
+                                            q.trim(),
+                                            open_target,
+                                            &selected_agent_url(),
+                                        );
                                         return;
                                     }
                                     let prefer_page = matches!(
@@ -531,6 +558,36 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                             }
                         },
+                    }
+                }
+                if matches!(variant, PaletteVariant::Start) && !agent_pages.is_empty() {
+                    div {
+                        id: "start-agent-select",
+                        class: "flex max-w-48 shrink-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 text-muted-foreground",
+                        if let Some(agent) = agent_pages
+                            .iter()
+                            .find(|agent| agent.url == selected_agent_url())
+                        {
+                            PageIconView {
+                                icon: agent.icon.clone(),
+                                url: agent.url.clone(),
+                                img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                            }
+                        }
+                        select {
+                            aria_label: "Prompt agent",
+                            title: "Prompt agent",
+                            class: "min-w-0 max-w-40 cursor-pointer bg-transparent py-1.5 text-sm text-foreground outline-none",
+                            value: "{selected_agent_url}",
+                            onchange: move |e| {
+                                selected_agent_url.set(e.value());
+                                focus_command_bar_input();
+                            },
+                            for agent in &agent_pages {
+                                option { value: "{agent.url}", "{agent.title}" }
+                            }
+                        }
                     }
                 }
             }
@@ -790,7 +847,28 @@ pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<
         action: action.to_string(),
         value: value.to_string(),
         target,
+        agent_url: None,
     });
+}
+
+fn emit_prompt_action(value: &str, target: Option<OpenTarget>, agent_url: &str) {
+    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
+        action: "prompt".to_string(),
+        value: value.to_string(),
+        target,
+        agent_url: (!agent_url.is_empty()).then(|| agent_url.to_string()),
+    });
+}
+
+fn focus_command_bar_input() {
+    let Some(input) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("command-bar-input"))
+    else {
+        return;
+    };
+    let input: web_sys::HtmlInputElement = input.unchecked_into();
+    let _ = input.focus();
 }
 
 fn focus_and_install_ctrl_bindings() {

@@ -209,7 +209,7 @@ fn agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBarPage
         .map(|agent| CommandBarPage {
             host: "agent".to_string(),
             url: agent.url.clone(),
-            title: agent.name.clone(),
+            title: format!("{} (ACP)", agent.name),
             keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
             icon: if agent.icon.is_empty() {
                 vmux_core::PageIcon::None
@@ -1241,8 +1241,15 @@ fn normalize_url(value: &str) -> String {
     }
 }
 
-fn prompt_agent_url(snapshot: &CommandBarAgentsSnapshot) -> Option<String> {
-    agent_pages(snapshot).first().map(|page| page.url.clone())
+fn prompt_agent_url(
+    snapshot: &CommandBarAgentsSnapshot,
+    requested_url: Option<&str>,
+) -> Option<String> {
+    let pages = agent_pages(snapshot);
+    requested_url
+        .and_then(|requested| pages.iter().find(|page| page.url == requested))
+        .or_else(|| pages.first())
+        .map(|page| page.url.clone())
 }
 
 fn on_command_bar_action(
@@ -1301,7 +1308,8 @@ fn on_command_bar_action(
                     &queries.stack_ts,
                 );
                 if let Some(stack) = empty_stack.or(focused_stack)
-                    && let Some(url) = prompt_agent_url(&resource_params.p2())
+                    && let Some(url) =
+                        prompt_agent_url(&resource_params.p2(), evt.agent_url.as_deref())
                 {
                     commands
                         .entity(stack)
@@ -1818,6 +1826,7 @@ fn reveal_command_bar(
                     action: "dismiss".to_string(),
                     value: String::new(),
                     target: None,
+                    agent_url: None,
                 },
             });
             continue;
@@ -2652,6 +2661,7 @@ mod tests {
                     action: "dismiss".to_string(),
                     value: String::new(),
                     target: None,
+                    agent_url: None,
                 },
             });
         app.world_mut().flush();
@@ -2925,7 +2935,7 @@ mod tests {
         };
 
         assert_eq!(
-            prompt_agent_url(&snapshot).as_deref(),
+            prompt_agent_url(&snapshot, None).as_deref(),
             Some("vmux://agent/codex/cli")
         );
     }
@@ -2943,10 +2953,42 @@ mod tests {
         };
 
         assert_eq!(
-            prompt_agent_url(&snapshot).as_deref(),
+            prompt_agent_url(&snapshot, None).as_deref(),
             Some("vmux://agent/claude-acp")
         );
-        assert_eq!(prompt_agent_url(&CommandBarAgentsSnapshot::default()), None);
+        assert_eq!(
+            prompt_agent_url(&CommandBarAgentsSnapshot::default(), None),
+            None
+        );
+    }
+
+    #[test]
+    fn prompt_uses_selected_installed_agent_and_rejects_stale_url() {
+        let snapshot = CommandBarAgentsSnapshot {
+            providers: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                url: "vmux://agent/codex/cli".to_string(),
+                icon: String::new(),
+            }],
+            acp: vec![vmux_command::snapshot::AgentProviderSummary {
+                id: "claude-acp".to_string(),
+                name: "Claude Agent".to_string(),
+                url: "vmux://agent/claude-acp".to_string(),
+                icon: String::new(),
+            }],
+            recent: vec![AgentPromptTarget::Cli(AgentKind::Codex)],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            prompt_agent_url(&snapshot, Some("vmux://agent/claude-acp")).as_deref(),
+            Some("vmux://agent/claude-acp")
+        );
+        assert_eq!(
+            prompt_agent_url(&snapshot, Some("vmux://agent/uninstalled")).as_deref(),
+            Some("vmux://agent/codex/cli")
+        );
     }
 
     #[test]
@@ -2997,6 +3039,7 @@ mod tests {
         assert_eq!(pages[0].url, "vmux://agent/codex/cli");
         assert_eq!(pages[0].title, "Codex (CLI)");
         assert_eq!(pages[0].host, "agent");
+        assert_eq!(pages[1].title, "Claude Agent (ACP)");
         assert!(matches!(
             pages[1].icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"

@@ -171,6 +171,7 @@ pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
     pub target: Option<crate::open_target::OpenTarget>,
+    pub agent_url: Option<String>,
 }
 
 #[derive(
@@ -470,10 +471,12 @@ mod tests {
             action: "open".to_string(),
             value: "google.com".to_string(),
             target: None,
+            agent_url: None,
         };
         assert_eq!(evt.action, "open");
         assert_eq!(evt.value, "google.com");
         assert_eq!(evt.target, None);
+        assert_eq!(evt.agent_url, None);
     }
 
     #[test]

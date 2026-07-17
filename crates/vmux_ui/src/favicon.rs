@@ -18,7 +18,9 @@ pub fn agent_host(url: &str) -> Option<&'static str> {
         ("vibe", "chat.mistral.ai"),
         ("mistral-vibe", "chat.mistral.ai"),
         ("claude", "claude.ai"),
+        ("claude-acp", "claude.ai"),
         ("codex", "chatgpt.com"),
+        ("codex-acp", "chatgpt.com"),
         ("gemini", "gemini.google.com"),
     ];
     for &(kind, host) in AGENTS {
@@ -172,7 +174,9 @@ mod tests {
     #[test]
     fn agent_host_maps_claude_and_codex() {
         assert_eq!(agent_host("vmux://agent/claude/x"), Some("claude.ai"));
+        assert_eq!(agent_host("vmux://agent/claude-acp/x"), Some("claude.ai"));
         assert_eq!(agent_host("vmux://agent/codex/x"), Some("chatgpt.com"));
+        assert_eq!(agent_host("vmux://agent/codex-acp/x"), Some("chatgpt.com"));
     }
 
     #[test]

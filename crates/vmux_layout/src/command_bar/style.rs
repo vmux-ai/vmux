@@ -291,7 +291,17 @@ mod tests {
         let source = include_str!("palette.rs");
 
         assert!(source.contains("should_submit_start_prompt("));
-        assert!(source.contains("emit_action_with_target(\"prompt\", q.trim(), open_target)"));
+        assert!(source.contains("emit_prompt_action("));
+        assert!(source.contains("agent_url: (!agent_url.is_empty())"));
+    }
+
+    #[test]
+    fn start_shows_agent_selector() {
+        let source = include_str!("palette.rs");
+
+        assert!(source.contains("id: \"start-agent-select\""));
+        assert!(source.contains("aria_label: \"Prompt agent\""));
+        assert!(source.contains("page.host == \"agent\""));
     }
 
     #[test]
