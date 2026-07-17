@@ -1,0 +1,13 @@
+(
+  chromium_major: 148,
+  entries: [
+    (platform: "macos", namespace: "runtime", member: "sendMessage", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "macos", namespace: "storage.local", member: "get", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "macos", namespace: "tabs", member: "query", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "macos", namespace: "windows", member: "getCurrent", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "linux", namespace: "runtime", member: "sendMessage", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "linux", namespace: "storage.local", member: "get", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "linux", namespace: "tabs", member: "query", kind: Method, status: Untested, owner: None, scenario: None),
+    (platform: "linux", namespace: "windows", member: "getCurrent", kind: Method, status: Untested, owner: None, scenario: None),
+  ],
+)

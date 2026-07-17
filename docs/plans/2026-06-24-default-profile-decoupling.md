@@ -1,7 +1,5 @@
 # Default-Profile Decoupling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Remove the hardcoded `"personal"` behavioral sentinel — make the default profile a renamable identity, mark ephemeral test sessions with a `Tester` bot identity, and keep the layout store space-owned and profile-agnostic.
 
 **Architecture:** A single env-derived predicate `is_test_session()` (`VMUX_TEST=1`) drives ephemerality (skip layout load/save), auto-approve, and which identity the bootstrap spawns (`Tester` vs `User`). The layout store moves to one profile-agnostic location; `profiles/<id>/` keeps only isolation state (cookies/socket/recordings). The default profile's storage id stays stable; its display name lives in config and is renamed via an MCP tool.

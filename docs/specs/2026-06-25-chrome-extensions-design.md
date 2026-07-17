@@ -1,5 +1,10 @@
 # Chrome extension support — side-loaded Web Store installer + top-right surface
 
+> Superseded by
+> [`2026-07-14-chrome-extension-parity-design.md`](2026-07-14-chrome-extension-parity-design.md).
+> The installer and UI work remain relevant, but the claim that Alloy panes have no
+> extension support is obsolete.
+
 Date: 2026-06-25
 Branch: `chrome-extensions`
 Status: design — approved (UI shape + scope confirmed); pending spike + spec review

@@ -1,5 +1,10 @@
 # Chrome Extensions Support Design
 
+> Superseded by
+> [`2026-07-14-chrome-extension-parity-design.md`](2026-07-14-chrome-extension-parity-design.md).
+> This document contains obsolete assumptions about Alloy support and service-worker
+> injection.
+
 ## Goal
 
 Enable Chrome Web Store extension support in vmux. Users install extensions from the Web Store via an in-app flow, extension icons appear in the header toolbar with badge support, and extensions like Bitwarden and Vimium work via a chrome.tabs bridge that maps CEF browsers to the extension tab API.

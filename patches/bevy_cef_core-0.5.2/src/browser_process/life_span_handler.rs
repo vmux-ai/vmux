@@ -6,8 +6,15 @@ use cef::{
     LifeSpanHandler, PopupFeatures, WindowInfo, WindowOpenDisposition, WrapLifeSpanHandler, sys,
 };
 use std::os::raw::c_int;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::browser_process::renderer_handler::TextureWake;
+
+static OPEN_BROWSER_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+pub fn open_browser_count() -> usize {
+    OPEN_BROWSER_COUNT.load(Ordering::Acquire)
+}
 
 #[derive(Clone, Debug)]
 pub struct WebviewPopupEvent {
@@ -71,6 +78,10 @@ impl WrapLifeSpanHandler for LifeSpanHandlerBuilder {
 }
 
 impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
+    fn on_after_created(&self, _browser: Option<&mut Browser>) {
+        OPEN_BROWSER_COUNT.fetch_add(1, Ordering::AcqRel);
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn on_before_popup(
         &self,
@@ -97,6 +108,9 @@ impl ImplLifeSpanHandler for LifeSpanHandlerBuilder {
     }
 
     fn on_before_close(&self, _browser: Option<&mut Browser>) {
+        let _ = OPEN_BROWSER_COUNT.fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            count.checked_sub(1)
+        });
         if let Some(wake) = &self.wake {
             wake();
         }
@@ -128,8 +142,12 @@ mod tests {
             wake: Some(wake),
         };
 
+        let before = open_browser_count();
+        handler.on_after_created(None);
+        assert_eq!(open_browser_count(), before + 1);
         handler.on_before_close(None);
 
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
+        assert_eq!(open_browser_count(), before);
     }
 }

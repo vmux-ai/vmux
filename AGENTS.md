@@ -4,10 +4,6 @@
 
 Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-commentary, no preamble, no postamble. Code speaks.
 
-## Skills
-
-Use superpower. Invoke relevant skills BEFORE any response or action. Even a 1% chance a skill might apply means invoke it.
-
 ## Pre-commit Checks
 
 CI runs fmt, clippy, and tests for PRs.
@@ -70,8 +66,8 @@ After merging, clean up: remove the worktree (`git worktree remove .worktrees/<n
 
 ## Documentation
 
-- Save design specs to `docs/specs/YYYY-MM-DD-<topic>-design.md` (not `docs/superpowers/specs/`).
-- Save implementation plans to `docs/plans/YYYY-MM-DD-<feature-name>.md` (not `docs/superpowers/plans/`).
+- Save design specs to `docs/specs/YYYY-MM-DD-<topic>-design.md`.
+- Save implementation plans to `docs/plans/YYYY-MM-DD-<feature-name>.md`.
 - Delete the plan file once the plan is fully implemented.
 
 ## Git

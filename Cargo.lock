@@ -9650,15 +9650,25 @@ dependencies = [
 name = "vmux_browser"
 version = "0.0.25"
 dependencies = [
+ "async-channel",
  "base64 0.22.1",
  "bevy",
  "bevy_cef",
  "bevy_cef_core",
  "chrono",
+ "crossbeam-channel",
  "image",
+ "libc",
+ "polling",
  "reqwest",
  "ron 0.8.1",
  "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tungstenite 0.28.0",
+ "url",
+ "uuid",
  "vmux_agent",
  "vmux_command",
  "vmux_core",
@@ -9670,6 +9680,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "zip",
 ]
 
 [[package]]
@@ -9724,6 +9735,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "url",
  "uuid",
  "vmux_profile",
  "vmux_wire",

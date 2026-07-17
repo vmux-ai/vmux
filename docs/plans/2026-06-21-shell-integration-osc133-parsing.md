@@ -1,7 +1,5 @@
 # Shell Integration — Plan 1: OSC 133 parse foundation
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Make `vmux_service` detect OSC 133 command-lifecycle markers (`C` = command start, `D;<exit>` = command end) in PTY output and broadcast them as a new `ServiceMessage::CommandLifecycle`, without changing any existing behavior.
 
 **Architecture:** The service parses PTY bytes with `alacritty_terminal`'s vte, whose high-level `Handler` ignores OSC 133. Rather than hand-roll a byte scanner, run a second, tiny `vte::Parser` per `Process` whose `Perform` only inspects `osc_dispatch` for `133`. vte handles ESC/OSC framing, `ST` vs `BEL`, and chunk-split reassembly. The drain loop feeds this scanner the same bytes it feeds alacritty and broadcasts a `CommandLifecycle` for each event. Nothing consumes the new message yet (additive, safe to ship).

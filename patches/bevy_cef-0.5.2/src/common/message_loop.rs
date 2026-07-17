@@ -7,12 +7,22 @@ use cef::{Settings, api_hash, execute_process, initialize, shutdown, sys};
 
 /// Controls the CEF message loop.
 ///
-/// Uses `external_message_pump` on all platforms. `cef::do_message_loop_work` runs **every
-/// frame** so input and IPC stay responsive; timer state from CEF is still tracked for scheduling.
+/// Uses `external_message_pump` on all platforms.
 pub struct MessageLoopPlugin {
     pub config: CommandLineConfig,
     pub extensions: CefExtensions,
     pub root_cache_path: Option<String>,
+}
+
+#[derive(Resource, Default)]
+pub struct CefShutdownState {
+    started: bool,
+}
+
+impl CefShutdownState {
+    pub fn started(&self) -> bool {
+        self.started
+    }
 }
 
 impl Plugin for MessageLoopPlugin {
@@ -71,12 +81,15 @@ impl Plugin for MessageLoopPlugin {
         #[cfg(target_os = "macos")]
         cef_initialize(&args, &mut cef_app, self.root_cache_path.as_deref());
 
-        app.insert_resource(wake_policy)
+        app.insert_resource(wake_policy.clone())
+            .init_resource::<CefShutdownState>()
             .insert_non_send(cef_app)
             .insert_non_send(RunOnMainThread)
             .add_systems(
-                Update,
-                close_all_browsers_then_cef_shutdown.run_if(on_message::<AppExit>),
+                Last,
+                close_all_browsers_then_cef_shutdown
+                    .after(bevy::window::ExitSystems)
+                    .run_if(on_message::<AppExit>),
             );
 
         // non-macOS: pump CEF once per Bevy tick (the wake-throttle thread wakes the loop).
@@ -84,12 +97,10 @@ impl Plugin for MessageLoopPlugin {
         app.insert_non_send(MessageLoopWorkingReceiver(rx))
             .add_systems(Main, cef_do_message_loop_work.before(Main::run_main));
 
-        // macOS: pump CEF from a native CFRunLoop timer, decoupled from the Bevy tick, so browsing
-        // doesn't wake the ECS. `rx` is dropped → CEF's pump-work scheduling sends are ignored.
         #[cfg(target_os = "macos")]
         {
             drop(rx);
-            cef_pump_timer::install(1.0 / 120.0);
+            app.insert_non_send(cef_pump_timer::install(1.0 / 120.0));
         }
     }
 }
@@ -245,17 +256,50 @@ fn close_all_browsers_then_cef_shutdown(
     mut browsers: NonSendMut<Browsers>,
     mut exits: MessageReader<AppExit>,
     webviews: Query<Entity, With<WebviewSource>>,
+    mut commands: Commands,
+    mut state: ResMut<CefShutdownState>,
+    mut pump_controller: Option<NonSendMut<CefPumpController>>,
     _: NonSend<RunOnMainThread>,
 ) {
     for _ in exits.read() {
+        if state.started {
+            continue;
+        }
+        state.started = true;
         let entities: Vec<Entity> = webviews.iter().collect();
         for e in entities {
             browsers.close(&e);
+            commands.entity(e).despawn();
         }
-        cef::do_message_loop_work();
-        cef::do_message_loop_work();
-        shutdown();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while open_browser_count() > 0 && std::time::Instant::now() < deadline {
+            cef::do_message_loop_work();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        if let Some(controller) = pump_controller.as_mut() {
+            controller.stop();
+        }
+        if open_browser_count() == 0 {
+            cef::do_message_loop_work();
+            shutdown();
+        } else {
+            error!(
+                "CEF shutdown skipped with {} browsers still closing",
+                open_browser_count()
+            );
+        }
     }
+}
+
+#[cfg(target_os = "macos")]
+type CefPumpController = cef_pump_timer::Controller;
+
+#[cfg(not(target_os = "macos"))]
+struct CefPumpController;
+
+#[cfg(not(target_os = "macos"))]
+impl CefPumpController {
+    fn stop(&mut self) {}
 }
 
 #[allow(clippy::needless_doctest_main)]
@@ -314,9 +358,6 @@ mod tests {
     }
 }
 
-/// Drives CEF's external message pump from a native `CFRunLoop` timer on the main thread, so
-/// pumping CEF does not require (or trigger) a Bevy `app.update()`. This is what lets the engine
-/// stay idle while a native (windowed) webview is being used.
 #[cfg(target_os = "macos")]
 mod cef_pump_timer {
     use std::os::raw::c_void;
@@ -331,6 +372,7 @@ mod cef_pump_timer {
         fn CFRunLoopGetMain() -> CFRunLoopRef;
         fn CFAbsoluteTimeGetCurrent() -> f64;
         fn CFRunLoopAddTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: CFStringRef);
+        fn CFRunLoopRemoveTimer(rl: CFRunLoopRef, timer: CFRunLoopTimerRef, mode: CFStringRef);
         fn CFRunLoopTimerCreate(
             allocator: *const c_void,
             fire_date: f64,
@@ -340,15 +382,41 @@ mod cef_pump_timer {
             callout: extern "C" fn(CFRunLoopTimerRef, *mut c_void),
             context: *mut c_void,
         ) -> CFRunLoopTimerRef;
+        fn CFRunLoopTimerInvalidate(timer: CFRunLoopTimerRef);
+        fn CFRelease(cf: *const c_void);
     }
 
     extern "C" fn pump(_timer: CFRunLoopTimerRef, _info: *mut c_void) {
         cef::do_message_loop_work();
     }
 
-    /// Pump CEF on the main run loop every `interval` seconds. The timer is intentionally leaked;
-    /// it lives for the app's lifetime.
-    pub fn install(interval: f64) {
+    pub struct Controller {
+        run_loop: CFRunLoopRef,
+        timer: CFRunLoopTimerRef,
+        stopped: bool,
+    }
+
+    impl Controller {
+        pub fn stop(&mut self) {
+            if self.stopped {
+                return;
+            }
+            self.stopped = true;
+            unsafe {
+                CFRunLoopRemoveTimer(self.run_loop, self.timer, kCFRunLoopCommonModes);
+                CFRunLoopTimerInvalidate(self.timer);
+                CFRelease(self.timer.cast_const());
+            }
+        }
+    }
+
+    impl Drop for Controller {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    pub fn install(interval: f64) -> Controller {
         unsafe {
             let timer = CFRunLoopTimerCreate(
                 std::ptr::null(),
@@ -359,7 +427,14 @@ mod cef_pump_timer {
                 pump,
                 std::ptr::null_mut(),
             );
-            CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+            assert!(!timer.is_null(), "failed to create CEF CFRunLoop timer");
+            let run_loop = CFRunLoopGetMain();
+            CFRunLoopAddTimer(run_loop, timer, kCFRunLoopCommonModes);
+            Controller {
+                run_loop,
+                timer,
+                stopped: false,
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
 use crate::popup_state::WebviewPopupSender;
 use crate::prelude::PreloadScripts;
+use crate::prelude::PrivatePreloadScripts;
 use crate::webview::mesh::MeshWebviewPlugin;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
@@ -273,7 +274,11 @@ fn create_webview(
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
     committed_nav_sender: Res<WebviewCommittedNavigationSender>,
-    cef_senders: (Res<WebviewCefStateSender>, Res<MediaPermissionSender>),
+    cef_senders: (
+        Res<WebviewCefStateSender>,
+        Res<MediaPermissionSender>,
+        Option<Res<crate::common::CefShutdownState>>,
+    ),
     popup_sender: Res<WebviewPopupSender>,
     render_callbacks: (Res<TextureWakeCallback>, Res<NativeOverlayPresenter>),
     webviews: Query<
@@ -283,6 +288,7 @@ fn create_webview(
             &WebviewSize,
             &PreloadScripts,
             Option<&WebviewMaxFrameRate>,
+            Option<&PrivatePreloadScripts>,
             Option<&HostWindow>,
             Has<WebviewTransparent>,
             Has<WebviewWindowed>,
@@ -296,6 +302,9 @@ fn create_webview(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
+    if cef_senders.2.is_some_and(|state| state.started()) {
+        return;
+    }
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         for (
@@ -304,6 +313,7 @@ fn create_webview(
             size,
             initialize_scripts,
             max_frame_rate,
+            private_initialize_scripts,
             host_window,
             transparent,
             windowed,
@@ -325,6 +335,16 @@ fn create_webview(
                 .map(|w| w.resolution.scale_factor())
                 .filter(|s| s.is_finite() && *s > 0.0)
                 .unwrap_or(1.0);
+            let initialize_scripts = initialize_scripts
+                .0
+                .iter()
+                .chain(
+                    private_initialize_scripts
+                        .into_iter()
+                        .flat_map(|scripts| scripts.0.iter()),
+                )
+                .cloned()
+                .collect::<Vec<_>>();
 
             let winit_window = window_entity.and_then(|e| winit_windows.get_window(e));
             let refresh_rate_millihertz = winit_window
@@ -369,7 +389,7 @@ fn create_webview(
                 native_direct_overlay
                     .then(|| render_callbacks.1.0.clone())
                     .flatten(),
-                &initialize_scripts.0,
+                &initialize_scripts,
                 host_window,
                 disk_profile.0.as_deref(),
                 if windowed && opaque_windowed_background {
