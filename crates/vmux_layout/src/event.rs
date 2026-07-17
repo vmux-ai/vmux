@@ -737,6 +737,19 @@ pub struct BookmarksCommandEvent {
     pub folder: Option<String>,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct BookmarkTextInputEvent {
+    pub active: bool,
+}
+
 #[cfg(test)]
 mod update_event_tests {
     use super::*;

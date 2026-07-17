@@ -45,6 +45,7 @@ use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
+    bookmark::BookmarkTextInputActive,
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
         HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
@@ -871,12 +872,27 @@ fn sync_keyboard_target(
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    bookmark_text_input_q: Query<Entity, (With<LayoutCef>, With<BookmarkTextInputActive>)>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     mut commands: Commands,
 ) {
     if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+        return;
+    }
+
+    if let Ok(layout) = bookmark_text_input_q.single() {
+        for (browser_e, has_kb) in &content_q {
+            if browser_e == layout {
+                if !has_kb {
+                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                }
+            } else if has_kb {
+                commands.entity(browser_e).remove::<CefKeyboardTarget>();
+            }
+        }
+        suppress.0 = false;
         return;
     }
 

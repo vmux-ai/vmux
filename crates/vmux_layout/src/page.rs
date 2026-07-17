@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
 use crate::event::{
-    BOOKMARKS_EVENT, BookmarkNode, BookmarkRow, BookmarksCommandEvent, BookmarksHostEvent,
-    FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
-    TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    BOOKMARKS_EVENT, BookmarkNode, BookmarkRow, BookmarkTextInputEvent, BookmarksCommandEvent,
+    BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent,
+    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode,
+    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::prelude::*;
 use vmux_core::PageIcon;
@@ -204,7 +204,6 @@ pub fn Page() -> Element {
                     id: "vmux-side-sheet",
                     class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-hidden w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
                     style: "{side_sheet_vars}",
-                    onmounted: install_side_sheet_context_menu_guard,
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
                             panes,
@@ -926,11 +925,15 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     });
 }
 
-fn create_bookmark_folder() {
+fn create_bookmark_folder(name: String) {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return;
+    }
     let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
         command: "new_folder".into(),
         uuid: None,
-        name: Some("New Folder".to_string()),
+        name: Some(name),
         url: None,
         title: None,
         favicon_url: None,
@@ -938,16 +941,8 @@ fn create_bookmark_folder() {
     });
 }
 
-fn install_side_sheet_context_menu_guard(event: Event<MountedData>) {
-    let Some(element) = event.downcast::<web_sys::Element>() else {
-        return;
-    };
-    let callback = Closure::wrap(Box::new(move |event: web_sys::Event| {
-        event.prevent_default();
-    }) as Box<dyn FnMut(_)>);
-    let _ =
-        element.add_event_listener_with_callback("contextmenu", callback.as_ref().unchecked_ref());
-    callback.forget();
+fn set_bookmark_text_input_active(active: bool) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarkTextInputEvent { active });
 }
 
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
@@ -970,6 +965,66 @@ fn focus_and_select_inline_rename(event: Event<MountedData>) {
         let _ = input.focus();
         input.select();
     }
+}
+
+#[component]
+fn BookmarkNameInput(
+    draft: Signal<String>,
+    class: String,
+    placeholder: String,
+    on_commit: EventHandler<String>,
+    on_cancel: EventHandler<()>,
+) -> Element {
+    let mut draft = draft;
+    let mut finished = use_signal(|| false);
+    use_drop(move || set_bookmark_text_input_active(false));
+
+    rsx! {
+        input {
+            r#type: "text",
+            class,
+            placeholder,
+            value: "{draft}",
+            autofocus: true,
+            oncontextmenu: move |event| event.prevent_default(),
+            onmounted: move |event| {
+                set_bookmark_text_input_active(true);
+                focus_and_select_inline_rename(event);
+            },
+            oninput: move |event| draft.set(event.value()),
+            onkeydown: move |event: Event<KeyboardData>| match event.key() {
+                Key::Enter => {
+                    event.prevent_default();
+                    if !finished() {
+                        finished.set(true);
+                        set_bookmark_text_input_active(false);
+                        on_commit.call(draft());
+                    }
+                }
+                Key::Escape => {
+                    event.prevent_default();
+                    if !finished() {
+                        finished.set(true);
+                        set_bookmark_text_input_active(false);
+                        on_cancel.call(());
+                    }
+                }
+                _ => {}
+            },
+            onblur: move |_| {
+                if !finished() {
+                    finished.set(true);
+                    set_bookmark_text_input_active(false);
+                    on_commit.call(draft());
+                }
+            },
+        }
+    }
+}
+
+fn begin_new_folder(mut creating: Signal<bool>, mut draft: Signal<String>) {
+    draft.set("New Folder".to_string());
+    creating.set(true);
 }
 
 fn clamp_side_sheet_context_menu(event: Event<MountedData>) {
@@ -1056,6 +1111,8 @@ fn commit_folder_rename(uuid: String, name: String) {
 #[component]
 fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode>) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
+    let mut creating_folder = use_signal(|| false);
+    let new_folder_draft = use_signal(|| "New Folder".to_string());
     let folders: Vec<BookmarkFolderChoice> = roots
         .iter()
         .filter_map(|node| match node {
@@ -1091,7 +1148,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     onclick: move |event| {
                         event.prevent_default();
                         event.stop_propagation();
-                        create_bookmark_folder();
+                        begin_new_folder(creating_folder, new_folder_draft);
                     },
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
                         path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
@@ -1107,7 +1164,24 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     }
                 }
             }
-            if pins.is_empty() && roots.is_empty() {
+            if creating_folder() {
+                div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    }
+                    BookmarkNameInput {
+                        draft: new_folder_draft,
+                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                        placeholder: "Folder name".to_string(),
+                        on_commit: move |name| {
+                            creating_folder.set(false);
+                            create_bookmark_folder(name);
+                        },
+                        on_cancel: move |_| creating_folder.set(false),
+                    }
+                }
+            }
+            if pins.is_empty() && roots.is_empty() && !creating_folder() {
                 div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No pins or bookmarks" }
             } else {
                 div { class: "flex flex-col gap-1",
@@ -1119,6 +1193,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                                     folder: f.clone(),
                                     folders: folders.clone(),
                                     active_page: active_page.clone(),
+                                    on_new_folder: move |_| begin_new_folder(creating_folder, new_folder_draft),
                                 }
                             },
                             BookmarkNode::Entry(b) => rsx! {
@@ -1205,7 +1280,7 @@ fn BookmarkEntry(
         row.title.clone()
     };
     let mut editing = use_signal(|| false);
-    let mut draft = use_signal(|| title.clone());
+    let draft = use_signal(|| title.clone());
     let mut move_targets: Vec<(Option<String>, String)> = Vec::new();
     if folder_uuid.is_some() {
         move_targets.push((None, "Move to Bookmarks".to_string()));
@@ -1232,38 +1307,18 @@ fn BookmarkEntry(
                     class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
                     globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                 }
-                input {
-                    r#type: "text",
-                    class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none",
-                    value: "{draft}",
-                    autofocus: true,
-                    oncontextmenu: move |e| e.prevent_default(),
-                    onmounted: focus_and_select_inline_rename,
-                    oninput: move |e| draft.set(e.value()),
-                    onkeydown: {
+                BookmarkNameInput {
+                    draft,
+                    class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none".to_string(),
+                    placeholder: String::new(),
+                    on_commit: {
                         let id = uuid_rename.clone();
-                        move |e: Event<KeyboardData>| match e.key() {
-                            Key::Enter => {
-                                e.prevent_default();
-                                editing.set(false);
-                                commit_bookmark_rename(id.clone(), draft());
-                            }
-                            Key::Escape => {
-                                e.prevent_default();
-                                editing.set(false);
-                            }
-                            _ => {}
+                        move |name| {
+                            editing.set(false);
+                            commit_bookmark_rename(id.clone(), name);
                         }
                     },
-                    onblur: {
-                        let id = uuid_rename.clone();
-                        move |_| {
-                            if editing() {
-                                editing.set(false);
-                                commit_bookmark_rename(id.clone(), draft());
-                            }
-                        }
-                    }
+                    on_cancel: move |_| editing.set(false),
                 }
             }
         } else {
@@ -1341,11 +1396,12 @@ fn BookmarkFolder(
     folder: FolderRow,
     folders: Vec<BookmarkFolderChoice>,
     active_page: Option<StackNode>,
+    on_new_folder: EventHandler<()>,
 ) -> Element {
     let uuid = folder.uuid.clone();
     let collapsed = folder.collapsed;
     let mut editing = use_signal(|| false);
-    let mut draft = use_signal(|| folder.name.clone());
+    let draft = use_signal(|| folder.name.clone());
     let menu_val = use_signal(|| folder.uuid.clone());
 
     rsx! {
@@ -1355,39 +1411,18 @@ fn BookmarkFolder(
                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
                         path { d: if collapsed { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
                     }
-                    input {
-                        r#type: "text",
-                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none",
-                        placeholder: "Folder name",
-                        value: "{draft}",
-                        autofocus: true,
-                        oncontextmenu: move |e| e.prevent_default(),
-                        onmounted: focus_and_select_inline_rename,
-                        oninput: move |e| draft.set(e.value()),
-                        onkeydown: {
+                    BookmarkNameInput {
+                        draft,
+                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                        placeholder: "Folder name".to_string(),
+                        on_commit: {
                             let id = uuid.clone();
-                            move |e: Event<KeyboardData>| match e.key() {
-                                Key::Enter => {
-                                    e.prevent_default();
-                                    editing.set(false);
-                                    commit_folder_rename(id.clone(), draft());
-                                }
-                                Key::Escape => {
-                                    e.prevent_default();
-                                    editing.set(false);
-                                }
-                                _ => {}
+                            move |name| {
+                                editing.set(false);
+                                commit_folder_rename(id.clone(), name);
                             }
                         },
-                        onblur: {
-                            let id = uuid.clone();
-                            move |_| {
-                                if editing() {
-                                    editing.set(false);
-                                    commit_folder_rename(id.clone(), draft());
-                                }
-                            }
-                        },
+                        on_cancel: move |_| editing.set(false),
                     }
                 }
             } else {
@@ -1438,7 +1473,7 @@ fn BookmarkFolder(
                         ContextMenuItem {
                             index: 2usize,
                             value: Into::<ReadSignal<String>>::into(menu_val),
-                            on_select: move |_: String| create_bookmark_folder(),
+                            on_select: move |_: String| on_new_folder.call(()),
                             attributes: vec![],
                             "New Folder"
                         }
