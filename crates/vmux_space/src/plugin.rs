@@ -4,11 +4,9 @@ use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use vmux_core::page::PageReady;
 use vmux_core::profile;
-use vmux_core::{
-    PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet, PageOpenTarget,
-    PageOpenTask,
-};
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::stack::Stack;
+use vmux_layout::warm_page::WarmPagePlugin;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 use crate::event::{
@@ -73,10 +71,7 @@ impl Plugin for SpacePlugin {
                 Update,
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
             )
-            .add_systems(
-                Update,
-                handle_spaces_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
+            .add_plugins(WarmPagePlugin::<Spaces>::default())
             .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&[
                 "spaces", "layout",
             ]))
@@ -154,42 +149,6 @@ fn update_effective_startup_dir(
     let next = (entity, vmux_setting::resolve_startup_dir(&settings, &id.0));
     if effective.0.as_ref() != Some(&next) {
         effective.0 = Some(next);
-    }
-}
-
-type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-
-fn handle_spaces_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    for (entity, task) in &tasks {
-        if task.url != SPACES_PAGE_URL {
-            continue;
-        }
-        clear_stack_children(task.stack, &children_q, &mut commands);
-        commands.entity(task.stack).insert(PageMetadata {
-            title: "Spaces".to_string(),
-            url: SPACES_PAGE_URL.to_string(),
-            icon: vmux_core::PageIcon::None,
-            bg_color: None,
-        });
-        commands.spawn((
-            Spaces::new(&mut meshes, &mut webview_mt),
-            ChildOf(task.stack),
-        ));
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
     }
 }
 
@@ -696,15 +655,14 @@ fn handle_open_in_new_space(
 
 fn respond_spaces_spawn(
     mut reader: MessageReader<vmux_core::page::SpacesPageSpawnRequest>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for req in reader.read() {
-        let entity = commands
-            .spawn(crate::spaces::Spaces::new(&mut meshes, &mut webview_mt))
-            .id();
-        commands.entity(entity).insert(ChildOf(req.target_stack));
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(req.target_stack),
+            url: SPACES_PAGE_URL.to_string(),
+            request_id: None,
+        });
     }
 }
 

@@ -20,7 +20,8 @@ use vmux_command::{
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_core::{
-    OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+    OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
+    PageOpenTarget, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -33,7 +34,6 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 
 use crate::event::*;
 use crate::pid::{self, Pid};
-use crate::processes_monitor::ProcessesMonitor;
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
@@ -552,19 +552,6 @@ fn handle_terminal_page_open(
                     commands.entity(entity).insert(PageOpenError { message });
                 }
             }
-        } else if task.url.starts_with(vmux_layout::event::SERVICES_PAGE_URL) {
-            clear_stack_children(task.stack, &children_q, &mut commands);
-            commands.entity(task.stack).insert(PageMetadata {
-                url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
-                title: "Background Services".to_string(),
-                bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-                ..default()
-            });
-            commands.spawn((
-                ProcessesMonitor::new(&mut meshes, &mut webview_mt),
-                ChildOf(task.stack),
-            ));
-            commands.entity(entity).insert(PageOpenHandled);
         }
     }
 }
@@ -671,18 +658,14 @@ fn respond_terminal_spawn(
 
 fn respond_processes_monitor_spawn(
     mut reader: MessageReader<ProcessesMonitorSpawnRequest>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for req in reader.read() {
-        let entity = commands
-            .spawn(crate::processes_monitor::ProcessesMonitor::new(
-                &mut meshes,
-                &mut webview_mt,
-            ))
-            .id();
-        commands.entity(entity).insert(ChildOf(req.target_stack));
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(req.target_stack),
+            url: vmux_layout::event::SERVICES_PAGE_URL.to_string(),
+            request_id: None,
+        });
     }
 }
 

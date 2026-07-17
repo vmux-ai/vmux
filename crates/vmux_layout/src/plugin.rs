@@ -16,6 +16,7 @@ use crate::space::SpacePlugin;
 use crate::stack::StackPlugin;
 use crate::tab::TabPlugin;
 use crate::toggle::TogglePlugin;
+use crate::warm_page::PrewarmPagesPlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowPlugin;
 use crate::worktree::WorktreePlugin;
@@ -93,6 +94,7 @@ impl Plugin for LayoutPlugin {
                 TogglePlugin,
                 WebviewRevealPlugin,
                 ArchivePlugin,
+                PrewarmPagesPlugin,
             ));
         #[cfg(feature = "player-mode")]
         app.add_plugins(FocusRingPlugin);

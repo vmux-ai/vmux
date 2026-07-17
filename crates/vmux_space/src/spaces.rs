@@ -2,6 +2,7 @@ use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_layout::cef::Browser;
+use vmux_layout::warm_page::WarmPage;
 
 use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
@@ -64,6 +65,20 @@ impl Spaces {
                 Pickable::default(),
             ),
         )
+    }
+}
+
+impl WarmPage for Spaces {
+    const HOST: &'static str = "spaces";
+    const URL: &'static str = SPACES_PAGE_URL;
+    const TITLE: &'static str = "Spaces";
+
+    fn spawn(
+        commands: &mut Commands,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) -> Entity {
+        commands.spawn(Spaces::new(meshes, webview_mt)).id()
     }
 }
 

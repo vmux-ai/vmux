@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use bevy::time::common_conditions::on_timer;
 use bevy_cef::prelude::BinEventEmitterPlugin;
-use vmux_core::{
-    CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
-};
+use vmux_core::page::PrewarmPage;
 
 use crate::event::{
     HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryOpenRequest,
@@ -24,12 +22,20 @@ pub struct HistoryPlugin;
 
 impl Plugin for HistoryPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::PAGE_MANIFEST);
+        app.world_mut().spawn((
+            crate::PAGE_MANIFEST,
+            PrewarmPage {
+                host: "history",
+                url: "vmux://history/",
+                title: "History",
+                pool_size: 1,
+            },
+        ));
+        vmux_core::register_host_spawn(app, "history");
         app.add_systems(
             Update,
             (spawn_visits, record_requested_visits, broadcast_history_changed).chain(),
         )
-            .add_systems(Update, handle_history_page_open.in_set(PageOpenSet::HandleKnownPages))
             .add_systems(
                 Update,
                 prune_history.run_if(on_timer(Duration::from_secs(3600))),
@@ -51,28 +57,6 @@ impl Plugin for HistoryPlugin {
             .add_observer(on_history_open_request)
             .add_observer(on_history_suggestions_request)
             .add_message::<HistoryOpenIntent>()
-            .add_message::<CefPageAttachRequest>()
             .add_message::<vmux_core::event::RecordVisitRequest>();
-    }
-}
-
-type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
-
-fn handle_history_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    mut attach_writer: MessageWriter<CefPageAttachRequest>,
-    mut commands: Commands,
-) {
-    for (entity, task) in &tasks {
-        if task.url != "vmux://history/" {
-            continue;
-        }
-        attach_writer.write(CefPageAttachRequest {
-            stack: task.stack,
-            url: task.url.clone(),
-            title: "History".to_string(),
-            bg_color: None,
-        });
-        commands.entity(entity).insert(PageOpenHandled);
     }
 }

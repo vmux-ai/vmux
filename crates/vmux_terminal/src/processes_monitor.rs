@@ -15,6 +15,7 @@ use vmux_layout::{
     event::SERVICES_PAGE_URL,
     pane::{Pane, PaneSplit},
     stack::{ActiveTabParam, Stack, focused_stack, stack_bundle},
+    warm_page::{WarmPage, WarmPagePlugin, WarmPageSpare},
 };
 
 #[derive(Component)]
@@ -59,6 +60,22 @@ impl ProcessesMonitor {
                 Pickable::default(),
             ),
         )
+    }
+}
+
+impl WarmPage for ProcessesMonitor {
+    const HOST: &'static str = "services";
+    const URL: &'static str = SERVICES_PAGE_URL;
+    const TITLE: &'static str = "Background Services";
+
+    fn spawn(
+        commands: &mut Commands,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) -> Entity {
+        commands
+            .spawn(ProcessesMonitor::new(meshes, webview_mt))
+            .id()
     }
 }
 
@@ -153,7 +170,8 @@ impl Plugin for ProcessesMonitorPlugin {
             )
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
-            .add_observer(on_process_kill_all);
+            .add_observer(on_process_kill_all)
+            .add_plugins(WarmPagePlugin::<ProcessesMonitor>::default());
     }
 }
 
@@ -162,13 +180,14 @@ fn request_process_list(
     time: Res<Time>,
     mut timer: ResMut<ProcessesPollTimer>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<(), With<ProcessesMonitor>>,
+    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
 ) {
     if monitors.is_empty() {
         return;
     }
     timer.0.tick(time.delta());
-    if timer.0.just_finished()
+    if (!claimed.is_empty() || timer.0.just_finished())
         && let Some(service) = service
     {
         service.0.send(ClientMessage::ListProcesses);
@@ -178,7 +197,8 @@ fn request_process_list(
 fn sample_process_usage(
     time: Res<Time>,
     mut timer: ResMut<SysinfoPollTimer>,
-    monitors: Query<(), With<ProcessesMonitor>>,
+    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     process_list: Res<ServiceProcessList>,
     mut sys: ResMut<SysinfoState>,
     mut usage: ResMut<ProcessUsage>,
@@ -187,7 +207,7 @@ fn sample_process_usage(
         return;
     }
     timer.0.tick(time.delta());
-    if !timer.0.just_finished() {
+    if claimed.is_empty() && !timer.0.just_finished() {
         return;
     }
 
@@ -248,12 +268,22 @@ fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     usage: Res<ProcessUsage>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
+    monitors: Query<
+        Entity,
+        (
+            With<ProcessesMonitor>,
+            With<PageReady>,
+            Without<WarmPageSpare>,
+        ),
+    >,
+    claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
     mut commands: Commands,
 ) {
-    if monitors.is_empty() || !(process_list.is_changed() || usage.is_changed()) {
+    if monitors.is_empty()
+        || !(process_list.is_changed() || usage.is_changed() || !claimed.is_empty())
+    {
         return;
     }
 

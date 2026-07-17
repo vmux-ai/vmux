@@ -2,12 +2,12 @@ use bevy::{picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_core::page::PageReady;
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenTask};
-use vmux_history::{CreatedAt, LastActivatedAt};
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     Browser,
     pane::{Pane, PaneSplit},
-    stack::{FocusedStack, stack_bundle},
+    stack::FocusedStack,
+    warm_page::WarmPage,
 };
 
 use crate::event::{
@@ -63,40 +63,17 @@ impl Settings {
     }
 }
 
-/// Spawn the settings webview (with its [`Settings`] marker) when a `vmux://settings/`
-/// page is opened by URL, so the backend settings broadcasts target it. Without this,
-/// in-place navigation would reuse a markerless webview that never receives settings.
-pub(crate) fn handle_settings_page_open(
-    tasks: Query<(Entity, &PageOpenTask), (Without<PageOpenHandled>, Without<PageOpenError>)>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    let mut handled_stacks = std::collections::HashSet::new();
-    for (entity, task) in &tasks {
-        if task.url != SETTINGS_PAGE_URL {
-            continue;
-        }
-        if !handled_stacks.insert(task.stack) {
-            commands.entity(entity).insert(PageOpenHandled);
-            continue;
-        }
-        if let Ok(children) = children_q.get(task.stack) {
-            for child in children.iter() {
-                commands.entity(child).try_despawn();
-            }
-        }
-        commands.entity(task.stack).insert(PageMetadata {
-            title: "Settings".to_string(),
-            url: SETTINGS_PAGE_URL.to_string(),
-            ..default()
-        });
-        commands.spawn((
-            Settings::new(&mut meshes, &mut webview_mt),
-            ChildOf(task.stack),
-        ));
-        commands.entity(entity).insert(PageOpenHandled);
+impl WarmPage for Settings {
+    const HOST: &'static str = "settings";
+    const URL: &'static str = SETTINGS_PAGE_URL;
+    const TITLE: &'static str = "Settings";
+
+    fn spawn(
+        commands: &mut Commands,
+        meshes: &mut ResMut<Assets<Mesh>>,
+        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) -> Entity {
+        commands.spawn(Settings::new(meshes, webview_mt)).id()
     }
 }
 
@@ -258,9 +235,7 @@ pub(crate) fn handle_open_settings_command(
     mut reader: MessageReader<AppCommand>,
     focus: Option<Res<FocusedStack>>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    mut commands: Commands,
+    mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for cmd in reader.read() {
         if !matches!(
@@ -275,20 +250,11 @@ pub(crate) fn handle_open_settings_command(
         let Some(pane) = focus.pane.filter(|p| panes.contains(*p)) else {
             continue;
         };
-        let tab = commands
-            .spawn((
-                stack_bundle(),
-                LastActivatedAt::now(),
-                CreatedAt::now(),
-                ChildOf(pane),
-            ))
-            .id();
-        commands.entity(tab).insert(PageMetadata {
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::NewStackInPane(pane),
             url: SETTINGS_PAGE_URL.to_string(),
-            title: "Settings".to_string(),
-            ..default()
+            request_id: None,
         });
-        commands.spawn((Settings::new(&mut meshes, &mut webview_mt), ChildOf(tab)));
     }
 }
 
@@ -567,7 +533,8 @@ mod agent_schema_tests {
 #[cfg(test)]
 mod page_open_tests {
     use super::*;
-    use vmux_core::PageOpenId;
+    use vmux_core::{PageOpenHandled, PageOpenId, PageOpenTask};
+    use vmux_layout::warm_page::WarmPagePlugin;
 
     #[test]
     fn settings_page_open_spawns_marker_and_handles() {
@@ -575,7 +542,7 @@ mod page_open_tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_settings_page_open);
+            .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         let claimed = app
             .world_mut()
@@ -608,7 +575,7 @@ mod page_open_tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_settings_page_open);
+            .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         for _ in 0..2 {
             app.world_mut().spawn(PageOpenTask {

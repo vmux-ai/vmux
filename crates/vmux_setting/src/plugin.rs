@@ -2,8 +2,10 @@ pub mod runtime;
 pub mod view;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
-use bevy_cef::prelude::{BinEventEmitterPlugin, WebviewExtendStandardMaterial};
+use bevy_cef::prelude::BinEventEmitterPlugin;
 use vmux_command::{ReadAppCommands, WriteAppCommands};
+use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_layout::warm_page::WarmPagePlugin;
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SettingsCommandEvent,
@@ -15,8 +17,8 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, broadcast_update_status_to_views,
-    handle_open_settings_command, handle_settings_page_open, on_check_for_updates,
-    on_settings_command, reset_sent_markers_on_page_ready,
+    handle_open_settings_command, on_check_for_updates, on_settings_command,
+    reset_sent_markers_on_page_ready,
 };
 
 /// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
@@ -62,10 +64,7 @@ impl Plugin for SettingsPlugin {
             )
             .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
             .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands))
-            .add_systems(
-                Update,
-                handle_settings_page_open.in_set(vmux_core::PageOpenSet::HandleKnownPages),
-            )
+            .add_plugins(WarmPagePlugin::<view::Settings>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 SettingsCommandEvent,
                 CheckForUpdatesEvent,
@@ -92,14 +91,13 @@ impl Plugin for SettingsPlugin {
 
 fn respond_settings_spawn(
     mut reader: MessageReader<vmux_core::page::SettingsPageSpawnRequest>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut page_open: MessageWriter<PageOpenRequest>,
 ) {
     for req in reader.read() {
-        let entity = commands
-            .spawn(view::Settings::new(&mut meshes, &mut webview_mt))
-            .id();
-        commands.entity(entity).insert(ChildOf(req.target_stack));
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(req.target_stack),
+            url: crate::event::SETTINGS_PAGE_URL.to_string(),
+            request_id: None,
+        });
     }
 }

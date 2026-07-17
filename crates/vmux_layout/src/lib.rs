@@ -48,6 +48,8 @@ pub mod stack;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod unit;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod warm_page;
+#[cfg(not(target_arch = "wasm32"))]
 mod webview_reveal;
 
 #[cfg(not(target_arch = "wasm32"))]
