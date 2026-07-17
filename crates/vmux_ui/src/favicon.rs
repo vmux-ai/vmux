@@ -16,6 +16,7 @@ pub fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
 pub fn agent_host(url: &str) -> Option<&'static str> {
     const AGENTS: &[(&str, &str)] = &[
         ("vibe", "chat.mistral.ai"),
+        ("mistral-vibe", "chat.mistral.ai"),
         ("claude", "claude.ai"),
         ("codex", "chatgpt.com"),
         ("gemini", "gemini.google.com"),
@@ -160,6 +161,10 @@ mod tests {
         );
         assert_eq!(
             agent_host("vmux://agent/vibe/cli/abc"),
+            Some("chat.mistral.ai")
+        );
+        assert_eq!(
+            agent_host("vmux://agent/mistral-vibe/session-1"),
             Some("chat.mistral.ai")
         );
     }
