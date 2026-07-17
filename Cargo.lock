@@ -962,6 +962,7 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "serde_json",
+ "smallvec",
  "uuid",
  "winit",
 ]

@@ -21,6 +21,8 @@ use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 #[cfg(feature = "pbr")]
 use bevy::picking::Pickable;
+#[cfg(feature = "pbr")]
+use bevy::platform::collections::HashMap;
 #[cfg(not(feature = "pbr"))]
 use bevy::prelude::Deref;
 #[cfg(feature = "pbr")]
@@ -215,6 +217,7 @@ fn on_mouse_wheel(
         for _ in er.read() {}
         return;
     }
+    let mut pending = HashMap::<Entity, (Vec2, Vec2)>::default();
     let use_targets = webviews_targeted.iter().next().is_some();
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
@@ -246,7 +249,13 @@ fn on_mouse_wheel(
                     commands
                         .entity(webview)
                         .insert(HistorySwipeVisualOffset::default());
-                    browsers.send_mouse_wheel(&webview, pos, delta);
+                    pending
+                        .entry(webview)
+                        .and_modify(|(position, accumulated)| {
+                            *position = pos;
+                            *accumulated += delta;
+                        })
+                        .or_insert((pos, delta));
                 }
                 HistorySwipeOutcome::Consumed { visual } => {
                     commands
@@ -264,6 +273,9 @@ fn on_mouse_wheel(
                 }
             }
         }
+    }
+    for (webview, (position, delta)) in pending {
+        browsers.send_mouse_wheel(&webview, position, delta);
     }
 }
 

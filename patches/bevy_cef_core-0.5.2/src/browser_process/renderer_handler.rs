@@ -1,19 +1,21 @@
 #[cfg(target_os = "macos")]
 use super::keepalive::{IoSurfaceKeepAlive, RealIoSurfaceOps};
-use async_channel::{Receiver, Sender};
 use bevy::prelude::*;
 use cef::osr_texture_import::SharedTextureHandle;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use cef_dll_sys::cef_paint_element_type_t;
+use smallvec::SmallVec;
 use std::any::Any;
 use std::cell::Cell;
+use std::collections::{HashMap, HashSet};
 use std::os::raw::c_int;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-pub type TextureSender = Sender<RenderTextureMessage>;
-
-pub type TextureReceiver = Receiver<RenderTextureMessage>;
+/// Inline dirty-rectangle storage for CEF paints.
+pub type WebviewDirtyRects = SmallVec<[WebviewDirtyRect; 8]>;
+/// Inline pixel-patch storage for CPU CEF paints.
+pub type WebviewPaintPatches = SmallVec<[WebviewPaintPatch; 4]>;
 
 pub type TextureWake = Arc<dyn Fn() + Send + Sync + 'static>;
 pub type AcceleratedFramePresenter = Arc<dyn Fn(AcceleratedFrame) + Send + Sync + 'static>;
@@ -29,14 +31,20 @@ pub struct RenderTextureMessage {
     pub width: u32,
     /// The height of the texture.
     pub height: u32,
-    /// This buffer will be `width` *`height` * 4 bytes in size and represents a BGRA image with an upper-left origin.
-    ///
-    /// Wrapped in `Arc` so the message survives Bevy's per-reader clone (3 consumers — mesh,
-    /// extend-material, sprite) without copying the full BGRA buffer each time.
-    pub buffer: Arc<Vec<u8>>,
-    /// Sub-regions of `buffer` that changed this paint, in pixels with an upper-left origin.
+    /// Packed BGRA pixel patches for the changed regions.
+    pub patches: Arc<WebviewPaintPatches>,
+    /// Changed regions in pixels with an upper-left origin.
     /// Empty means treat the whole frame as dirty (full upload).
-    pub dirty: Vec<WebviewDirtyRect>,
+    pub dirty: WebviewDirtyRects,
+}
+
+/// Packed BGRA pixels for one changed surface region.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebviewPaintPatch {
+    /// Destination region in the webview surface.
+    pub rect: WebviewDirtyRect,
+    /// Tightly packed rows with `rect.width * 4` bytes per row.
+    pub buffer: Arc<Vec<u8>>,
 }
 
 /// A changed sub-region of a webview paint, in pixels with an upper-left origin.
@@ -48,19 +56,14 @@ pub struct WebviewDirtyRect {
     pub height: u32,
 }
 
-fn webview_dirty_rects(
-    rects: Option<&[cef::Rect]>,
-    width: u32,
-    height: u32,
-) -> Vec<WebviewDirtyRect> {
+fn webview_dirty_rects(rects: Option<&[cef::Rect]>, width: u32, height: u32) -> WebviewDirtyRects {
     let Some(rects) = rects else {
-        return Vec::new();
+        return WebviewDirtyRects::new();
     };
     let surface_w = width as i32;
     let surface_h = height as i32;
-    rects
-        .iter()
-        .filter_map(|r| {
+    optimize_webview_dirty_rects(
+        rects.iter().filter_map(|r| {
             let left = r.x.max(0);
             let top = r.y.max(0);
             let right = r.x.saturating_add(r.width).min(surface_w);
@@ -74,8 +77,87 @@ fn webview_dirty_rects(
                 width: (right - left) as u32,
                 height: (bottom - top) as u32,
             })
-        })
-        .collect()
+        }),
+        width,
+        height,
+    )
+}
+
+fn dirty_rect_union(left: WebviewDirtyRect, right: WebviewDirtyRect) -> Option<WebviewDirtyRect> {
+    let left_right = left.x.saturating_add(left.width);
+    let left_bottom = left.y.saturating_add(left.height);
+    let right_right = right.x.saturating_add(right.width);
+    let right_bottom = right.y.saturating_add(right.height);
+    if left_right < right.x
+        || right_right < left.x
+        || left_bottom < right.y
+        || right_bottom < left.y
+    {
+        return None;
+    }
+    let x = left.x.min(right.x);
+    let y = left.y.min(right.y);
+    Some(WebviewDirtyRect {
+        x,
+        y,
+        width: left_right.max(right_right).saturating_sub(x),
+        height: left_bottom.max(right_bottom).saturating_sub(y),
+    })
+}
+
+/// Clamp and merge dirty rectangles, using an empty result for a full-frame update.
+pub fn optimize_webview_dirty_rects(
+    rects: impl IntoIterator<Item = WebviewDirtyRect>,
+    width: u32,
+    height: u32,
+) -> WebviewDirtyRects {
+    let mut merged = WebviewDirtyRects::new();
+    for rect in rects {
+        let right = rect.x.saturating_add(rect.width).min(width);
+        let bottom = rect.y.saturating_add(rect.height).min(height);
+        if rect.x >= width || rect.y >= height || right <= rect.x || bottom <= rect.y {
+            continue;
+        }
+        let mut rect = WebviewDirtyRect {
+            x: rect.x,
+            y: rect.y,
+            width: right - rect.x,
+            height: bottom - rect.y,
+        };
+        let mut index = 0;
+        while index < merged.len() {
+            if let Some(union) = dirty_rect_union(merged[index], rect) {
+                rect = union;
+                merged.swap_remove(index);
+                index = 0;
+            } else {
+                index += 1;
+            }
+        }
+        merged.push(rect);
+    }
+    let area = merged.iter().fold(0_u64, |total, rect| {
+        total.saturating_add(rect.width as u64 * rect.height as u64)
+    });
+    let full_area = width as u64 * height as u64;
+    if merged.len() > 16 || area.saturating_mul(2) >= full_area {
+        merged.clear();
+    }
+    merged
+}
+
+/// Combine damage from dropped frames, using an empty result for a full-frame update.
+pub fn coalesce_webview_dirty_rects(
+    width: u32,
+    height: u32,
+    previous: &[WebviewDirtyRect],
+    latest: &[WebviewDirtyRect],
+    same_surface: bool,
+) -> WebviewDirtyRects {
+    if !same_surface || previous.is_empty() || latest.is_empty() {
+        return WebviewDirtyRects::new();
+    }
+    optimize_webview_dirty_rects(previous.iter().chain(latest).copied(), width, height)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,6 +166,201 @@ pub enum RenderPaintElementType {
     View,
     /// The popup frame of the browser.
     Popup,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PaintFrameKey {
+    webview: Entity,
+    ty: RenderPaintElementType,
+}
+
+#[derive(Default)]
+struct TextureMailboxState {
+    pending: HashMap<PaintFrameKey, PendingTexturePaint>,
+    sizes: HashMap<PaintFrameKey, (u32, u32)>,
+    force_full: HashSet<PaintFrameKey>,
+    next_generation: u64,
+    next_sequence: u64,
+}
+
+struct PendingTexturePaint {
+    generation: u64,
+    sequence: u64,
+    width: u32,
+    height: u32,
+    dirty: WebviewDirtyRects,
+    message: Option<RenderTextureMessage>,
+}
+
+/// Latest CPU paint per webview and paint element.
+#[derive(Clone, Default)]
+pub struct TextureMailbox(Arc<Mutex<TextureMailboxState>>);
+
+pub type TextureSender = TextureMailbox;
+pub type TextureReceiver = TextureMailbox;
+
+impl TextureMailbox {
+    /// Create producer and consumer handles for one mailbox.
+    pub fn channel() -> (TextureSender, TextureReceiver) {
+        let mailbox = Self::default();
+        (mailbox.clone(), mailbox)
+    }
+
+    fn publish_paint(
+        &self,
+        webview: Entity,
+        ty: RenderPaintElementType,
+        width: u32,
+        height: u32,
+        dirty: WebviewDirtyRects,
+        buffer: *const u8,
+    ) -> bool {
+        let key = PaintFrameKey { webview, ty };
+        let (generation, sequence, dirty) = {
+            let mut state = self
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let same_surface = state.sizes.get(&key) == Some(&(width, height));
+            state.sizes.insert(key, (width, height));
+            let dirty = if state.force_full.remove(&key) {
+                WebviewDirtyRects::new()
+            } else if let Some(previous) = state.pending.get(&key) {
+                coalesce_webview_dirty_rects(
+                    width,
+                    height,
+                    &previous.dirty,
+                    &dirty,
+                    previous.width == width && previous.height == height,
+                )
+            } else if same_surface {
+                dirty
+            } else {
+                WebviewDirtyRects::new()
+            };
+            state.next_generation = state.next_generation.wrapping_add(1);
+            state.next_sequence = state.next_sequence.wrapping_add(1);
+            let generation = state.next_generation;
+            let sequence = state.next_sequence;
+            state.pending.insert(
+                key,
+                PendingTexturePaint {
+                    generation,
+                    sequence,
+                    width,
+                    height,
+                    dirty: dirty.clone(),
+                    message: None,
+                },
+            );
+            (generation, sequence, dirty)
+        };
+        let patches = Arc::new(copy_paint_patches(buffer, width, height, &dirty));
+        let message = RenderTextureMessage {
+            webview,
+            ty,
+            width,
+            height,
+            patches,
+            dirty,
+        };
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(pending) = state
+            .pending
+            .get_mut(&key)
+            .filter(|pending| pending.generation == generation && pending.sequence == sequence)
+        else {
+            return false;
+        };
+        pending.message = Some(message);
+        true
+    }
+
+    /// Drain all latest pending paints.
+    pub fn drain(&self) -> Vec<RenderTextureMessage> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut ready = Vec::new();
+        state.pending.retain(|_, pending| {
+            let Some(message) = pending.message.take() else {
+                return true;
+            };
+            ready.push((pending.sequence, message));
+            false
+        });
+        ready.sort_unstable_by_key(|(sequence, _)| *sequence);
+        ready.into_iter().map(|(_, message)| message).collect()
+    }
+
+    /// Force the next CPU paint for one surface to carry the complete frame.
+    pub fn request_full(&self, webview: Entity, ty: RenderPaintElementType) {
+        let key = PaintFrameKey { webview, ty };
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.pending.remove(&key);
+        state.force_full.insert(key);
+    }
+
+    /// Remove pending state for a closed webview.
+    pub fn discard(&self, webview: Entity) {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.pending.retain(|key, _| key.webview != webview);
+        state.sizes.retain(|key, _| key.webview != webview);
+        state.force_full.retain(|key| key.webview != webview);
+    }
+}
+
+fn copy_paint_patches(
+    buffer: *const u8,
+    width: u32,
+    height: u32,
+    dirty: &[WebviewDirtyRect],
+) -> WebviewPaintPatches {
+    let full = WebviewDirtyRect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let rects = if dirty.is_empty() {
+        std::slice::from_ref(&full)
+    } else {
+        dirty
+    };
+    let source_stride = width as usize * 4;
+    rects
+        .iter()
+        .filter(|rect| rect.width > 0 && rect.height > 0)
+        .map(|rect| {
+            let row_bytes = rect.width as usize * 4;
+            let mut bytes = vec![0_u8; row_bytes * rect.height as usize];
+            for row in 0..rect.height as usize {
+                let source_offset = (rect.y as usize + row) * source_stride + rect.x as usize * 4;
+                let destination_offset = row * row_bytes;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        buffer.add(source_offset),
+                        bytes.as_mut_ptr().add(destination_offset),
+                        row_bytes,
+                    );
+                }
+            }
+            WebviewPaintPatch {
+                rect: *rect,
+                buffer: Arc::new(bytes),
+            }
+        })
+        .collect()
 }
 
 pub struct SendSharedTextureHandle(pub SharedTextureHandle);
@@ -107,11 +384,79 @@ pub struct AcceleratedFrame {
     /// overlay set it directly as a `CALayer`'s `contents` instead of importing into a GPU texture.
     pub io_surface: usize,
     pub keepalive: Arc<dyn Any + Send + Sync>,
-    pub dirty: Vec<WebviewDirtyRect>,
+    pub dirty: WebviewDirtyRects,
 }
 
-pub type AcceleratedSender = Sender<AcceleratedFrame>;
-pub type AcceleratedReceiver = Receiver<AcceleratedFrame>;
+#[derive(Default)]
+struct AcceleratedMailboxState {
+    pending: HashMap<PaintFrameKey, (u64, AcceleratedFrame)>,
+    next_sequence: u64,
+}
+
+/// Latest accelerated paint per webview and paint element.
+#[derive(Clone, Default)]
+pub struct AcceleratedMailbox(Arc<Mutex<AcceleratedMailboxState>>);
+
+pub type AcceleratedSender = AcceleratedMailbox;
+pub type AcceleratedReceiver = AcceleratedMailbox;
+
+impl AcceleratedMailbox {
+    /// Create producer and consumer handles for one mailbox.
+    pub fn channel() -> (AcceleratedSender, AcceleratedReceiver) {
+        let mailbox = Self::default();
+        (mailbox.clone(), mailbox)
+    }
+
+    /// Replace the pending frame and return whether the mailbox became non-empty for its key.
+    pub fn publish(&self, mut frame: AcceleratedFrame) -> bool {
+        let key = PaintFrameKey {
+            webview: frame.webview,
+            ty: frame.ty,
+        };
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, previous)) = state.pending.get(&key) {
+            frame.dirty = coalesce_webview_dirty_rects(
+                frame.width,
+                frame.height,
+                &previous.dirty,
+                &frame.dirty,
+                previous.width == frame.width
+                    && previous.height == frame.height
+                    && previous.format == frame.format,
+            );
+        }
+        state.next_sequence = state.next_sequence.wrapping_add(1);
+        let sequence = state.next_sequence;
+        state.pending.insert(key, (sequence, frame)).is_none()
+    }
+
+    /// Drain all latest pending frames.
+    pub fn drain(&self) -> Vec<AcceleratedFrame> {
+        let mut state = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut frames = state
+            .pending
+            .drain()
+            .map(|(_, frame)| frame)
+            .collect::<Vec<_>>();
+        frames.sort_unstable_by_key(|(sequence, _)| *sequence);
+        frames.into_iter().map(|(_, frame)| frame).collect()
+    }
+
+    /// Remove pending state for a closed webview.
+    pub fn discard(&self, webview: Entity) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pending
+            .retain(|key, _| key.webview != webview);
+    }
+}
 
 pub type SharedViewSize = std::rc::Rc<Cell<Vec2>>;
 
@@ -231,17 +576,16 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             cef_paint_element_type_t::PET_POPUP => RenderPaintElementType::Popup,
             _ => RenderPaintElementType::View,
         };
-        let texture = RenderTextureMessage {
-            webview: self.webview,
-            ty,
-            width: width as u32,
-            height: height as u32,
-            buffer: Arc::new(unsafe {
-                std::slice::from_raw_parts(buffer, (width * height * 4) as usize).to_vec()
-            }),
-            dirty: webview_dirty_rects(dirty_rects, width as u32, height as u32),
-        };
-        send_render_texture(&self.texture_sender, self.texture_wake.as_ref(), texture);
+        let width = width as u32;
+        let height = height as u32;
+        let dirty = webview_dirty_rects(dirty_rects, width, height);
+        if self
+            .texture_sender
+            .publish_paint(self.webview, ty, width, height, dirty, buffer)
+            && let Some(wake) = self.texture_wake.as_ref()
+        {
+            wake();
+        }
     }
 
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -286,8 +630,9 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             if let Some(presenter) = self.accelerated_presenter.as_ref() {
                 presenter(frame);
             } else {
-                let _ = self.accel_sender.send_blocking(frame);
-                if let Some(wake) = self.texture_wake.as_ref() {
+                if self.accel_sender.publish(frame)
+                    && let Some(wake) = self.texture_wake.as_ref()
+                {
                     wake();
                 }
             }
@@ -304,46 +649,110 @@ impl ImplRenderHandler for RenderHandlerBuilder {
     }
 }
 
-fn send_render_texture(
-    texture_sender: &TextureSender,
-    texture_wake: Option<&TextureWake>,
-    texture: RenderTextureMessage,
-) {
-    let _ = texture_sender.send_blocking(texture);
-    if let Some(wake) = texture_wake {
-        wake();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn render_texture_delivery_wakes_consumer() {
-        let (tx, rx) = async_channel::unbounded();
-        let wakes = Arc::new(AtomicUsize::new(0));
-        let wakes_for_callback = Arc::clone(&wakes);
-        let wake: TextureWake = Arc::new(move || {
-            wakes_for_callback.fetch_add(1, Ordering::Relaxed);
-        });
-
-        send_render_texture(
-            &tx,
-            Some(&wake),
-            RenderTextureMessage {
-                webview: Entity::from_bits(1),
-                ty: RenderPaintElementType::View,
+    fn texture_mailbox_keeps_latest_frame() {
+        let (tx, rx) = TextureMailbox::channel();
+        let first = vec![1_u8; 4 * 4 * 4];
+        let latest = vec![2_u8; 4 * 4 * 4];
+        assert!(tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            WebviewDirtyRects::new(),
+            first.as_ptr(),
+        ));
+        assert!(tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            smallvec::smallvec![WebviewDirtyRect {
+                x: 1,
+                y: 1,
                 width: 1,
                 height: 1,
-                buffer: Arc::new(vec![0, 0, 0, 0]),
-                dirty: Vec::new(),
-            },
+            }],
+            latest.as_ptr(),
+        ));
+
+        let frames = rx.drain();
+        assert_eq!(frames.len(), 1);
+        assert!(frames[0].dirty.is_empty());
+        assert_eq!(frames[0].patches[0].buffer.as_slice(), latest.as_slice());
+    }
+
+    #[test]
+    fn texture_mailbox_copies_only_dirty_pixels_after_initial_frame() {
+        let (tx, rx) = TextureMailbox::channel();
+        let first = vec![1_u8; 4 * 4 * 4];
+        tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            WebviewDirtyRects::new(),
+            first.as_ptr(),
+        );
+        rx.drain();
+        let latest = vec![2_u8; 4 * 4 * 4];
+        tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            smallvec::smallvec![WebviewDirtyRect {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 1,
+            }],
+            latest.as_ptr(),
         );
 
-        assert!(rx.try_recv().is_ok());
-        assert_eq!(wakes.load(Ordering::Relaxed), 1);
+        let frames = rx.drain();
+        assert_eq!(frames[0].patches.len(), 1);
+        assert_eq!(frames[0].patches[0].buffer.len(), 8);
+        assert!(frames[0].patches[0].buffer.iter().all(|byte| *byte == 2));
+    }
+
+    #[test]
+    fn requested_full_paint_repairs_consumer_reinitialization() {
+        let (tx, rx) = TextureMailbox::channel();
+        let first = vec![1_u8; 4 * 4 * 4];
+        tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            WebviewDirtyRects::new(),
+            first.as_ptr(),
+        );
+        rx.drain();
+        tx.request_full(Entity::from_bits(1), RenderPaintElementType::View);
+
+        let latest = vec![2_u8; 4 * 4 * 4];
+        tx.publish_paint(
+            Entity::from_bits(1),
+            RenderPaintElementType::View,
+            4,
+            4,
+            smallvec::smallvec![WebviewDirtyRect {
+                x: 1,
+                y: 1,
+                width: 1,
+                height: 1,
+            }],
+            latest.as_ptr(),
+        );
+
+        let frames = rx.drain();
+        assert!(frames[0].dirty.is_empty());
+        assert_eq!(frames[0].patches[0].buffer.len(), latest.len());
     }
 
     #[test]
@@ -357,7 +766,7 @@ mod tests {
 
         assert!(callback.contains("presenter(frame)"));
         assert!(callback.contains("else {"));
-        assert!(callback.contains("self.accel_sender.send_blocking(frame)"));
+        assert!(callback.contains("self.accel_sender.publish(frame)"));
         assert!(callback.contains("wake()"));
     }
 
@@ -367,25 +776,25 @@ mod tests {
             cef::Rect {
                 x: -5,
                 y: 0,
-                width: 100,
-                height: 100,
+                width: 10,
+                height: 10,
             },
             cef::Rect {
                 x: 90,
                 y: 90,
-                width: 100,
-                height: 100,
+                width: 20,
+                height: 20,
             },
         ];
         let dirty = webview_dirty_rects(Some(&rects), 100, 100);
         assert_eq!(
-            dirty,
-            vec![
+            dirty.as_slice(),
+            &[
                 WebviewDirtyRect {
                     x: 0,
                     y: 0,
-                    width: 95,
-                    height: 100,
+                    width: 5,
+                    height: 10,
                 },
                 WebviewDirtyRect {
                     x: 90,
@@ -400,5 +809,36 @@ mod tests {
     #[test]
     fn missing_dirty_rects_mean_full_frame() {
         assert!(webview_dirty_rects(None, 100, 100).is_empty());
+    }
+
+    #[test]
+    fn overlapping_dirty_rects_are_merged() {
+        let dirty = optimize_webview_dirty_rects(
+            [
+                WebviewDirtyRect {
+                    x: 10,
+                    y: 10,
+                    width: 10,
+                    height: 10,
+                },
+                WebviewDirtyRect {
+                    x: 15,
+                    y: 15,
+                    width: 10,
+                    height: 10,
+                },
+            ],
+            100,
+            100,
+        );
+        assert_eq!(
+            dirty.as_slice(),
+            &[WebviewDirtyRect {
+                x: 10,
+                y: 10,
+                width: 15,
+                height: 15,
+            }]
+        );
     }
 }

@@ -102,10 +102,7 @@ impl Plugin for PanePlugin {
         #[cfg(target_os = "macos")]
         app.add_systems(
             Update,
-            (
-                publish_pane_hover_regions,
-                apply_pending_hover.before(crate::stack::ComputeFocusSet),
-            ),
+            apply_pending_hover.before(crate::stack::ComputeFocusSet),
         );
         #[cfg(not(target_os = "macos"))]
         app.add_systems(
@@ -2166,127 +2163,47 @@ fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Opti
 }
 
 #[cfg(target_os = "macos")]
-mod hover_wake {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::{LazyLock, Mutex};
-
-    #[derive(Default)]
-    struct Regions {
-        panes: Vec<(u64, f32, f32, f32, f32)>,
-        active: Option<u64>,
-    }
-
-    static REGIONS: LazyLock<Mutex<Regions>> = LazyLock::new(|| Mutex::new(Regions::default()));
-    static PENDING: AtomicU64 = AtomicU64::new(0);
-
-    pub fn publish(panes: Vec<(u64, f32, f32, f32, f32)>, active: Option<u64>) {
-        if let Ok(mut regions) = REGIONS.lock() {
-            regions.panes = panes;
-            regions.active = active;
-        }
-    }
-
-    fn region_contains(region: &(u64, f32, f32, f32, f32), x: f32, y: f32) -> bool {
-        let (_, min_x, min_y, max_x, max_y) = *region;
-        x >= min_x && x <= max_x && y >= min_y && y <= max_y
-    }
-
-    pub fn wake_on_move(x: f32, y: f32) -> bool {
-        let Ok(regions) = REGIONS.lock() else {
-            return false;
-        };
-        let hit = regions
-            .panes
-            .iter()
-            .find(|region| region_contains(region, x, y))
-            .map(|(entity, ..)| *entity);
-        match hit {
-            Some(entity) if Some(entity) == regions.active => false,
-            Some(entity) => {
-                PENDING.store(entity, Ordering::Relaxed);
-                true
-            }
-            None => true,
-        }
-    }
-
-    pub fn cursor_over_pane(x: f32, y: f32) -> bool {
-        let Ok(regions) = REGIONS.lock() else {
-            return false;
-        };
-        regions
-            .panes
-            .iter()
-            .any(|region| region_contains(region, x, y))
-    }
-
-    pub fn take_pending_target() -> Option<u64> {
-        match PENDING.swap(0, Ordering::Relaxed) {
-            0 => None,
-            bits => Some(bits),
-        }
-    }
-}
-
-#[cfg(target_os = "macos")]
-pub use hover_wake::{cursor_over_pane, wake_on_move};
-
-#[cfg(target_os = "macos")]
-fn publish_pane_hover_regions(
+fn apply_pending_hover(
     mode: Res<crate::scene::InteractionMode>,
     leaf_panes: Query<
         (Entity, &ComputedNode, &UiGlobalTransform),
         (With<Pane>, Without<PaneSplit>),
     >,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-) {
-    if *mode != crate::scene::InteractionMode::User {
-        hover_wake::publish(Vec::new(), None);
-        return;
-    }
-    let mut panes = Vec::new();
-    for (entity, node, ui_gt) in &leaf_panes {
-        let center = ui_gt.transform_point2(Vec2::ZERO);
-        let half = node.size * 0.5;
-        panes.push((
-            entity.to_bits(),
-            center.x - half.x,
-            center.y - half.y,
-            center.x + half.x,
-            center.y + half.y,
-        ));
-    }
-    let active = active_among(
-        leaf_panes
-            .iter()
-            .filter_map(|(entity, _, _)| pane_ts.get(entity).ok()),
-    )
-    .map(|entity| entity.to_bits());
-    hover_wake::publish(panes, active);
-}
-
-#[cfg(target_os = "macos")]
-fn apply_pending_hover(
-    mode: Res<crate::scene::InteractionMode>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut commands: Commands,
+    mut last_motion_sequence: Local<u64>,
 ) {
-    let Some(bits) = hover_wake::take_pending_target() else {
+    let Some(pointer) = crate::native_pointer::snapshot() else {
         return;
     };
+    if pointer.motion_sequence == 0 || pointer.motion_sequence == *last_motion_sequence {
+        return;
+    }
+    *last_motion_sequence = pointer.motion_sequence;
     if *mode != crate::scene::InteractionMode::User {
         return;
     }
-    let Some(target) = Entity::try_from_bits(bits) else {
+    let target = leaf_panes.iter().find_map(|(entity, node, ui_gt)| {
+        let center = ui_gt.transform_point2(Vec2::ZERO);
+        let half = node.size * 0.5;
+        let min = center - half;
+        let max = center + half;
+        (pointer.position_px.x >= min.x
+            && pointer.position_px.x <= max.x
+            && pointer.position_px.y >= min.y
+            && pointer.position_px.y <= max.y)
+            .then_some(entity)
+    });
+    let Some(target) = target else {
         return;
     };
-    if !leaf_panes.contains(target) {
-        return;
-    }
-    let current = active_among(leaf_panes.iter().filter_map(|e| pane_ts.get(e).ok()));
+    let current = active_among(
+        leaf_panes
+            .iter()
+            .filter_map(|(entity, _, _)| pane_ts.get(entity).ok()),
+    );
     if current == Some(target) {
         return;
     }
@@ -5477,17 +5394,16 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn wake_on_move_suppresses_active_pane() {
-        super::hover_wake::publish(
-            vec![(1, 0.0, 0.0, 100.0, 100.0), (2, 200.0, 0.0, 300.0, 100.0)],
-            Some(1),
-        );
-        assert!(!super::wake_on_move(50.0, 50.0));
-        assert_eq!(super::hover_wake::take_pending_target(), None);
-        assert!(super::wake_on_move(250.0, 50.0));
-        assert_eq!(super::hover_wake::take_pending_target(), Some(2));
-        assert!(super::wake_on_move(150.0, 50.0));
-        assert_eq!(super::hover_wake::take_pending_target(), None);
+    fn native_pane_hover_reads_latest_pointer_in_update() {
+        let source = include_str!("pane.rs");
+        let apply = source
+            .split("fn apply_pending_hover")
+            .nth(1)
+            .and_then(|tail| tail.split("fn click_pane_in_player_mode").next())
+            .unwrap_or_default();
+
+        assert!(apply.contains("crate::native_pointer::snapshot()"));
+        assert!(apply.contains("pointer.motion_sequence"));
     }
 
     #[test]

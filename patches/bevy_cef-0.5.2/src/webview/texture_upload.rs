@@ -7,7 +7,7 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::RenderQueue;
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
-use bevy_cef_core::prelude::{RenderTextureMessage, WebviewDirtyRect};
+use bevy_cef_core::prelude::{Browsers, RenderTextureMessage, WebviewPaintPatches};
 use std::sync::Arc;
 
 /// A CEF paint streamed into an already-prepared GPU texture via `write_texture`, so the texture
@@ -15,10 +15,9 @@ use std::sync::Arc;
 #[derive(Clone)]
 struct PendingTextureUpload {
     image: AssetId<Image>,
-    buffer: Arc<Vec<u8>>,
+    patches: Arc<WebviewPaintPatches>,
     width: u32,
     height: u32,
-    dirty: Vec<WebviewDirtyRect>,
 }
 
 /// Render-world queue of pending webview pixel uploads. Public only because the public
@@ -56,6 +55,7 @@ impl Plugin for WebviewTextureUploadPlugin {
 /// leaving the asset (and its bind group) untouched.
 pub(crate) fn apply_webview_texture(
     texture: &RenderTextureMessage,
+    browsers: &Browsers,
     images: &mut Assets<Image>,
     handle: &Handle<Image>,
     uploads: &mut WebviewTextureUploads,
@@ -67,11 +67,12 @@ pub(crate) fn apply_webview_texture(
     if same_size {
         uploads.0.push(PendingTextureUpload {
             image: handle.id(),
-            buffer: texture.buffer.clone(),
+            patches: texture.patches.clone(),
             width: texture.width,
             height: texture.height,
-            dirty: texture.dirty.clone(),
         });
+    } else if !texture.dirty.is_empty() {
+        browsers.request_full_cpu_paint(texture.webview, texture.ty);
     } else if let Some(mut image) = images.get_mut(handle.id()) {
         update_webview_image(texture, &mut image);
     }
@@ -103,31 +104,16 @@ fn upload_webview_textures(
         {
             continue;
         }
-        let stride = upload.width * 4;
-        if upload.dirty.is_empty() {
+        for patch in upload.patches.iter() {
             write_region(
                 &queue,
                 gpu,
-                &upload.buffer,
-                stride,
-                0,
-                0,
-                upload.width,
-                upload.height,
+                &patch.buffer,
+                patch.rect.x,
+                patch.rect.y,
+                patch.rect.width,
+                patch.rect.height,
             );
-        } else {
-            for rect in &upload.dirty {
-                write_region(
-                    &queue,
-                    gpu,
-                    &upload.buffer,
-                    stride,
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    rect.height,
-                );
-            }
         }
     }
 }
@@ -137,7 +123,6 @@ fn write_region(
     queue: &RenderQueue,
     gpu: &GpuImage,
     buffer: &[u8],
-    stride: u32,
     x: u32,
     y: u32,
     width: u32,
@@ -146,7 +131,6 @@ fn write_region(
     if width == 0 || height == 0 {
         return;
     }
-    let offset = y as u64 * stride as u64 + x as u64 * 4;
     queue.write_texture(
         TexelCopyTextureInfo {
             texture: &gpu.texture,
@@ -157,8 +141,8 @@ fn write_region(
         },
         buffer,
         TexelCopyBufferLayout {
-            offset,
-            bytes_per_row: Some(stride),
+            offset: 0,
+            bytes_per_row: Some(width * 4),
             rows_per_image: None,
         },
         Extent3d {
@@ -174,7 +158,7 @@ mod tests {
     use super::*;
     use bevy::asset::RenderAssetUsages;
     use bevy::render::render_resource::{TextureDimension, TextureFormat};
-    use bevy_cef_core::prelude::RenderPaintElementType;
+    use bevy_cef_core::prelude::{RenderPaintElementType, WebviewDirtyRect, WebviewPaintPatch};
 
     fn paint(width: u32, height: u32) -> RenderTextureMessage {
         RenderTextureMessage {
@@ -182,8 +166,20 @@ mod tests {
             ty: RenderPaintElementType::View,
             width,
             height,
-            buffer: Arc::new(vec![0u8; (width * height * 4) as usize]),
-            dirty: Vec::new(),
+            patches: Arc::new(
+                [WebviewPaintPatch {
+                    rect: WebviewDirtyRect {
+                        x: 0,
+                        y: 0,
+                        width,
+                        height,
+                    },
+                    buffer: Arc::new(vec![0u8; (width * height * 4) as usize]),
+                }]
+                .into_iter()
+                .collect(),
+            ),
+            dirty: Default::default(),
         }
     }
 
@@ -206,8 +202,9 @@ mod tests {
         let mut images = Assets::<Image>::default();
         let handle = images.add(surface(4, 4));
         let mut uploads = WebviewTextureUploads::default();
+        let browsers = Browsers::default();
 
-        apply_webview_texture(&paint(4, 4), &mut images, &handle, &mut uploads);
+        apply_webview_texture(&paint(4, 4), &browsers, &mut images, &handle, &mut uploads);
 
         assert_eq!(uploads.0.len(), 1);
         assert_eq!(
@@ -221,8 +218,9 @@ mod tests {
         let mut images = Assets::<Image>::default();
         let handle = images.add(surface(4, 4));
         let mut uploads = WebviewTextureUploads::default();
+        let browsers = Browsers::default();
 
-        apply_webview_texture(&paint(8, 6), &mut images, &handle, &mut uploads);
+        apply_webview_texture(&paint(8, 6), &browsers, &mut images, &handle, &mut uploads);
 
         assert!(uploads.0.is_empty());
         assert_eq!(

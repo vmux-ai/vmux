@@ -12,6 +12,7 @@ use crate::webview::pinch_zoom::zoom_level_after_pinch;
 use crate::webview::texture_upload::{WebviewTextureUploads, apply_webview_texture};
 use bevy::input::gestures::PinchGesture;
 use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::{Browsers, RenderTextureMessage};
 use std::fmt::Debug;
@@ -99,6 +100,7 @@ fn sync_sprite_material_alpha(
 fn render(
     mut commands: Commands,
     mut er: MessageReader<RenderTextureMessage>,
+    browsers: NonSend<Browsers>,
     mut images: ResMut<Assets<bevy::prelude::Image>>,
     mut uploads: ResMut<WebviewTextureUploads>,
     mut webviews: Query<&mut Sprite, With<WebviewSource>>,
@@ -110,7 +112,7 @@ fn render(
         if sprite.image == Handle::default() {
             sprite.image = images.add(webview_placeholder_image());
         }
-        apply_webview_texture(texture, &mut images, &sprite.image, &mut uploads);
+        apply_webview_texture(texture, &browsers, &mut images, &sprite.image, &mut uploads);
         commands
             .entity(texture.webview)
             .insert(WebviewSurface(sprite.image.clone()));
@@ -193,6 +195,7 @@ fn on_mouse_wheel(
         for _ in er.read() {}
         return;
     }
+    let mut pending = HashMap::<Entity, (Vec2, Vec2)>::default();
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
             continue;
@@ -218,7 +221,13 @@ fn on_mouse_wheel(
                     commands
                         .entity(webview)
                         .insert(HistorySwipeVisualOffset::default());
-                    browsers.send_mouse_wheel(&webview, pos, delta);
+                    pending
+                        .entry(webview)
+                        .and_modify(|(position, accumulated)| {
+                            *position = pos;
+                            *accumulated += delta;
+                        })
+                        .or_insert((pos, delta));
                 }
                 HistorySwipeOutcome::Consumed { visual } => {
                     commands
@@ -236,6 +245,9 @@ fn on_mouse_wheel(
                 }
             }
         }
+    }
+    for (webview, (position, delta)) in pending {
+        browsers.send_mouse_wheel(&webview, position, delta);
     }
 }
 

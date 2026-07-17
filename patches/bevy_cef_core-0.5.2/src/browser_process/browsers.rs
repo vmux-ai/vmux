@@ -6,7 +6,7 @@ use crate::browser_process::client_handler::{
     SnapshotResultRaw,
 };
 use crate::prelude::*;
-use async_channel::{Sender, TryRecvError};
+use async_channel::Sender;
 use bevy::input::ButtonState;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -130,6 +130,7 @@ pub struct WebviewBrowser {
     pub device_scale: SharedDeviceScaleFactor,
     windowless_frame_rate: Cell<i32>,
     hidden: Cell<bool>,
+    last_mouse_move: Cell<Option<(i32, i32, u32, bool)>>,
     /// Last applied windowed (native) frame in points `(x, y, w, h)`. Used to skip redundant
     /// `setFrame`/`was_resized` calls — re-resizing CEF to the same size every frame clears its
     /// surface and leaves it blank until the next real paint.
@@ -193,8 +194,8 @@ pub struct Browsers {
 
 impl Default for Browsers {
     fn default() -> Self {
-        let (sender, receiver) = async_channel::unbounded::<RenderTextureMessage>();
-        let (accel_sender, accel_receiver) = async_channel::unbounded::<AcceleratedFrame>();
+        let (sender, receiver) = TextureMailbox::channel();
+        let (accel_sender, accel_receiver) = AcceleratedMailbox::channel();
         Browsers {
             browsers: HashMap::default(),
             sender,
@@ -421,6 +422,7 @@ impl Browsers {
             device_scale,
             windowless_frame_rate: Cell::new(windowless_frame_rate),
             hidden: Cell::new(false),
+            last_mouse_move: Cell::new(None),
             last_frame: Cell::new(None),
             last_corner_radius: Cell::new(None),
             last_corner_radius_all_corners: Cell::new(None),
@@ -556,11 +558,40 @@ impl Browsers {
         // Route by webview entity. Requiring `focused_frame()` drops all input until CEF already
         // has focus — so the first click never reaches `set_focus`.
         if let Some(browser) = self.browsers.get(webview) {
+            let modifiers = modifiers_from_mouse_buttons(buttons);
             let mouse_event = cef::MouseEvent {
                 x: position.x as i32,
                 y: position.y as i32,
-                modifiers: modifiers_from_mouse_buttons(buttons),
+                modifiers,
             };
+            let signature = (mouse_event.x, mouse_event.y, modifiers, mouse_leave);
+            if browser.last_mouse_move.replace(Some(signature)) == Some(signature) {
+                return;
+            }
+            browser
+                .host
+                .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
+        }
+    }
+
+    pub fn send_native_mouse_move(
+        &self,
+        webview: &Entity,
+        buttons: NativeMouseButtons,
+        position: Vec2,
+        mouse_leave: bool,
+    ) {
+        if let Some(browser) = self.browsers.get(webview) {
+            let modifiers = modifiers_from_native_mouse_buttons(buttons);
+            let mouse_event = cef::MouseEvent {
+                x: position.x as i32,
+                y: position.y as i32,
+                modifiers,
+            };
+            let signature = (mouse_event.x, mouse_event.y, modifiers, mouse_leave);
+            if browser.last_mouse_move.replace(Some(signature)) == Some(signature) {
+                return;
+            }
             browser
                 .host
                 .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
@@ -1631,6 +1662,8 @@ impl Browsers {
     ///
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
+        self.sender.discard(*webview);
+        self.accel_sender.discard(*webview);
         if let Some(browser) = self.browsers.remove(webview) {
             info!(
                 "cef_close_browser webview={webview:?} windowed={}",
@@ -1657,13 +1690,24 @@ impl Browsers {
     }
 
     #[inline]
-    pub fn try_receive_texture(&self) -> core::result::Result<RenderTextureMessage, TryRecvError> {
-        self.receiver.try_recv()
+    pub fn drain_render_textures(&self) -> Vec<RenderTextureMessage> {
+        self.receiver.drain()
+    }
+
+    pub fn request_full_cpu_paint(&self, webview: Entity, ty: RenderPaintElementType) {
+        self.sender.request_full(webview, ty);
+        if let Some(browser) = self.browsers.get(&webview) {
+            let ty = match ty {
+                RenderPaintElementType::View => cef::PaintElementType::VIEW,
+                RenderPaintElementType::Popup => cef::PaintElementType::POPUP,
+            };
+            browser.host.invalidate(ty);
+        }
     }
 
     #[inline]
-    pub fn try_receive_accelerated(&self) -> core::result::Result<AcceleratedFrame, TryRecvError> {
-        self.accel_receiver.try_recv()
+    pub fn drain_accelerated_frames(&self) -> Vec<AcceleratedFrame> {
+        self.accel_receiver.drain()
     }
 
     /// Shows the DevTools for the specified webview.
@@ -2615,7 +2659,7 @@ mod tests {
         let close_fn = implementation
             .split("pub fn close")
             .nth(1)
-            .and_then(|tail| tail.split("pub fn try_receive_texture").next())
+            .and_then(|tail| tail.split("pub fn drain_render_textures").next())
             .unwrap_or_default();
 
         assert!(close_fn.contains("window_handle"));

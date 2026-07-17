@@ -11,7 +11,7 @@ use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     input::{
         ButtonState, InputSystems,
-        mouse::{MouseButton, MouseButtonInput},
+        mouse::{MouseButton, MouseButtonInput, MouseWheel},
     },
     material::AlphaMode,
     picking::pointer::PointerButton,
@@ -22,9 +22,11 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{
-    CefEmbeddedHosts, CommandLineConfig, NativeMouseButtons, NativeMouseMovePresenter,
-    RenderTextureMessage, webview_debug_log,
+    CefEmbeddedHosts, CommandLineConfig, RenderTextureMessage, webview_debug_log,
 };
+#[cfg(target_os = "macos")]
+use bevy_cef_core::prelude::{NativeMouseButtons, NativeMouseMovePresenter};
+#[cfg(target_os = "macos")]
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -232,7 +234,12 @@ impl Plugin for BrowserPlugin {
             )
             .add_systems(
                 Last,
-                (refresh_layout_cef_hover, refresh_active_windowed_hover),
+                (
+                    refresh_layout_cef_hover,
+                    refresh_active_windowed_hover,
+                    sync_layout_cef_frame_rate,
+                )
+                    .chain(),
             )
             .init_resource::<HostFocusIntent>()
             .init_resource::<PendingNavSnapshots>()
@@ -320,32 +327,41 @@ struct CefPointerHitRect {
     interactive: bool,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Default)]
 struct NativeLayoutPointerState {
     regions: Vec<CefPointerHitRect>,
     pointer_inside: bool,
     position_px: Option<Vec2>,
+    buttons: NativeMouseButtons,
+    pending: bool,
 }
 
+#[cfg(target_os = "macos")]
 static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
     LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
+static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
+#[cfg(target_os = "macos")]
 #[derive(Default)]
 struct NativeLayoutMousePresenterState {
     scale: f32,
     presenter: Option<NativeMouseMovePresenter>,
 }
 
+#[cfg(target_os = "macos")]
 thread_local! {
     static NATIVE_LAYOUT_MOUSE_PRESENTER: RefCell<NativeLayoutMousePresenterState> =
         RefCell::new(NativeLayoutMousePresenterState::default());
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NativeLayoutPointerMoveResult {
     pub owns_pointer: bool,
-    pub forwarded: bool,
-    pub changed: bool,
+    pub presenter_active: bool,
+    pub region_changed: bool,
+    pub pending: bool,
 }
 
 fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
@@ -358,30 +374,20 @@ fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
     point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
 }
 
+#[cfg(target_os = "macos")]
 fn physical_cef_pointer_hit_rect(mut rect: CefPointerHitRect, scale: f32) -> CefPointerHitRect {
     rect.center *= scale;
     rect.size *= scale;
     rect
 }
 
+#[cfg(target_os = "macos")]
 fn set_native_layout_pointer_regions(regions: impl IntoIterator<Item = CefPointerHitRect>) {
     let mut state = NATIVE_LAYOUT_POINTER_STATE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     state.regions.clear();
     state.regions.extend(regions);
-}
-
-fn clear_native_layout_pointer_regions() {
-    let mut state = NATIVE_LAYOUT_POINTER_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.regions.clear();
-    state.pointer_inside = false;
-    state.position_px = None;
-    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow_mut(|state| {
-        state.presenter = None;
-    });
 }
 
 #[cfg(target_os = "macos")]
@@ -404,29 +410,55 @@ fn native_layout_mouse_presenter_active() -> bool {
     NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| state.presenter.is_some())
 }
 
-fn layout_pointer_move_should_wake(was_inside: bool, inside: bool) -> bool {
-    was_inside || inside
+#[cfg(target_os = "macos")]
+fn clear_native_layout_pointer_state() {
+    let should_flush = {
+        let mut state = NATIVE_LAYOUT_POINTER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.regions.clear();
+        let should_flush = state.pointer_inside && state.position_px.is_some();
+        state.pointer_inside = false;
+        state.pending |= should_flush;
+        should_flush
+    };
+    NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+    if should_flush {
+        flush_native_layout_pointer_move();
+    }
+    set_native_layout_mouse_presenter(1.0, None);
 }
 
-/// Returns whether native pointer motion needs a layout hover update.
-pub fn native_layout_pointer_move_should_wake(x_px: f32, y_px: f32) -> bool {
-    if !x_px.is_finite() || !y_px.is_finite() {
-        return false;
-    }
-    let mut state = NATIVE_LAYOUT_POINTER_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+#[cfg(target_os = "macos")]
+fn queue_native_layout_pointer_sample(
+    state: &mut NativeLayoutPointerState,
+    position: Vec2,
+    buttons: NativeMouseButtons,
+) -> NativeLayoutPointerMoveResult {
     let inside = state
         .regions
         .iter()
         .copied()
-        .any(|rect| cef_pointer_hit_rect_contains(rect, Vec2::new(x_px, y_px)));
-    let should_wake = layout_pointer_move_should_wake(state.pointer_inside, inside);
+        .any(|rect| cef_pointer_hit_rect_contains(rect, position));
+    let was_inside = state.pointer_inside;
+    let sample_changed =
+        state.position_px != Some(position) || state.buttons != buttons || was_inside != inside;
     state.pointer_inside = inside;
-    should_wake
+    state.position_px = Some(position);
+    state.buttons = buttons;
+    if (was_inside || inside) && sample_changed {
+        state.pending = true;
+    }
+    NativeLayoutPointerMoveResult {
+        owns_pointer: was_inside || inside,
+        presenter_active: false,
+        region_changed: was_inside != inside,
+        pending: state.pending,
+    }
 }
 
-pub fn forward_native_layout_pointer_move(
+#[cfg(target_os = "macos")]
+pub fn queue_native_layout_pointer_move(
     x_px: f32,
     y_px: f32,
     buttons: NativeMouseButtons,
@@ -434,50 +466,57 @@ pub fn forward_native_layout_pointer_move(
     if !x_px.is_finite() || !y_px.is_finite() {
         return NativeLayoutPointerMoveResult::default();
     }
-    let (was_inside, inside) = {
+    let (mut result, inside) = {
         let mut state = NATIVE_LAYOUT_POINTER_STATE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let inside = state
-            .regions
-            .iter()
-            .copied()
-            .any(|rect| cef_pointer_hit_rect_contains(rect, Vec2::new(x_px, y_px)));
-        let was_inside = state.pointer_inside;
-        state.pointer_inside = inside;
-        state.position_px = Some(Vec2::new(x_px, y_px));
-        (was_inside, inside)
+        let position = Vec2::new(x_px, y_px);
+        let result = queue_native_layout_pointer_sample(&mut state, position, buttons);
+        (result, state.pointer_inside)
     };
-    let owns_pointer = was_inside || inside;
+    NATIVE_LAYOUT_POINTER_INSIDE.store(inside, Ordering::Relaxed);
+    result.presenter_active = native_layout_mouse_presenter_active();
+    result
+}
+
+#[cfg(target_os = "macos")]
+pub fn flush_native_layout_pointer_move() -> bool {
+    let Some((position_px, buttons, inside)) = ({
+        let mut state = NATIVE_LAYOUT_POINTER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.pending {
+            None
+        } else {
+            state.pending = false;
+            state
+                .position_px
+                .map(|position| (position, state.buttons, state.pointer_inside))
+        }
+    }) else {
+        return false;
+    };
     let forwarded = NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
         let Some(presenter) = state.presenter.as_ref() else {
             return false;
         };
-        if !owns_pointer || !state.scale.is_finite() || state.scale <= 0.0 {
+        if !state.scale.is_finite() || state.scale <= 0.0 {
             return false;
         }
-        presenter.send(Vec2::new(x_px, y_px) / state.scale, buttons, !inside);
+        presenter.send(position_px / state.scale, buttons, !inside);
         true
     });
-    NativeLayoutPointerMoveResult {
-        owns_pointer,
-        forwarded,
-        changed: was_inside != inside,
+    if !forwarded {
+        NATIVE_LAYOUT_POINTER_STATE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pending = true;
     }
+    forwarded
 }
 
 pub fn native_layout_pointer_is_inside() -> bool {
-    NATIVE_LAYOUT_POINTER_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .pointer_inside
-}
-
-pub fn native_layout_pointer_position_px() -> Option<Vec2> {
-    NATIVE_LAYOUT_POINTER_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .position_px
+    NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
 }
 
 fn cef_pointer_hit_rect(
@@ -526,12 +565,23 @@ fn sync_layout_cef_pointer_target(
     mut commands: Commands,
 ) {
     let Ok((layout, has_target)) = layout_q.single() else {
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         return;
     };
     #[cfg(target_os = "macos")]
     let should_target = {
-        let _ = (&windows, &cef_regions);
-        modal_pointer_targets.is_empty() && native_layout_pointer_is_inside()
+        let inside = windows
+            .single()
+            .ok()
+            .and_then(|window| {
+                let scale = window.resolution.scale_factor();
+                (scale.is_finite() && scale > 0.0).then_some(scale)
+            })
+            .and_then(|scale| {
+                vmux_layout::native_pointer::snapshot().map(|pointer| pointer.position_px / scale)
+            })
+            .is_some_and(|position| cef_pointer_regions_contains(position, &cef_regions));
+        modal_pointer_targets.is_empty() && inside
     };
     #[cfg(not(target_os = "macos"))]
     let should_target = modal_pointer_targets.is_empty()
@@ -540,6 +590,7 @@ fn sync_layout_cef_pointer_target(
             .ok()
             .and_then(Window::cursor_position)
             .is_some_and(|pos| cef_pointer_regions_contains(pos, &cef_regions));
+    NATIVE_LAYOUT_POINTER_INSIDE.store(should_target, Ordering::Relaxed);
     if should_target && !has_target {
         commands.entity(layout).insert(CefPointerTarget);
     } else if !should_target && has_target {
@@ -612,8 +663,10 @@ fn forward_layout_cef_mouse_button(
             continue;
         };
         #[cfg(target_os = "macos")]
-        let position = native_layout_pointer_position_px()
-            .map(|position| position / window.resolution.scale_factor())
+        let native_pointer = vmux_layout::native_pointer::snapshot();
+        #[cfg(target_os = "macos")]
+        let position = native_pointer
+            .map(|pointer| pointer.position_px / window.resolution.scale_factor())
             .or_else(|| window.cursor_position());
         #[cfg(not(target_os = "macos"))]
         let position = window.cursor_position();
@@ -625,6 +678,10 @@ fn forward_layout_cef_mouse_button(
             *captured = true;
         }
         if inside || *captured {
+            #[cfg(target_os = "macos")]
+            if let Some(pointer) = native_pointer {
+                browsers.send_native_mouse_move(&layout, pointer.buttons, position, !inside);
+            }
             browsers.send_mouse_click(
                 &layout,
                 position,
@@ -1668,7 +1725,11 @@ fn windowed_hover_refresh_position(
 
 #[derive(Default)]
 struct LayoutHoverRefreshState {
+    #[cfg(not(target_os = "macos"))]
+    sequence: u64,
+    #[cfg(not(target_os = "macos"))]
     position: Option<Vec2>,
+    #[cfg(not(target_os = "macos"))]
     in_region: bool,
 }
 
@@ -1678,15 +1739,24 @@ fn reset_layout_cef_hover(
     layout: Entity,
     state: &mut LayoutHoverRefreshState,
 ) {
-    if state.in_region {
-        browsers.send_mouse_move(
-            &layout,
-            buttons.get_pressed(),
-            state.position.unwrap_or_default(),
-            true,
-        );
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (browsers, buttons, layout);
+        clear_native_layout_pointer_state();
+        *state = LayoutHoverRefreshState::default();
     }
-    *state = LayoutHoverRefreshState::default();
+    #[cfg(not(target_os = "macos"))]
+    {
+        if state.in_region {
+            browsers.send_mouse_move(
+                &layout,
+                buttons.get_pressed(),
+                state.position.unwrap_or_default(),
+                true,
+            );
+        }
+        *state = LayoutHoverRefreshState::default();
+    }
 }
 
 fn refresh_layout_cef_hover(
@@ -1701,69 +1771,94 @@ fn refresh_layout_cef_hover(
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
-        clear_native_layout_pointer_regions();
+        #[cfg(target_os = "macos")]
+        clear_native_layout_pointer_state();
+        #[cfg(not(target_os = "macos"))]
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         *state = LayoutHoverRefreshState::default();
         return;
     };
     if suppress.0 || !modal_pointer_targets.is_empty() {
-        clear_native_layout_pointer_regions();
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
     let Some(window_entity) = primary_window.single().ok() else {
-        clear_native_layout_pointer_regions();
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
-        clear_native_layout_pointer_regions();
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     };
     let scale = window.resolution.scale_factor();
     if !scale.is_finite() || scale <= 0.0 {
-        clear_native_layout_pointer_regions();
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
-    set_native_layout_pointer_regions(
-        cef_regions
-            .iter()
-            .map(
-                |(header, side_sheet, node, computed, transform, visibility, open)| {
-                    cef_pointer_hit_rect(
-                        header, side_sheet, node, computed, transform, visibility, open,
-                    )
-                },
-            )
-            .filter(|rect| rect.interactive)
-            .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
-    );
     #[cfg(target_os = "macos")]
     {
+        set_native_layout_pointer_regions(
+            cef_regions
+                .iter()
+                .map(
+                    |(header, side_sheet, node, computed, transform, visibility, open)| {
+                        cef_pointer_hit_rect(
+                            header, side_sheet, node, computed, transform, visibility, open,
+                        )
+                    },
+                )
+                .filter(|rect| rect.interactive)
+                .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
+        );
         set_native_layout_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
-        if native_layout_mouse_presenter_active() {
-            *state = LayoutHoverRefreshState::default();
+        if let Some(pointer) = vmux_layout::native_pointer::snapshot() {
+            let result = queue_native_layout_pointer_move(
+                pointer.position_px.x,
+                pointer.position_px.y,
+                pointer.buttons,
+            );
+            if result.owns_pointer {
+                flush_native_layout_pointer_move();
+            }
+        }
+        *state = LayoutHoverRefreshState::default();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
+        else {
+            reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+            return;
+        };
+        let sequence = 0;
+        let position = cursor_px / scale;
+        let in_region = cef_pointer_regions_contains(position, &cef_regions);
+        NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
+        let unchanged = state.sequence == sequence
+            && state.position == Some(position)
+            && state.in_region == in_region;
+        if unchanged {
             return;
         }
+        if in_region {
+            browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
+        } else if state.in_region {
+            browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
+        }
+        state.sequence = sequence;
+        state.position = Some(position);
+        state.in_region = in_region;
     }
-    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
-    else {
-        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
-        return;
-    };
-    let position = cursor_px / scale;
-    let in_region = cef_pointer_regions_contains(position, &cef_regions);
-    if state.position == Some(position) && state.in_region == in_region {
-        return;
-    }
-    if in_region {
-        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
-    } else if state.in_region {
-        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
-    }
-    state.position = Some(position);
-    state.in_region = in_region;
+}
+
+#[derive(Default)]
+struct WindowedHoverRefreshState {
+    entity: Option<Entity>,
+    position: Option<Vec2>,
 }
 
 fn refresh_active_windowed_hover(
@@ -1790,39 +1885,126 @@ fn refresh_active_windowed_hover(
             Without<SideSheet>,
         ),
     >,
+    mut state: Local<WindowedHoverRefreshState>,
 ) {
     if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+        *state = WindowedHoverRefreshState::default();
         return;
     }
     if native_left_mouse_down() {
+        *state = WindowedHoverRefreshState::default();
         return;
     }
     let Some((entity, transform, computed, ui_gt, host_window)) = active_q.iter().next() else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
     if transform.scale.x <= 1.0e-3 {
+        *state = WindowedHoverRefreshState::default();
         return;
     }
     let Some(window_entity) = host_window
         .map(|host| host.0)
         .or_else(|| primary_window.single().ok())
     else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
     let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
     else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
     let Some(frame) = windowed_hover_refresh_frame(computed, ui_gt) else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
     let Some(position) = windowed_hover_refresh_position(cursor_px, frame) else {
+        *state = WindowedHoverRefreshState::default();
         return;
     };
+    if state.entity == Some(entity) && state.position == Some(position) {
+        return;
+    }
     browsers.send_mouse_move(&entity, buttons.get_pressed(), position, false);
+    state.entity = Some(entity);
+    state.position = Some(position);
+}
+
+const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
+const LAYOUT_HOVER_FRAME_RATE: i32 = 30;
+const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
+const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
+
+#[derive(Default)]
+struct LayoutFrameRateState {
+    native_sequence: u64,
+    last_input: Option<std::time::Instant>,
+    dragging_layout: bool,
+}
+
+fn layout_frame_rate(
+    now: std::time::Instant,
+    last_input: Option<std::time::Instant>,
+    hovered: bool,
+    dragging: bool,
+) -> i32 {
+    if dragging
+        || last_input.is_some_and(|last| now.saturating_duration_since(last) < LAYOUT_INPUT_BURST)
+    {
+        LAYOUT_ACTIVE_FRAME_RATE
+    } else if hovered {
+        LAYOUT_HOVER_FRAME_RATE
+    } else {
+        LAYOUT_IDLE_FRAME_RATE
+    }
+}
+
+fn sync_layout_cef_frame_rate(
+    mut cursor_events: MessageReader<CursorMoved>,
+    mut button_events: MessageReader<MouseButtonInput>,
+    mut wheel_events: MessageReader<MouseWheel>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    mut state: Local<LayoutFrameRateState>,
+) {
+    let inside = native_layout_pointer_is_inside();
+    let pointer = vmux_layout::native_pointer::snapshot();
+    let native_changed = pointer.is_some_and(|pointer| {
+        if pointer.sequence == state.native_sequence {
+            return false;
+        }
+        state.native_sequence = pointer.sequence;
+        true
+    });
+    let pointer_moved = native_changed || cursor_events.read().count() > 0;
+    let button_changed = button_events.read().count() > 0;
+    let wheel_changed = wheel_events.read().count() > 0;
+    let input_changed = pointer_moved || button_changed || wheel_changed;
+    let now = std::time::Instant::now();
+    if (inside || state.dragging_layout) && (button_changed || wheel_changed) {
+        state.last_input = Some(now);
+    }
+    let native_dragging = pointer.is_some_and(|pointer| {
+        pointer.buttons.left || pointer.buttons.right || pointer.buttons.middle
+    });
+    let any_pressed = native_dragging || buttons.get_pressed().next().is_some();
+    if !any_pressed {
+        state.dragging_layout = false;
+    } else if inside && input_changed {
+        state.dragging_layout = true;
+    }
+    let desired = layout_frame_rate(now, state.last_input, inside, state.dragging_layout);
+    let Ok(mut cap) = layout_q.single_mut() else {
+        return;
+    };
+    if cap.0 != desired {
+        cap.0 = desired;
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2570,7 +2752,7 @@ fn flush_pending_osr_textures(
     mut ew: MessageWriter<RenderTextureMessage>,
     browsers: NonSend<Browsers>,
 ) {
-    while let Ok(texture) = browsers.try_receive_texture() {
+    for texture in browsers.drain_render_textures() {
         ew.write(texture);
     }
 }
@@ -5591,6 +5773,7 @@ mod tests {
         assert!(refresh_fn.contains("With<WebviewWindowed>"));
         assert!(refresh_fn.contains("vmux_layout::pane::pane_hover_cursor_position"));
         assert!(refresh_fn.contains("browsers.send_mouse_move"));
+        assert!(refresh_fn.contains("state.position == Some(position)"));
     }
 
     #[test]
@@ -5602,14 +5785,73 @@ mod tests {
             .and_then(|tail| tail.split("fn refresh_active_windowed_hover").next())
             .unwrap_or_default();
 
-        assert!(refresh_fn.contains("pane_hover_cursor_position"));
-        assert!(refresh_fn.contains("cef_pointer_regions_contains"));
-        assert!(refresh_fn.contains("window.resolution.scale_factor()"));
+        assert!(refresh_fn.contains("vmux_layout::native_pointer::snapshot()"));
         assert!(refresh_fn.contains("set_native_layout_pointer_regions"));
+        assert!(refresh_fn.contains("physical_cef_pointer_hit_rect"));
         assert!(refresh_fn.contains("browsers.native_mouse_move_presenter"));
-        assert!(refresh_fn.contains("native_layout_mouse_presenter_active"));
-        assert!(refresh_fn.contains("browsers.send_mouse_move"));
+        assert!(refresh_fn.contains("queue_native_layout_pointer_move"));
+        assert!(refresh_fn.contains("flush_native_layout_pointer_move"));
+        assert!(refresh_fn.contains("window.resolution.scale_factor()"));
         assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
+    }
+
+    #[test]
+    fn native_layout_pointer_queue_retains_only_latest_sample() {
+        let source = include_str!("lib.rs");
+        let sample = source
+            .split("fn queue_native_layout_pointer_sample")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn queue_native_layout_pointer_move").next())
+            .unwrap_or_default();
+        let queue = source
+            .split("pub fn queue_native_layout_pointer_move")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn flush_native_layout_pointer_move").next())
+            .unwrap_or_default();
+        let flush = source
+            .split("pub fn flush_native_layout_pointer_move")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn native_layout_pointer_is_inside").next())
+            .unwrap_or_default();
+
+        assert!(sample.contains("state.position_px = Some(position)"));
+        assert!(sample.contains("state.buttons = buttons"));
+        assert!(source.contains("fn queue_native_layout_pointer_sample"));
+        assert!(sample.contains("sample_changed"));
+        assert!(sample.contains("state.pending = true"));
+        assert!(queue.contains("queue_native_layout_pointer_sample"));
+        assert!(flush.contains("state.pending = false"));
+        assert!(flush.contains("presenter.send(position_px / state.scale"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_layout_pointer_queue_skips_identical_sample() {
+        let mut state = NativeLayoutPointerState {
+            regions: vec![CefPointerHitRect {
+                center: Vec2::new(50.0, 25.0),
+                size: Vec2::new(20.0, 10.0),
+                interactive: true,
+            }],
+            ..Default::default()
+        };
+        let buttons = NativeMouseButtons::default();
+
+        let entered =
+            queue_native_layout_pointer_sample(&mut state, Vec2::new(50.0, 25.0), buttons);
+        assert!(entered.owns_pointer);
+        assert!(entered.region_changed);
+        assert!(entered.pending);
+        state.pending = false;
+        let duplicate =
+            queue_native_layout_pointer_sample(&mut state, Vec2::new(50.0, 25.0), buttons);
+        assert!(duplicate.owns_pointer);
+        assert!(!duplicate.region_changed);
+        assert!(!duplicate.pending);
+        let moved = queue_native_layout_pointer_sample(&mut state, Vec2::new(51.0, 25.0), buttons);
+        assert!(moved.owns_pointer);
+        assert!(!moved.region_changed);
+        assert!(moved.pending);
     }
 
     #[test]
@@ -5642,31 +5884,41 @@ mod tests {
             .and_then(|tail| tail.split("fn forward_layout_cef_cursor_move").next())
             .unwrap_or_default();
 
-        assert!(click_forward.contains("native_layout_pointer_position_px"));
-        assert!(target_sync.contains("native_layout_pointer_is_inside"));
+        assert!(click_forward.contains("vmux_layout::native_pointer::snapshot()"));
+        assert!(target_sync.contains("vmux_layout::native_pointer::snapshot()"));
     }
 
     #[test]
-    fn native_layout_pointer_regions_use_physical_coordinates() {
-        let rect = physical_cef_pointer_hit_rect(
-            CefPointerHitRect {
-                center: Vec2::new(50.0, 25.0),
-                size: Vec2::new(20.0, 10.0),
-                interactive: true,
-            },
-            2.0,
+    fn layout_pointer_regions_match_layout_coordinates() {
+        let rect = CefPointerHitRect {
+            center: Vec2::new(50.0, 25.0),
+            size: Vec2::new(20.0, 10.0),
+            interactive: true,
+        };
+
+        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 25.0)));
+        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(39.0, 25.0)));
+    }
+
+    #[test]
+    fn layout_frame_rate_bursts_after_input() {
+        let now = std::time::Instant::now();
+        assert_eq!(
+            layout_frame_rate(now, None, false, false),
+            LAYOUT_IDLE_FRAME_RATE
         );
-
-        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(100.0, 50.0)));
-        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(79.0, 50.0)));
-    }
-
-    #[test]
-    fn native_layout_pointer_wakes_inside_and_once_on_exit() {
-        assert!(!layout_pointer_move_should_wake(false, false));
-        assert!(layout_pointer_move_should_wake(false, true));
-        assert!(layout_pointer_move_should_wake(true, true));
-        assert!(layout_pointer_move_should_wake(true, false));
+        assert_eq!(
+            layout_frame_rate(now, None, true, false),
+            LAYOUT_HOVER_FRAME_RATE
+        );
+        assert_eq!(
+            layout_frame_rate(now, Some(now), false, false),
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
+        assert_eq!(
+            layout_frame_rate(now, None, true, true),
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
     }
 
     #[test]

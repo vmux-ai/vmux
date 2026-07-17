@@ -59,6 +59,7 @@ where
 fn render<E: MaterialExtension>(
     mut commands: Commands,
     mut er: MessageReader<RenderTextureMessage>,
+    browsers: NonSend<Browsers>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<WebviewExtendedMaterial<E>>>,
     mut uploads: ResMut<WebviewTextureUploads>,
@@ -79,6 +80,6 @@ fn render<E: MaterialExtension>(
         commands
             .entity(texture.webview)
             .insert(WebviewSurface(handle.clone()));
-        apply_webview_texture(texture, &mut images, &handle, &mut uploads);
+        apply_webview_texture(texture, &browsers, &mut images, &handle, &mut uploads);
     }
 }
