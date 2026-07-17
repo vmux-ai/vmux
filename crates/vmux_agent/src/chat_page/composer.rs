@@ -46,6 +46,10 @@ pub(crate) enum ToolActivity {
     Other,
 }
 
+pub(crate) fn should_expand_thinking(block_index: usize, block_count: usize) -> bool {
+    block_index + 1 == block_count
+}
+
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     let Some(token) = draft.strip_prefix('/') else {
         return SelectorMode::None;
@@ -393,6 +397,12 @@ mod tests {
             SelectorMode::Resume("SID-9")
         );
         assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
+    }
+
+    #[test]
+    fn thinking_expands_only_until_the_next_block() {
+        assert!(should_expand_thinking(0, 1));
+        assert!(!should_expand_thinking(0, 2));
     }
 
     #[test]

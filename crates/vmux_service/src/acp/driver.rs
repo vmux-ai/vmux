@@ -73,7 +73,40 @@ pub struct AcpTerminal {
 #[derive(Clone)]
 struct AcpFsScope {
     cwd: PathBuf,
-    vibe_session_id: Option<Arc<Mutex<Option<String>>>>,
+    vibe_temp_root: Option<PathBuf>,
+}
+
+struct VibeTempRoot(tempfile::TempDir);
+
+impl VibeTempRoot {
+    fn create(agent_id: &str) -> std::io::Result<Option<Self>> {
+        if !matches!(agent_id, "mistral-vibe" | "vibe") {
+            return Ok(None);
+        }
+        tempfile::Builder::new()
+            .prefix("vmux-vibe-")
+            .tempdir()
+            .map(Self)
+            .map(Some)
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self.0.path()
+    }
+
+    fn apply_env(&self, mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+        env.retain(|(key, _)| key != "TMPDIR");
+        env.push((
+            "TMPDIR".to_string(),
+            self.path().to_string_lossy().into_owned(),
+        ));
+        env
+    }
+
+    async fn cleanup(self) {
+        let path = self.0.keep();
+        let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(path)).await;
+    }
 }
 
 /// State shared between the driver's request handlers and its prompt loop.
@@ -388,13 +421,26 @@ pub async fn run(
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
-    let fs_session_id = matches!(agent_id.as_str(), "mistral-vibe" | "vibe")
-        .then(|| Arc::new(Mutex::new(resume.clone())));
+    let vibe_temp_root = match VibeTempRoot::create(&agent_id) {
+        Ok(root) => root,
+        Err(err) => {
+            shared.emit_status(AgentRunStatus::Errored(format!(
+                "vibe temp directory failed: {err}"
+            )));
+            return;
+        }
+    };
     let fs_scope = AcpFsScope {
         cwd: shared.cwd.clone(),
-        vibe_session_id: fs_session_id.clone(),
+        vibe_temp_root: vibe_temp_root
+            .as_ref()
+            .map(|root| root.path().to_path_buf()),
     };
     let env = apply_vibe_mcp_env(&agent_id, env, &mcp_servers);
+    let env = match &vibe_temp_root {
+        Some(root) => root.apply_env(env),
+        None => env,
+    };
     let session_meta = session_meta_for_agent(&agent_id);
     let mut child = match Command::new(&command)
         .args(&args)
@@ -584,7 +630,6 @@ pub async fn run(
                 main_shared.finish_history_replay(session_id.is_some());
             }
             if let Some(sid) = &session_id {
-                remember_acp_fs_session(&fs_session_id, sid);
                 main_shared.emit(ServiceMessage::AcpSessionCreated {
                     sid: main_shared.sid.clone(),
                     acp_session_id: sid.to_string(),
@@ -612,7 +657,6 @@ pub async fn run(
                 .await;
                 match ensured {
                     Ok((sid, created)) => {
-                        remember_acp_fs_session(&fs_session_id, &sid);
                         if created {
                             main_shared.emit(ServiceMessage::AcpSessionCreated {
                                 sid: main_shared.sid.clone(),
@@ -669,7 +713,6 @@ pub async fn run(
                                 continue;
                             }
                         };
-                        remember_acp_fs_session(&fs_session_id, &active_session_id);
                         if created {
                             main_shared.emit(ServiceMessage::AcpSessionCreated {
                                 sid: main_shared.sid.clone(),
@@ -775,6 +818,9 @@ pub async fn run(
         )));
     }
     let _ = child.kill().await;
+    if let Some(root) = vibe_temp_root {
+        root.cleanup().await;
+    }
 }
 
 fn apply_vibe_mcp_env(
@@ -1200,20 +1246,12 @@ fn resolve_in_cwd(cwd: &std::path::Path, path: &std::path::Path) -> Option<PathB
     Some(abs)
 }
 
-fn remember_acp_fs_session(session: &Option<Arc<Mutex<Option<String>>>>, session_id: &SessionId) {
-    if let Some(session) = session {
-        *session.lock().unwrap() = Some(session_id.to_string());
-    }
-}
-
 fn resolve_acp_fs_path(scope: &AcpFsScope, path: &std::path::Path) -> Option<PathBuf> {
-    resolve_in_cwd(&scope.cwd, path).or_else(|| {
-        let session_id = scope.vibe_session_id.as_ref()?.lock().unwrap().clone()?;
-        resolve_vibe_scratchpad(&session_id, path)
-    })
+    resolve_in_cwd(&scope.cwd, path)
+        .or_else(|| resolve_vibe_scratchpad(scope.vibe_temp_root.as_ref()?, path))
 }
 
-fn resolve_vibe_scratchpad(session_id: &str, path: &std::path::Path) -> Option<PathBuf> {
+fn resolve_vibe_scratchpad(temp_root: &std::path::Path, path: &std::path::Path) -> Option<PathBuf> {
     if !path.is_absolute()
         || path
             .components()
@@ -1221,14 +1259,9 @@ fn resolve_vibe_scratchpad(session_id: &str, path: &std::path::Path) -> Option<P
     {
         return None;
     }
-    let short_id: String = session_id.chars().take(8).collect();
-    if short_id.len() != 8 {
-        return None;
-    }
-    let prefix = format!("vibe-scratchpad-{short_id}-");
-    let temp = std::env::temp_dir();
-    let real_temp = temp.canonicalize().ok()?;
-    for base in [&temp, &real_temp] {
+    let prefix = "vibe-scratchpad-";
+    let real_temp = temp_root.canonicalize().ok()?;
+    for base in [temp_root, real_temp.as_path()] {
         let Ok(relative) = path.strip_prefix(base) else {
             continue;
         };
@@ -1238,7 +1271,7 @@ fn resolve_vibe_scratchpad(session_id: &str, path: &std::path::Path) -> Option<P
         let Some(root_name_str) = root_name.to_str() else {
             continue;
         };
-        if !root_name_str.starts_with(&prefix) || root_name_str.len() == prefix.len() {
+        if !root_name_str.starts_with(prefix) || root_name_str.len() == prefix.len() {
             continue;
         }
         let scratchpad = base.join(root_name);
@@ -1246,6 +1279,13 @@ fn resolve_vibe_scratchpad(session_id: &str, path: &std::path::Path) -> Option<P
             continue;
         };
         if !real_scratchpad.starts_with(&real_temp) {
+            continue;
+        }
+        let Some(real_root_name) = real_scratchpad.file_name().and_then(|name| name.to_str())
+        else {
+            continue;
+        };
+        if !real_root_name.starts_with(prefix) || real_root_name.len() == prefix.len() {
             continue;
         }
         if let Some(path) = resolve_in_cwd(&scratchpad, path) {
@@ -1350,6 +1390,29 @@ mod tests {
         assert_eq!(value[1]["command"], "/tmp/vmux");
         assert_eq!(value[1]["args"], serde_json::json!(["mcp", "--profile"]));
         assert_eq!(value[1]["env"]["VMUX_PROFILE"], "dev");
+    }
+
+    #[test]
+    fn vibe_temp_root_overrides_child_tmpdir() {
+        let root = VibeTempRoot::create("mistral-vibe").unwrap().unwrap();
+        let env = root.apply_env(vec![
+            ("TMPDIR".to_string(), "/old".to_string()),
+            ("HOME".to_string(), "/home/test".to_string()),
+        ]);
+        let expected = root.path().to_string_lossy().into_owned();
+
+        assert_eq!(
+            env.iter()
+                .filter(|(key, _)| key == "TMPDIR")
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>(),
+            vec![expected.as_str()]
+        );
+        assert!(
+            env.iter()
+                .any(|(key, value)| key == "HOME" && value == "/home/test")
+        );
+        assert!(VibeTempRoot::create("codex").unwrap().is_none());
     }
 
     #[test]
@@ -1877,15 +1940,13 @@ mod tests {
     }
 
     #[test]
-    fn vibe_fs_scope_allows_only_current_session_scratchpad() {
-        let scratchpad =
-            std::env::temp_dir().join(format!("vibe-scratchpad-deadbeef-{}", std::process::id()));
+    fn vibe_fs_scope_allows_only_process_temp_root() {
+        let temp_root = tempfile::tempdir().unwrap();
+        let scratchpad = temp_root.path().join("vibe-scratchpad-cafebabe-runtime");
         std::fs::create_dir_all(&scratchpad).unwrap();
         let scope = AcpFsScope {
             cwd: PathBuf::from("/work"),
-            vibe_session_id: Some(Arc::new(Mutex::new(Some(
-                "deadbeef-0000-0000-0000-000000000000".to_string(),
-            )))),
+            vibe_temp_root: Some(temp_root.path().to_path_buf()),
         };
 
         assert!(resolve_acp_fs_path(&scope, &scratchpad.join("test.nu")).is_some());
@@ -1899,13 +1960,29 @@ mod tests {
         assert!(
             resolve_acp_fs_path(
                 &scope,
-                &std::env::temp_dir().join("vibe-scratchpad-cafebabe-x/test.nu")
+                &std::env::temp_dir().join("vibe-scratchpad-deadbeef-foreign/test.nu")
             )
             .is_none()
         );
         assert!(resolve_acp_fs_path(&scope, std::path::Path::new("/etc/passwd")).is_none());
+    }
 
-        std::fs::remove_dir_all(scratchpad).unwrap();
+    #[cfg(unix)]
+    #[test]
+    fn vibe_fs_scope_rejects_scratchpad_symlink_outside_process_root() {
+        use std::os::unix::fs::symlink;
+
+        let temp_root = tempfile::tempdir().unwrap();
+        let foreign_root = tempfile::tempdir().unwrap();
+        let target = foreign_root.path().join("vibe-scratchpad-cafebabe-target");
+        let alias = temp_root.path().join("vibe-scratchpad-deadbeef-alias");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("secret.nu"), "secret").unwrap();
+        symlink(&target, &alias).unwrap();
+
+        assert!(resolve_vibe_scratchpad(temp_root.path(), &alias.join("secret.nu")).is_none());
+
+        std::fs::remove_file(alias).unwrap();
     }
 
     #[test]

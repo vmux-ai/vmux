@@ -446,12 +446,7 @@ fn apply_agent_compatibility_env(
 }
 
 fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
-    let config = read_vibe_config(&env);
-    let mut disabled = config
-        .as_ref()
-        .and_then(|table| table.get("disabled_tools").cloned())
-        .and_then(|value| value.try_into::<Vec<String>>().ok())
-        .unwrap_or_default();
+    let mut disabled = Vec::new();
     if let Some(value) = env
         .iter()
         .rev()
@@ -471,14 +466,7 @@ fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, 
         "VIBE_DISABLED_TOOLS".to_string(),
         serde_json::to_string(&disabled).unwrap(),
     ));
-    let mut mcp_servers = config
-        .as_ref()
-        .and_then(|table| table.get("mcp_servers"))
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|server| serde_json::to_value(server).ok())
-        .collect::<Vec<_>>();
+    let mut mcp_servers: Vec<serde_json::Value> = Vec::new();
     if let Some(value) = env
         .iter()
         .rev()
@@ -501,31 +489,14 @@ fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, 
             ),
         }
     }
+    env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
     if !mcp_servers.is_empty() {
-        env.retain(|(key, _)| key != "VIBE_MCP_SERVERS");
         env.push((
             "VIBE_MCP_SERVERS".to_string(),
             serde_json::to_string(&mcp_servers).unwrap(),
         ));
     }
     env
-}
-
-fn read_vibe_config(env: &[(String, String)]) -> Option<toml::Table> {
-    let value = |key: &str| {
-        env.iter()
-            .rev()
-            .find(|(candidate, _)| candidate == key)
-            .map(|(_, value)| value.as_str())
-    };
-    let root = value("VIBE_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| value("HOME").map(|home| std::path::PathBuf::from(home).join(".vibe")));
-    let path = root.map(|root| root.join("config.toml"))?;
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return None;
-    };
-    text.parse::<toml::Table>().ok()
 }
 
 fn extend_unique(out: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
@@ -1246,29 +1217,9 @@ mod tests {
 
     #[test]
     fn vibe_acp_routes_shell_commands_through_vmux_run() {
-        let tmp = std::env::temp_dir().join(format!(
-            "vmux-vibe-acp-env-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let vibe_home = tmp.join(".vibe");
-        std::fs::create_dir_all(&vibe_home).unwrap();
-        std::fs::write(
-            vibe_home.join("config.toml"),
-            "disabled_tools = [\"from-config\"]\n\
-             [[mcp_servers]]\n\
-             name = \"from-config\"\n\
-             transport = \"stdio\"\n\
-             command = \"config-command\"\n",
-        )
-        .unwrap();
         let env = apply_agent_compatibility_env(
             "mistral-vibe",
             vec![
-                s("HOME", tmp.to_str().unwrap()),
                 s("VIBE_DISABLED_TOOLS", r#"["from-env"]"#),
                 s(
                     "VIBE_MCP_SERVERS",
@@ -1282,15 +1233,21 @@ mod tests {
             .map(|(_, value)| serde_json::from_str::<Vec<String>>(value).unwrap())
             .expect("Vibe ACP disabled tools");
 
-        assert_eq!(disabled, vec!["from-config", "from-env", "bash"]);
+        assert_eq!(disabled, vec!["from-env", "bash"]);
         let mcp_servers = env
             .iter()
             .find(|(key, _)| key == "VIBE_MCP_SERVERS")
             .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
             .expect("Vibe ACP MCP servers");
-        assert_eq!(mcp_servers[0]["name"], "from-config");
-        assert_eq!(mcp_servers[1]["name"], "from-env");
-        let _ = std::fs::remove_dir_all(tmp);
+        assert_eq!(mcp_servers[0]["name"], "from-env");
+    }
+
+    #[test]
+    fn vibe_acp_discards_invalid_mcp_environment() {
+        let env =
+            apply_agent_compatibility_env("mistral-vibe", vec![s("VIBE_MCP_SERVERS", "not-json")]);
+
+        assert!(env.iter().all(|(key, _)| key != "VIBE_MCP_SERVERS"));
     }
 
     #[test]

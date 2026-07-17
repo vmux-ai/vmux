@@ -4,7 +4,7 @@ use crate::chat_page::composer::{
     PromptEdit, ResumeMenuState, SelectorMode, ToolActivity, chat_page_title, edit_prompt,
     filter_models, filter_sessions, is_handoff_boundary, menu_direction, move_selection,
     prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_fetch_resume, tool_activity,
+    should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
@@ -1000,10 +1000,7 @@ fn render_item(key: usize, item: &ChatItem, verb: &str, elapsed: u32) -> Element
 
 fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
-    let latest_thinking = turn
-        .blocks
-        .iter()
-        .rposition(|block| matches!(block, ChatBlock::Thinking(_)));
+    let block_count = turn.blocks.len();
     let blocks = turn
         .blocks
         .iter()
@@ -1024,7 +1021,7 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
     rsx! {
         div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
             for (j , block , children) in blocks {
-                {render_block(j, block, &children, latest_thinking == Some(j))}
+                {render_block(j, block, &children, should_expand_thinking(j, block_count))}
             }
             if turn.running && !reconnecting {
                 {render_working(verb, elapsed)}
