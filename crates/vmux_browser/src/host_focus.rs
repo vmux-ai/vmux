@@ -2,6 +2,7 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget};
 use vmux_layout::Header;
+use vmux_layout::bookmark::BookmarkTextInputActive;
 use vmux_layout::command_bar::handler::is_command_bar_open;
 use vmux_layout::scene::InteractionMode;
 use vmux_layout::side_sheet::SideSheet;
@@ -45,12 +46,15 @@ pub(crate) fn compute_host_focus_intent(
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
     terminal_q: Query<(), With<Terminal>>,
     modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    bookmark_text_input_q: Query<(), (With<Browser>, With<BookmarkTextInputActive>)>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
     // While the command bar owns native focus, leave content focus alone — otherwise we would
     // re-steal first-responder from the command bar every frame.
     let next = if *mode != InteractionMode::User || is_command_bar_open(&modal_q) {
         HostFocusIntent::Unmanaged
+    } else if !bookmark_text_input_q.is_empty() {
+        HostFocusIntent::WinitHost
     } else {
         let active = focus.stack.and_then(|stack| {
             content_q.iter().find(|&webview| {
@@ -159,6 +163,20 @@ mod tests {
     #[test]
     fn no_active_stack_intends_winit_host() {
         let mut app = app();
+        app.update();
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn bookmark_text_input_reclaims_winit_host_focus() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((Browser, BookmarkTextInputActive));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
