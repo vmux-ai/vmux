@@ -663,18 +663,20 @@ pub fn Page() -> Element {
             },
 
             div {
-                class: "h-full shrink-0 overflow-hidden",
+                class: "h-full shrink-0 overflow-hidden transition-[width] duration-200 ease-out will-change-[width]",
                 style: "{explorer_panel_style}",
                 ExplorerPanel {}
             }
-            if explorer_visible() {
-                div {
-                    class: "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] hover:bg-cyan-400/40",
-                    onmousedown: move |e: Event<MouseData>| {
-                        e.prevent_default();
-                        explorer_resizing.set(true);
-                    },
-                }
+            div {
+                class: if explorer_visible() {
+                    "h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-[width,opacity,background-color] duration-200 hover:bg-cyan-400/40"
+                } else {
+                    "pointer-events-none h-full w-0 shrink-0 bg-transparent opacity-0 transition-[width,opacity,background-color] duration-200"
+                },
+                onmousedown: move |e: Event<MouseData>| {
+                    e.prevent_default();
+                    explorer_resizing.set(true);
+                },
             }
 
         div {

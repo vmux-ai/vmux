@@ -21,6 +21,22 @@ fn explorer_rows_emit_intents() {
     assert!(s.contains("FileOpenEvent"));
     assert!(s.contains("ExplorerCloseEditor"));
     assert!(s.contains("ExplorerGoto"));
+    assert!(s.contains("ExplorerTreePrefetch"));
+    assert!(s.contains("ExplorerTreeRefresh"));
+    assert!(s.contains("ExplorerCreate"));
+    assert!(s.contains("ExplorerRename"));
+    assert!(s.contains("ExplorerDelete"));
+    assert!(s.contains("EXPLORER_FS_RESULT_EVENT"));
+}
+
+#[test]
+fn explorer_animates_tree_and_sections() {
+    let s = explorer_source();
+    assert!(s.contains("reconcile_rows"));
+    assert!(s.contains("grid-rows-[0fr]"));
+    assert!(s.contains("grid-rows-[1fr]"));
+    assert!(s.contains("transition-[grid-template-rows,opacity,transform]"));
+    assert!(s.contains("transition-transform duration-150"));
 }
 
 #[test]
@@ -30,6 +46,7 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("ExplorerPanelToggle"));
     assert!(s.contains("ExplorerChromeEvent"));
     assert!(s.contains("ExplorerPanelWidth"));
+    assert!(s.contains("transition-[width] duration-200"));
 }
 
 #[test]
