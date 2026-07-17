@@ -202,20 +202,22 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
             return;
         }
 
-        let draft_value = draft.peek();
-        let selector_open = inline_media_query(&draft_value).is_some()
-            || match selector_mode(&draft_value) {
-                SelectorMode::Resume(_) => true,
-                SelectorMode::Models(_) => true,
-                SelectorMode::Commands(query) => {
-                    let query = query.to_lowercase();
-                    slash_cmds
-                        .peek()
-                        .iter()
-                        .any(|command| command.name.starts_with(&query))
+        let selector_open = {
+            let draft_value = draft.peek();
+            inline_media_query(&draft_value).is_some()
+                || match selector_mode(&draft_value) {
+                    SelectorMode::Resume(_) => true,
+                    SelectorMode::Models(_) => true,
+                    SelectorMode::Commands(query) => {
+                        let query = query.to_lowercase();
+                        slash_cmds
+                            .peek()
+                            .iter()
+                            .any(|command| command.name.starts_with(&query))
+                    }
+                    SelectorMode::None => false,
                 }
-                SelectorMode::None => false,
-            };
+        };
         let key = event.key();
         let direction = if event.meta_key() || event.alt_key() {
             None
