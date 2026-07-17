@@ -20,25 +20,41 @@ struct PageRelaunchRequest {
     channel: String,
 }
 
-fn relaunch_plan(exe: &std::path::Path, pid: u32, dyld_library_path: Option<&str>) -> Vec<String> {
+fn relaunch_plan(
+    exe: &std::path::Path,
+    pid: u32,
+    dyld_library_path: Option<&str>,
+) -> Vec<std::ffi::OsString> {
     let app_bundle = exe
         .ancestors()
         .nth(3)
-        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("app"))
-        .and_then(|path| path.to_str());
-    let launch = match app_bundle {
-        Some(app) => format!("open \"{app}\""),
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("app"));
+    match app_bundle {
+        Some(app) => vec![
+            "-c".into(),
+            format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; open \"$1\"").into(),
+            "vmux-relauncher".into(),
+            app.as_os_str().into(),
+        ],
         None => match dyld_library_path {
-            Some(dyld) if !dyld.is_empty() => {
-                format!("DYLD_LIBRARY_PATH=\"{dyld}\" \"{}\"", exe.display())
-            }
-            _ => format!("\"{}\"", exe.display()),
+            Some(dyld) if !dyld.is_empty() => vec![
+                "-c".into(),
+                format!(
+                    "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; DYLD_LIBRARY_PATH=\"$2\" \"$1\""
+                )
+                .into(),
+                "vmux-relauncher".into(),
+                exe.as_os_str().into(),
+                dyld.into(),
+            ],
+            _ => vec![
+                "-c".into(),
+                format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; \"$1\"").into(),
+                "vmux-relauncher".into(),
+                exe.as_os_str().into(),
+            ],
         },
-    };
-    vec![
-        "-c".to_string(),
-        format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; {launch}"),
-    ]
+    }
 }
 
 fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
@@ -78,18 +94,42 @@ mod tests {
         let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
         let args = relaunch_plan(exe, 4242, None);
         assert_eq!(args[0], "-c");
-        assert!(args[1].contains("kill -0 4242"));
-        assert!(args[1].contains("open \"/Applications/Vmux.app\""));
+        assert!(args[1].to_string_lossy().contains("kill -0 4242"));
+        assert!(args[1].to_string_lossy().contains("open \"$1\""));
+        assert_eq!(args[3], "/Applications/Vmux.app");
     }
 
     #[test]
     fn relaunch_plan_reexecs_bare_binary_in_dev_with_dyld() {
         let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
         let args = relaunch_plan(exe, 7, Some("/rust/lib:/tmp/target/debug/deps"));
-        assert!(args[1].contains("kill -0 7"));
-        assert!(
-            args[1].contains("DYLD_LIBRARY_PATH=\"/rust/lib:/tmp/target/debug/deps\" \"/tmp/target/debug/vmux_desktop\"")
-        );
-        assert!(!args[1].contains("open \""));
+        let script = args[1].to_string_lossy();
+        assert!(script.contains("kill -0 7"));
+        assert!(script.contains("DYLD_LIBRARY_PATH=\"$2\" \"$1\""));
+        assert!(!script.contains("open \""));
+        assert_eq!(args[3], "/tmp/target/debug/vmux_desktop");
+        assert_eq!(args[4], "/rust/lib:/tmp/target/debug/deps");
+    }
+
+    #[test]
+    fn relaunch_plan_reexecs_bare_binary_without_empty_dyld() {
+        let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
+        let args = relaunch_plan(exe, 8, Some(""));
+        let script = args[1].to_string_lossy();
+        assert!(!script.contains("DYLD_LIBRARY_PATH"));
+        assert!(script.contains("\"$1\""));
+        assert_eq!(args.len(), 4);
+        assert_eq!(args[3], "/tmp/target/debug/vmux_desktop");
+    }
+
+    #[test]
+    fn relaunch_plan_keeps_shell_syntax_out_of_script() {
+        let exe = std::path::Path::new("/tmp/$(touch vmux-injected)");
+        let args = relaunch_plan(exe, 9, Some("`touch vmux-dyld-injected`"));
+        let script = args[1].to_string_lossy();
+        assert!(!script.contains("vmux-injected"));
+        assert!(!script.contains("vmux-dyld-injected"));
+        assert_eq!(args[3], "/tmp/$(touch vmux-injected)");
+        assert_eq!(args[4], "`touch vmux-dyld-injected`");
     }
 }

@@ -225,7 +225,7 @@ fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -
     let _status_listener = use_bin_event_listener::<UpdateCheckStatusEvent, _>(
         UPDATE_CHECK_STATUS_EVENT,
         move |event| {
-            let unavailable = matches!(event.status, UpdateCheckStatus::Unavailable);
+            let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
             if updater_unavailable() != unavailable {
                 updater_unavailable.set(unavailable);
             }

@@ -163,9 +163,11 @@ impl PageBuilder {
                 merge_cef_shell_index(&dist, &shell, CefMode::Browser);
             }
         }
+        let mut copies_succeeded = true;
         if dist.is_dir() {
             for (source, dest_rel) in &self.extra_dist_copies {
-                if let Err(error) = copy_dir_recursive(source, &dist.join(dest_rel)) {
+                if let Err(error) = replace_dir_recursive(source, &dist.join(dest_rel)) {
+                    copies_succeeded = false;
                     println!(
                         "cargo:warning={warning_prefix}: could not copy {}: {error}",
                         source.display()
@@ -173,7 +175,11 @@ impl PageBuilder {
                 }
             }
         }
+        if !copies_succeeded {
+            let _ = fs::remove_file(dist.join(DIST_BUNDLE_STAMP));
+        }
         if dist.is_dir()
+            && copies_succeeded
             && let Err(error) = refresh_bundle_stamp(&dist)
         {
             println!("cargo:warning={warning_prefix}: could not write bundle stamp: {error}");
@@ -686,6 +692,16 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn replace_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(dst) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(dst)?,
+        Ok(_) => fs::remove_file(dst)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    copy_dir_recursive(src, dst)
+}
+
 fn newest_bg_wasm_mtime(dir: &Path) -> Option<SystemTime> {
     let wasm_dir = dir.join("wasm");
     if !wasm_dir.is_dir() {
@@ -833,6 +849,24 @@ mod tests {
             fs::read_to_string(destination.join("font.woff2")).unwrap(),
             "font"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacement_copy_removes_destination_only_files() {
+        let root =
+            std::env::temp_dir().join(format!("vmux-replacement-copy-test-{}", std::process::id()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        fs::write(source.join("current.woff2"), "current").unwrap();
+        fs::write(destination.join("stale.woff2"), "stale").unwrap();
+
+        replace_dir_recursive(&source, &destination).unwrap();
+
+        assert!(destination.join("current.woff2").is_file());
+        assert!(!destination.join("stale.woff2").exists());
         let _ = fs::remove_dir_all(root);
     }
 
