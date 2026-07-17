@@ -1,6 +1,11 @@
 //! Background daemon that hosts persistent terminal processes across app restarts, plus
 //! the processes-monitor webview page.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use vmux_service_client::{
+    read_message, read_message_blocking, write_message, write_message_blocking,
+};
+
 pub mod event;
 
 #[cfg(target_arch = "wasm32")]

@@ -1,0 +1,12 @@
+[package]
+name = "vmux_profile"
+description = "Vmux profile names and filesystem paths"
+version.workspace = true
+edition.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

@@ -41,6 +41,8 @@ crossbeam-channel = "0.5"
 futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
+vmux_service_client = { path = "../vmux_service_client" }
+vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 

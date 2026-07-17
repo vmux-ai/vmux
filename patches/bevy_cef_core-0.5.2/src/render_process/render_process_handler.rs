@@ -3,8 +3,6 @@ use crate::render_process::cef_api_handler::CefApiHandler;
 use crate::util::json_to_v8;
 use crate::util::v8_accessor::V8DefaultAccessorBuilder;
 use crate::util::v8_interceptor::V8DefaultInterceptorBuilder;
-use bevy::platform::collections::HashMap;
-use bevy_remote::BrpResult;
 use cef::rc::{Rc, RcImpl};
 use cef::{
     Browser, CefString, DictionaryValue, Frame, ImplBinaryValue, ImplBrowser, ImplCommandLine,
@@ -13,9 +11,9 @@ use cef::{
     V8Value, WrapRenderProcessHandler, command_line_get_global, register_extension, sys,
     v8_value_create_array_buffer_with_copy, v8_value_create_object,
 };
-use std::collections::HashMap as StdHashMap;
+use std::collections::HashMap;
 use std::os::raw::c_int;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 const CEF_API_EXTENSION_NAME: &str = "v8/bevy-cef-api";
 const CEF_API_EXTENSION_CODE: &str = r#"
@@ -34,10 +32,20 @@ if (!cef) cef = {};
 })();
 "#;
 
-pub(crate) static BRP_PROMISES: Mutex<HashMap<String, V8Value>> = Mutex::new(HashMap::new());
-pub(crate) static LISTEN_EVENTS: Mutex<HashMap<String, V8Value>> = Mutex::new(HashMap::new());
+#[derive(serde::Deserialize)]
+struct RenderBrpError {
+    message: String,
+}
 
-static INIT_SCRIPTS: Mutex<HashMap<c_int, String>> = Mutex::new(HashMap::new());
+type RenderBrpResult = Result<serde_json::Value, RenderBrpError>;
+
+pub(crate) static BRP_PROMISES: LazyLock<Mutex<HashMap<String, V8Value>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(crate) static LISTEN_EVENTS: LazyLock<Mutex<HashMap<String, V8Value>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static INIT_SCRIPTS: LazyLock<Mutex<HashMap<c_int, String>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 pub const INIT_SCRIPT_KEY: &str = "init_script";
 
 pub const PROCESS_MESSAGE_BRP: &str = "brp";
@@ -230,7 +238,7 @@ fn handle_brp_message(message: &ProcessMessage, ctx: V8Context) {
         return;
     };
 
-    if let Ok(brp_result) = serde_json::from_str::<BrpResult>(&payload) {
+    if let Ok(brp_result) = serde_json::from_str::<RenderBrpResult>(&payload) {
         ctx.enter();
         match brp_result {
             Ok(v) => {
@@ -339,7 +347,7 @@ fn register_extensions_from_command_line() {
         return;
     }
 
-    let Ok(extensions) = serde_json::from_str::<StdHashMap<String, String>>(&json) else {
+    let Ok(extensions) = serde_json::from_str::<HashMap<String, String>>(&json) else {
         eprintln!("bevy_cef: failed to parse extensions JSON: {}", json);
         return;
     };

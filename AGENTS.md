@@ -79,3 +79,5 @@ After merging, clean up: remove the worktree (`git worktree remove .worktrees/<n
 Never merge, rebase, or cherry-pick feature work into local `main`. Land changes through PRs only.
 
 Always prefer `git rebase` over `git merge` when updating branches. Use `git push --force-with-lease` after rebasing.
+
+When asked to create or open a PR, create it directly with `gh pr create`. Do not use `-w`, stop at a prefilled browser form, or require the user to submit it. Return the created PR URL.

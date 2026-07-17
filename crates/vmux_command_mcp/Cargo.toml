@@ -1,0 +1,13 @@
+[package]
+name = "vmux_command_mcp"
+description = "Lightweight MCP schema for vmux app commands"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde_json = { workspace = true }
+vmux_macro = { path = "../vmux_macro" }
+
+[dev-dependencies]
+vmux_command = { path = "../vmux_command" }
