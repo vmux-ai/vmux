@@ -7,9 +7,12 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
-use vmux_core::extension::{crx, store};
+use vmux_core::extension::{crx, manifest, store};
 
 const CHROMIUM_MAJOR: u32 = 148;
+const CONFORMANCE_PROFILE: &str = "extension-conformance";
+const MAX_CAPTURE_HEADER_BYTES: usize = 16 * 1024;
+const MAX_CAPTURE_BODY_BYTES: usize = 1024 * 1024;
 const FIXTURE_MANIFEST: &str =
     include_str!("../../tests/fixtures/extension_conformance/manifest.json");
 const FIXTURE_BACKGROUND: &str =
@@ -162,8 +165,9 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
+    let collector_token = uuid::Uuid::new_v4().to_string();
     let collector = format!(
-        "http://{}/capture",
+        "http://{}/capture?token={collector_token}",
         listener.local_addr().map_err(|error| error.to_string())?
     );
     let temp = tempfile::Builder::new()
@@ -173,6 +177,31 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
     let extension = prepare_fixture(temp.path(), target, &collector)?;
     let extension_id = crx::extension_id_from_key(FIXTURE_PUBLIC_KEY);
     let mut command = Command::new(browser);
+    let child_home = temp.path().join("home");
+    let child_tmp = child_home.join("tmp");
+    std::fs::create_dir_all(&child_tmp).map_err(|error| error.to_string())?;
+    command
+        .env_clear()
+        .env("HOME", &child_home)
+        .env("TMPDIR", &child_tmp)
+        .env("USER", "vmux-conformance")
+        .env("LOGNAME", "vmux-conformance");
+    for name in [
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "XAUTHORITY",
+        "LD_LIBRARY_PATH",
+        "DYLD_LIBRARY_PATH",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
     let mut vmux_home = None;
     if target == "chrome" {
         let profile = temp.path().join("chrome-profile");
@@ -185,18 +214,14 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
             format!("chrome-extension://{extension_id}/echo.html"),
         ]);
     } else {
-        let home = temp.path().join("home");
-        let tmp = home.join("tmp");
-        std::fs::create_dir_all(&tmp).map_err(|error| error.to_string())?;
-        link_debug_cef_framework(&home)?;
-        install_vmux_fixture(&home, &extension, &extension_id)?;
+        link_debug_cef_framework(&child_home)?;
+        install_vmux_fixture(&child_home, &extension, &extension_id)?;
         command
             .env("VMUX_EXTENSION_CONFORMANCE", "1")
+            .env("VMUX_EXTENSION_CONFORMANCE_ID", &extension_id)
             .env("VMUX_TEST", "1")
-            .env("HOME", home)
-            .env("TMPDIR", tmp)
-            .env("VMUX_PROFILE", "extension-conformance");
-        vmux_home = Some(temp.path().join("home"));
+            .env("VMUX_PROFILE", CONFORMANCE_PROFILE);
+        vmux_home = Some(child_home);
     }
     let stderr_path = temp.path().join("browser.stderr.log");
     let stderr_file = std::fs::File::create(&stderr_path).map_err(|error| error.to_string())?;
@@ -212,7 +237,14 @@ fn capture(target: &str, browser: &Path, diagnostics: &Path) -> Result<Capture, 
     } else {
         Duration::from_secs(30)
     };
-    let captures = collect_captures(listener, child, expected, timeout, &stderr_path);
+    let captures = collect_captures(
+        listener,
+        child,
+        expected,
+        timeout,
+        &stderr_path,
+        &collector_token,
+    );
     let service_result = vmux_home.as_deref().map(terminate_vmux_service).transpose();
     let diagnostics_result =
         persist_diagnostics(target, diagnostics, &stderr_path, vmux_home.as_deref());
@@ -255,8 +287,14 @@ fn persist_diagnostics(
         let copied_data = destination.join(vmux_data_suffix()?);
         copy_diagnostic_directory(&data.join("logs"), &copied_data.join("logs"))?;
         copy_diagnostic_file(
-            &data.join("profiles/extension-conformance/chrome_debug.log"),
-            &copied_data.join("profiles/extension-conformance/chrome_debug.log"),
+            &data
+                .join("profiles")
+                .join(CONFORMANCE_PROFILE)
+                .join("chrome_debug.log"),
+            &copied_data
+                .join("profiles")
+                .join(CONFORMANCE_PROFILE)
+                .join("chrome_debug.log"),
         )?;
     }
     Ok(())
@@ -296,8 +334,8 @@ fn vmux_data_dir(home: &Path) -> Result<PathBuf, String> {
 #[cfg(unix)]
 fn terminate_vmux_service(home: &Path) -> Result<(), String> {
     let pid_path = vmux_data_dir(home)?.join(format!(
-        "services/vmux-{}-extension-conformance.pid",
-        vmux_build_profile()?
+        "services/vmux-{}-{CONFORMANCE_PROFILE}.pid",
+        vmux_build_profile()?,
     ));
     let started = Instant::now();
     let pid = loop {
@@ -305,7 +343,7 @@ fn terminate_vmux_service(home: &Path) -> Result<(), String> {
             Ok(pid) => break pid,
             Err(error)
                 if error.kind() == std::io::ErrorKind::NotFound
-                    && started.elapsed() < Duration::from_secs(1) =>
+                    && started.elapsed() < Duration::from_secs(5) =>
             {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -326,7 +364,14 @@ fn terminate_vmux_service(home: &Path) -> Result<(), String> {
         std::thread::sleep(Duration::from_millis(20));
     }
     if process_exists(pid) {
-        return Err(format!("vmux service {pid} did not exit after SIGTERM"));
+        signal_process(pid, libc::SIGKILL)?;
+        let started = Instant::now();
+        while process_exists(pid) && started.elapsed() < Duration::from_secs(1) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    if process_exists(pid) {
+        return Err(format!("vmux service {pid} did not exit after SIGKILL"));
     }
     Ok(())
 }
@@ -492,24 +537,40 @@ fn prepare_fixture(root: &Path, target: &str, collector: &str) -> Result<PathBuf
 
 fn install_vmux_fixture(home: &Path, extension: &Path, extension_id: &str) -> Result<(), String> {
     let root = home.join(".vmux/extensions");
-    let source = store::source_dir(&root, extension_id, "1.0.0");
+    let manifest_text = std::fs::read_to_string(extension.join("manifest.json"))
+        .map_err(|error| error.to_string())?;
+    let parsed = manifest::parse(&manifest_text)?;
+    let source = store::source_dir(&root, extension_id, &parsed.version);
     copy_tree(extension, &source)?;
     let source_hash = store::tree_sha256(&source)?;
-    store::Index {
-        entries: vec![store::ExtEntry {
-            id: extension_id.into(),
-            name: "vmux extension conformance".into(),
-            version: "1.0.0".into(),
-            popup: None,
-            icon: None,
-            enabled: true,
-            source_hash,
-            public_key_b64: Some(
-                base64::engine::general_purpose::STANDARD.encode(FIXTURE_PUBLIC_KEY),
-            ),
-        }],
-    }
-    .save(&root)
+    let mut profile_enabled = std::collections::BTreeMap::new();
+    profile_enabled.insert(CONFORMANCE_PROFILE.into(), true);
+    let mut index = store::Index::default();
+    let mut approved_grants = std::collections::BTreeMap::new();
+    approved_grants.insert(
+        CONFORMANCE_PROFILE.into(),
+        store::ExtensionGrants {
+            permissions: parsed.permissions.clone(),
+            host_permissions: parsed.host_permissions.clone(),
+        },
+    );
+    index.upsert(store::ExtEntry {
+        id: extension_id.into(),
+        name: manifest::resolve_name(extension, &parsed),
+        version: parsed.version,
+        popup: parsed.popup,
+        icon: parsed.icon,
+        enabled: false,
+        profile_enabled,
+        permissions: parsed.permissions,
+        optional_permissions: parsed.optional_permissions,
+        host_permissions: parsed.host_permissions,
+        optional_host_permissions: parsed.optional_host_permissions,
+        approved_grants,
+        source_hash,
+        public_key_b64: Some(base64::engine::general_purpose::STANDARD.encode(FIXTURE_PUBLIC_KEY)),
+    });
+    index.save(&root)
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
@@ -532,13 +593,14 @@ fn collect_captures(
     expected: usize,
     timeout: Duration,
     stderr_path: &Path,
+    collector_token: &str,
 ) -> Result<Vec<Capture>, String> {
     let started = Instant::now();
     let mut captures = Vec::new();
     let mut failure = None;
     while captures.len() < expected {
         match listener.accept() {
-            Ok((stream, _)) => match read_capture(stream) {
+            Ok((stream, _)) => match read_capture(stream, collector_token, started + timeout) {
                 Ok(capture) => {
                     if let Some(error) = capture
                         .internal_observations
@@ -598,39 +660,25 @@ fn terminate_child(child: &mut Child, stderr_path: &Path) -> Result<(ExitStatus,
     Ok((status, stderr))
 }
 
-fn read_capture(mut stream: TcpStream) -> Result<Capture, String> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| error.to_string())?;
+fn read_capture(
+    mut stream: TcpStream,
+    collector_token: &str,
+    deadline: Instant,
+) -> Result<Capture, String> {
     let mut request = Vec::new();
     let mut buffer = [0u8; 8192];
     let (header_end, content_length) = loop {
-        let read = stream
-            .read(&mut buffer)
-            .map_err(|error| error.to_string())?;
+        let read = read_capture_chunk(&mut stream, &mut buffer, deadline)?;
         if read == 0 {
             return Err("collector request ended before headers".into());
         }
         request.extend_from_slice(&buffer[..read]);
-        if let Some(header_end) = find_bytes(&request, b"\r\n\r\n") {
-            let headers =
-                std::str::from_utf8(&request[..header_end]).map_err(|error| error.to_string())?;
-            let content_length = headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("content-length")
-                        .then(|| value.trim().parse::<usize>().ok())
-                        .flatten()
-                })
-                .ok_or("collector request has no content-length")?;
-            break (header_end + 4, content_length);
+        if let Some(metadata) = capture_request_metadata(&request, collector_token)? {
+            break metadata;
         }
     };
     while request.len() < header_end + content_length {
-        let read = stream
-            .read(&mut buffer)
-            .map_err(|error| error.to_string())?;
+        let read = read_capture_chunk(&mut stream, &mut buffer, deadline)?;
         if read == 0 {
             return Err("collector request ended before body".into());
         }
@@ -642,6 +690,58 @@ fn read_capture(mut stream: TcpStream) -> Result<Capture, String> {
         .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
         .map_err(|error| error.to_string())?;
     Ok(capture)
+}
+
+fn read_capture_chunk(
+    stream: &mut TcpStream,
+    buffer: &mut [u8],
+    deadline: Instant,
+) -> Result<usize, String> {
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err("collector request exceeded capture deadline".into());
+    }
+    stream
+        .set_read_timeout(Some(remaining.min(Duration::from_secs(2))))
+        .map_err(|error| error.to_string())?;
+    stream.read(buffer).map_err(|error| error.to_string())
+}
+
+fn capture_request_metadata(
+    request: &[u8],
+    collector_token: &str,
+) -> Result<Option<(usize, usize)>, String> {
+    let Some(header_end) = find_bytes(request, b"\r\n\r\n") else {
+        if request.len() > MAX_CAPTURE_HEADER_BYTES {
+            return Err("collector request headers exceed size limit".into());
+        }
+        return Ok(None);
+    };
+    if header_end > MAX_CAPTURE_HEADER_BYTES {
+        return Err("collector request headers exceed size limit".into());
+    }
+    let headers = std::str::from_utf8(&request[..header_end]).map_err(|error| error.to_string())?;
+    let request_line = headers
+        .lines()
+        .next()
+        .ok_or("collector request line is missing")?;
+    let expected_request = format!("POST /capture?token={collector_token} HTTP/1.1");
+    if request_line != expected_request {
+        return Err("collector request is not authorized".into());
+    }
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .ok_or("collector request has no content-length")?;
+    if content_length > MAX_CAPTURE_BODY_BYTES {
+        return Err("collector request body exceeds size limit".into());
+    }
+    Ok(Some((header_end + 4, content_length)))
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -858,6 +958,42 @@ mod tests {
             compare_shared(&baseline, &candidate)
                 .unwrap_err()
                 .contains("runtime.message")
+        );
+    }
+
+    #[test]
+    fn collector_requires_token_and_bounded_body() {
+        let valid = b"POST /capture?token=secret HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}";
+        let body_start = find_bytes(valid, b"\r\n\r\n").unwrap() + 4;
+        assert_eq!(
+            capture_request_metadata(valid, "secret").unwrap(),
+            Some((body_start, 2))
+        );
+        assert!(capture_request_metadata(valid, "wrong").is_err());
+        let oversized = format!(
+            "POST /capture?token=secret HTTP/1.1\r\nContent-Length: {}\r\n\r\n",
+            MAX_CAPTURE_BODY_BYTES + 1
+        );
+        assert!(capture_request_metadata(oversized.as_bytes(), "secret").is_err());
+    }
+
+    #[test]
+    fn vmux_fixture_index_round_trips_profile_grants() {
+        let temp = tempfile::tempdir().unwrap();
+        let extension = prepare_fixture(temp.path(), "vmux", "http://127.0.0.1/capture").unwrap();
+        let home = temp.path().join("home");
+        let extension_id = crx::extension_id_from_key(FIXTURE_PUBLIC_KEY);
+
+        install_vmux_fixture(&home, &extension, &extension_id).unwrap();
+
+        let index = store::Index::load(&home.join(".vmux/extensions")).unwrap();
+        let entry = &index.entries[0];
+        assert_eq!(entry.id, extension_id);
+        assert!(entry.enabled_for(CONFORMANCE_PROFILE));
+        assert!(
+            entry
+                .grants_for(CONFORMANCE_PROFILE)
+                .covers(&entry.permissions, &entry.host_permissions)
         );
     }
 }

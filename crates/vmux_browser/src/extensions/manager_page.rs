@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
@@ -28,6 +28,7 @@ enum OutMsg {
     Progress(ExtInstallProgress),
     Status(ExtStatusEvent),
     List(ExtensionsEvent),
+    WebStoreInstallResult { id: String, success: bool },
 }
 
 #[derive(Resource, Clone, Default)]
@@ -36,6 +37,14 @@ struct ExtOutbox(Arc<Mutex<Vec<(Entity, OutMsg)>>>);
 #[derive(Resource, Default)]
 struct ExtSubscribers(HashSet<Entity>);
 
+struct WebStoreInjector {
+    nonce: String,
+    extension_id: String,
+}
+
+#[derive(Resource, Default)]
+struct WebStoreInjectors(HashMap<Entity, WebStoreInjector>);
+
 pub struct ExtensionsPlugin;
 
 impl Plugin for ExtensionsPlugin {
@@ -43,17 +52,18 @@ impl Plugin for ExtensionsPlugin {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<ExtOutbox>()
             .init_resource::<ExtSubscribers>()
+            .init_resource::<WebStoreInjectors>()
             .add_message::<CefPageAttachRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
-                ExtListRequest,
                 ExtToggleRequest,
                 ExtUninstallRequest,
                 ExtBrowseStoreRequest,
-            )>::default())
+            )>::for_hosts(&["extensions"]))
             .add_plugins(BinEventEmitterPlugin::<(
+                ExtListRequest,
                 ExtActionRequest,
                 ExtOpenManagerRequest,
-            )>::default())
+            )>::for_hosts(&["extensions", "layout"]))
             .add_plugins(JsEmitEventPlugin::<AddExtensionRequest>::default())
             .add_observer(on_list_request)
             .add_observer(on_toggle_request)
@@ -104,28 +114,39 @@ fn push(outbox: &ExtOutbox, entity: Entity, msg: OutMsg) {
 
 fn snapshot() -> ExtensionsEvent {
     let root = store::root();
+    let profile = vmux_core::profile::active_profile_name();
     let idx = store::Index::load(&root).unwrap_or_default();
     let loaded = super::load::loaded_ids();
     let extensions = idx
         .entries
         .iter()
-        .map(|e| ExtRow {
-            id: e.id.clone(),
-            name: e.name.clone(),
-            version: e.version.clone(),
-            icon: e.icon.clone(),
-            popup: e.popup.clone(),
-            enabled: e.enabled,
-            status: if e.enabled {
-                ExtStatus::Installed
-            } else {
-                ExtStatus::Disabled
-            },
+        .filter(|entry| entry.installed_for(&profile))
+        .map(|e| {
+            let enabled = e.enabled_for(&profile);
+            let needs_approval = !e
+                .grants_for(&profile)
+                .covers(&e.permissions, &e.host_permissions);
+            ExtRow {
+                id: e.id.clone(),
+                name: e.name.clone(),
+                version: e.version.clone(),
+                icon: e.icon.clone(),
+                popup: e.popup.clone(),
+                enabled,
+                needs_approval,
+                required_permissions: e.permissions.clone(),
+                required_host_permissions: e.host_permissions.clone(),
+                status: if enabled {
+                    ExtStatus::Installed
+                } else {
+                    ExtStatus::Disabled
+                },
+            }
         })
         .collect();
     ExtensionsEvent {
         extensions,
-        pending: idx.is_dirty(&loaded),
+        pending: idx.is_dirty_for(&profile, &loaded),
     }
 }
 
@@ -136,7 +157,7 @@ fn broadcast_list(outbox: &ExtOutbox, subs: &ExtSubscribers) {
     }
 }
 
-fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String) {
+fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String, requester: Option<Entity>) {
     let sink = outbox.clone();
     std::thread::spawn(move || {
         let key = source.clone();
@@ -168,9 +189,24 @@ fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String) {
                         entity,
                         OutMsg::Status(ExtStatusEvent {
                             id: entry.id.clone(),
-                            status: ExtStatus::Installed,
+                            status: if entry.enabled_for(&vmux_core::profile::active_profile_name())
+                            {
+                                ExtStatus::Installed
+                            } else {
+                                ExtStatus::Disabled
+                            },
                             version: Some(entry.version.clone()),
                         }),
+                    );
+                }
+                if let Some(entity) = requester {
+                    push(
+                        &sink,
+                        entity,
+                        OutMsg::WebStoreInstallResult {
+                            id: entry.id,
+                            success: true,
+                        },
                     );
                 }
             }
@@ -185,6 +221,16 @@ fn spawn_install(outbox: &ExtOutbox, subs: Vec<Entity>, source: String) {
                             pct: None,
                             message: e.clone(),
                         }),
+                    );
+                }
+                if let Some(entity) = requester {
+                    push(
+                        &sink,
+                        entity,
+                        OutMsg::WebStoreInstallResult {
+                            id: key.clone(),
+                            success: false,
+                        },
                     );
                 }
             }
@@ -212,7 +258,10 @@ fn on_toggle_request(
     outbox: Res<ExtOutbox>,
 ) {
     let req = trigger.event().payload.clone();
-    let _ = store::update_index(&store::root(), |idx| idx.set_enabled(&req.id, req.enabled));
+    let profile = vmux_core::profile::active_profile_name();
+    let _ = store::update_index(&store::root(), |idx| {
+        idx.set_enabled_for(&profile, &req.id, req.enabled, req.approve_permissions);
+    });
     broadcast_list(&outbox, &subs);
 }
 
@@ -221,7 +270,8 @@ fn on_uninstall_request(
     subs: Res<ExtSubscribers>,
     outbox: Res<ExtOutbox>,
 ) {
-    let _ = store::uninstall(&store::root(), &trigger.event().payload.id);
+    let profile = vmux_core::profile::active_profile_name();
+    let _ = store::uninstall_for_profile(&store::root(), &profile, &trigger.event().payload.id);
     broadcast_list(&outbox, &subs);
 }
 
@@ -234,6 +284,9 @@ fn on_action_request(
     let Some(entry) = idx.entries.into_iter().find(|e| e.id == id) else {
         return;
     };
+    if !entry.enabled_for(&vmux_core::profile::active_profile_name()) {
+        return;
+    }
     let Some(popup) = entry.popup else {
         return;
     };
@@ -298,6 +351,7 @@ fn run_agent_installs(
             &outbox,
             subs.0.iter().copied().collect(),
             req.source.clone(),
+            None,
         );
     }
 }
@@ -306,10 +360,11 @@ fn run_agent_installs(
 struct AddExtensionRequest {
     channel: String,
     id: String,
+    nonce: String,
 }
 
 const ADD_CHANNEL: &str = "vmux-add-extension";
-const REMOVE_CHANNEL: &str = "vmux-remove-extension";
+const MANAGE_CHANNEL: &str = "vmux-manage-extension";
 
 fn is_webstore_url(url: &str) -> bool {
     url.strip_prefix("https://")
@@ -323,39 +378,84 @@ const INJECTOR_JS: &str = include_str!("add_to_vmux.js");
 fn inject_on_cws_nav(
     mut events: MessageReader<WebviewCommittedNavigationEvent>,
     browsers: NonSend<Browsers>,
+    mut injectors: ResMut<WebStoreInjectors>,
 ) {
     for ev in events.read() {
-        if ev.is_main_frame && is_webstore_url(&ev.url) {
+        if !ev.is_main_frame {
+            continue;
+        }
+        if is_webstore_url(&ev.url) {
+            let Some(extension_id) = vmux_core::extension::webstore::extension_id(&ev.url) else {
+                injectors.0.remove(&ev.webview);
+                continue;
+            };
+            let profile = vmux_core::profile::active_profile_name();
             let idx = store::Index::load(&store::root()).unwrap_or_default();
-            let list = idx
+            let installed = idx
                 .entries
                 .iter()
-                .map(|e| format!("\"{}\"", e.id))
-                .collect::<Vec<_>>()
-                .join(",");
-            let js = format!("window.__VMUX_INSTALLED__=[{list}];{INJECTOR_JS}");
-            browsers.execute_js(&ev.webview, &js);
+                .filter(|entry| entry.installed_for(&profile))
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>();
+            let nonce = uuid::Uuid::new_v4().to_string();
+            injectors.0.insert(
+                ev.webview,
+                WebStoreInjector {
+                    nonce: nonce.clone(),
+                    extension_id,
+                },
+            );
+            let replacements = [
+                (
+                    "__VMUX_WEBSTORE_INSTALLED__",
+                    serde_json::to_string(&installed).expect("serializable extension list"),
+                ),
+                (
+                    "__VMUX_WEBSTORE_NONCE__",
+                    serde_json::to_string(&nonce).expect("serializable web store nonce"),
+                ),
+            ];
+            if let Ok(js) = super::template::render(INJECTOR_JS, &replacements) {
+                browsers.execute_js(&ev.webview, &js);
+            }
+        } else {
+            injectors.0.remove(&ev.webview);
         }
     }
 }
 
 fn on_add_extension(
     trigger: On<Receive<AddExtensionRequest>>,
-    mut writer: MessageWriter<vmux_layout::ExtensionInstallRequest>,
     subs: Res<ExtSubscribers>,
     outbox: Res<ExtOutbox>,
+    injectors: Res<WebStoreInjectors>,
+    mut cmd: MessageWriter<AppCommand>,
 ) {
     let req = &trigger.payload;
+    let Some(injector) = injectors.0.get(&trigger.event().webview) else {
+        return;
+    };
     let Some(id) = vmux_core::extension::webstore::extension_id(&req.id) else {
         return;
     };
+    if injector.nonce != req.nonce || injector.extension_id != id {
+        return;
+    }
     match req.channel.as_str() {
         ADD_CHANNEL => {
-            writer.write(vmux_layout::ExtensionInstallRequest { source: id });
+            spawn_install(
+                &outbox,
+                subs.0.iter().copied().collect(),
+                id,
+                Some(trigger.event().webview),
+            );
         }
-        REMOVE_CHANNEL => {
-            let _ = store::uninstall(&store::root(), &id);
-            broadcast_list(&outbox, &subs);
+        MANAGE_CHANNEL => {
+            cmd.write(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InNewStack {
+                    url: Some(EXTENSIONS_PAGE_URL.to_string()),
+                },
+            )));
         }
         _ => {}
     }
@@ -384,6 +484,34 @@ fn drain_outbox(outbox: Res<ExtOutbox>, browsers: NonSend<Browsers>, mut command
             OutMsg::Status(ev) => {
                 commands.trigger(BinHostEmitEvent::from_rkyv(entity, EXT_STATUS_EVENT, &ev))
             }
+            OutMsg::WebStoreInstallResult { id, success } => {
+                let detail = serde_json::json!({ "id": id, "success": success });
+                let script = format!(
+                    "globalThis.dispatchEvent(new CustomEvent('__vmuxWebStoreInstallResult',{{detail:{detail}}}));"
+                );
+                browsers.execute_js(&entity, &script);
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_store_injector_renders_without_page_globals() {
+        let source = super::super::template::render(
+            INJECTOR_JS,
+            &[
+                ("__VMUX_WEBSTORE_INSTALLED__", "[]".into()),
+                ("__VMUX_WEBSTORE_NONCE__", "\"nonce\"".into()),
+            ],
+        )
+        .unwrap();
+
+        assert!(!source.contains("__VMUX_"));
+        assert!(!source.contains("window.__VMUX_NONCE__"));
+        assert!(!source.contains("window.__VMUX_INSTALLED__"));
     }
 }

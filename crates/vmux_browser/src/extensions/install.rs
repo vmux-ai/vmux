@@ -56,6 +56,10 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
     let source_hash = store::tree_sha256(&final_dir)?;
     let _ = std::fs::remove_dir_all(&staging);
 
+    let profile = vmux_core::profile::active_profile_name();
+    let mut profile_enabled = std::collections::BTreeMap::new();
+    profile_enabled.insert(profile.clone(), false);
+
     let entry = store::ExtEntry {
         id: id.to_string(),
         name: if name.trim().is_empty() {
@@ -66,13 +70,57 @@ fn install_crx(root: &Path, id: &str, bytes: &[u8]) -> Result<store::ExtEntry, S
         version: m.version,
         popup: m.popup,
         icon,
-        enabled: true,
+        enabled: false,
+        profile_enabled,
+        permissions: m.permissions,
+        optional_permissions: m.optional_permissions,
+        host_permissions: m.host_permissions,
+        optional_host_permissions: m.optional_host_permissions,
+        approved_grants: std::collections::BTreeMap::new(),
         source_hash,
         public_key_b64,
     };
-    let upsert_entry = entry.clone();
-    store::update_index(root, move |idx| idx.upsert(upsert_entry))?;
-    Ok(entry)
+    let mut persisted = None;
+    store::update_index(root, |idx| {
+        let mut upsert_entry = entry.clone();
+        if let Some(existing) = idx.entries.iter().find(|item| item.id == upsert_entry.id) {
+            upsert_entry.enabled = existing.enabled;
+            upsert_entry
+                .profile_enabled
+                .clone_from(&existing.profile_enabled);
+            upsert_entry
+                .profile_enabled
+                .entry(profile.clone())
+                .or_insert(false);
+            upsert_entry
+                .approved_grants
+                .clone_from(&existing.approved_grants);
+            for grants in upsert_entry.approved_grants.values_mut() {
+                grants.retain_declared(
+                    &upsert_entry.permissions,
+                    &upsert_entry.optional_permissions,
+                    &upsert_entry.host_permissions,
+                    &upsert_entry.optional_host_permissions,
+                );
+            }
+            for enabled_profile in upsert_entry
+                .profile_enabled
+                .iter()
+                .filter_map(|(profile, enabled)| enabled.then_some(profile.clone()))
+                .collect::<Vec<_>>()
+            {
+                if !upsert_entry
+                    .grants_for(&enabled_profile)
+                    .covers(&upsert_entry.permissions, &upsert_entry.host_permissions)
+                {
+                    upsert_entry.profile_enabled.insert(enabled_profile, false);
+                }
+            }
+        }
+        idx.upsert(upsert_entry.clone());
+        persisted = Some(upsert_entry);
+    })?;
+    persisted.ok_or_else(|| "extension index update produced no entry".into())
 }
 
 fn icon_data_url(dir: &Path, rel: &str) -> Option<String> {
@@ -91,7 +139,7 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn fixture_crx() -> (String, Vec<u8>) {
+    fn fixture_crx(manifest: &str) -> (String, Vec<u8>) {
         let public_key = b"PUBKEY";
         let id = crx::extension_id_from_key(public_key);
         let mut zip_bytes = Vec::new();
@@ -99,15 +147,7 @@ mod tests {
             let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut zip_bytes));
             zip.start_file("manifest.json", zip::write::SimpleFileOptions::default())
                 .unwrap();
-            zip.write_all(
-                br#"{
-                    "manifest_version": 3,
-                    "name": "Fixture",
-                    "version": "1.0",
-                    "background": { "service_worker": "background.js" }
-                }"#,
-            )
-            .unwrap();
+            zip.write_all(manifest.as_bytes()).unwrap();
             zip.start_file("background.js", zip::write::SimpleFileOptions::default())
                 .unwrap();
             zip.write_all(b"chrome.runtime.onInstalled.addListener(() => {});")
@@ -127,7 +167,14 @@ mod tests {
     #[test]
     fn installs_source_under_immutable_package_path() {
         let root = tempfile::tempdir().unwrap();
-        let (id, bytes) = fixture_crx();
+        let (id, bytes) = fixture_crx(
+            r#"{
+                "manifest_version": 3,
+                "name": "Fixture",
+                "version": "1.0",
+                "background": { "service_worker": "background.js" }
+            }"#,
+        );
 
         let entry = install_crx(root.path(), &id, &bytes).unwrap();
 
@@ -143,5 +190,71 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(source.join("manifest.json")).unwrap())
                 .unwrap();
         assert_eq!(manifest["background"]["service_worker"], "background.js");
+        assert!(entry.installed_for("personal"));
+        assert!(!entry.enabled_for("personal"));
+        assert_eq!(
+            entry.grants_for("personal"),
+            store::ExtensionGrants::default()
+        );
+    }
+
+    #[test]
+    fn update_reconciles_grants_and_disables_every_affected_profile() {
+        let root = tempfile::tempdir().unwrap();
+        let (id, initial) = fixture_crx(
+            r#"{
+                "manifest_version": 3,
+                "name": "Fixture",
+                "version": "1.0",
+                "permissions": ["storage"],
+                "optional_permissions": ["history"],
+                "background": { "service_worker": "background.js" }
+            }"#,
+        );
+        install_crx(root.path(), &id, &initial).unwrap();
+        store::update_index(root.path(), |index| {
+            let entry = index
+                .entries
+                .iter_mut()
+                .find(|entry| entry.id == id)
+                .unwrap();
+            for profile in ["personal", "work"] {
+                entry.profile_enabled.insert(profile.into(), true);
+                entry.approved_grants.insert(
+                    profile.into(),
+                    store::ExtensionGrants {
+                        permissions: vec!["storage".into(), "history".into()],
+                        host_permissions: Vec::new(),
+                    },
+                );
+            }
+        })
+        .unwrap();
+        let (_, update) = fixture_crx(
+            r#"{
+                "manifest_version": 3,
+                "name": "Fixture",
+                "version": "2.0",
+                "permissions": ["storage", "bookmarks"],
+                "background": { "service_worker": "background.js" }
+            }"#,
+        );
+
+        let returned = install_crx(root.path(), &id, &update).unwrap();
+        let stored = store::Index::load(root.path())
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.id == id)
+            .unwrap();
+
+        assert_eq!(returned, stored);
+        for profile in ["personal", "work"] {
+            assert!(!stored.enabled_for(profile));
+            assert_eq!(
+                stored.grants_for(profile).permissions,
+                vec!["storage".to_string()]
+            );
+        }
     }
 }

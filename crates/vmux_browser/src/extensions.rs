@@ -9,5 +9,6 @@ mod manager_page;
 pub(crate) mod model;
 mod runtime;
 mod shim;
+mod template;
 
 pub use manager_page::ExtensionsPlugin;

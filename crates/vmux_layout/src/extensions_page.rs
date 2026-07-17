@@ -10,6 +10,20 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 
+fn approval_message(extension: &ExtRow) -> String {
+    let mut requested = extension.required_permissions.clone();
+    requested.extend(extension.required_host_permissions.iter().cloned());
+    if requested.is_empty() {
+        format!("Enable {}?", extension.name)
+    } else {
+        format!(
+            "Enable {} and allow:\n\n{}",
+            extension.name,
+            requested.join("\n")
+        )
+    }
+}
+
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -121,6 +135,8 @@ fn render_extension(extension: &ExtRow) -> Element {
     let item = extension.clone();
     let toggle_id = item.id.clone();
     let toggle_enabled = item.enabled;
+    let needs_approval = item.needs_approval;
+    let approval = approval_message(&item);
     let remove_id = item.id.clone();
     let icon = item.icon.clone();
     rsx! {
@@ -144,9 +160,21 @@ fn render_extension(extension: &ExtRow) -> Element {
                 ManagerButton {
                     variant: ManagerButtonVariant::Secondary,
                     onclick: move |_| {
+                        let enabling = !toggle_enabled;
+                        let approve_permissions = if enabling && needs_approval {
+                            web_sys::window()
+                                .and_then(|window| window.confirm_with_message(&approval).ok())
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+                        if enabling && needs_approval && !approve_permissions {
+                            return;
+                        }
                         let _ = try_cef_bin_emit_rkyv(&ExtToggleRequest {
                             id: toggle_id.clone(),
-                            enabled: !toggle_enabled,
+                            enabled: enabling,
+                            approve_permissions,
                         });
                     },
                     if item.enabled { "Disable" } else { "Enable" }

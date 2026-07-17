@@ -70,6 +70,7 @@ chrono = { version = "0.4", default-features = false, features = [
     "std",
 ] }
 crossbeam-channel = "0.5"
+polling = "3.11"
 tungstenite = "0.28"
 url = "2"
 notify = "6"

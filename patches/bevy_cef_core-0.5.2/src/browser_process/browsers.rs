@@ -146,6 +146,8 @@ pub struct WebviewBrowser {
     /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
     windowed: bool,
     allow_native_focus: bool,
+    webview_popup_sender: WebviewPopupSenderInner,
+    texture_wake: Option<TextureWake>,
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
     #[cfg(target_os = "macos")]
@@ -265,8 +267,8 @@ impl Browsers {
             webview_committed_nav_sender,
             webview_cef_state_sender,
             media_permission_sender,
-            webview_popup_sender,
-            texture_wake,
+            webview_popup_sender.clone(),
+            texture_wake.clone(),
             accelerated_presenter,
             !allow_native_focus,
         );
@@ -427,6 +429,8 @@ impl Browsers {
             last_focus_ring: Cell::new(None),
             windowed,
             allow_native_focus,
+            webview_popup_sender,
+            texture_wake,
             #[cfg(target_os = "macos")]
             native_liquid_glass,
             #[cfg(target_os = "macos")]
@@ -1673,7 +1677,15 @@ impl Browsers {
         };
         browser.host.show_dev_tools(
             Some(&WindowInfo::default()),
-            Some(&mut ClientHandlerBuilder::new(DevToolRenderHandlerBuilder::build()).build()),
+            Some(
+                &mut ClientHandlerBuilder::new(DevToolRenderHandlerBuilder::build())
+                    .with_life_span_handler(LifeSpanHandlerBuilder::build(
+                        *webview,
+                        browser.webview_popup_sender.clone(),
+                        browser.texture_wake.clone(),
+                    ))
+                    .build(),
+            ),
             Some(&BrowserSettings::default()),
             None,
         );
@@ -2571,6 +2583,21 @@ mod tests {
                 .contains(".with_focus_handler(FocusCanceler::build(texture_wake.clone()))")
         );
         assert!(implementation.contains("pub fn set_windowed_focus"));
+    }
+
+    #[test]
+    fn devtools_browser_uses_shared_lifetime_tracking() {
+        let implementation = include_str!("browsers.rs")
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        let devtools = implementation
+            .split("pub fn show_devtool")
+            .nth(1)
+            .and_then(|tail| tail.split("pub fn close_devtools").next())
+            .unwrap_or_default();
+
+        assert!(devtools.contains(".with_life_span_handler(LifeSpanHandlerBuilder::build("));
     }
 
     #[test]

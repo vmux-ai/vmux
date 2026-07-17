@@ -1,7 +1,7 @@
 # Chrome Extension Behavioral Parity
 
 Date: 2026-07-14
-Status: approved design; implementation planning pending
+Status: approved design; Stage 0 in progress
 Branch: `fix/ext-window-shim`
 
 Supersedes:
@@ -39,9 +39,11 @@ vmux already implements:
 - MV3 classic and module service-worker loader generation.
 
 The current shim patches parts of `chrome.windows` and `chrome.tabs` inside MV3 service
-workers. It can generate and reload those workers, but its tests verify file rewriting,
-not Chrome-compatible runtime behavior. Current local extension state has Bitwarden and
-Vimium disabled, so there is no fresh end-to-end runtime verification.
+workers. It can generate and reload those workers, but its tests primarily verify file
+rewriting rather than Chrome-compatible runtime behavior. Manual Bitwarden and Vimium
+testing has exposed active-tab inference, worker-lifecycle, and idle-CPU failures that
+Stage 0 now treats as transport and model requirements rather than extension-specific
+exceptions.
 
 Two prior design assumptions are obsolete:
 
@@ -135,6 +137,7 @@ extended to track:
 
 - Extension ID, version, manifest version, and package checksum.
 - Declared permissions, optional permissions, and host permissions.
+- Per-profile installation membership and approved permission and host grants.
 - Generated-runtime version and capability-matrix version.
 - Enabled state per profile.
 - Loaded package version and whether relaunch is required.
@@ -155,6 +158,17 @@ The runtime directory is generated from the immutable source package and contain
 patched manifest, adapter runtime, bridge page, and service-worker loader. CEF loads the
 runtime directory. Updating an extension or adapter generates a new runtime hash instead
 of chaining modifications onto prior generated files.
+
+Installation is staged disabled. Enabling requires explicit approval of the current
+mandatory permissions and host permissions. Permission-expanding updates disable every
+affected profile until approval; removed declarations are removed from persisted grants.
+Removing an extension from one profile removes only that profile's membership and runtime.
+Shared package data is deleted after the final profile removes it.
+
+Chrome Web Store injection may request only the extension ID in the webview's current committed
+detail URL. It can stage that package disabled or open the native manager; it cannot approve
+permissions, enable an extension, or remove profile membership. Those transitions require the
+trusted `vmux://extensions` surface.
 
 Existing directories containing `vmux_shim.json` are migrated by restoring the recorded
 original worker. If the original package cannot be verified, vmux re-downloads the same
@@ -229,6 +243,8 @@ The runtime:
 - Registers bridged event listeners synchronously during worker startup.
 - Reconnects after service-worker restart without relying on global worker state.
 - Filters reserved bridge messages from extension-owned runtime listeners.
+- Uses protocol versions, channel names, context IDs, and reserved channel names generated
+  from Rust definitions rather than duplicated JavaScript literals.
 
 Unsupported methods reject or set `runtime.lastError`; they never resolve with invented
 objects.
@@ -255,16 +271,39 @@ The bridge page:
 - Uses native `chrome.runtime` messaging to communicate with the extension worker and
   other extension contexts.
 - Can wake a dormant worker by delivering a reserved runtime event.
-- Does not keep the worker alive solely to maintain transport.
+- On CEF builds that reject dormant extension-worker starts, sends a reserved heartbeat
+  through a runtime port before Chrome's idle deadline. This pins the worker only as a
+  classified compatibility fallback. The port exists only while the authenticated bridge
+  socket is connected, is disconnected on close or fatal error, and is removed when native
+  worker wake is reliable.
+- Waits on scheduled CEF work and transport deadlines. Neither the bridge nor CEF pumping
+  may continuously wake the Bevy schedule or native run loop while idle.
 
 After CEF reports an enabled extension ready, vmux creates one hidden browser for its
 bridge page. That browser is infrastructure: it is excluded from the Chrome tab model,
 layout persistence, history, and user-facing page lists.
 
 The generated manifest permits only the loopback connection required by the bridge. The
-listener binds to loopback, selects an ephemeral port, and requires a per-launch,
-per-profile, per-extension token. The token grants only that extension's declared API
-permissions.
+listener binds to loopback, selects an ephemeral port, validates the
+`chrome-extension://<id>` WebSocket origin, and requires a per-launch, per-profile,
+per-extension token. The token remains in a closure-scoped preload that runs before extension
+code, eagerly serializes the handshake with captured JavaScript intrinsics, captures native
+WebSocket operations before page scripts can replace them, and never exports the token through
+`globalThis`, DOM state, or runtime messages. Renderer sender metadata is untrusted input: the
+broker verifies extension origins and binds content-script tab URLs to the canonical Rust model.
+Client-supplied context fields never independently grant authority. The token grants only the
+current profile's approved permissions and host permissions intersected with current manifest
+declarations.
+
+The server permits at most 64 total and 8 unauthenticated connections, 256 KiB frames, 1 MiB
+messages and socket write buffering, 64 inbound messages, 64 outbound messages, and 4 MiB of
+queued outbound payloads. The generated client permits 64 queued frames totaling 1 MiB, 64
+queued inbound frames totaling 1 MiB, 256 pending callbacks, 64 subscriptions, and 256 KiB of
+WebSocket buffered data. It drains at most 128 broker messages per Bevy update. Writes have a
+five-second deadline, runtime-event delivery has a five-second deadline, and reconnect backoff is
+bounded between 250 milliseconds and 30 seconds. Overflow closes the affected session; mutation
+requests retain their request ID and terminal responses are cached across replacement sessions.
+Non-droppable event overflow is a fatal protocol error rather than silent loss.
 
 Wire messages use a versioned schema shared by CEF IPC and the WebSocket transport so API
 handlers do not depend on transport details.
@@ -397,10 +436,12 @@ blindly retried; deduplication by request ID permits safe response recovery.
 
 - The loopback listener accepts no non-loopback connections.
 - Tokens are random, scoped to one launch, profile, and extension, and rotated on relaunch.
-- Bridge credentials are injected through a non-reflectable native preload scoped to the hidden
-  bridge page's initial main-frame URL. They never appear in extension resources, page URLs,
-  process arguments, subframes, later navigations, or logs.
-- The broker derives authority from the installed manifest, never from request claims.
+- Bridge credentials are injected through a private preload scoped to the hidden bridge page's
+  initial main-frame URL. The preload captures native transport operations before extension code
+  runs. Credentials never appear in extension resources, page URLs, process arguments, subframes,
+  later navigations, runtime messages, or logs.
+- The broker derives authority from per-profile approved grants intersected with the installed
+  manifest, never from request claims or unapproved optional permissions.
 - Profile and extension IDs are validated before dispatch.
 - The bridge exposes no arbitrary filesystem, process, shell, or raw ECS access.
 - Native and optional permissions are enforced before invoking handlers.
@@ -431,6 +472,11 @@ or incorrect errors.
 Support for a capability entry requires a matching Chromium scenario or an explicit
 reason why differential execution is impossible.
 
+The conformance runner derives its fixture extension ID from the checked-in test public key and
+passes that exact ID through `VMUX_EXTENSION_CONFORMANCE_ID`. Reserved conformance APIs are enabled
+only for that registered extension when the `conformance` feature and
+`VMUX_EXTENSION_CONFORMANCE=1` are both active.
+
 ## Additional Testing
 
 ### Unit
@@ -455,20 +501,51 @@ reason why differential execution is impossible.
 
 - Authentication and extension/profile isolation.
 - Reconnect, timeout, cancellation, and mutation deduplication.
-- Worker suspension and wake delivery.
+- Worker suspension and wake delivery after at least 35 seconds without extension UI.
+- CEF-native worker-wake failure falls back to heartbeat pinning without a retry storm.
+- Keepalive ports use a 60-second activity lease and disconnect when the lease expires.
 - Queue bounds and non-droppable event behavior.
 
 ### End to end
 
 Representative smoke coverage includes:
 
-- Bitwarden.
-- Vimium.
+- Bitwarden manual smoke: current-site matching, inline suggestions, and field fill in a
+  disposable profile. Personal-account testing is optional and never part of CI.
+- Vimium: page commands, link hints, and active-tab action state.
 - uBlock Origin.
 - React Developer Tools.
 
 These are regression fixtures, not the definition of compatibility. The capability
 matrix and differential harness define compatibility.
+
+Automated tests use fixture extensions, synthetic credentials, and disposable profiles.
+They never require a developer or CI worker to type a password, unlock a system keychain,
+sign in to a personal account, or grant an interactive credential prompt. Personal email,
+vault data, tokens, cookies, profile directories, and extension debug logs must not enter
+test fixtures, snapshots, CI artifacts, or failure output.
+
+### Idle resource budget
+
+After a 10-second settling period with enabled extensions idle and no visible extension
+surface, a 60-second sample must meet all of the following on the macOS reference runner:
+
+- Aggregate CPU for vmux and every CEF child process has a median below 1% of one core and a
+  95th percentile below 3%; no individual idle child has a 95th percentile above 2%.
+- No polling loop with a period shorter than one second.
+- The bridge emits at most one fallback heartbeat per connected extension every 20 seconds and
+  holds the worker port only during a 60-second activity lease.
+- Bevy uses reactive update mode; `UpdateMode::Continuous` is forbidden.
+- The CEF pump wakes from CEF deadlines or explicit transport work, not a periodic run-loop
+  timer.
+
+Linux CI additionally asserts that idle bridge sockets block in readiness wait and that
+synthetic transport traffic returns the process to idle after queues drain.
+
+The macOS reference sample records `ps -axo pid=,ppid=,%cpu=,command=` once per second for 60
+seconds, builds the descendant process set rooted at the launched vmux PID, and sums `%cpu` across
+that set. macOS `%cpu = 100` represents one fully occupied core; results are not divided by the
+machine's core count.
 
 ## Delivery Stages
 
@@ -484,8 +561,9 @@ own implementation plan and review.
 - Authenticated bridge page and transport.
 - Canonical window and tab model.
 
-Exit criteria: a fixture extension can query model state, receive a bridged event after a
-worker restart, and produce Chromium-comparable recordings.
+Exit criteria: a fixture extension can query model state, receive a bridged event after
+at least 35 seconds without extension UI, survive a worker restart where CEF supports it,
+and produce Chromium-comparable recordings while meeting the idle resource budget.
 
 ### Stage 1 — Browser core
 
@@ -543,7 +621,10 @@ adds the required platform model.
 - Every completed namespace has zero `Untested` entries.
 - Every bridged capability has differential or equivalent contract coverage.
 - Worker restart does not lose durable extension surface state or eligible pending events.
+- Enabling idle extensions does not switch Bevy or the macOS CEF pump to continuous updates.
+- Idle extensions meet the measurable CPU, wake, polling, and heartbeat limits above.
 - Extension/profile isolation tests pass.
+- Automated credential tests remain synthetic, disposable, and noninteractive.
 - Representative smoke extensions pass their documented scenarios.
 - Existing Web Store install, manager, MCP, and header behavior continue to work.
 - macOS and Linux behavior is separately classified and tested.

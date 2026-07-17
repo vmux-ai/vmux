@@ -1,8 +1,26 @@
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Component, Path};
+use vmux_core::extension::protocol::{BRIDGE_CHANNEL, KEEPALIVE_CHANNEL};
 
-pub(crate) const PATCH_SOURCE: &str = include_str!("shim.js");
+const PATCH_TEMPLATE: &str = include_str!("shim.js");
 const PATCH_FILE: &str = "vmux_patch.js";
+const PAGE_LOADER: &str = r#"<script src="/vmux_patch.js"></script>"#;
+
+pub(crate) fn patch_source() -> Result<String, String> {
+    super::template::render(
+        PATCH_TEMPLATE,
+        &[
+            (
+                "__VMUX_BRIDGE_CHANNEL__",
+                serde_json::to_string(BRIDGE_CHANNEL).map_err(|error| error.to_string())?,
+            ),
+            (
+                "__VMUX_KEEPALIVE_CHANNEL__",
+                serde_json::to_string(KEEPALIVE_CHANNEL).map_err(|error| error.to_string())?,
+            ),
+        ],
+    )
+}
 
 fn content_hash(source: &str) -> String {
     let mut hash: u32 = 0x811c_9dc5;
@@ -30,9 +48,10 @@ pub(crate) fn install_worker_loader(dir: &Path, runtime_file: &str) -> Result<St
         return Err("manifest service worker is already generated".into());
     }
     let is_module = background.get("type").and_then(Value::as_str) == Some("module");
+    let patch_source = patch_source()?;
     let loader_file = format!(
         "vmux_sw_{}.js",
-        content_hash(&format!("{runtime_file}\0{PATCH_SOURCE}"))
+        content_hash(&format!("{runtime_file}\0{patch_source}"))
     );
     let loader = if is_module {
         format!(
@@ -43,7 +62,7 @@ pub(crate) fn install_worker_loader(dir: &Path, runtime_file: &str) -> Result<St
             "importScripts(\"{runtime_file}\");\nimportScripts(\"{PATCH_FILE}\");\nimportScripts(\"{original}\");\n"
         )
     };
-    std::fs::write(dir.join(PATCH_FILE), PATCH_SOURCE).map_err(|error| error.to_string())?;
+    std::fs::write(dir.join(PATCH_FILE), patch_source).map_err(|error| error.to_string())?;
     std::fs::write(dir.join(&loader_file), loader).map_err(|error| error.to_string())?;
     background.insert("service_worker".into(), Value::String(loader_file.clone()));
     std::fs::write(
@@ -52,6 +71,28 @@ pub(crate) fn install_worker_loader(dir: &Path, runtime_file: &str) -> Result<St
     )
     .map_err(|error| error.to_string())?;
     Ok(loader_file)
+}
+
+pub(crate) fn install_page_loader(dir: &Path, popup: &str) -> Result<(), String> {
+    if popup.is_empty()
+        || Path::new(popup)
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
+    {
+        return Err("manifest popup path is invalid".into());
+    }
+    let path = dir.join(popup);
+    let html = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    if html.contains(PAGE_LOADER) {
+        return Ok(());
+    }
+    let patched = if let Some(index) = html.find("<head>") {
+        let index = index + "<head>".len();
+        format!("{}{}{}", &html[..index], PAGE_LOADER, &html[index..])
+    } else {
+        format!("{PAGE_LOADER}{html}")
+    };
+    std::fs::write(path, patched).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -92,6 +133,14 @@ mod tests {
         assert!(loader.contains("importScripts(\"vmux_patch.js\")"));
         assert!(loader.contains("importScripts(\"background.js\")"));
         assert!(dir.path().join(PATCH_FILE).exists());
+        let patch = std::fs::read_to_string(dir.path().join(PATCH_FILE)).unwrap();
+        assert!(patch.contains("message.channel === BRIDGE_CHANNEL"));
+        assert!(patch.contains("capture(message, sender)"));
+        assert!(patch.contains("bridgeRuntime.request(\"windows\", \"create\""));
+        assert!(!patch.contains("self.clients.openWindow"));
+        assert!(patch.contains("__vmux_active_tab_v1"));
+        assert!(patch.contains("c.storage.session.set(stored)"));
+        assert!(!patch.contains("event.addListener = function"));
     }
 
     #[test]
@@ -119,5 +168,31 @@ mod tests {
 
         assert!(install_worker_loader(dir.path(), "vmux_runtime.js").is_err());
         assert!(!dir.path().join(PATCH_FILE).exists());
+    }
+
+    #[test]
+    fn page_loader_runs_before_extension_scripts_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("popup")).unwrap();
+        let path = dir.path().join("popup/index.html");
+        std::fs::write(
+            &path,
+            "<!doctype html><html><head><script defer src=\"main.js\"></script></head></html>",
+        )
+        .unwrap();
+
+        install_page_loader(dir.path(), "popup/index.html").unwrap();
+        install_page_loader(dir.path(), "popup/index.html").unwrap();
+
+        let html = std::fs::read_to_string(path).unwrap();
+        assert!(html.find(PAGE_LOADER).unwrap() < html.find("main.js").unwrap());
+        assert_eq!(html.matches(PAGE_LOADER).count(), 1);
+    }
+
+    #[test]
+    fn page_loader_rejects_path_escape() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert!(install_page_loader(dir.path(), "../popup.html").is_err());
     }
 }

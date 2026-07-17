@@ -62,6 +62,9 @@ pub struct ExtRow {
     pub icon: Option<String>,
     pub popup: Option<String>,
     pub enabled: bool,
+    pub needs_approval: bool,
+    pub required_permissions: Vec<String>,
+    pub required_host_permissions: Vec<String>,
     pub status: ExtStatus,
 }
 
@@ -131,6 +134,7 @@ pub struct ExtStatusEvent {
 pub struct ExtToggleRequest {
     pub id: String,
     pub enabled: bool,
+    pub approve_permissions: bool,
 }
 
 #[derive(

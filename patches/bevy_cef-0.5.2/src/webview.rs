@@ -274,7 +274,11 @@ fn create_webview(
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
     committed_nav_sender: Res<WebviewCommittedNavigationSender>,
-    cef_senders: (Res<WebviewCefStateSender>, Res<MediaPermissionSender>),
+    cef_senders: (
+        Res<WebviewCefStateSender>,
+        Res<MediaPermissionSender>,
+        Option<Res<crate::common::CefShutdownState>>,
+    ),
     popup_sender: Res<WebviewPopupSender>,
     render_callbacks: (Res<TextureWakeCallback>, Res<NativeOverlayPresenter>),
     webviews: Query<
@@ -298,6 +302,9 @@ fn create_webview(
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
+    if cef_senders.2.is_some_and(|state| state.started()) {
+        return;
+    }
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         for (

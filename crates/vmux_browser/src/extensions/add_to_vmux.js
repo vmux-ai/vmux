@@ -1,9 +1,8 @@
-(function () {
-  if (window.__VMUX_EXT__) return;
-  window.__VMUX_EXT__ = true;
-  var installed = Array.isArray(window.__VMUX_INSTALLED__)
-    ? window.__VMUX_INSTALLED__.slice()
-    : [];
+(function (installedInput, nonce) {
+  if (window.__vmuxExtInjected) return;
+  window.__vmuxExtInjected = true;
+  var installed = Array.isArray(installedInput) ? installedInput.slice() : [];
+  var activeRequest = null;
   function extId() {
     var s = location.pathname.split("/");
     for (var i = 0; i < s.length; i++) {
@@ -60,11 +59,10 @@
       btn.dataset.vmux = id;
       btn.dataset.state = "";
     }
-    // mid-action: keep our "Relaunch to..." text.
-    if (btn.dataset.state === "pending") return;
+    if (btn.dataset.state === "requesting") return;
     // Reflect vmux's own install state, re-asserting if the store page
     // re-renders the label back to Chrome's text.
-    var want = installed.indexOf(id) >= 0 ? "Remove from Vmux" : "Add to Vmux";
+    var want = installed.indexOf(id) >= 0 ? "Manage in Vmux" : "Add to Vmux";
     if ((btn.textContent || "").trim() !== want) setLabel(btn, want);
   }
   document.addEventListener(
@@ -76,28 +74,24 @@
       e.preventDefault();
       e.stopImmediatePropagation();
       var id = btn.dataset.vmux;
-      if (btn.dataset.state === "pending") {
-        try {
-          cef.emit({ channel: "vmux-relaunch" });
-        } catch (err) {}
-        setLabel(btn, "Relaunching…");
-        return;
-      }
+      if (btn.dataset.state === "requesting") return;
       var idx = installed.indexOf(id);
       if (idx >= 0) {
         try {
-          cef.emit({ channel: "vmux-remove-extension", id: id });
+          cef.emit({ channel: "vmux-manage-extension", id: id, nonce: nonce });
         } catch (err) {}
-        installed.splice(idx, 1);
-        setLabel(btn, "Relaunch to apply");
       } else {
+        activeRequest = { id: id, button: btn };
+        btn.dataset.state = "requesting";
+        setLabel(btn, "Installing…");
         try {
-          cef.emit({ channel: "vmux-add-extension", id: id });
-        } catch (err) {}
-        installed.push(id);
-        setLabel(btn, "Relaunch to enable");
+          cef.emit({ channel: "vmux-add-extension", id: id, nonce: nonce });
+        } catch (err) {
+          activeRequest = null;
+          btn.dataset.state = "";
+          setLabel(btn, "Add to Vmux");
+        }
       }
-      btn.dataset.state = "pending";
     },
     true,
   );
@@ -137,14 +131,36 @@
       if (banner && banner !== e) banner.style.display = "none";
     }
   }
+  var tickScheduled = false;
   function tick() {
     relabel();
     hideBanner();
     dismissNags();
   }
-  new MutationObserver(tick).observe(document.documentElement, {
+  function scheduleTick() {
+    if (tickScheduled) return;
+    tickScheduled = true;
+    requestAnimationFrame(function () {
+      tickScheduled = false;
+      tick();
+    });
+  }
+  addEventListener("__vmuxWebStoreInstallResult", function (event) {
+    var detail = event && event.detail;
+    if (!activeRequest || !detail || detail.id !== activeRequest.id) return;
+    var request = activeRequest;
+    activeRequest = null;
+    request.button.dataset.state = "";
+    if (detail.success) {
+      if (installed.indexOf(request.id) < 0) installed.push(request.id);
+      setLabel(request.button, "Manage in Vmux");
+    } else {
+      setLabel(request.button, "Add to Vmux");
+    }
+  });
+  new MutationObserver(scheduleTick).observe(document.documentElement, {
     childList: true,
     subtree: true,
   });
   tick();
-})();
+})(__VMUX_WEBSTORE_INSTALLED__, __VMUX_WEBSTORE_NONCE__);

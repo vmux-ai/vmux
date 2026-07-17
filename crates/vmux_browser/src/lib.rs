@@ -93,23 +93,36 @@ fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
-        let extension_root = vmux_core::extension::store::root();
         let profile = vmux_core::profile::active_profile_name();
-        let extension_index = vmux_core::extension::store::Index::load(&extension_root)
-            .unwrap_or_else(|error| panic!("failed to load extension index: {error}"));
-        let enabled_extension_ids = extension_index
-            .entries
-            .iter()
-            .filter(|entry| entry.enabled)
-            .map(|entry| entry.id.clone())
-            .collect::<Vec<_>>();
-        let extension_bridge = crate::extensions::bridge::ExtensionBridgeServer::start(
-            &profile,
-            enabled_extension_ids,
-        )
-        .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         let prepared_extensions = crate::extensions::load::apply_env()
             .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
+        let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
+        let extension_registrations = prepared_extensions
+            .iter()
+            .map(|runtime| crate::extensions::bridge::BridgeRegistration {
+                extension_id: runtime.extension_id.clone(),
+                authorization: crate::extensions::bridge::BridgeAuthorization {
+                    permissions: runtime.granted_permissions.iter().cloned().collect(),
+                    host_permissions: runtime
+                        .granted_host_permissions
+                        .iter()
+                        .map(|pattern| {
+                            vmux_core::extension::match_pattern::ChromeMatchPattern::parse(pattern)
+                                .unwrap_or_else(|error| {
+                                    panic!("invalid stored host permission: {error}")
+                                })
+                        })
+                        .collect(),
+                    conformance: conformance_extension.as_deref()
+                        == Some(runtime.extension_id.as_str()),
+                },
+            })
+            .collect::<Vec<_>>();
+        let extension_bridge = crate::extensions::bridge::ExtensionBridgeServer::start_registered(
+            &profile,
+            extension_registrations,
+        )
+        .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         if crate::extensions::broker::extension_conformance_enabled() {
             app.init_resource::<crate::extensions::broker::ConformanceWakeTimer>();
         }
@@ -130,14 +143,22 @@ impl Plugin for BrowserPlugin {
                 prepared_extensions,
             ))
             .insert_resource(extension_bridge)
+            .init_resource::<crate::extensions::bridge_page::ExtensionBridgeLifecycle>()
+            .init_resource::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
             .init_resource::<crate::extensions::broker::BridgeSubscriptions>()
+            .init_resource::<crate::extensions::broker::BridgeResponseCache>()
             .init_resource::<crate::extensions::broker::PendingBridgeEvents>()
             .init_resource::<crate::extensions::model::ChromeModel>()
             .init_resource::<crate::extensions::model::ChromeStableIds>()
             .add_message::<crate::extensions::model::ChromeModelEvent>()
             .add_systems(
-                Startup,
-                crate::extensions::bridge_page::spawn_extension_bridge_pages,
+                Update,
+                (
+                    crate::extensions::bridge_page::stop_extension_bridge_pages,
+                    crate::extensions::bridge_page::spawn_extension_bridge_pages,
+                )
+                    .chain()
+                    .before(CefSystems::CreateAndResize),
             )
             .add_systems(
                 Update,
@@ -2574,10 +2595,71 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
 
 fn drain_committed_navigation(
     receiver: Res<WebviewCommittedNavigationReceiver>,
+    infrastructure: Res<crate::extensions::bridge_page::ExtensionInfrastructureEntities>,
     mut writer: MessageWriter<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>,
 ) {
     while let Ok(ev) = receiver.0.try_recv() {
+        if infrastructure.contains(ev.webview) {
+            continue;
+        }
         writer.write(ev);
+    }
+}
+
+#[cfg(test)]
+mod committed_navigation_tests {
+    use super::*;
+    use bevy_cef::prelude::WebviewCommittedNavigationReceiver;
+    use bevy_cef_core::prelude::{
+        CefTransitionCore, CefTransitionQualifiers, WebviewCommittedNavigationEvent,
+    };
+
+    #[derive(Resource, Default)]
+    struct Collected(Vec<Entity>);
+
+    fn collect(
+        mut events: MessageReader<WebviewCommittedNavigationEvent>,
+        mut collected: ResMut<Collected>,
+    ) {
+        collected.0.extend(events.read().map(|event| event.webview));
+    }
+
+    #[test]
+    fn infrastructure_navigation_is_not_forwarded() {
+        let mut app = App::new();
+        let infrastructure = app
+            .world_mut()
+            .spawn(crate::extensions::bridge_page::ExtensionBridgeWebview {
+                extension_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                role: crate::extensions::bridge_page::ExtensionBridgeRole::Transport,
+            })
+            .id();
+        let visible = app.world_mut().spawn_empty().id();
+        let (sender, receiver) = async_channel::unbounded();
+        app.insert_resource(WebviewCommittedNavigationReceiver(receiver))
+            .init_resource::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
+            .init_resource::<Collected>()
+            .add_message::<WebviewCommittedNavigationEvent>()
+            .add_systems(Update, (drain_committed_navigation, collect).chain());
+        app.world_mut()
+            .resource_mut::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
+            .insert(infrastructure);
+        app.world_mut().despawn(infrastructure);
+        for webview in [infrastructure, visible] {
+            sender
+                .send_blocking(WebviewCommittedNavigationEvent {
+                    webview,
+                    url: "https://example.com".into(),
+                    is_main_frame: true,
+                    transition: CefTransitionCore::Link,
+                    qualifiers: CefTransitionQualifiers::default(),
+                })
+                .unwrap();
+        }
+
+        app.update();
+
+        assert_eq!(app.world().resource::<Collected>().0, [visible]);
     }
 }
 

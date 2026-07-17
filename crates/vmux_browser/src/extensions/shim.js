@@ -1,68 +1,75 @@
-// vmux extension shim, loaded before the real service worker.
-//
-// vmux embeds CEF in chrome-bootstrap + alloy-style browsers, where chrome.windows
-// resolves the focused window to WINDOW_ID_NONE (-1) and chrome.tabs.query/get are
-// unpopulated -- yet message/port senders still carry a valid sender.tab. Observe
-// that tab via our own (non-invasive) listeners and feed it back through shimmed
-// chrome.tabs.query/get, and supply a synthetic focused window, so extensions (e.g. a
-// password manager) can resolve the current tab and position their UI instead of
-// throwing. Valid as both a classic importScripts target and an ES module import.
 (function () {
   var c = globalThis.chrome;
   if (!c) return;
-  function log() {
-    try {
-      console.log.apply(console, ["[vmux]"].concat([].slice.call(arguments)));
-    } catch (e) {}
-  }
-
+  var BRIDGE_CHANNEL = __VMUX_BRIDGE_CHANNEL__;
+  var KEEPALIVE_CHANNEL = __VMUX_KEEPALIVE_CHANNEL__;
+  var BRIDGE_URL = c.runtime && c.runtime.getURL ? c.runtime.getURL("vmux_bridge.html") : null;
+  var ACTIVE_TAB_KEY = "__vmux_active_tab_v1";
+  var FAKE_WINDOW_ID = 1;
+  var FAKE_TAB_ID = 1;
   var lastTab = null;
-  var loggedTabId = null;
-  function capture(sender, where) {
-    if (sender && sender.tab && typeof sender.tab.id === "number") {
-      lastTab = sender.tab;
-      if (lastTab.id !== loggedTabId) {
-        loggedTabId = lastTab.id;
-        log("captured tab", where, lastTab.id, lastTab.url);
-      }
-    }
+
+  function webUrl(value) {
+    return typeof value === "string" && /^(https?|file):/.test(value) ? value : null;
   }
 
-  // Non-invasive observers: our own listeners run alongside the extension's without
-  // wrapping or consuming its messages (return undefined => not handled).
+  function senderUrl(message, sender) {
+    return (
+      webUrl(sender && sender.tab && sender.tab.url) ||
+      webUrl(sender && sender.url) ||
+      webUrl(message && message.tab && message.tab.url) ||
+      webUrl(message && message.url) ||
+      webUrl(message && message.uri) ||
+      webUrl(message && message.documentUrl)
+    );
+  }
+
+  function capture(message, sender) {
+    var url = senderUrl(message, sender);
+    if (!url) return null;
+    var tab = Object.assign({}, (sender && sender.tab) || (message && message.tab) || {});
+    if (typeof tab.id !== "number" || tab.id < 0) tab.id = FAKE_TAB_ID;
+    if (typeof tab.windowId !== "number" || tab.windowId < 0) tab.windowId = FAKE_WINDOW_ID;
+    if (!webUrl(tab.url)) tab.url = url;
+    if (typeof tab.index !== "number") tab.index = 0;
+    if (typeof tab.active !== "boolean") tab.active = true;
+    if (typeof tab.highlighted !== "boolean") tab.highlighted = tab.active;
+    if (!tab.status) tab.status = "complete";
+    lastTab = tab;
+    if (c.storage && c.storage.session) {
+      var stored = {};
+      stored[ACTIVE_TAB_KEY] = tab;
+      try {
+        var result = c.storage.session.set(stored);
+        if (result && typeof result.catch === "function") result.catch(function () {});
+      } catch (_error) {}
+    }
+    return tab;
+  }
+
+  function reservedMessage(message, sender) {
+    return (
+      message &&
+      message.channel === BRIDGE_CHANNEL &&
+      BRIDGE_URL &&
+      sender &&
+      sender.url === BRIDGE_URL
+    );
+  }
+
   if (c.runtime && c.runtime.onMessage) {
-    c.runtime.onMessage.addListener(function (msg, sender) {
-      capture(sender, "msg");
-      var cmd = msg && (msg.command || msg.type);
-      if (cmd && /openAutofillInlineMenu|updateAutofillInlineMenuListCiphers|cipher/i.test(String(cmd))) {
-        log("msg", cmd, "ciphers:", msg && msg.ciphers ? msg.ciphers.length : "n/a");
-      }
+    c.runtime.onMessage.addListener(function (message, sender) {
+      if (!reservedMessage(message, sender)) capture(message, sender);
       return undefined;
     });
   }
   if (c.runtime && c.runtime.onConnect) {
     c.runtime.onConnect.addListener(function (port) {
-      if (!port) return;
-      if (port.sender) capture(port.sender, "port:" + (port.name || "?"));
-      if (/inline|overlay|autofill/i.test(String(port.name || ""))) {
-        log("port connect", port.name);
-        var origPost = port.postMessage && port.postMessage.bind(port);
-        if (origPost) {
-          port.postMessage = function (m) {
-            try {
-              var cmd = m && (m.command || m.type);
-              if (cmd && (/cipher/i.test(String(cmd)) || (m && m.ciphers))) {
-                log("port>", port.name, cmd, "ciphers:", m && m.ciphers ? m.ciphers.length : "n/a");
-              }
-            } catch (e) {}
-            return origPost(m);
-          };
-        }
-      }
+      if (!port || port.name === KEEPALIVE_CHANNEL) return;
+      capture(null, port.sender);
     });
   }
 
-  var FAKE_WINDOW_ID = 1;
   function fakeWindow(getInfo) {
     var w = {
       id: FAKE_WINDOW_ID, focused: true, top: 0, left: 0, width: 1920, height: 1080,
@@ -70,6 +77,32 @@
     };
     if (getInfo && getInfo.populate) w.tabs = lastTab ? [lastTab] : [];
     return w;
+  }
+
+  function requestActiveTab(done) {
+    if (lastTab) {
+      done(lastTab);
+      return;
+    }
+    if (!c.storage || !c.storage.session) {
+      done(null);
+      return;
+    }
+    try {
+      var result = c.storage.session.get(ACTIVE_TAB_KEY);
+      Promise.resolve(result).then(
+        function (stored) {
+          var tab = stored && stored[ACTIVE_TAB_KEY];
+          if (tab && webUrl(tab.url)) lastTab = tab;
+          done(lastTab);
+        },
+        function () {
+          done(null);
+        },
+      );
+    } catch (_error) {
+      done(null);
+    }
   }
   function resolved(makeResult) {
     return function () {
@@ -92,32 +125,22 @@
   }
 
   var nativeTabsCreate = c.tabs && c.tabs.create ? c.tabs.create.bind(c.tabs) : null;
+  var bridgeRuntime = globalThis.__vmuxExtensionRuntime;
   function firstUrl(info) {
     var u = info && info.url;
     return Array.isArray(u) ? u[0] : u;
   }
-  // chrome.windows.create / tabs.create don't open anything under alloy-style CEF, so
-  // extension popouts (unlock, add-login) never appear. Open the URL via the SW
-  // clients.openWindow API instead, which doesn't depend on chrome.windows.
   function openPopout(info) {
     var url = firstUrl(info);
-    log("open popout", url);
-    if (!url) return;
-    try {
-      if (self.clients && self.clients.openWindow) {
-        self.clients.openWindow(url).then(
-          function (client) { log("openWindow", client ? "ok" : "null"); },
-          function (e) { log("openWindow fail", String(e)); }
-        );
-        return;
-      }
-    } catch (e) {
-      log("openWindow threw", String(e));
+    if (!url) return Promise.resolve();
+    if (bridgeRuntime && typeof bridgeRuntime.request === "function") {
+      return bridgeRuntime.request("windows", "create", [{ url: url }]);
     }
-    if (nativeTabsCreate) {
-      try {
-        nativeTabsCreate({ url: url });
-      } catch (e) {}
+    if (!nativeTabsCreate) return Promise.reject(new Error("vmux cannot open extension window"));
+    try {
+      return Promise.resolve(nativeTabsCreate({ url: url }));
+    } catch (e) {
+      return Promise.reject(e);
     }
   }
 
@@ -136,75 +159,97 @@
       return w;
     });
     c.windows.create = function (info, cb) {
-      openPopout(info);
       var w = fakeWindow();
-      if (typeof cb === "function") {
-        cb(w);
-        return;
-      }
-      return Promise.resolve(w);
+      var opened = openPopout(info).then(function () { return w; });
+      if (typeof cb !== "function") return opened;
+      opened.then(cb, function () { cb(undefined); });
     };
   }
 
   if (c.tabs) {
     var origQuery = c.tabs.query ? c.tabs.query.bind(c.tabs) : null;
+    function queryNative(queryInfo, done) {
+      if (!origQuery) {
+        done([]);
+        return;
+      }
+      var settled = false;
+      var finish = function (tabs) {
+        if (settled) return;
+        settled = true;
+        if (c.runtime) void c.runtime.lastError;
+        done(tabs || []);
+      };
+      try {
+        var result = origQuery(queryInfo, finish);
+        if (result && typeof result.then === "function") result.then(finish, function () { finish([]); });
+      } catch (_error) {
+        finish([]);
+      }
+    }
     c.tabs.query = function (queryInfo, cb) {
       var wantsActive =
         queryInfo && (queryInfo.active || queryInfo.currentWindow || queryInfo.lastFocusedWindow);
-      var deliver = function (res) {
-        if (cb) {
-          cb(res);
+      var promise = new Promise(function (resolve) {
+        var fallback = function () {
+          queryNative(queryInfo, function (tabs) {
+            resolve(tabs);
+          });
+        };
+        if (!wantsActive) {
+          fallback();
           return;
         }
-        return Promise.resolve(res);
-      };
-      if (wantsActive && lastTab) return deliver([lastTab]);
-      if (origQuery) {
-        try {
-          var p = origQuery(queryInfo);
-          if (p && p.then) {
-            return p.then(
-              function (r) {
-                if (wantsActive && (!r || !r.length) && lastTab) r = [lastTab];
-                return deliver(r || []);
-              },
-              function () {
-                return deliver(lastTab ? [lastTab] : []);
-              }
-            );
+        requestActiveTab(function (tab) {
+          if (!tab) {
+            fallback();
+            return;
           }
-        } catch (e) {}
+          resolve([tab]);
+        });
+      });
+      if (typeof cb === "function") {
+        promise.then(cb);
+        return;
       }
-      return deliver(lastTab ? [lastTab] : []);
+      return promise;
     };
     var origGet = c.tabs.get ? c.tabs.get.bind(c.tabs) : null;
     c.tabs.get = function (id, cb) {
-      var deliver = function (res) {
-        if (cb) {
-          cb(res);
-          return;
-        }
-        return Promise.resolve(res);
-      };
-      if (lastTab && (id == null || id === lastTab.id)) return deliver(lastTab);
-      if (origGet) {
-        try {
-          var p = origGet(id);
-          if (p && p.then) return p.then(deliver, function () { return deliver(lastTab); });
-        } catch (e) {}
-      }
-      return deliver(lastTab);
-    };
-    c.tabs.create = function (info, cb) {
-      openPopout(info);
-      var t = lastTab || { id: FAKE_WINDOW_ID, active: true };
+      var promise = new Promise(function (resolve) {
+        requestActiveTab(function (tab) {
+          if (tab && (id == null || id === tab.id)) {
+            resolve(tab);
+            return;
+          }
+          if (!origGet) {
+            resolve(tab);
+            return;
+          }
+          try {
+            var result = origGet(id, function (nativeTab) {
+              if (c.runtime) void c.runtime.lastError;
+              resolve(nativeTab || tab);
+            });
+            if (result && typeof result.then === "function") {
+              result.then(resolve, function () { resolve(tab); });
+            }
+          } catch (_error) {
+            resolve(tab);
+          }
+        });
+      });
       if (typeof cb === "function") {
-        cb(t);
+        promise.then(cb);
         return;
       }
-      return Promise.resolve(t);
+      return promise;
+    };
+    c.tabs.create = function (info, cb) {
+      var t = lastTab || { id: FAKE_WINDOW_ID, active: true };
+      var opened = openPopout(info).then(function () { return t; });
+      if (typeof cb !== "function") return opened;
+      opened.then(cb, function () { cb(undefined); });
     };
   }
-
-  log("shim v5 installed (capture + windows + tabs + openWindow popouts)");
 })();
