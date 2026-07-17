@@ -246,10 +246,7 @@ fn activate_app_during_boot(
 fn activate_app_during_boot() {}
 
 #[cfg(target_os = "macos")]
-fn install_native_mouse_wake_monitor(
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-) {
+fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
     let Some(proxy) = proxy else {
@@ -258,9 +255,6 @@ fn install_native_mouse_wake_monitor(
     if NATIVE_MOUSE_WAKE_MONITOR_INSTALLED.load(Ordering::Relaxed) {
         return;
     }
-    let Some(primary_window) = primary_window.single().ok().and_then(appkit_window_ptr) else {
-        return;
-    };
     let proxy = (**proxy).clone();
     let thread_proxy = proxy.clone();
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
@@ -323,7 +317,7 @@ fn install_native_mouse_wake_monitor(
                 | NSEventType::RightMouseDragged
                 | NSEventType::OtherMouseDragged
         );
-        let location = event_location_in_window_physical_px(ev, primary_window);
+        let location = event_location_in_window_physical_px(ev);
         if let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), native_mouse_buttons(), motion);
         }
@@ -444,34 +438,9 @@ fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
 fn install_live_resize_monitor() {}
 
 #[cfg(target_os = "macos")]
-fn appkit_window_ptr(entity: Entity) -> Option<usize> {
-    use bevy::winit::WINIT_WINDOWS;
-    use objc2_app_kit::{NSView, NSWindow};
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    WINIT_WINDOWS.with_borrow(|windows| {
-        let window = windows.get_window(entity)?;
-        let handle = window.window_handle().ok()?;
-        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
-            return None;
-        };
-        let view = unsafe { &*appkit.ns_view.as_ptr().cast::<NSView>() };
-        let window = view.window()?;
-        Some((&*window as *const NSWindow) as usize)
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn event_location_in_window_physical_px(
-    event: &objc2_app_kit::NSEvent,
-    expected_window: usize,
-) -> Option<(f32, f32)> {
+fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Option<(f32, f32)> {
     let mtm = objc2::MainThreadMarker::new()?;
     let window = event.window(mtm)?;
-    let window_ptr = (&*window as *const objc2_app_kit::NSWindow) as usize;
-    if window_ptr != expected_window {
-        return None;
-    }
     let content = window.contentView()?;
     let point = content.convertPoint_fromView(event.locationInWindow(), None);
     let scale = window.backingScaleFactor();
@@ -988,6 +957,20 @@ mod tests {
         assert!(plugin_build.contains("activate_primary_window_on_startup"));
         assert!(source.contains("activateIgnoringOtherApps"));
         assert!(source.contains("makeKeyAndOrderFront"));
+    }
+
+    #[test]
+    fn native_mouse_monitor_does_not_wait_for_window_creation() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("proxy: Option<Res<EventLoopProxyWrapper>>"));
+        assert!(!monitor.contains("PrimaryWindow"));
+        assert!(!monitor.contains("appkit_window_ptr"));
     }
 
     #[test]
