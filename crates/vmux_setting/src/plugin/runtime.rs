@@ -134,16 +134,6 @@ pub struct AgentSettings {
     /// `file://` follow-pane beside that agent.
     #[serde(default = "default_true")]
     pub follow_files: bool,
-    /// When true (default), an agent finishing a turn tidies clean file previews
-    /// in its follow-pane, keeping changed files and the pane's active preview.
-    #[serde(default = "default_true")]
-    pub tidy_files: bool,
-    /// Only tidy when the follow-pane holds more than this many file previews.
-    #[serde(default = "default_tidy_files_max")]
-    pub tidy_files_max: usize,
-    /// When true, tidy without the confirm dialog. Set by the "Always tidy" button.
-    #[serde(default)]
-    pub tidy_files_auto: bool,
     /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
     #[serde(default = "default_acp_agents")]
     pub acp: Vec<AcpAgentConfig>,
@@ -164,15 +154,8 @@ fn default_agent_settings() -> AgentSettings {
         }],
         allow_run_placement_override: false,
         follow_files: true,
-        tidy_files: true,
-        tidy_files_max: 5,
-        tidy_files_auto: false,
         acp: default_acp_agents(),
     }
-}
-
-fn default_tidy_files_max() -> usize {
-    5
 }
 
 /// One external ACP agent the host can spawn. Identity is `id`; the binary is
@@ -1249,14 +1232,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_defaults_enable_tidy() {
-        let s = default_agent_settings();
-        assert!(s.tidy_files);
-        assert_eq!(s.tidy_files_max, 5);
-        assert!(!s.tidy_files_auto);
-    }
-
-    #[test]
     fn agent_defaults_disable_run_placement_override() {
         assert!(!AgentSettings::default().allow_run_placement_override);
     }
@@ -1265,6 +1240,15 @@ mod tests {
     fn legacy_agent_settings_default_run_placement_override_to_disabled() {
         let settings = parse_settings("(agent: (follow_files: true))").unwrap();
         assert!(!settings.agent.allow_run_placement_override);
+    }
+
+    #[test]
+    fn legacy_agent_tidy_settings_are_ignored() {
+        let settings = parse_settings(
+            "(agent: (follow_files: true, tidy_files: true, tidy_files_max: 5, tidy_files_auto: true))",
+        )
+        .unwrap();
+        assert!(settings.agent.follow_files);
     }
 
     #[test]
@@ -1279,17 +1263,6 @@ mod tests {
         assert!(settings.agent.allow_run_placement_override);
         let reparsed: AppSettings = ron::de::from_str(&ron).expect("RON parses");
         assert!(reparsed.agent.allow_run_placement_override);
-    }
-
-    #[test]
-    fn apply_update_sets_tidy_auto_without_clobbering_siblings() {
-        let mut s = base_settings();
-        assert!(s.agent.follow_files);
-        let ron = apply_settings_update(&mut s, "agent.tidy_files_auto", serde_json::json!(true))
-            .expect("update ok");
-        assert!(s.agent.tidy_files_auto);
-        assert!(s.agent.follow_files, "sibling preserved");
-        assert!(ron.contains("tidy_files_auto"));
     }
 
     fn base_settings() -> AppSettings {

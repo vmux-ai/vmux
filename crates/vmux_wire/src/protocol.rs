@@ -166,8 +166,8 @@ pub enum AgentCommand {
         anchor: ProcessId,
     },
     /// The calling CLI agent finished a turn (fired from its `Stop` hook). Resolved to the agent
-    /// via `anchor`; the GUI raises `AgentAttention` so the follow-pane auto-tidy and the
-    /// done-dot fire at turn-end (the terminal bell only fires on idle/permission, not turn-end).
+    /// via `anchor`; the GUI raises `AgentAttention` so the done-dot fires at turn-end (the
+    /// terminal bell only fires on idle/permission, not turn-end).
     /// Appended at the end to keep rkyv's positional enum discriminants stable.
     TurnEnded {
         anchor: ProcessId,

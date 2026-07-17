@@ -444,9 +444,6 @@ fn build_settings_schema() -> SettingsSchema {
                     order: vec![
                         "allow_run_placement_override".into(),
                         "follow_files".into(),
-                        "tidy_files".into(),
-                        "tidy_files_max".into(),
-                        "tidy_files_auto".into(),
                         "app_providers".into(),
                         "acp".into(),
                     ],

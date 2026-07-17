@@ -802,6 +802,21 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
     let folded_stack = pane.stacks.iter().find(|stack| stack.is_active).cloned();
+    let clean_editor_count = pane
+        .stacks
+        .iter()
+        .filter(|stack| stack.is_editor && !stack.is_dirty)
+        .count();
+    let clean_editor_count = if clean_editor_count == pane.stacks.len() {
+        clean_editor_count.saturating_sub(1)
+    } else {
+        clean_editor_count
+    };
+    let tidy_title = if clean_editor_count == 1 {
+        "Close 1 clean editor".to_string()
+    } else {
+        format!("Close {clean_editor_count} clean editors")
+    };
     let mut folded = use_signal(|| false);
 
     rsx! {
@@ -821,6 +836,26 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                         "min-w-0 flex-1 text-ui font-medium text-muted-foreground"
                     },
                     "{label}"
+                }
+                if clean_editor_count > 0 {
+                    button {
+                        r#type: "button",
+                        aria_label: "Close clean editors",
+                        title: "{tidy_title}",
+                        class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                                command: "tidy_clean_editors".to_string(),
+                                pane_id: pane_id.to_string(),
+                                stack_index: 0,
+                            });
+                        },
+                        Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                            path { d: "m7 21-4.3-4.3a2.26 2.26 0 0 1 0-3.2l9.6-9.6a2.26 2.26 0 0 1 3.2 0l5.6 5.6a2.26 2.26 0 0 1 0 3.2L13 21" }
+                            path { d: "M22 21H7" }
+                            path { d: "m5 11 9 9" }
+                        }
+                    }
                 }
                 button {
                     r#type: "button",

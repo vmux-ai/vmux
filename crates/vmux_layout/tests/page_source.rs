@@ -100,6 +100,16 @@ fn folded_pane_shows_its_active_stack() {
 }
 
 #[test]
+fn pane_shows_tidy_button_for_closable_clean_editors() {
+    let pane = pane_section_component_source();
+
+    assert!(pane.contains("clean_editor_count"));
+    assert!(pane.contains("if clean_editor_count > 0"));
+    assert!(pane.contains("aria_label: \"Close clean editors\""));
+    assert!(pane.contains("command: \"tidy_clean_editors\".to_string()"));
+}
+
+#[test]
 fn embedded_header_css_has_fixed_tab_utilities() {
     let css_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../vmux_server/dist/assets/index.css");

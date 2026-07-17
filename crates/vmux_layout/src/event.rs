@@ -438,6 +438,10 @@ pub struct StackNode {
     pub is_loading: bool,
     #[serde(default)]
     pub bg_color: Option<String>,
+    #[serde(default)]
+    pub is_editor: bool,
+    #[serde(default)]
+    pub is_dirty: bool,
 }
 
 #[derive(

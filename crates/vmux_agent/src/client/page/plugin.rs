@@ -33,10 +33,6 @@ impl Plugin for PageAgentPlugin {
             .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::with_id(
                 "vmux-agent-toast",
             ))
-            .add_plugins(BinEventEmitterPlugin::<(
-                vmux_core::event::FileTidyActionEvent,
-            )>::default())
-            .add_observer(crate::plugin::on_tidy_action)
             .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)
             .add_systems(

@@ -377,17 +377,11 @@ pub fn Page() -> Element {
     let mut explorer_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
-    let mut tidy_prompt = use_signal(|| Option::<u32>::None);
 
     let _chrome =
         use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
             explorer_visible.set(c.visible);
             explorer_width.set(c.width);
-        });
-
-    let _tidy =
-        use_bin_event_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
-            tidy_prompt.set(Some(e.count));
         });
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
@@ -888,44 +882,6 @@ pub fn Page() -> Element {
                         span {
                             class: "shrink-0 rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-cyan-700 dark:text-cyan-200",
                             "{lbl}"
-                        }
-                    })
-                }
-                {
-                    tidy_prompt().map(|count| {
-                        let noun = if count == 1 { "preview" } else { "previews" };
-                        rsx! {
-                            div {
-                                class: "flex shrink-0 items-center gap-1.5 text-[11px]",
-                                span {
-                                    class: "select-none text-cyan-700 dark:text-cyan-200",
-                                    "\u{2726} {count} unchanged {noun}"
-                                }
-                                button {
-                                    class: "rounded-full bg-cyan-400/20 px-2 py-0.5 font-medium text-cyan-700 hover:bg-cyan-400/30 dark:text-cyan-100",
-                                    onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Tidy });
-                                        tidy_prompt.set(None);
-                                    },
-                                    "Tidy"
-                                }
-                                button {
-                                    class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
-                                    onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Always });
-                                        tidy_prompt.set(None);
-                                    },
-                                    "Always"
-                                }
-                                button {
-                                    class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
-                                    onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
-                                        tidy_prompt.set(None);
-                                    },
-                                    "\u{2715}"
-                                }
-                            }
                         }
                     })
                 }

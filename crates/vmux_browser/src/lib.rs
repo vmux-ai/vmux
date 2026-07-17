@@ -56,8 +56,8 @@ use vmux_layout::{
     pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::{
-        ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
-        stack_bundle,
+        ActiveTabParam, CloseStackRequest, Stack, active_stack_in_pane, collect_leaf_panes,
+        focused_stack, stack_bundle,
     },
     tab::{Tab, TabWorktree},
     window::{
@@ -3160,7 +3160,15 @@ fn push_pane_tree_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&OscTitle>), With<Browser>>,
+    browser_meta: Query<
+        (
+            &PageMetadata,
+            Has<Loading>,
+            Option<&OscTitle>,
+            Option<&vmux_git::GitDiffSource>,
+        ),
+        With<Browser>,
+    >,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -3196,9 +3204,10 @@ fn push_pane_tree_emit(
                 let mut found_browser = false;
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
-                        if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
+                        if let Ok((meta, loading, osc, diff_source)) = browser_meta.get(browser_e) {
                             let is_new_stack = new_stack_ctx.stack == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
+                            let is_editor = !is_new_stack && meta.url.starts_with("file:");
                             stacks.push(StackNode {
                                 title: if is_new_stack {
                                     "New Stack".to_string()
@@ -3219,6 +3228,9 @@ fn push_pane_tree_emit(
                                 stack_index: stack_index as u32,
                                 is_loading: loading,
                                 bg_color: meta.bg_color.clone(),
+                                is_editor,
+                                is_dirty: is_editor
+                                    && diff_source.is_some_and(|source| source.dirty),
                             });
                             found_browser = true;
                         }
@@ -3233,6 +3245,8 @@ fn push_pane_tree_emit(
                         stack_index: stack_index as u32,
                         is_loading: false,
                         bg_color: None,
+                        is_editor: false,
+                        is_dirty: false,
                     });
                 }
                 stack_index += 1;
@@ -3760,14 +3774,32 @@ fn on_hard_reload_notify_header(
     }
 }
 
+fn stack_is_clean_editor(
+    stack: Entity,
+    stack_children: &Query<&Children>,
+    browser_meta: &Query<(&PageMetadata, Option<&vmux_git::GitDiffSource>), With<Browser>>,
+) -> bool {
+    stack_children.get(stack).is_ok_and(|children| {
+        children.iter().any(|child| {
+            browser_meta.get(child).is_ok_and(|(meta, diff_source)| {
+                meta.url.starts_with("file:") && diff_source.is_none_or(|source| !source.dirty)
+            })
+        })
+    })
+}
+
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
+    stack_children: Query<&Children>,
     stack_q: Query<Entity, With<Stack>>,
+    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
+    browser_meta: Query<(&PageMetadata, Option<&vmux_git::GitDiffSource>), With<Browser>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut close: MessageWriter<CloseStackRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -3809,6 +3841,21 @@ fn on_side_sheet_command_emit(
             messages.write(cmd);
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
+        }
+        "tidy_clean_editors" => {
+            let mut closable: Vec<Entity> = stack_entities
+                .iter()
+                .copied()
+                .filter(|stack| stack_is_clean_editor(*stack, &stack_children, &browser_meta))
+                .collect();
+            if closable.len() == stack_entities.len() {
+                let keeper = active_stack_in_pane(target_pane, &pane_children, &stack_ts)
+                    .or_else(|| stack_entities.first().copied());
+                closable.retain(|stack| Some(*stack) != keeper);
+            }
+            for stack in closable {
+                close.write(CloseStackRequest { stack });
+            }
         }
         "new_stack" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
@@ -4644,6 +4691,95 @@ mod tests {
 
         assert!(branch.contains("StackCommand::Close"));
         assert!(!branch.contains("window.visible = false"));
+    }
+
+    fn spawn_tidy_test_stack(
+        app: &mut App,
+        pane: Entity,
+        url: &str,
+        dirty: Option<bool>,
+        activated_at: i64,
+    ) -> Entity {
+        let stack = app
+            .world_mut()
+            .spawn((
+                Stack::default(),
+                LastActivatedAt(activated_at),
+                ChildOf(pane),
+            ))
+            .id();
+        let mut browser = app.world_mut().spawn((
+            Browser,
+            PageMetadata {
+                url: url.to_string(),
+                ..default()
+            },
+            ChildOf(stack),
+        ));
+        if let Some(dirty) = dirty {
+            browser.insert(vmux_git::GitDiffSource { dirty, ..default() });
+        }
+        stack
+    }
+
+    fn side_sheet_tidy_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<PaneHoverIntent>()
+            .add_message::<AppCommand>()
+            .add_message::<vmux_command::CommandIssued>()
+            .add_message::<vmux_layout::CloseStackRequest>()
+            .add_observer(on_side_sheet_command_emit);
+        app
+    }
+
+    fn trigger_side_sheet_tidy(app: &mut App, pane: Entity) {
+        app.world_mut().trigger(BinReceive {
+            webview: Entity::PLACEHOLDER,
+            payload: SideSheetCommandEvent {
+                command: "tidy_clean_editors".to_string(),
+                pane_id: pane.to_bits().to_string(),
+                stack_index: 0,
+            },
+        });
+    }
+
+    #[test]
+    fn side_sheet_tidy_closes_clean_editors_only() {
+        let mut app = side_sheet_tidy_test_app();
+        let pane = app.world_mut().spawn(Pane).id();
+        let clean = spawn_tidy_test_stack(&mut app, pane, "file:///clean.rs", Some(false), 1);
+        spawn_tidy_test_stack(&mut app, pane, "file:///dirty.rs", Some(true), 2);
+        spawn_tidy_test_stack(&mut app, pane, "https://example.com", None, 3);
+
+        trigger_side_sheet_tidy(&mut app, pane);
+
+        let closed: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::CloseStackRequest>>()
+            .drain()
+            .map(|request| request.stack)
+            .collect();
+        assert_eq!(closed, vec![clean]);
+    }
+
+    #[test]
+    fn side_sheet_tidy_keeps_active_when_all_editors_are_clean() {
+        let mut app = side_sheet_tidy_test_app();
+        let pane = app.world_mut().spawn(Pane).id();
+        let inactive = spawn_tidy_test_stack(&mut app, pane, "file:///old.rs", Some(false), 1);
+        let active = spawn_tidy_test_stack(&mut app, pane, "file:///active.rs", Some(false), 2);
+
+        trigger_side_sheet_tidy(&mut app, pane);
+
+        let closed: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::CloseStackRequest>>()
+            .drain()
+            .map(|request| request.stack)
+            .collect();
+        assert_eq!(closed, vec![inactive]);
+        assert!(!closed.contains(&active));
     }
 
     #[test]

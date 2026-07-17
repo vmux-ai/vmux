@@ -159,11 +159,10 @@ fn vibe_hooks_path() -> PathBuf {
 
 /// Idempotently register vmux-managed hooks in `~/.vibe/hooks.toml`: an
 /// `after_tool` hook that pings vmux on file read/edit, and a `post_agent_turn`
-/// hook that pings vmux at turn-end (drives follow-pane auto-tidy + the
-/// done-dot). Both commands no-op without `VMUX_ANCHOR`, so manual vibe use is
-/// unaffected. Adds each named hook if absent and reconciles its command in
-/// place when stale (e.g. after the vmux binary moves) — never clobbers
-/// user-authored hooks.
+/// hook that pings vmux at turn-end for the done-dot. Both commands no-op
+/// without `VMUX_ANCHOR`, so manual vibe use is unaffected. Adds each named
+/// hook if absent and reconciles its command in place when stale (e.g. after
+/// the vmux binary moves) — never clobbers user-authored hooks.
 fn ensure_vibe_hooks(vmux_command: &str) {
     write_vmux_hooks(&vibe_hooks_path(), vmux_command);
 }

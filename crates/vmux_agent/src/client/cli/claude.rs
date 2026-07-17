@@ -102,8 +102,8 @@ pub(crate) fn project_dir_name(cwd: &Path) -> String {
 /// Inline `--settings` JSON merging three vmux hooks (merges with the user's
 /// `~/.claude/settings.json`, does not modify it): a Notification bell; a
 /// PostToolUse hook that pings vmux on every file read/edit; and a Stop hook
-/// that pings vmux at turn-end (drives follow-pane auto-tidy + the done-dot).
-/// Both vmux pings are `async` so they never block the agent.
+/// that pings vmux at turn-end for the done-dot. Both vmux pings are `async` so
+/// they never block the agent.
 fn build_settings_json(mcp: &McpServerConfig) -> String {
     let anchor = anchor_from_mcp(mcp);
     let args_for = |subcommand: &str| {
