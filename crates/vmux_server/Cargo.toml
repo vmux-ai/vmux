@@ -8,7 +8,7 @@ build = "build.rs"
 
 [features]
 default = []
-build = ["dep:regex"]
+build = ["dep:regex", "dep:sha2"]
 web = [
     "dep:dioxus",
     "dep:vmux_agent",
@@ -24,13 +24,13 @@ web = [
 ]
 
 [dependencies]
-rkyv = { workspace = true }
-serde = { workspace = true }
 regex = { workspace = true, optional = true }
+sha2 = { version = "0.10", optional = true }
 vmux_core = { path = "../vmux_core" }
 
 [build-dependencies]
 regex = { workspace = true }
+sha2 = "0.10"
 
 [[bin]]
 name = "vmux_server"

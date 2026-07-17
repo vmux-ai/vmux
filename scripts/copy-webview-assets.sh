@@ -11,9 +11,10 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 
 copy_shared_webview_app() {
-    local src="$ROOT/crates/vmux_server/dist"
+    local src="${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_server/dist}"
     local dest="$WEBVIEW_ROOT/_shared"
 
+    "$ROOT/scripts/verify-web-bundle.sh" release "$src"
     if [[ ! -f "$src/index.html" ]]; then
         echo "copy-webview-assets: missing $src/index.html" >&2
         exit 1
@@ -21,6 +22,7 @@ copy_shared_webview_app() {
 
     mkdir -p "$dest"
     cp -R "$src/." "$dest/"
+    "$ROOT/scripts/verify-web-bundle.sh" release "$dest"
 }
 
 rm -rf "$WEBVIEW_ROOT"

@@ -16,7 +16,9 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vmux_layout::scene::InteractionMode;
+#[cfg(feature = "tray")]
 use vmux_terminal as terminal;
+#[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
 
 const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
@@ -31,7 +33,9 @@ const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
     HideAllWindows,
+    #[cfg(feature = "tray")]
     ShowAllWindows,
+    #[cfg(feature = "tray")]
     QuitVmux,
 }
 
@@ -691,12 +695,14 @@ fn handle_lifecycle_events(world: &mut World) {
                 }
                 hide_all_osr_webviews(world);
             }
+            #[cfg(feature = "tray")]
             LifecycleEvent::ShowAllWindows => {
                 let mut q = world.query::<&mut Window>();
                 for mut w in q.iter_mut(world) {
                     w.visible = true;
                 }
             }
+            #[cfg(feature = "tray")]
             LifecycleEvent::QuitVmux => {
                 let live = {
                     let mut q = world.query_filtered::<(), (With<Terminal>, Without<PtyExited>)>();

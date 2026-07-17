@@ -17,7 +17,9 @@ fn dev_target_signs_then_runs_debug_binary() {
 
     assert!(makefile.contains(".DEFAULT_GOAL := dev"));
     assert!(
-        makefile.contains("dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process")
+        makefile.contains(
+            "dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-render-process"
+        )
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
     assert!(makefile.contains(
@@ -46,7 +48,12 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
     assert!(
         makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)")
     );
-    assert!(makefile.contains("VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev"));
+    assert!(
+        makefile.contains("VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full")
+    );
+    assert!(makefile.contains(
+        "$(MAKE) dev VMUX_BUILD_WEB=0 VMUX_DESKTOP_FEATURES=\"--no-default-features --features dev,full\""
+    ));
     assert!(makefile.contains("dev-player:"));
     assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
@@ -162,7 +169,9 @@ fn package_builds_cef_helper_separately_without_lto() {
     let script = include_str!("../../../scripts/build-package-binaries.sh");
 
     assert!(script.contains("build -p vmux_cli --release"));
-    assert!(script.contains("build -p vmux_desktop -p vmux_service --release"));
+    assert!(script.contains(
+        "build -p vmux_desktop -p vmux_service --release --features vmux_desktop/package"
+    ));
     assert!(!script.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --release"));
     assert!(script.contains("build -p bevy_cef_debug_render_process --profile cef-helper"));
     assert!(script.contains("$helper_dir/bevy_cef_debug_render_process"));
@@ -406,7 +415,13 @@ fn player_mode_owns_player_only_bevy_features() {
     let desktop = include_str!("../Cargo.toml");
     let layout = include_str!("../../vmux_layout/Cargo.toml");
 
-    assert!(desktop.contains("default = [\"player-mode\"]"));
+    assert!(desktop.contains("default = [\"full\"]"));
+    let full = desktop
+        .split_once("full = [")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(features, _)| features)
+        .expect("full feature list");
+    assert!(full.contains("\"player-mode\""));
     assert!(desktop.contains("player-mode = [\"vmux_layout/player-mode\"]"));
     for feature in [
         "bevy/bevy_animation",

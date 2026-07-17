@@ -405,12 +405,6 @@ fn handle_connection(
         .set_read_timeout(Some(IO_TIMEOUT))
         .map_err(|error| error.to_string())?;
     bevy::log::info!("extension bridge authenticated");
-    write_server_message(
-        &mut socket,
-        &BridgeServerMessage::Ready {
-            protocol_version: BRIDGE_PROTOCOL_VERSION,
-        },
-    )?;
     let poller = Arc::new(Poller::new().map_err(|error| error.to_string())?);
     unsafe {
         poller
@@ -436,17 +430,25 @@ fn handle_connection(
         let _ = previous.poller.notify();
     }
 
-    let result = route_connection(
+    let result = write_server_message(
         &mut socket,
-        &extension_id,
-        session_id,
-        inbound_tx,
-        &outbound_rx,
-        &queued_bytes,
-        shutdown,
-        &cancelled,
-        &poller,
-    );
+        &BridgeServerMessage::Ready {
+            protocol_version: BRIDGE_PROTOCOL_VERSION,
+        },
+    )
+    .and_then(|()| {
+        route_connection(
+            &mut socket,
+            &extension_id,
+            session_id,
+            inbound_tx,
+            &outbound_rx,
+            &queued_bytes,
+            shutdown,
+            &cancelled,
+            &poller,
+        )
+    });
     let mut sessions = sessions.lock().unwrap_or_else(|error| error.into_inner());
     if sessions
         .get(&extension_id)

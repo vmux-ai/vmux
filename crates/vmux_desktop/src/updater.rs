@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive, JsEmitEventPlugin, Receive};
+use bevy_cef::prelude::BinReceive;
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
-use vmux_layout::event::RestartRequestEvent;
 use vmux_setting::{
     AppSettings,
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
@@ -122,69 +121,7 @@ impl Plugin for UpdatePlugin {
         })
         .add_systems(Startup, init_update_checker)
         .add_systems(Update, poll_update_result)
-        .add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
-            &["debug", "extensions", "layout"],
-        ))
-        .add_plugins(JsEmitEventPlugin::<PageRelaunchRequest>::default())
-        .add_observer(on_restart_request)
-        .add_observer(on_page_relaunch)
         .add_observer(on_debug_simulate_download);
-    }
-}
-
-#[derive(serde::Deserialize)]
-struct PageRelaunchRequest {
-    channel: String,
-}
-
-fn relaunch_plan(exe: &std::path::Path, pid: u32, dyld_library_path: Option<&str>) -> Vec<String> {
-    let app_bundle = exe
-        .ancestors()
-        .nth(3)
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("app"))
-        .and_then(|p| p.to_str());
-    let launch = match app_bundle {
-        Some(app) => format!("open \"{app}\""),
-        // A bare dev binary is dynamically linked; /bin/sh strips DYLD_* (SIP),
-        // so re-inject the search path the running process is already using.
-        None => match dyld_library_path {
-            Some(dyld) if !dyld.is_empty() => {
-                format!("DYLD_LIBRARY_PATH=\"{dyld}\" \"{}\"", exe.display())
-            }
-            _ => format!("\"{}\"", exe.display()),
-        },
-    };
-    vec![
-        "-c".to_string(),
-        format!("while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; {launch}"),
-    ]
-}
-
-fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
-    let Ok(exe) = std::env::current_exe() else {
-        bevy::log::error!("restart requested but current_exe() is unavailable");
-        return;
-    };
-    let dyld = std::env::var("DYLD_LIBRARY_PATH").ok();
-    let args = relaunch_plan(&exe, std::process::id(), dyld.as_deref());
-    if let Err(e) = std::process::Command::new("sh").args(&args).spawn() {
-        bevy::log::error!("failed to spawn relauncher: {e}");
-        return;
-    }
-    bevy::log::info!("relaunching to apply update");
-    exit.write(AppExit::Success);
-}
-
-fn on_restart_request(
-    _trigger: On<BinReceive<RestartRequestEvent>>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    relaunch_now(&mut exit);
-}
-
-fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
-    if trigger.payload.channel == "vmux-relaunch" {
-        relaunch_now(&mut exit);
     }
 }
 
@@ -503,26 +440,6 @@ mod tests {
         assert_eq!(progress_step(0, 0, 0), None);
         assert_eq!(progress_step(bucket + 1, 0, 0), Some(1));
         assert_eq!(progress_step(bucket + 1, 0, 1), None);
-    }
-
-    #[test]
-    fn relaunch_plan_opens_app_bundle() {
-        let exe = std::path::Path::new("/Applications/Vmux.app/Contents/MacOS/vmux_desktop");
-        let args = relaunch_plan(exe, 4242, None);
-        assert_eq!(args[0], "-c");
-        assert!(args[1].contains("kill -0 4242"));
-        assert!(args[1].contains("open \"/Applications/Vmux.app\""));
-    }
-
-    #[test]
-    fn relaunch_plan_reexecs_bare_binary_in_dev_with_dyld() {
-        let exe = std::path::Path::new("/tmp/target/debug/vmux_desktop");
-        let args = relaunch_plan(exe, 7, Some("/rust/lib:/tmp/target/debug/deps"));
-        assert!(args[1].contains("kill -0 7"));
-        assert!(
-            args[1].contains("DYLD_LIBRARY_PATH=\"/rust/lib:/tmp/target/debug/deps\" \"/tmp/target/debug/vmux_desktop\"")
-        );
-        assert!(!args[1].contains("open \""));
     }
 
     #[test]

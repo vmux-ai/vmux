@@ -1395,7 +1395,7 @@ mod tests {
     fn desktop_enables_nspanel_binding_for_glass_backdrop() {
         let manifest = include_str!("../Cargo.toml");
 
-        assert!(manifest.contains("\"NSPanel\""));
+        assert!(manifest.contains("\"objc2-app-kit/NSPanel\""));
     }
 
     #[test]

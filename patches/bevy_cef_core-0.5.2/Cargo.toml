@@ -45,7 +45,6 @@ browser-process = [
     "dep:raw-window-handle",
     "dep:winit",
     "cef/accelerated_osr",
-    "cef/build-util",
     "cef/sandbox",
     "dep:objc2",
     "dep:objc2-app-kit",
@@ -53,6 +52,9 @@ browser-process = [
     "dep:objc2-quartz-core",
     "dep:objc2-core-graphics",
     "dep:objc2-core-foundation",
+]
+native-video-overlay = [
+    "browser-process",
     "dep:objc2-av-foundation",
     "dep:objc2-av-kit",
 ]
@@ -136,12 +138,17 @@ optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-app-kit]
 version = "0.3"
+default-features = false
 features = [
+    "std",
     "NSView",
     "NSResponder",
     "NSGraphics",
     "NSGlassEffectView",
     "NSColor",
+    "NSWindow",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
     "objc2-quartz-core",
 ]
 optional = true
@@ -153,25 +160,30 @@ optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-quartz-core]
 version = "0.3"
-features = ["CALayer", "CAShapeLayer", "objc2-core-graphics"]
+default-features = false
+features = ["std", "CALayer", "CAShapeLayer", "objc2-core-graphics"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-graphics]
 version = "0.3"
-features = ["CGPath", "CGImage", "CGColorSpace", "CGContext", "CGBitmapContext"]
+default-features = false
+features = ["std", "CGPath", "CGImage", "CGColorSpace", "CGContext", "CGBitmapContext"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-foundation]
 version = "0.3"
-features = ["CFBase"]
+default-features = false
+features = ["std", "CFBase"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-av-foundation]
 version = "0.3"
-features = ["AVPlayer", "AVPlayerItem", "objc2-core-media"]
+default-features = false
+features = ["std", "AVPlayer", "AVPlayerItem", "objc2-core-media"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-av-kit]
 version = "0.3"
-features = ["AVPlayerView", "objc2-app-kit"]
+default-features = false
+features = ["std", "AVPlayerView", "objc2-app-kit", "objc2-av-foundation"]
 optional = true

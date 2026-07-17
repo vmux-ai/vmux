@@ -1,10 +1,12 @@
-.PHONY: dev dev-player test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
+.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
 
 .DEFAULT_GOAL := dev
 
 VMUX_PROFILE ?= personal
 VMUX_TEST ?=
-VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev
+VMUX_BUILD_WEB ?= 1
+VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full
+DEV_WEB_TARGET := $(if $(filter 1,$(VMUX_BUILD_WEB)),web-bundle)
 
 CARGO_BIN := $(or $(shell command -v cargo 2>/dev/null),$(HOME)/.cargo/bin/cargo)
 CARGO_WITH_CEF_CACHE := CARGO_BIN="$(CARGO_BIN)" ./scripts/cargo-with-cef-cache.sh
@@ -20,9 +22,10 @@ CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' C
 CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
-# Header / history / UI library `dist/` folders are built by each crate’s `build.rs` via **`dx build`** when you compile `vmux_desktop` (needs `dioxus-cli` on PATH).
+web-bundle: ensure-web-deps
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_server
 
-dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
+dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-render-process
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop $(VMUX_DESKTOP_FEATURES)
 	@identity="$$(./scripts/ensure-local-codesign-identity.sh)" && \
@@ -44,13 +47,35 @@ dev: ensure-mac-deps ensure-codesign-deps install-debug-render-process
 	exec env -u CEF_PATH DYLD_LIBRARY_PATH="$$dylib_path" VMUX_PROFILE="$(VMUX_PROFILE)" VMUX_TEST="$(VMUX_TEST)" ./target/debug/vmux_desktop
 
 dev-player:
-	$(MAKE) dev VMUX_DESKTOP_FEATURES="--features dev"
+	$(MAKE) dev VMUX_DESKTOP_FEATURES="--no-default-features --features dev,player-mode"
+
+dev-rust:
+	@./scripts/verify-web-bundle.sh debug || (echo "missing or incompatible debug web bundle; run make dev first" && exit 1)
+	@wasm="$$(find crates/vmux_server/dist -type f -name '*_bg.wasm' -print -quit 2>/dev/null)"; \
+	stale="$$(find \
+		Cargo.toml Cargo.lock crates/vmux_*/Cargo.toml \
+		crates/vmux_server/Cargo.toml crates/vmux_server/Dioxus.toml crates/vmux_server/build.rs \
+		crates/vmux_server/assets crates/vmux_server/src crates/vmux_ui/assets crates/vmux_ui/src \
+		crates/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/vmux_editor/src \
+		crates/vmux_git/src crates/vmux_history/src crates/vmux_layout/src crates/vmux_profile/src \
+		crates/vmux_service/src crates/vmux_setting/src crates/vmux_space/src \
+		crates/vmux_team/src crates/vmux_terminal/assets/fonts crates/vmux_terminal/src \
+		crates/vmux_wire/src \
+		-type f -newer "$$wasm" -print -quit 2>/dev/null)"; \
+	if [ -z "$$wasm" ] || [ -n "$$stale" ]; then \
+		echo "stale debug web bundle; run make dev first"; \
+		exit 1; \
+	fi
+	$(MAKE) dev VMUX_BUILD_WEB=0 VMUX_DESKTOP_FEATURES="--no-default-features --features dev,full"
+
+dev-full:
+	$(MAKE) dev VMUX_DESKTOP_FEATURES="--no-default-features --features dev,full"
 
 test-app:
 	$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1
 
 build: ensure-mac-deps
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release --features vmux_desktop/package
 
 -include .env
 export
@@ -156,7 +181,9 @@ doctor:
 		CEF_DEBUG_RENDER="$(CEF_DEBUG_RENDER)" ./scripts/doctor-mac.sh
 
 # Non-interactive bootstrap so `make dev` works even after dependency bumps.
-ensure-mac-deps:
+ensure-mac-deps: ensure-native-deps ensure-web-deps
+
+ensure-native-deps:
 	@echo "Checking build dependencies..."
 	@if [ ! -x "$(CARGO_BIN)" ]; then \
 		echo "cargo not found at $(CARGO_BIN). Install rustup first: https://rustup.rs/"; \
@@ -170,6 +197,8 @@ ensure-mac-deps:
 		echo "CEF framework not found at $(CEF_FRAMEWORK_DIR). Run: make setup-cef"; \
 		exit 1; \
 	fi
+
+ensure-web-deps: ensure-native-deps
 	@if ! "$(RUSTUP_BIN)" target list --installed 2>/dev/null | grep -qx "wasm32-unknown-unknown"; then \
 		echo "Installing rust target wasm32-unknown-unknown..."; \
 		"$(RUSTUP_BIN)" target add wasm32-unknown-unknown; \

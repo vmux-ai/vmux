@@ -151,7 +151,7 @@ pub struct WebviewBrowser {
     texture_wake: Option<TextureWake>,
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     media_overlay: RefCell<Option<MediaOverlay>>,
     #[cfg(target_os = "macos")]
     corner_cover: RefCell<Option<objc2::rc::Retained<objc2_quartz_core::CAShapeLayer>>>,
@@ -175,7 +175,7 @@ pub struct WebviewBrowser {
     last_badge: Cell<Option<(u8, i32, i32, i32)>>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
 struct MediaOverlay {
     view: objc2::rc::Retained<objc2_av_kit::AVPlayerView>,
     player: objc2::rc::Retained<objc2_av_foundation::AVPlayer>,
@@ -436,6 +436,7 @@ impl Browsers {
             #[cfg(target_os = "macos")]
             native_liquid_glass,
             #[cfg(target_os = "macos")]
+            #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
             media_overlay: RefCell::new(None),
             #[cfg(target_os = "macos")]
             corner_cover: RefCell::new(None),
@@ -855,23 +856,23 @@ impl Browsers {
     /// Play `file_path` through a native macOS `AVPlayer` overlay filling the whole
     /// webview (used by the full media view). AVFoundation decodes H.264/HEVC that
     /// this codec-less CEF build cannot. Idempotent for the same path.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     pub fn attach_media_overlay(&self, webview: &Entity, file_path: &str) {
         self.upsert_media_overlay(webview, file_path, None);
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "native-video-overlay")))]
     pub fn attach_media_overlay(&self, _webview: &Entity, _file_path: &str) {}
 
     /// Play `file_path` through a native `AVPlayer` overlay positioned over a
     /// sub-rect of the webview (CSS px, viewport-relative top-left) — used by the
     /// dir-browser preview pane. Repositions in place when the path is unchanged.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     pub fn set_media_overlay(&self, webview: &Entity, file_path: &str, rect: (f32, f32, f32, f32)) {
         self.upsert_media_overlay(webview, file_path, Some(rect));
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "native-video-overlay")))]
     pub fn set_media_overlay(
         &self,
         _webview: &Entity,
@@ -880,7 +881,7 @@ impl Browsers {
     ) {
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     fn upsert_media_overlay(
         &self,
         webview: &Entity,
@@ -909,7 +910,7 @@ impl Browsers {
     }
 
     /// Remove the native media overlay from a webview, if present.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     pub fn detach_media_overlay(&self, webview: &Entity) {
         let Some(browser) = self.browsers.get(webview) else {
             return;
@@ -921,12 +922,12 @@ impl Browsers {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(target_os = "macos", feature = "native-video-overlay")))]
     pub fn detach_media_overlay(&self, _webview: &Entity) {}
 
     /// Convert a webview-relative rect (CSS px, top-left origin) into the CEF view's
     /// AppKit frame, accounting for the view's flipped-ness. `None` fills the view.
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     fn overlay_frame(
         cef_view: &objc2_app_kit::NSView,
         rect: Option<(f32, f32, f32, f32)>,
@@ -944,7 +945,7 @@ impl Browsers {
         NSRect::new(NSPoint::new(x, oy), NSSize::new(w, h))
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     fn position_overlay(
         host: &BrowserHost,
         view: &objc2_av_kit::AVPlayerView,
@@ -959,7 +960,7 @@ impl Browsers {
         nsview.setFrame(Self::overlay_frame(cef_view, Some(rect)));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     fn build_media_overlay(
         host: &BrowserHost,
         file_path: &str,

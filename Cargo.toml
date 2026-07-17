@@ -74,7 +74,13 @@ polling = "3.11"
 tungstenite = "0.28"
 url = "2"
 notify = "6"
-dioxus = { version = "=0.7.4", features = ["web"] }
+dioxus = { version = "=0.7.4", default-features = false, features = [
+    "web",
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
 wasm-bindgen = "0.2"
 regex = "1"
 smallvec = "1"

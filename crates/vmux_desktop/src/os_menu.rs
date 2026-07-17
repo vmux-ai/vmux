@@ -337,6 +337,7 @@ fn forward_menu_events(world: &mut World) {
                 });
             world.resource_mut::<Messages<AppCommand>>().write(cmd);
         } else {
+            #[cfg(feature = "tray")]
             crate::tray::PENDING_TRAY_EVENTS.lock().push(event_id);
         }
     }

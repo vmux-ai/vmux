@@ -14,30 +14,44 @@ mod background_lifecycle;
 mod boot_status;
 mod browser_scroll;
 mod browser_snapshot;
+#[cfg(any(feature = "recording", feature = "screenshots"))]
+mod capture_output;
+#[cfg(any(
+    not(feature = "recording"),
+    not(feature = "screenshots"),
+    not(feature = "updater")
+))]
+mod disabled_features;
 mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
 #[cfg(target_os = "macos")]
 mod focus_native;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod lechat_bridge;
 mod log_forward;
 mod media_permission;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
+#[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
 pub mod panic_hook;
 mod persistence;
+#[cfg(feature = "recording")]
 mod recording;
+mod relaunch;
+#[cfg(feature = "screenshots")]
 mod screenshot;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
 
 pub(crate) mod shortcut;
+#[cfg(feature = "tray")]
 mod tray;
+#[cfg(feature = "updater")]
 pub mod updater;
 mod window_state;
 use bevy::asset::io::web::WebAssetPlugin;
@@ -80,7 +94,7 @@ fn primary_window_config(title: String) -> NativeWindow {
         movable_by_window_background: false,
         fullsize_content_view: true,
         ime_enabled: true,
-        visible: !cfg!(target_os = "macos"),
+        visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
         position: WindowPosition::Centered(MonitorSelection::Primary),
         resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
         ..default()
@@ -148,19 +162,24 @@ impl Plugin for VmuxPlugin {
                 vmux_agent::AcpAgentPlugin,
                 PersistencePlugin,
                 LayoutPlugin,
-                updater::VmuxUpdater::builder().build().plugin(),
                 background_lifecycle::BackgroundLifecyclePlugin,
-                tray::TrayPlugin,
                 display::DisplayPlugin,
+                relaunch::RelaunchPlugin,
                 window_state::WindowStatePlugin,
             ));
 
+        #[cfg(feature = "updater")]
+        app.add_plugins(updater::VmuxUpdater::builder().build().plugin());
+
+        #[cfg(not(feature = "updater"))]
+        app.add_systems(Startup, disabled_features::mark_updater_unavailable)
+            .add_systems(Update, disabled_features::reject_update_checks);
+
+        #[cfg(feature = "tray")]
+        app.add_plugins(tray::TrayPlugin);
+
         app.init_resource::<boot_status::SplashStatus>()
             .init_resource::<boot_status::RestoreComplete>()
-            .init_resource::<screenshot::ScreenshotBridge>()
-            .init_resource::<recording::RecordingBridge>()
-            .init_resource::<recording::RecordingStatus>()
-            .add_message::<recording::RecordingControl>()
             .add_systems(
                 Update,
                 boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
@@ -168,12 +187,38 @@ impl Plugin for VmuxPlugin {
             .add_systems(
                 Update,
                 (
-                    screenshot::start_screenshots,
-                    screenshot::drain_screenshots,
                     browser_snapshot::drive_pending_nav_snapshots,
                     browser_scroll::run_scrolls,
                     browser_snapshot::start_snapshots,
                     browser_snapshot::shape_snapshot_results,
+                )
+                    .chain()
+                    .after(WriteAppCommands),
+            )
+            .add_systems(Startup, appearance::seed_system_appearance);
+
+        #[cfg(feature = "screenshots")]
+        app.init_resource::<screenshot::ScreenshotBridge>()
+            .add_systems(
+                Update,
+                (screenshot::start_screenshots, screenshot::drain_screenshots)
+                    .chain()
+                    .after(WriteAppCommands),
+            );
+
+        #[cfg(not(feature = "screenshots"))]
+        app.add_systems(
+            Update,
+            disabled_features::reject_screenshots.after(WriteAppCommands),
+        );
+
+        #[cfg(feature = "recording")]
+        app.init_resource::<recording::RecordingBridge>()
+            .init_resource::<recording::RecordingStatus>()
+            .add_message::<recording::RecordingControl>()
+            .add_systems(
+                Update,
+                (
                     recording::start_recording,
                     recording::handle_recording_control,
                     recording::auto_stop_recordings,
@@ -181,14 +226,27 @@ impl Plugin for VmuxPlugin {
                 )
                     .chain()
                     .after(WriteAppCommands),
+            );
+
+        #[cfg(not(feature = "recording"))]
+        app.add_systems(
+            Update,
+            (
+                disabled_features::reject_recording_starts,
+                disabled_features::reject_recording_stops,
             )
-            .add_systems(Startup, notify::request_notification_auth)
-            .add_systems(Startup, appearance::seed_system_appearance)
+                .after(WriteAppCommands),
+        );
+
+        #[cfg(feature = "native-notifications")]
+        app.add_systems(Startup, notify::request_notification_auth)
             .add_systems(Update, notify::post_os_notifications);
 
+        #[cfg(all(target_os = "macos", feature = "native-glass"))]
+        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin));
+
         #[cfg(target_os = "macos")]
-        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin))
-            .add_systems(Last, focus_native::apply_winit_host_focus);
+        app.add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
 
@@ -204,10 +262,13 @@ mod tests {
     }
 
     #[test]
-    fn primary_window_starts_hidden_on_macos_until_backdrop_is_ready() {
+    fn primary_window_starts_hidden_when_native_glass_needs_backdrop_setup() {
         let window = primary_window_config("Vmux".to_string());
 
-        assert_eq!(window.visible, !cfg!(target_os = "macos"));
+        assert_eq!(
+            window.visible,
+            !cfg!(all(target_os = "macos", feature = "native-glass"))
+        );
     }
 
     #[test]
