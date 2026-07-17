@@ -41,8 +41,8 @@ pub struct PendingStackClose;
 #[derive(Component)]
 pub struct CloseConfirmed;
 
-/// Close (despawn) a specific stack entity. Used by agent auto-tidy. Ignored if
-/// it is the only stack in its pane, so tidy can never empty (and collapse) a pane.
+/// Close (despawn) a specific stack entity without a confirmation dialog. Ignored if it is the
+/// only stack in its pane, so bulk cleanup cannot empty and collapse a pane.
 #[derive(Message, Clone, Copy)]
 pub struct CloseStackRequest {
     pub stack: Entity,

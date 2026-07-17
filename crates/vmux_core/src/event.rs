@@ -47,10 +47,6 @@ pub const FILE_CURSOR_EVENT: &str = "file_cursor";
 pub const FILE_DIRTY_EVENT: &str = "file_dirty";
 pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
-/// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
-pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
-/// File page → host: the user's choice on the tidy prompt banner.
-pub const FILE_TIDY_ACTION_EVENT: &str = "file_tidy_action";
 pub const FILE_EXTERNAL_CHANGE_EVENT: &str = "file_external_change";
 pub const FILE_HOVER_REQUEST_EVENT: &str = "file_hover_request";
 pub const FILE_HOVER_EVENT: &str = "file_hover";
@@ -1506,62 +1502,6 @@ pub struct FileViewModeEvent {
 )]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
-}
-
-/// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FileTidyPromptEvent {
-    pub count: u32,
-}
-
-/// The user's choice on the tidy prompt banner.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum TidyChoice {
-    /// Close the clean previews now.
-    Tidy,
-    /// Close now and stop asking (persist `agent.tidy_files_auto`).
-    Always,
-    /// Leave everything open.
-    Dismiss,
-}
-
-/// File page → host: the user clicked a button on the tidy prompt banner.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FileTidyActionEvent {
-    pub choice: TidyChoice,
 }
 
 #[derive(
