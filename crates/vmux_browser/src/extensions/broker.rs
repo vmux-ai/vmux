@@ -477,7 +477,7 @@ fn validate_caller_context<'a>(
         let tab = i32::try_from(*tab_id)
             .ok()
             .and_then(|tab_id| model.tabs.iter().find(|tab| tab.id == tab_id));
-        if *frame_id < 0 || !tab.is_some_and(|tab| tab.url == *url) {
+        if *frame_id < 0 || tab.is_none_or(|tab| tab.url != *url) {
             return Err(ChromeError::new(
                 "invalid_context",
                 "content-script caller does not match the browser model",

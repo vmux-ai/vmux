@@ -76,6 +76,7 @@ impl ChromeStableIds {
 
 #[derive(Message, Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
 pub enum ChromeModelEvent {
     TabCreated(ChromeTab),
     TabUpdated { old: ChromeTab, new: ChromeTab },

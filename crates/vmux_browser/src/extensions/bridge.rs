@@ -109,7 +109,6 @@ impl ExtensionBridgeServer {
         let registrations = registrations.into_iter().collect::<Vec<_>>();
         let identities = registrations
             .iter()
-            .into_iter()
             .map(|registration| {
                 let extension_id = registration.extension_id.clone();
                 (
@@ -460,6 +459,7 @@ fn handle_connection(
     result
 }
 
+#[allow(clippy::result_large_err)]
 fn accept_websocket(
     stream: TcpStream,
     identities: &HashMap<String, BridgeIdentity>,
