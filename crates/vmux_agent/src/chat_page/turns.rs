@@ -88,10 +88,9 @@ fn flush(
         turn.step_count = turn
             .blocks
             .iter()
-            .filter(|block| match block {
-                ChatBlock::Text(_) => false,
-                ChatBlock::ToolResult { call_id, .. } => !turn.has_tool_use(call_id),
-                _ => true,
+            .enumerate()
+            .filter(|(index, block)| {
+                !matches!(block, ChatBlock::Text(_)) && turn.parent_tool_index(*index).is_none()
             })
             .count() as u32;
         turn.duration_secs = durations.get(*ordinal).copied();
@@ -272,6 +271,35 @@ mod tests {
             Message::User { text: "a".into() },
             Message::ToolResult {
                 call_id: "missing".into(),
+                content: "output".into(),
+                is_error: false,
+            },
+        ];
+        let items = group_turns(&msgs, &[], false);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(turn.step_count, 1);
+    }
+
+    #[test]
+    fn guardian_and_results_count_as_one_tool_step() {
+        let msgs = vec![
+            Message::User { text: "a".into() },
+            assistant(vec![
+                AssistantBlock::ToolUse {
+                    call_id: "read-1".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                },
+                AssistantBlock::ToolUse {
+                    call_id: "review-1".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                },
+            ]),
+            Message::ToolResult {
+                call_id: "read-1".into(),
                 content: "output".into(),
                 is_error: false,
             },

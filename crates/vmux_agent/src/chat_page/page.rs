@@ -961,16 +961,23 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
         .blocks
         .iter()
         .enumerate()
-        .filter_map(|(key, block)| match block {
-            ChatBlock::ToolResult { call_id, .. } if turn.has_tool_use(call_id) => None,
-            ChatBlock::ToolUse { call_id, .. } => Some((key, block, turn.tool_result(call_id))),
-            _ => Some((key, block, None)),
+        .filter_map(|(key, block)| {
+            if turn.parent_tool_index(key).is_some() {
+                return None;
+            }
+            let children = turn
+                .blocks
+                .iter()
+                .enumerate()
+                .filter(|(child_key, _)| turn.parent_tool_index(*child_key) == Some(key))
+                .collect::<Vec<_>>();
+            Some((key, block, children))
         })
         .collect::<Vec<_>>();
     rsx! {
         div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
-            for (j , block , tool_result) in blocks {
-                {render_block(j, block, tool_result)}
+            for (j , block , children) in blocks {
+                {render_block(j, block, &children)}
             }
             if turn.running && !reconnecting {
                 {render_working(verb, elapsed)}
@@ -1133,7 +1140,7 @@ fn tool_presentation(name: &str) -> (ActivityIcon, Cow<'static, str>) {
     }
 }
 
-fn render_block(key: usize, block: &ChatBlock, tool_result: Option<(&str, bool)>) -> Element {
+fn render_block(key: usize, block: &ChatBlock, children: &[(usize, &ChatBlock)]) -> Element {
     match block {
         ChatBlock::Text(text) => rsx! {
             div {
@@ -1170,8 +1177,12 @@ fn render_block(key: usize, block: &ChatBlock, tool_result: Option<(&str, bool)>
                                 pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
                             }
                         }
-                        if let Some((content, is_error)) = tool_result {
-                            {render_nested_tool_result(content, is_error)}
+                        if !children.is_empty() {
+                            div { class: "ml-0.5 mt-1.5 flex flex-col gap-1 border-l border-foreground/15 pl-3",
+                                for (child_key , child) in children {
+                                    {render_tool_child(*child_key, child)}
+                                }
+                            }
                         }
                     }
                 }
@@ -1255,7 +1266,31 @@ fn render_block(key: usize, block: &ChatBlock, tool_result: Option<(&str, bool)>
     }
 }
 
-fn render_nested_tool_result(content: &str, is_error: bool) -> Element {
+fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
+    match block {
+        ChatBlock::ToolUse { name, args, .. } => {
+            let (_, label) = tool_presentation(name);
+            rsx! {
+                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
+                    summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "font-medium", "{label}" }
+                        {render_disclosure_icon()}
+                    }
+                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
+                    if !args.is_empty() && args != "{}" {
+                        pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                    }
+                }
+            }
+        }
+        ChatBlock::ToolResult {
+            content, is_error, ..
+        } => render_nested_tool_result(key, content, *is_error),
+        _ => rsx! {},
+    }
+}
+
+fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Element {
     let tone = if is_error {
         "text-red-500"
     } else {
@@ -1263,7 +1298,7 @@ fn render_nested_tool_result(content: &str, is_error: bool) -> Element {
     };
     let label = if is_error { "Error" } else { "Output" };
     rsx! {
-        details { class: "disclosure ml-0.5 mt-1.5 border-l border-foreground/15 pl-3 text-xs {tone}",
+        details { key: "{key}", class: "disclosure text-xs {tone}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium", "{label}" }
                 {render_disclosure_icon()}

@@ -1,5 +1,6 @@
 use super::event::{
     ChatBlock, ChatItem, ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry,
+    is_guardian_tool,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -210,13 +211,7 @@ fn streaming_title_emoji(items: &[ChatItem]) -> &'static str {
 
 pub(crate) fn tool_activity(name: &str) -> ToolActivity {
     let lower = name.to_ascii_lowercase();
-    if lower.contains("guardian")
-        || lower.contains("approval")
-        || lower == "review"
-        || lower.ends_with("_review")
-        || lower.ends_with(".review")
-        || lower.ends_with(":review")
-    {
+    if is_guardian_tool(name) {
         ToolActivity::Guardian
     } else if lower.contains("read_file") || lower.contains("read file") {
         ToolActivity::ReadFile
