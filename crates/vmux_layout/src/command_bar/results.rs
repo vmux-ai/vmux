@@ -126,12 +126,19 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
-/// Installed agent launcher rows in recent-first input order, filtered by query.
+/// Installed agent launcher rows in recent-first input order. A matching query narrows the
+/// choices; ordinary prompt text that matches no agent keeps every choice visible.
 pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
-    pages
+    let agents: Vec<_> = pages.iter().filter(|page| page.host == "agent").collect();
+    let matches: Vec<_> = agents
         .iter()
-        .filter(|page| page.host == "agent" && page_matches(page, &search_lower))
+        .copied()
+        .filter(|page| page_matches(page, &search_lower))
+        .collect();
+    let visible = if matches.is_empty() { agents } else { matches };
+    visible
+        .into_iter()
         .map(|page| CommandBarResultItem::Page {
             url: page.url.clone(),
             title: page.title.clone(),
@@ -681,6 +688,24 @@ mod tests {
             &results[0],
             CommandBarResultItem::Page { url, .. } if url == "vmux://agent/vibe/"
         ));
+    }
+
+    #[test]
+    fn start_prompt_text_keeps_all_agent_choices_visible() {
+        let mut pages = sample_pages();
+        pages.push(CommandBarPage {
+            host: "agent".into(),
+            url: "vmux://agent/codex/cli".into(),
+            title: "Codex (CLI)".into(),
+            keywords: vec!["codex".into(), "agent".into()],
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        });
+
+        let results = agent_page_results(&pages, "show me something fun in terminal");
+        let urls: Vec<_> = results.iter().filter_map(agent_page_url).collect();
+
+        assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://agent/codex/cli"]);
     }
 
     #[test]
