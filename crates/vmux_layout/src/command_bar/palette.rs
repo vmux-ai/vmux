@@ -6,7 +6,7 @@ use crate::command_bar::keyboard::{
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, agent_page_results, filter_results,
-    space_switch_results,
+    replacement_agent_url, space_switch_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -148,17 +148,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     use_effect(move || {
         let pages = state().pages;
         let current = selected_agent_url();
-        if !pages
-            .iter()
-            .any(|page| page.host == "agent" && page.url == current)
-        {
-            selected_agent_url.set(
-                pages
-                    .iter()
-                    .find(|page| page.host == "agent")
-                    .map(|page| page.url.clone())
-                    .unwrap_or_default(),
-            );
+        if let Some(replacement) = replacement_agent_url(&pages, &current) {
+            selected_agent_url.set(replacement);
         }
     });
 

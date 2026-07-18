@@ -141,6 +141,21 @@ pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
         .collect()
 }
 
+pub fn replacement_agent_url(pages: &[CommandBarPage], current: &str) -> Option<String> {
+    if pages
+        .iter()
+        .any(|page| page.host == "agent" && page.url == current)
+    {
+        return None;
+    }
+    let replacement = pages
+        .iter()
+        .find(|page| page.host == "agent")
+        .map(|page| page.url.clone())
+        .unwrap_or_default();
+    (replacement != current).then_some(replacement)
+}
+
 fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
     dirs.iter()
         .filter(|d| search_lower.is_empty() || d.path.to_lowercase().contains(search_lower))
@@ -653,6 +668,22 @@ mod tests {
             .collect();
 
         assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://agent/codex/cli"]);
+    }
+
+    #[test]
+    fn empty_agent_pages_do_not_replace_empty_selection() {
+        assert_eq!(replacement_agent_url(&sample_pages()[..1], ""), None);
+    }
+
+    #[test]
+    fn agent_selection_only_changes_when_missing() {
+        let pages = sample_pages();
+
+        assert_eq!(replacement_agent_url(&pages, "vmux://agent/vibe/"), None);
+        assert_eq!(
+            replacement_agent_url(&pages, "vmux://agent/missing/"),
+            Some("vmux://agent/vibe/".to_string())
+        );
     }
 
     #[test]
