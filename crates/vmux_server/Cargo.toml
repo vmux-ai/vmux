@@ -14,6 +14,7 @@ web = [
     "dep:vmux_agent",
     "dep:vmux_editor",
     "dep:vmux_history",
+    "dep:vmux_knowledge",
     "dep:vmux_layout",
     "dep:vmux_service",
     "dep:vmux_setting",
@@ -42,6 +43,7 @@ dioxus = { workspace = true, optional = true }
 vmux_agent = { path = "../vmux_agent", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_history = { path = "../vmux_history", optional = true }
+vmux_knowledge = { path = "../vmux_knowledge", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }
 vmux_service = { path = "../vmux_service", optional = true }
 vmux_setting = { path = "../vmux_setting", optional = true }

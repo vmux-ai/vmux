@@ -49,6 +49,7 @@ web_pages! {
     render_terminal: "terminal" => vmux_terminal::page::Page,
     render_services: "services" => vmux_service::page::Page,
     render_history: "history" => vmux_history::page::Page,
+    render_notes: "notes" => vmux_knowledge::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
     render_team: "team" => vmux_team::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,

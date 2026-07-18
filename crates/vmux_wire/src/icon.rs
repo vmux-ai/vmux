@@ -34,6 +34,7 @@ pub enum BuiltinIcon {
     Nushell,
     Bash,
     Zsh,
+    BookOpen,
 }
 
 impl BuiltinIcon {
