@@ -126,11 +126,12 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
-/// Installed agent launcher rows in recent-first input order.
-pub fn agent_page_results(pages: &[CommandBarPage]) -> Vec<CommandBarResultItem> {
+/// Installed agent launcher rows in recent-first input order, filtered by query.
+pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
+    let search_lower = query.trim().to_lowercase();
     pages
         .iter()
-        .filter(|page| page.host == "agent")
+        .filter(|page| page.host == "agent" && page_matches(page, &search_lower))
         .map(|page| CommandBarResultItem::Page {
             url: page.url.clone(),
             title: page.title.clone(),
@@ -649,7 +650,7 @@ mod tests {
             shortcut: String::new(),
         });
 
-        let results = agent_page_results(&pages);
+        let results = agent_page_results(&pages, "");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -662,8 +663,29 @@ mod tests {
     }
 
     #[test]
+    fn start_agent_pages_filter_by_query() {
+        let mut pages = sample_pages();
+        pages.push(CommandBarPage {
+            host: "agent".into(),
+            url: "vmux://agent/codex/cli".into(),
+            title: "Codex (CLI)".into(),
+            keywords: vec!["codex".into(), "agent".into()],
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        });
+
+        let results = agent_page_results(&pages, "vibe");
+
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            &results[0],
+            CommandBarResultItem::Page { url, .. } if url == "vmux://agent/vibe/"
+        ));
+    }
+
+    #[test]
     fn prompt_agent_url_only_accepts_agent_page_rows() {
-        let agent = agent_page_results(&sample_pages()).remove(0);
+        let agent = agent_page_results(&sample_pages(), "").remove(0);
         let settings = CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),

@@ -172,7 +172,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
     } else if start_agent_mode {
-        agent_page_results(&pages)
+        agent_page_results(&pages, &q)
     } else {
         let history = history_suggestions();
         let r = filter_results(
