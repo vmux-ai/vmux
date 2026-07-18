@@ -21,6 +21,18 @@ pub(crate) enum MenuDirection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PromptHistoryDirection {
+    Older,
+    Newer,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InlineMediaQuery<'a> {
+    pub start: usize,
+    pub query: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PromptEdit<'a> {
     Insert(&'a str),
     Backspace,
@@ -69,6 +81,30 @@ pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     } else {
         SelectorMode::Commands(token)
     }
+}
+
+pub(crate) fn inline_media_query(draft: &str) -> Option<InlineMediaQuery<'_>> {
+    draft.rmatch_indices('@').find_map(|(start, _)| {
+        let boundary = start == 0
+            || draft[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let query = &draft[start + 1..];
+        (boundary && !query.chars().any(char::is_whitespace))
+            .then_some(InlineMediaQuery { start, query })
+    })
+}
+
+pub(crate) fn replace_inline_media_query(
+    draft: &str,
+    query: InlineMediaQuery<'_>,
+    replacement: &str,
+) -> String {
+    let mut value = String::with_capacity(draft.len() + replacement.len());
+    value.push_str(&draft[..query.start]);
+    value.push_str(replacement);
+    value
 }
 
 pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -> bool {
@@ -161,6 +197,59 @@ pub(crate) fn move_selection(current: usize, len: usize, direction: MenuDirectio
     }
 }
 
+pub(crate) fn prompt_history_direction(
+    key: &str,
+    ctrl: bool,
+    value: &str,
+    selection_start: u32,
+    selection_end: u32,
+) -> Option<PromptHistoryDirection> {
+    if selection_start != selection_end {
+        return None;
+    }
+    if ctrl {
+        return match key {
+            "n" | "N" => Some(PromptHistoryDirection::Newer),
+            "p" | "P" => Some(PromptHistoryDirection::Older),
+            _ => None,
+        };
+    }
+    let caret = utf16_to_byte(value, selection_start);
+    match key {
+        "ArrowUp" if !value[..caret].contains('\n') => Some(PromptHistoryDirection::Older),
+        "ArrowDown" if !value[caret..].contains('\n') => Some(PromptHistoryDirection::Newer),
+        _ => None,
+    }
+}
+
+pub(crate) fn move_prompt_history(
+    history: &[String],
+    cursor: Option<usize>,
+    scratch: &str,
+    current: &str,
+    direction: PromptHistoryDirection,
+) -> (String, Option<usize>, String) {
+    if history.is_empty() {
+        return (current.to_string(), cursor, scratch.to_string());
+    }
+    match direction {
+        PromptHistoryDirection::Older => {
+            let next = cursor.map_or(history.len() - 1, |index| index.saturating_sub(1));
+            let scratch = if cursor.is_none() { current } else { scratch };
+            (history[next].clone(), Some(next), scratch.to_string())
+        }
+        PromptHistoryDirection::Newer => match cursor {
+            Some(index) if index + 1 < history.len() => (
+                history[index + 1].clone(),
+                Some(index + 1),
+                scratch.to_string(),
+            ),
+            Some(_) => (scratch.to_string(), None, scratch.to_string()),
+            None => (current.to_string(), None, scratch.to_string()),
+        },
+    }
+}
+
 pub(crate) fn is_handoff_boundary(message_index: usize, imported_message_count: u32) -> bool {
     imported_message_count != 0 && message_index + 1 == imported_message_count as usize
 }
@@ -177,7 +266,7 @@ pub(crate) fn chat_page_title(items: &[ChatItem], status: &str, agent_name: &str
     let topic = items
         .iter()
         .filter_map(|item| match item {
-            ChatItem::User { text } => Some(text.as_str()),
+            ChatItem::User { text, .. } => Some(text.as_str()),
             ChatItem::Turn(_) => None,
         })
         .map(normalize_chat_page_title)
@@ -406,6 +495,40 @@ mod tests {
     }
 
     #[test]
+    fn inline_media_query_requires_a_token_boundary_and_open_tail() {
+        assert_eq!(
+            inline_media_query("inspect @Pictures/scr"),
+            Some(InlineMediaQuery {
+                start: 8,
+                query: "Pictures/scr",
+            })
+        );
+        assert_eq!(
+            inline_media_query("@"),
+            Some(InlineMediaQuery {
+                start: 0,
+                query: "",
+            })
+        );
+        assert_eq!(inline_media_query("mail@example.com"), None);
+        assert_eq!(inline_media_query("inspect @image.png next"), None);
+    }
+
+    #[test]
+    fn inline_media_replacement_preserves_prompt_prefix() {
+        let draft = "compare this @Pic";
+        let query = inline_media_query(draft).unwrap();
+        assert_eq!(
+            replace_inline_media_query(draft, query, "@Pictures/photo.png "),
+            "compare this @Pictures/photo.png "
+        );
+        assert_eq!(
+            replace_inline_media_query(draft, query, ""),
+            "compare this "
+        );
+    }
+
+    #[test]
     fn models_filter_by_name_id_and_description() {
         let models = vec![
             ModelOptionEntry {
@@ -489,6 +612,73 @@ mod tests {
     }
 
     #[test]
+    fn prompt_history_uses_arrows_at_text_boundaries_and_ctrl_np_anywhere() {
+        assert_eq!(
+            prompt_history_direction("ArrowUp", false, "first\nsecond", 2, 2),
+            Some(PromptHistoryDirection::Older)
+        );
+        assert_eq!(
+            prompt_history_direction("ArrowUp", false, "first\nsecond", 8, 8),
+            None
+        );
+        assert_eq!(
+            prompt_history_direction("ArrowDown", false, "first\nsecond", 8, 8),
+            Some(PromptHistoryDirection::Newer)
+        );
+        assert_eq!(
+            prompt_history_direction("p", true, "first\nsecond", 8, 8),
+            Some(PromptHistoryDirection::Older)
+        );
+        assert_eq!(
+            prompt_history_direction("n", true, "first\nsecond", 2, 4),
+            None
+        );
+    }
+
+    #[test]
+    fn prompt_history_restores_unsent_scratch_after_newest_entry() {
+        let history = vec!["first".to_string(), "second".to_string()];
+        let (value, cursor, scratch) = move_prompt_history(
+            &history,
+            None,
+            "",
+            "unfinished",
+            PromptHistoryDirection::Older,
+        );
+        assert_eq!(
+            (value.as_str(), cursor, scratch.as_str()),
+            ("second", Some(1), "unfinished")
+        );
+
+        let (value, cursor, scratch) = move_prompt_history(
+            &history,
+            cursor,
+            &scratch,
+            &value,
+            PromptHistoryDirection::Older,
+        );
+        assert_eq!((value.as_str(), cursor), ("first", Some(0)));
+
+        let (value, cursor, scratch) = move_prompt_history(
+            &history,
+            cursor,
+            &scratch,
+            &value,
+            PromptHistoryDirection::Newer,
+        );
+        assert_eq!((value.as_str(), cursor), ("second", Some(1)));
+
+        let (value, cursor, _) = move_prompt_history(
+            &history,
+            cursor,
+            &scratch,
+            &value,
+            PromptHistoryDirection::Newer,
+        );
+        assert_eq!((value.as_str(), cursor), ("unfinished", None));
+    }
+
+    #[test]
     fn escape_clears_only_idle_unqueued_draft() {
         assert!(should_clear_draft_on_escape(false, true, false));
         assert!(!should_clear_draft_on_escape(true, true, false));
@@ -499,16 +689,12 @@ mod tests {
     #[test]
     fn chat_page_title_uses_first_prompt_as_stable_topic() {
         let items = vec![
-            ChatItem::User {
-                text: "  Fix the\ndynamic   agent page title  ".into(),
-            },
+            ChatItem::user("  Fix the\ndynamic   agent page title  "),
             ChatItem::Turn(ChatTurn {
                 running: true,
                 ..Default::default()
             }),
-            ChatItem::User {
-                text: "continue".into(),
-            },
+            ChatItem::user("continue"),
         ];
 
         assert_eq!(
@@ -526,9 +712,7 @@ mod tests {
         fn title(block: ChatBlock) -> String {
             chat_page_title(
                 &[
-                    ChatItem::User {
-                        text: "Ship dynamic titles".into(),
-                    },
+                    ChatItem::user("Ship dynamic titles"),
                     ChatItem::Turn(ChatTurn {
                         blocks: vec![block],
                         running: true,
@@ -590,31 +774,21 @@ mod tests {
     fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
         assert_eq!(chat_page_title(&[], "idle", "Codex"), "Codex");
 
-        let items = vec![ChatItem::User {
-            text: "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
-        }];
+        let items = vec![ChatItem::user(
+            "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
+        )];
         let title = chat_page_title(&items, "idle", "Codex");
         assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
         assert!(title.ends_with('…'));
         assert_eq!(
-            chat_page_title(
-                &[ChatItem::User {
-                    text: "Fix \u{202E}\x1b title".into(),
-                }],
-                "idle",
-                "Codex"
-            ),
+            chat_page_title(&[ChatItem::user("Fix \u{202E}\x1b title")], "idle", "Codex"),
             "Fix title"
         );
         assert_eq!(
             chat_page_title(
                 &[
-                    ChatItem::User {
-                        text: "\u{202E}".into(),
-                    },
-                    ChatItem::User {
-                        text: "Keep 👩‍💻 and فارسی\u{200C}".into(),
-                    },
+                    ChatItem::user("\u{202E}"),
+                    ChatItem::user("Keep 👩‍💻 and فارسی\u{200C}"),
                 ],
                 "errored",
                 "Codex"

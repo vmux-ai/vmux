@@ -791,9 +791,10 @@ fn send_acp_input(
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
-        let Some(text) = queue.take_next() else {
+        let Some(prompt) = queue.take_next() else {
             continue;
         };
+        let text = prompt.text;
         let context = pending
             .as_deref_mut()
             .and_then(PendingHandoff::context_for_send);
@@ -803,11 +804,12 @@ fn send_acp_input(
         {
             imported.first_prompt = Some(text.clone());
         }
-        service.0.send(ClientMessage::AgentInput {
-            sid: session.sid.clone(),
+        service.0.send(ClientMessage::agent_input(
+            session.sid.clone(),
             text,
             context,
-        });
+            prompt.attachments,
+        ));
         *state = AgentRunState::Streaming;
     }
 }

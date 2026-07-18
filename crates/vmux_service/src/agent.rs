@@ -5,7 +5,9 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::agent_broker::AgentBroker;
 use crate::message::{AssistantBlock, Message};
-use crate::protocol::{AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage};
+use crate::protocol::{
+    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
+};
 use crate::providers::{anthropic, mistral, openai};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 
@@ -37,7 +39,10 @@ pub fn resolve_provider(provider: &str) -> Option<PageProvider> {
 }
 
 pub enum SessionInput {
-    User(String),
+    User {
+        text: String,
+        attachments: Vec<AgentAttachment>,
+    },
     Approve {
         call_id: String,
         decision: ApprovalDecision,
@@ -169,10 +174,12 @@ enum Decision {
     Closed,
 }
 
-async fn recv_user(input_rx: &mut mpsc::UnboundedReceiver<SessionInput>) -> Option<String> {
+async fn recv_user(
+    input_rx: &mut mpsc::UnboundedReceiver<SessionInput>,
+) -> Option<(String, Vec<AgentAttachment>)> {
     loop {
         match input_rx.recv().await {
-            Some(SessionInput::User(text)) => return Some(text),
+            Some(SessionInput::User { text, attachments }) => return Some((text, attachments)),
             Some(SessionInput::Approve { .. }) | Some(SessionInput::Cancel) => continue,
             Some(SessionInput::Close) | None => return None,
         }
@@ -195,7 +202,7 @@ async fn await_decision(
                 };
             }
             Some(SessionInput::Cancel) => return Decision::Cancelled,
-            Some(SessionInput::Approve { .. }) | Some(SessionInput::User(_)) => continue,
+            Some(SessionInput::Approve { .. }) | Some(SessionInput::User { .. }) => continue,
             Some(SessionInput::Close) | None => return Decision::Closed,
         }
     }
@@ -220,10 +227,13 @@ async fn run_session(
     };
 
     loop {
-        let Some(text) = recv_user(&mut input_rx).await else {
+        let Some((text, attachments)) = recv_user(&mut input_rx).await else {
             return;
         };
-        messages.lock().await.push(Message::User { text });
+        messages
+            .lock()
+            .await
+            .push(Message::user_with_attachments(text, attachments));
 
         let Some(key) = api_key.as_deref() else {
             let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
@@ -263,7 +273,7 @@ async fn run_session(
                                 http.abort();
                                 return;
                             }
-                            Some(SessionInput::User(_)) | Some(SessionInput::Approve { .. }) => {}
+                            Some(SessionInput::User { .. }) | Some(SessionInput::Approve { .. }) => {}
                         }
                     }
                     event = ev_rx.recv() => {

@@ -23,6 +23,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+base64 = "0.22"
 bevy = { workspace = true }
 bevy_ecs = { workspace = true }
 libc = "0.2"
@@ -44,6 +45,7 @@ vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 tempfile = "3.27.0"
+url = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }

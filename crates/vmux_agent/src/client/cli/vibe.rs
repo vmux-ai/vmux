@@ -384,7 +384,7 @@ pub(crate) fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<
             continue;
         };
         match value.get("role").and_then(|v| v.as_str()) {
-            Some("user") => messages.push(Message::User { text }),
+            Some("user") => messages.push(Message::user(text)),
             Some("assistant") => messages.push(Message::Assistant {
                 blocks: vec![AssistantBlock::Text(text)],
             }),
@@ -802,9 +802,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "fix auth".into()
-                },
+                Message::user("fix auth"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
                 }
@@ -833,9 +831,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "before".into()
-                },
+                Message::user("before"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("after".into())]
                 }

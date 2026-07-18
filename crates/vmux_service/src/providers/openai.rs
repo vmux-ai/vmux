@@ -42,7 +42,7 @@ fn messages_to_responses_input(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for msg in messages {
         match msg {
-            Message::User { text } => out.push(json!({
+            Message::User { text, .. } => out.push(json!({
                 "type":"message","role":"user","content":[{"type":"input_text","text":text}]
             })),
             Message::Assistant { blocks } => {
@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn build_request_uses_responses_endpoint_and_bearer_auth() {
-        let msgs = vec![Message::User { text: "hi".into() }];
+        let msgs = vec![Message::user("hi")];
         let req = build_request("gpt-5", &msgs, &[], "test-key");
         assert_eq!(req.url().as_str(), ENDPOINT);
         assert_eq!(

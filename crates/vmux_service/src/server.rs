@@ -1,5 +1,7 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
-use crate::protocol::{ClientMessage, ProcessId, ServiceMessage, validate_agent_command};
+use crate::protocol::{
+    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, validate_agent_command,
+};
 use crate::{read_message, write_message};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,6 +36,54 @@ type PendingCommands = Arc<
         >,
     >,
 >;
+
+fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
+    if attachments.is_empty() {
+        return text;
+    }
+    let mut prompt = text;
+    if !prompt.is_empty() {
+        prompt.push_str("\n\n");
+    }
+    prompt.push_str("Attached files:\n");
+    for attachment in attachments {
+        prompt.push_str("- ");
+        prompt.push_str(&attachment.path);
+        prompt.push('\n');
+    }
+    prompt.pop();
+    prompt
+}
+
+async fn route_agent_input(
+    acp_manager: &Arc<Mutex<crate::acp::AcpSessionManager>>,
+    agent_manager: &Arc<Mutex<crate::agent::AgentSessionManager>>,
+    sid: String,
+    text: String,
+    context: Option<String>,
+    attachments: Vec<AgentAttachment>,
+) {
+    let acp = acp_manager.lock().await;
+    if acp.contains(&sid) {
+        acp.input(
+            &sid,
+            crate::acp::AcpInput::User {
+                text,
+                context,
+                attachments,
+            },
+        );
+        return;
+    }
+    drop(acp);
+    agent_manager.lock().await.input(
+        &sid,
+        crate::agent::SessionInput::User {
+            text: page_agent_prompt(text, &attachments),
+            attachments,
+        },
+    );
+}
 
 /// Acquire the manager lock and run `f` against the process if it exists.
 /// Returns Some(result) when the process was found, None otherwise.
@@ -777,17 +827,25 @@ async fn handle_client(
             }
 
             ClientMessage::AgentInput { sid, text, context } => {
-                if acp_manager.lock().await.contains(&sid) {
-                    acp_manager
-                        .lock()
-                        .await
-                        .input(&sid, crate::acp::AcpInput::User { text, context });
-                } else {
-                    agent_manager
-                        .lock()
-                        .await
-                        .input(&sid, crate::agent::SessionInput::User(text));
-                }
+                route_agent_input(&acp_manager, &agent_manager, sid, text, context, Vec::new())
+                    .await;
+            }
+
+            ClientMessage::AgentInputWithAttachments {
+                sid,
+                text,
+                context,
+                attachments,
+            } => {
+                route_agent_input(
+                    &acp_manager,
+                    &agent_manager,
+                    sid,
+                    text,
+                    context,
+                    attachments,
+                )
+                .await;
             }
 
             ClientMessage::AcpSetModel {
@@ -967,6 +1025,20 @@ mod tests {
     use super::*;
     use crate::protocol::{AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId};
     use tokio::sync::oneshot;
+
+    #[test]
+    fn page_agent_prompt_appends_attachment_paths() {
+        let attachments = vec![AgentAttachment {
+            path: "/tmp/report.txt".into(),
+            name: "report.txt".into(),
+            mime_type: "text/plain".into(),
+            size: 12,
+        }];
+        assert_eq!(
+            page_agent_prompt("review".into(), &attachments),
+            "review\n\nAttached files:\n- /tmp/report.txt"
+        );
+    }
 
     #[test]
     fn acp_spawn_replays_agent_info_after_subscribing() {

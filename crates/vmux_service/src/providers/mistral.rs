@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn build_request_sets_headers_and_url() {
-        let msgs = vec![Message::User { text: "hi".into() }];
+        let msgs = vec![Message::user("hi")];
         let req = build_request("devstral-2", &msgs, &[], "test-key");
         assert_eq!(req.url().as_str(), ENDPOINT);
         let auth = req

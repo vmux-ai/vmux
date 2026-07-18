@@ -334,9 +334,7 @@ pub(crate) fn load_codex_transcript(root: &Path, session_id: &str) -> Result<Vec
             continue;
         };
         match payload.get("type").and_then(|v| v.as_str()) {
-            Some("user_message") => messages.push(Message::User {
-                text: text.to_string(),
-            }),
+            Some("user_message") => messages.push(Message::user(text)),
             Some("agent_message") => messages.push(Message::Assistant {
                 blocks: vec![AssistantBlock::Text(text.to_string())],
             }),
@@ -611,9 +609,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "fix auth".into()
-                },
+                Message::user("fix auth"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("working".into())]
                 }
@@ -646,9 +642,7 @@ mod tests {
         assert_eq!(
             messages,
             vec![
-                Message::User {
-                    text: "before".into()
-                },
+                Message::user("before"),
                 Message::Assistant {
                     blocks: vec![AssistantBlock::Text("after".into())]
                 }

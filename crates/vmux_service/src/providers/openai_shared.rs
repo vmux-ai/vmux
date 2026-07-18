@@ -93,7 +93,7 @@ pub fn messages_to_chat_completions(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for msg in messages {
         match msg {
-            Message::User { text } => out.push(json!({"role":"user","content":text})),
+            Message::User { text, .. } => out.push(json!({"role":"user","content":text})),
             Message::Assistant { blocks } => {
                 let mut content = String::new();
                 let mut tool_calls = Vec::new();
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn messages_to_chat_completions_roundtrip() {
         let msgs = vec![
-            Message::User { text: "hi".into() },
+            Message::user("hi"),
             Message::Assistant {
                 blocks: vec![AssistantBlock::Text("hello".into())],
             },

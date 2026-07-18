@@ -43,7 +43,7 @@ fn messages_to_anthropic_blocks(messages: &[Message]) -> Vec<Value> {
     let mut out = Vec::new();
     for msg in messages {
         match msg {
-            Message::User { text } => out.push(json!({
+            Message::User { text, .. } => out.push(json!({
                 "role":"user",
                 "content":[{"type":"text","text":text}]
             })),
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn build_request_sets_x_api_key_and_version_header() {
-        let msgs = vec![Message::User { text: "hi".into() }];
+        let msgs = vec![Message::user("hi")];
         let req = build_request("claude-sonnet-4-6", &msgs, &[], "test-key");
         assert_eq!(req.url().as_str(), ENDPOINT);
         assert_eq!(req.headers().get("x-api-key").unwrap(), "test-key");

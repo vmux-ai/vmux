@@ -4,6 +4,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::message::{AssistantBlock, Message, PlanStep};
+use crate::protocol::AgentAttachment;
 use agent_client_protocol::schema::v1::{
     ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
@@ -158,8 +159,9 @@ impl AcpProjector {
     /// Record the user's prompt as its own turn. ACP never echoes the prompt back as a
     /// `session/update`, so without this the transcript the chat renders would omit it and
     /// the optimistic user bubble would vanish on the next snapshot.
-    pub fn push_user(&mut self, text: String) {
-        self.messages.push(Message::User { text });
+    pub fn push_user(&mut self, text: String, attachments: Vec<AgentAttachment>) {
+        self.messages
+            .push(Message::user_with_attachments(text, attachments));
     }
 
     /// Feed one update; returns the side effects the driver should emit.
@@ -200,8 +202,8 @@ impl AcpProjector {
         };
         let text = text.text;
         match self.messages.last_mut() {
-            Some(Message::User { text: existing }) => existing.push_str(&text),
-            _ => self.messages.push(Message::User { text }),
+            Some(Message::User { text: existing, .. }) => existing.push_str(&text),
+            _ => self.messages.push(Message::user(text)),
         }
         vec![Intent::Snapshot]
     }
@@ -570,13 +572,20 @@ mod tests {
     #[test]
     fn push_user_records_a_turn_before_following_assistant_text() {
         let mut p = AcpProjector::new();
-        p.push_user("hi".to_string());
+        let attachment = AgentAttachment {
+            path: "/tmp/image.png".into(),
+            name: "image.png".into(),
+            mime_type: "image/png".into(),
+            size: 3,
+        };
+        p.push_user("hi".to_string(), vec![attachment.clone()]);
         p.apply(chunk("hello"));
         assert_eq!(p.messages().len(), 2);
         assert_eq!(
             p.messages()[0],
             Message::User {
-                text: "hi".to_string()
+                text: "hi".to_string(),
+                attachments: vec![attachment],
             }
         );
         assert_eq!(

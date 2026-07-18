@@ -4,6 +4,102 @@
 
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
+/// Bin-event id: native → page files selected from disk or the clipboard.
+pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
+/// Bin-event id: native → page previews for media already present in the transcript.
+pub const CHAT_ATTACHMENT_PREVIEWS_EVENT: &str = "chat_attachment_previews";
+/// Bin-event id: native → page media entries matching an inline `@` query.
+pub const CHAT_MEDIA_ENTRIES_EVENT: &str = "chat_media_entries";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachment {
+    pub path: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub preview_data_url: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatSubmitAttachment {
+    pub path: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size: u64,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachments {
+    pub attachments: Vec<ChatAttachment>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaEntry {
+    pub path: String,
+    pub name: String,
+    pub parent: String,
+    pub mime_type: String,
+    pub is_dir: bool,
+    pub preview_data_url: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaEntries {
+    pub request_id: u64,
+    pub query: String,
+    pub entries: Vec<ChatMediaEntry>,
+}
 
 #[derive(
     Clone,
@@ -18,6 +114,7 @@ pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 pub struct QueuedPromptSnapshot {
     pub id: u64,
     pub text: String,
+    pub attachment_names: Vec<String>,
 }
 
 /// Native → page: the full conversation plus run-state, pushed on every change.
@@ -71,6 +168,79 @@ pub struct ChatSnapshot {
 )]
 pub struct ChatSubmit {
     pub text: String,
+    pub attachments: Vec<ChatSubmitAttachment>,
+}
+
+/// Page → native: open a multi-select file picker rooted at the user's home directory.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatPickFiles;
+
+/// Page → native: attach image media from the system clipboard, if present.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatPasteMedia;
+
+/// Page → native: list media and directories for an inline `@` query.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatMediaListRequest {
+    pub request_id: u64,
+    pub query: String,
+}
+
+/// Page → native: attach paths selected from the inline `@` menu.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachPaths {
+    pub paths: Vec<String>,
+}
+
+/// Page → native: load previews for media already present in the transcript.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAttachmentPreviewRequest {
+    pub paths: Vec<String>,
 }
 
 /// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
@@ -371,8 +541,21 @@ pub struct ChatPlanStep {
 /// `group_turns`, carried as JSON in [`ChatSnapshot::messages_json`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ChatItem {
-    User { text: String },
+    User {
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<ChatSubmitAttachment>,
+    },
     Turn(ChatTurn),
+}
+
+impl ChatItem {
+    pub fn user(text: impl Into<String>) -> Self {
+        Self::User {
+            text: text.into(),
+            attachments: Vec::new(),
+        }
+    }
 }
 
 /// One assistant turn: its ordered prose/activity timeline and run-state.
@@ -478,10 +661,12 @@ mod tests {
                 QueuedPromptSnapshot {
                     id: 4,
                     text: "a".into(),
+                    attachment_names: vec!["image.png".into()],
                 },
                 QueuedPromptSnapshot {
                     id: 9,
                     text: "b".into(),
+                    attachment_names: Vec::new(),
                 },
             ],
             paused: true,
@@ -502,9 +687,42 @@ mod tests {
     }
 
     #[test]
+    fn chat_media_entries_rkyv_roundtrip() {
+        let value = ChatMediaEntries {
+            request_id: 7,
+            query: "Pictures/scr".into(),
+            entries: vec![ChatMediaEntry {
+                path: "/Users/me/Pictures/screenshot.png".into(),
+                name: "screenshot.png".into(),
+                parent: "~/Pictures".into(),
+                mime_type: "image/png".into(),
+                is_dir: false,
+                preview_data_url: "data:image/png;base64,cG5n".into(),
+            }],
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
+        let back = rkyv::from_bytes::<ChatMediaEntries, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.request_id, 7);
+        assert_eq!(back.entries[0].name, "screenshot.png");
+        assert!(
+            back.entries[0]
+                .preview_data_url
+                .starts_with("data:image/png")
+        );
+    }
+
+    #[test]
     fn chat_item_turn_roundtrip() {
         let items = vec![
-            ChatItem::User { text: "hi".into() },
+            ChatItem::User {
+                text: "hi".into(),
+                attachments: vec![ChatSubmitAttachment {
+                    path: "/tmp/image.png".into(),
+                    name: "image.png".into(),
+                    mime_type: "image/png".into(),
+                    size: 3,
+                }],
+            },
             ChatItem::Turn(ChatTurn {
                 blocks: vec![
                     ChatBlock::Thinking("hmm".into()),
@@ -523,6 +741,11 @@ mod tests {
         let json = serde_json::to_string(&items).unwrap();
         let back: Vec<ChatItem> = serde_json::from_str(&json).unwrap();
         assert_eq!(back.len(), 2);
+        assert!(matches!(
+            &back[0],
+            ChatItem::User { attachments, .. }
+                if attachments.first().is_some_and(|attachment| attachment.name == "image.png")
+        ));
         let ChatItem::Turn(turn) = &back[1] else {
             panic!("expected turn")
         };
