@@ -20,7 +20,10 @@ pub fn resolve_acp(
 }
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
-    !matches!(agent_id, "claude" | "codex" | "mistral-vibe" | "vibe")
+    !matches!(
+        crate::acp_install::registry_id_alias(agent_id),
+        "claude-acp" | "codex-acp" | "mistral-vibe"
+    )
 }
 
 fn resolve_inner(
@@ -139,7 +142,9 @@ mod tests {
     #[test]
     fn compatibility_acp_agents_keep_vmux_terminal_tools() {
         assert!(!acp_uses_native_terminals("codex"));
+        assert!(!acp_uses_native_terminals("codex-acp"));
         assert!(!acp_uses_native_terminals("claude"));
+        assert!(!acp_uses_native_terminals("claude-acp"));
         assert!(!acp_uses_native_terminals("mistral-vibe"));
         assert!(!acp_uses_native_terminals("vibe"));
         assert!(acp_uses_native_terminals("vibe-acp"));

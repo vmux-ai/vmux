@@ -438,9 +438,9 @@ fn apply_agent_compatibility_env(
     agent_id: &str,
     env: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
-    match agent_id {
-        "mistral-vibe" | "vibe" => apply_vibe_compatibility_env(env),
-        "codex" => apply_codex_compatibility_env(env),
+    match crate::acp_install::registry_id_alias(agent_id) {
+        "mistral-vibe" => apply_vibe_compatibility_env(env),
+        "codex-acp" => apply_codex_compatibility_env(env),
         _ => env,
     }
 }
@@ -1195,26 +1195,28 @@ mod tests {
 
     #[test]
     fn codex_acp_routes_shell_commands_through_vmux_run() {
-        let env = apply_agent_compatibility_env("codex", Vec::new());
-        let config = env
-            .iter()
-            .find(|(key, _)| key == "CODEX_CONFIG")
-            .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
-            .expect("codex ACP compatibility config");
+        for agent_id in ["codex", "codex-acp"] {
+            let env = apply_agent_compatibility_env(agent_id, Vec::new());
+            let config = env
+                .iter()
+                .find(|(key, _)| key == "CODEX_CONFIG")
+                .map(|(_, value)| serde_json::from_str::<serde_json::Value>(value).unwrap())
+                .expect("codex ACP compatibility config");
 
-        assert_eq!(config["features"]["shell_tool"], false);
-        assert_eq!(config["features"]["unified_exec"], false);
-        assert_eq!(config["tools"]["web_search"], false);
-        assert_eq!(
-            config["features"]["code_mode"]["direct_only_tool_namespaces"],
-            serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
-        );
-        assert!(
-            config["developer_instructions"]
-                .as_str()
-                .unwrap()
-                .contains("mcp__vmux__run")
-        );
+            assert_eq!(config["features"]["shell_tool"], false);
+            assert_eq!(config["features"]["unified_exec"], false);
+            assert_eq!(config["tools"]["web_search"], false);
+            assert_eq!(
+                config["features"]["code_mode"]["direct_only_tool_namespaces"],
+                serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
+            );
+            assert!(
+                config["developer_instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("mcp__vmux__run")
+            );
+        }
     }
 
     #[test]

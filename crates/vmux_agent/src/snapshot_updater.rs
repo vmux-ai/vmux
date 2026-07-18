@@ -4,7 +4,7 @@ use vmux_command::snapshot::{
 };
 
 use vmux_core::agent::AgentProviderTargetKind;
-use vmux_core::{LastActivatedAt, Ready};
+use vmux_core::{ArchivedPage, LastActivatedAt, Ready};
 
 use crate::client::page::strategy_index::PageStrategyIndex;
 
@@ -107,13 +107,14 @@ pub(crate) fn update_recent_agents(
     )>,
     cli_sessions: Query<(Entity, &vmux_core::agent::AgentSession, &ChildOf)>,
     stack_times: Query<&LastActivatedAt>,
+    archived_pages: Query<(Entity, &ArchivedPage)>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
+    mut remembered: Local<std::collections::HashMap<AgentPromptTarget, (i64, u64)>>,
 ) {
-    let mut newest = std::collections::HashMap::<AgentPromptTarget, (i64, u64)>::new();
     let mut consider = |entity: Entity, timestamp: i64, target: AgentPromptTarget| {
         let key = (timestamp, entity.to_bits());
-        if newest.get(&target).is_none_or(|current| key > *current) {
-            newest.insert(target, key);
+        if remembered.get(&target).is_none_or(|current| key > *current) {
+            remembered.insert(target, key);
         }
     };
 
@@ -136,10 +137,23 @@ pub(crate) fn update_recent_agents(
             AgentPromptTarget::Cli(session.kind),
         );
     }
+    for (entity, page) in &archived_pages {
+        let target = match crate::url::AgentUrl::parse(&page.url) {
+            Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
+            Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
+                id: crate::acp_install::registry_id_alias(&id).to_string(),
+            },
+            _ => continue,
+        };
+        consider(entity, page.closed_at, target);
+    }
 
-    let mut recent: Vec<(AgentPromptTarget, (i64, u64))> = newest.into_iter().collect();
-    recent.sort_by_key(|(_, key)| std::cmp::Reverse(*key));
-    let recent = recent.into_iter().map(|(target, _)| target).collect();
+    let mut recent: Vec<_> = remembered.iter().collect();
+    recent.sort_by_key(|(_, key)| std::cmp::Reverse(**key));
+    let recent = recent
+        .into_iter()
+        .map(|(target, _)| target.clone())
+        .collect();
     if snapshot.recent != recent {
         snapshot.recent = recent;
     }
@@ -287,6 +301,56 @@ mod tests {
                     id: "claude-acp".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
+            ]
+        );
+
+        let mut q = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::client::acp::AcpSession>>();
+        let acp_sessions: Vec<_> = q.iter(app.world()).collect();
+        for session in acp_sessions {
+            app.world_mut().despawn(session);
+        }
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CommandBarAgentsSnapshot>().recent,
+            vec![
+                AgentPromptTarget::Acp {
+                    id: "claude-acp".to_string(),
+                },
+                AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
+            ]
+        );
+    }
+
+    #[test]
+    fn closed_codex_acp_stays_ahead_of_older_claude_cli() {
+        let mut app = App::new();
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .add_systems(Update, update_recent_agents);
+        let cli_stack = app.world_mut().spawn(LastActivatedAt(20)).id();
+        app.world_mut().spawn((
+            vmux_core::agent::AgentSession {
+                kind: vmux_core::agent::AgentKind::Claude,
+            },
+            ChildOf(cli_stack),
+        ));
+        app.world_mut().spawn(ArchivedPage {
+            url: "vmux://agent/codex-acp/session-1".to_string(),
+            closed_at: 30,
+            ..default()
+        });
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CommandBarAgentsSnapshot>().recent,
+            vec![
+                AgentPromptTarget::Acp {
+                    id: "codex-acp".to_string(),
+                },
+                AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Claude),
             ]
         );
     }

@@ -13,7 +13,7 @@ pub struct CommandBarAgentsSnapshot {
     pub strategies: Vec<AgentStrategySummary>,
     /// Installed registry ACP agents and their single-segment launch URLs.
     pub acp: Vec<AgentProviderSummary>,
-    /// Installed ACP and CLI agents with open sessions, most recently used first.
+    /// Installed ACP and CLI agents, most recently used first.
     pub recent: Vec<AgentPromptTarget>,
 }
 
