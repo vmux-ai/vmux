@@ -290,18 +290,18 @@ mod tests {
     fn start_enter_emits_prompt_action() {
         let source = include_str!("palette.rs");
 
-        assert!(source.contains("should_submit_start_prompt("));
+        assert!(source.contains("is_start_prompt_query("));
         assert!(source.contains("emit_prompt_action("));
         assert!(source.contains("agent_url: (!agent_url.is_empty())"));
     }
 
     #[test]
-    fn start_shows_agent_selector() {
+    fn start_shows_agents_as_result_rows() {
         let source = include_str!("palette.rs");
 
-        assert!(source.contains("id: \"start-agent-select\""));
-        assert!(source.contains("aria_label: \"Prompt agent\""));
-        assert!(source.contains("page.host == \"agent\""));
+        assert!(source.contains("agent_page_results(&pages)"));
+        assert!(source.contains("agent_page_url(item)"));
+        assert!(!source.contains("start-agent-select"));
     }
 
     #[test]

@@ -126,12 +126,11 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
         .collect()
 }
 
-/// Installed agent launcher rows in input order, filtered by the start-page query.
-pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
-    let search_lower = query.trim().to_lowercase();
+/// Installed agent launcher rows in recent-first input order.
+pub fn agent_page_results(pages: &[CommandBarPage]) -> Vec<CommandBarResultItem> {
     pages
         .iter()
-        .filter(|page| page.host == "agent" && page_matches(page, &search_lower))
+        .filter(|page| page.host == "agent")
         .map(|page| CommandBarResultItem::Page {
             url: page.url.clone(),
             title: page.title.clone(),
@@ -141,19 +140,11 @@ pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
         .collect()
 }
 
-pub fn replacement_agent_url(pages: &[CommandBarPage], current: &str) -> Option<String> {
-    if pages
-        .iter()
-        .any(|page| page.host == "agent" && page.url == current)
-    {
-        return None;
+pub fn agent_page_url(item: &CommandBarResultItem) -> Option<&str> {
+    match item {
+        CommandBarResultItem::Page { url, .. } if url.starts_with("vmux://agent/") => Some(url),
+        _ => None,
     }
-    let replacement = pages
-        .iter()
-        .find(|page| page.host == "agent")
-        .map(|page| page.url.clone())
-        .unwrap_or_default();
-    (replacement != current).then_some(replacement)
 }
 
 fn work_dir_results(dirs: &[CommandBarWorkDir], search_lower: &str) -> Vec<CommandBarResultItem> {
@@ -658,7 +649,7 @@ mod tests {
             shortcut: String::new(),
         });
 
-        let results = agent_page_results(&pages, "");
+        let results = agent_page_results(&pages);
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -671,19 +662,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_agent_pages_do_not_replace_empty_selection() {
-        assert_eq!(replacement_agent_url(&sample_pages()[..1], ""), None);
-    }
+    fn prompt_agent_url_only_accepts_agent_page_rows() {
+        let agent = agent_page_results(&sample_pages()).remove(0);
+        let settings = CommandBarResultItem::Page {
+            url: "vmux://settings/".into(),
+            title: "Settings".into(),
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        };
 
-    #[test]
-    fn agent_selection_only_changes_when_missing() {
-        let pages = sample_pages();
-
-        assert_eq!(replacement_agent_url(&pages, "vmux://agent/vibe/"), None);
-        assert_eq!(
-            replacement_agent_url(&pages, "vmux://agent/missing/"),
-            Some("vmux://agent/vibe/".to_string())
-        );
+        assert_eq!(agent_page_url(&agent), Some("vmux://agent/vibe/"));
+        assert_eq!(agent_page_url(&settings), None);
     }
 
     #[test]

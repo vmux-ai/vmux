@@ -202,8 +202,7 @@ fn install_keep_input_focused_on_click() {
         {
             let on_input = el.closest("#command-bar-input").ok().flatten().is_some();
             let on_results = el.closest("#command-bar-results").ok().flatten().is_some();
-            let on_agent_select = el.closest("#start-agent-select").ok().flatten().is_some();
-            if on_input || on_results || on_agent_select {
+            if on_input || on_results {
                 return;
             }
         }

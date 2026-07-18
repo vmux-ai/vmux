@@ -5,8 +5,8 @@ use crate::command_bar::keyboard::{
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, agent_page_results, filter_results,
-    replacement_agent_url, space_switch_results,
+    CommandBarResultItem as ResultItem, active_space_index, agent_page_results, agent_page_url,
+    filter_results, space_switch_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -20,7 +20,7 @@ use vmux_command::event::{
     CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
     HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
     PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_should_refocus, is_data_uri,
-    looks_like_url, should_open_typed_query_on_enter, should_submit_start_prompt,
+    is_start_prompt_query, looks_like_url, should_open_typed_query_on_enter,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_ui::components::icon::Icon;
@@ -73,7 +73,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut suggestions_request_id = use_signal(|| 0u64);
     let mut last_open_id = use_signal(|| u64::MAX);
     let mut last_focus_open_id = use_signal(|| u64::MAX);
-    let mut selected_agent_url = use_signal(String::new);
 
     use_effect(move || {
         let s = state();
@@ -146,14 +145,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
-        let pages = state().pages;
-        let current = selected_agent_url();
-        if let Some(replacement) = replacement_agent_url(&pages, &current) {
-            selected_agent_url.set(replacement);
-        }
-    });
-
-    use_effect(move || {
         let _ = query();
         let _ = selected();
         let _ = nav_mode();
@@ -168,11 +159,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let tabs = state_val.tabs.clone();
     let commands = state_val.commands.clone();
     let pages = state_val.pages.clone();
-    let agent_pages: Vec<_> = pages
-        .iter()
-        .filter(|page| page.host == "agent")
-        .cloned()
-        .collect();
     let work_dirs = state_val.work_dirs.clone();
     let recent_files = state_val.recent_files.clone();
     let open_target = state_val.target;
@@ -180,14 +166,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
 
     let q = query();
+    let start_prompt_mode = matches!(variant, PaletteVariant::Start) && is_start_prompt_query(&q);
+    let start_agent_mode =
+        matches!(variant, PaletteVariant::Start) && (q.trim().is_empty() || start_prompt_mode);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
-    } else if matches!(variant, PaletteVariant::Start)
-        && !q.trim_start().starts_with('>')
-        && !looks_like_url(q.trim())
-        && completion_query(&q).is_none()
-    {
-        agent_page_results(&pages, &q)
+    } else if start_agent_mode {
+        agent_page_results(&pages)
     } else {
         let history = history_suggestions();
         let r = filter_results(
@@ -237,7 +222,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
     let nav = nav_mode();
-    let display_text = if nav {
+    let display_text = if nav && !start_prompt_mode {
         match &active_item {
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
@@ -302,6 +287,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let execute = move |item: &ResultItem| {
+        let prompt = query();
+        if matches!(variant, PaletteVariant::Start)
+            && is_start_prompt_query(&prompt)
+            && let Some(agent_url) = agent_page_url(item)
+        {
+            on_close.call(());
+            emit_prompt_action(prompt.trim(), open_target, agent_url);
+            return;
+        }
         on_close.call(());
         match item {
             ResultItem::Terminal { path } => {
@@ -516,18 +510,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         execute(item);
                                     }
                                 } else {
-                                    if should_submit_start_prompt(
-                                        matches!(variant, PaletteVariant::Start),
-                                        nav_mode(),
-                                        results.get(sel).is_some(),
-                                        &q,
-                                    ) {
-                                        on_close.call(());
-                                        emit_prompt_action(
-                                            q.trim(),
-                                            open_target,
-                                            &selected_agent_url(),
-                                        );
+                                    if start_prompt_mode {
+                                        if let Some(item) = results.get(sel) {
+                                            execute(item);
+                                        } else {
+                                            on_close.call(());
+                                            emit_prompt_action(q.trim(), open_target, "");
+                                        }
                                         return;
                                     }
                                     let prefer_page = matches!(
@@ -549,36 +538,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 }
                             }
                         },
-                    }
-                }
-                if matches!(variant, PaletteVariant::Start) && !agent_pages.is_empty() {
-                    div {
-                        id: "start-agent-select",
-                        class: "flex max-w-48 shrink-0 items-center gap-1.5 rounded-md bg-foreground/5 px-2 text-muted-foreground",
-                        if let Some(agent) = agent_pages
-                            .iter()
-                            .find(|agent| agent.url == selected_agent_url())
-                        {
-                            PageIconView {
-                                icon: agent.icon.clone(),
-                                url: agent.url.clone(),
-                                img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                                icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
-                            }
-                        }
-                        select {
-                            aria_label: "Prompt agent",
-                            title: "Prompt agent",
-                            class: "min-w-0 max-w-40 cursor-pointer bg-transparent py-1.5 text-sm text-foreground outline-none",
-                            value: "{selected_agent_url}",
-                            onchange: move |e| {
-                                selected_agent_url.set(e.value());
-                                focus_command_bar_input();
-                            },
-                            for agent in &agent_pages {
-                                option { value: "{agent.url}", "{agent.title}" }
-                            }
-                        }
                     }
                 }
             }
@@ -679,7 +638,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     }
                                 }
                                 span { class: result_trailing_slot_class(),
-                                    if shortcut.is_empty() {
+                                    if start_prompt_mode && agent_page_url(item).is_some() {
+                                        "Prompt"
+                                    } else if shortcut.is_empty() {
                                         "New tab"
                                     } else {
                                         span { class: result_shortcut_badge_class(), "{shortcut}" }
@@ -849,17 +810,6 @@ fn emit_prompt_action(value: &str, target: Option<OpenTarget>, agent_url: &str) 
         target,
         agent_url: (!agent_url.is_empty()).then(|| agent_url.to_string()),
     });
-}
-
-fn focus_command_bar_input() {
-    let Some(input) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id("command-bar-input"))
-    else {
-        return;
-    };
-    let input: web_sys::HtmlInputElement = input.unchecked_into();
-    let _ = input.focus();
 }
 
 fn focus_and_install_ctrl_bindings() {

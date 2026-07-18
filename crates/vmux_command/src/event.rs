@@ -252,17 +252,9 @@ pub fn should_open_typed_query_on_enter(
         && looks_like_url(query.trim())
 }
 
-pub fn should_submit_start_prompt(
-    is_start: bool,
-    nav_mode: bool,
-    has_result: bool,
-    query: &str,
-) -> bool {
+pub fn is_start_prompt_query(query: &str) -> bool {
     let query = query.trim();
-    is_start
-        && !nav_mode
-        && !has_result
-        && !query.is_empty()
+    !query.is_empty()
         && !query.starts_with('>')
         && !looks_like_url(query)
         && !looks_like_explicit_path(query)
@@ -590,22 +582,17 @@ mod tests {
     }
 
     #[test]
-    fn start_enter_submits_plain_text_as_prompt() {
-        assert!(should_submit_start_prompt(
-            true,
-            false,
-            false,
-            "fix the failing test"
-        ));
+    fn start_plain_text_is_prompt_query() {
+        assert!(is_start_prompt_query("fix the failing test"));
     }
 
     #[test]
-    fn start_enter_opens_matching_launcher_result() {
-        assert!(!should_submit_start_prompt(true, false, true, "codex"));
+    fn start_agent_name_is_still_prompt_query() {
+        assert!(is_start_prompt_query("codex"));
     }
 
     #[test]
-    fn start_enter_keeps_explicit_navigation_inputs() {
+    fn start_explicit_navigation_inputs_are_not_prompts() {
         for query in [
             "https://example.com",
             "example.com",
@@ -616,22 +603,8 @@ mod tests {
             "../repo",
             "> close tab",
         ] {
-            assert!(
-                !should_submit_start_prompt(true, false, false, query),
-                "{query}"
-            );
+            assert!(!is_start_prompt_query(query), "{query}");
         }
-    }
-
-    #[test]
-    fn start_enter_keeps_keyboard_selected_result() {
-        assert!(!should_submit_start_prompt(true, true, false, "terminal"));
-        assert!(!should_submit_start_prompt(
-            false,
-            false,
-            false,
-            "ask the agent"
-        ));
     }
 
     #[test]
