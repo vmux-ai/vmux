@@ -100,36 +100,32 @@ fn acp_agent_summaries(
 }
 
 pub(crate) fn update_recent_agents(
-    acp_sessions: Query<(
-        Entity,
-        &crate::client::acp::AcpSession,
-        Option<&LastActivatedAt>,
-    )>,
-    cli_sessions: Query<(Entity, &vmux_core::agent::AgentSession, &ChildOf)>,
+    acp_sessions: Query<(&crate::client::acp::AcpSession, Option<&LastActivatedAt>)>,
+    cli_sessions: Query<(&vmux_core::agent::AgentSession, &ChildOf)>,
     stack_times: Query<&LastActivatedAt>,
-    archived_pages: Query<(Entity, &ArchivedPage)>,
+    archived_pages: Query<&ArchivedPage>,
     mut snapshot: ResMut<CommandBarAgentsSnapshot>,
-    mut remembered: Local<std::collections::HashMap<AgentPromptTarget, (i64, u64)>>,
+    mut remembered: Local<std::collections::HashMap<AgentPromptTarget, i64>>,
 ) {
-    let mut consider = |entity: Entity, timestamp: i64, target: AgentPromptTarget| {
-        let key = (timestamp, entity.to_bits());
-        if remembered.get(&target).is_none_or(|current| key > *current) {
-            remembered.insert(target, key);
+    let mut consider = |timestamp: i64, target: AgentPromptTarget| {
+        if remembered
+            .get(&target)
+            .is_none_or(|current| timestamp > *current)
+        {
+            remembered.insert(target, timestamp);
         }
     };
 
-    for (entity, session, timestamp) in &acp_sessions {
+    for (session, timestamp) in &acp_sessions {
         consider(
-            entity,
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
                 id: crate::acp_install::registry_id_alias(&session.agent_id).to_string(),
             },
         );
     }
-    for (entity, session, child_of) in &cli_sessions {
+    for (session, child_of) in &cli_sessions {
         consider(
-            entity,
             stack_times
                 .get(child_of.parent())
                 .map(|timestamp| timestamp.0)
@@ -137,7 +133,7 @@ pub(crate) fn update_recent_agents(
             AgentPromptTarget::Cli(session.kind),
         );
     }
-    for (entity, page) in &archived_pages {
+    for page in &archived_pages {
         let target = match crate::url::AgentUrl::parse(&page.url) {
             Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
             Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
@@ -145,17 +141,29 @@ pub(crate) fn update_recent_agents(
             },
             _ => continue,
         };
-        consider(entity, page.closed_at, target);
+        consider(page.closed_at, target);
     }
 
     let mut recent: Vec<_> = remembered.iter().collect();
-    recent.sort_by_key(|(_, key)| std::cmp::Reverse(**key));
+    recent.sort_by_cached_key(|(target, timestamp)| {
+        (
+            std::cmp::Reverse(**timestamp),
+            agent_prompt_target_sort_name(target),
+        )
+    });
     let recent = recent
         .into_iter()
         .map(|(target, _)| target.clone())
         .collect();
     if snapshot.recent != recent {
         snapshot.recent = recent;
+    }
+}
+
+fn agent_prompt_target_sort_name(target: &AgentPromptTarget) -> String {
+    match target {
+        AgentPromptTarget::Cli(kind) => kind.display_name().to_lowercase(),
+        AgentPromptTarget::Acp { id } => id.to_lowercase(),
     }
 }
 
@@ -351,6 +359,42 @@ mod tests {
                     id: "codex-acp".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Claude),
+            ]
+        );
+    }
+
+    #[test]
+    fn equal_recent_agent_times_fall_back_to_name() {
+        let mut app = App::new();
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .add_systems(Update, update_recent_agents);
+        app.world_mut().spawn((
+            crate::client::acp::AcpSession {
+                agent_id: "claude-acp".to_string(),
+                sid: "acp-session".to_string(),
+                cwd: std::path::PathBuf::new(),
+                anchor: vmux_service::protocol::ProcessId::new(),
+                resume: None,
+            },
+            LastActivatedAt(10),
+        ));
+        let cli_stack = app.world_mut().spawn(LastActivatedAt(10)).id();
+        app.world_mut().spawn((
+            vmux_core::agent::AgentSession {
+                kind: vmux_core::agent::AgentKind::Codex,
+            },
+            ChildOf(cli_stack),
+        ));
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<CommandBarAgentsSnapshot>().recent,
+            vec![
+                AgentPromptTarget::Acp {
+                    id: "claude-acp".to_string(),
+                },
+                AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
             ]
         );
     }

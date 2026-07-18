@@ -163,7 +163,7 @@ pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
         .filter(|page| page.host != "agent" && page.host != "start")
         .filter(|page| page_matches(page, &search_lower))
         .collect();
-    app_pages.sort_by_key(|page| page.url.to_lowercase());
+    app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
     results.extend(
         app_pages
             .into_iter()

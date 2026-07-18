@@ -55,11 +55,13 @@ mod tests {
 
     #[test]
     fn claude_uses_rose_orange() {
-        let a = agent_accent("claude");
-        assert_eq!(a.grad, "from-orange-400 to-rose-500");
-        assert_eq!(a.accent_text, "text-rose-600 dark:text-rose-400");
-        assert_eq!(a.accent_bg, "bg-rose-400");
-        assert_eq!(a.rain_rgb, "251 113 133");
+        for id in ["claude", "claude-acp"] {
+            let a = agent_accent(id);
+            assert_eq!(a.grad, "from-orange-400 to-rose-500");
+            assert_eq!(a.accent_text, "text-rose-600 dark:text-rose-400");
+            assert_eq!(a.accent_bg, "bg-rose-400");
+            assert_eq!(a.rain_rgb, "251 113 133");
+        }
     }
 
     #[test]
