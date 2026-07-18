@@ -171,6 +171,7 @@ pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
     pub target: Option<crate::open_target::OpenTarget>,
+    pub agent_url: Option<String>,
 }
 
 #[derive(
@@ -249,6 +250,14 @@ pub fn should_open_typed_query_on_enter(
         && !query.trim().is_empty()
         && !query.trim_start().starts_with('>')
         && looks_like_url(query.trim())
+}
+
+pub fn is_start_prompt_query(query: &str) -> bool {
+    let query = query.trim();
+    !query.is_empty()
+        && !query.starts_with('>')
+        && !looks_like_url(query)
+        && !looks_like_explicit_path(query)
 }
 
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
@@ -454,10 +463,12 @@ mod tests {
             action: "open".to_string(),
             value: "google.com".to_string(),
             target: None,
+            agent_url: None,
         };
         assert_eq!(evt.action, "open");
         assert_eq!(evt.value, "google.com");
         assert_eq!(evt.target, None);
+        assert_eq!(evt.agent_url, None);
     }
 
     #[test]
@@ -568,6 +579,32 @@ mod tests {
             false,
             "google.com"
         ));
+    }
+
+    #[test]
+    fn start_plain_text_is_prompt_query() {
+        assert!(is_start_prompt_query("fix the failing test"));
+    }
+
+    #[test]
+    fn start_agent_name_is_still_prompt_query() {
+        assert!(is_start_prompt_query("codex"));
+    }
+
+    #[test]
+    fn start_explicit_navigation_inputs_are_not_prompts() {
+        for query in [
+            "https://example.com",
+            "example.com",
+            "vmux://settings/",
+            "/tmp/file",
+            "~/project",
+            "./src",
+            "../repo",
+            "> close tab",
+        ] {
+            assert!(!is_start_prompt_query(query), "{query}");
+        }
     }
 
     #[test]

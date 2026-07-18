@@ -46,9 +46,8 @@ struct WarmStartReady;
 struct WarmStartPoolNode;
 
 /// Marks a live `vmux://start/` page that has received the current launcher payload.
-/// Cleared implicitly by re-pushing whenever the work snapshot changes, so a page that
-/// becomes ready after the snapshot was populated still gets the data (fixes the race
-/// where the one-shot mount fetch missed a not-yet-spawned pane).
+/// Cleared implicitly by re-pushing whenever a launcher snapshot changes, so a page that
+/// becomes ready after snapshots were populated still gets the data.
 #[derive(Component)]
 struct StartWorkSynced;
 
@@ -84,9 +83,9 @@ impl Plugin for StartPlugin {
     }
 }
 
-/// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs
-/// and recent files auto-appear without a reopen. Pushes to a ready start page when the
-/// work snapshot changed this frame, or when the page is newly ready and not yet synced
+/// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs,
+/// recent files, agent order, spaces, and pages auto-update without a reopen. Pushes to a ready
+/// start page when a launcher snapshot changed this frame, or when newly ready and not yet synced
 /// (covers panes that spawn before the start page's CEF is ready). Uses `open_id: 0`,
 /// which does not reset the palette's input/selection.
 fn sync_live_start_pages(
@@ -106,10 +105,14 @@ fn sync_live_start_pages(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    // Refresh on work-snapshot changes and on focus/tab changes (so the tabs list
-    // and active markers stay current), plus first-sync for newly-ready pages.
     let focus_changed = focused.is_changed();
-    let changed = work_snapshot.is_changed() || focus_changed;
+    let changed = should_refresh_start_payload(
+        spaces_snapshot.is_changed(),
+        agents_snapshot.is_changed(),
+        pages_snapshot.is_changed(),
+        work_snapshot.is_changed(),
+        focus_changed,
+    );
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
@@ -158,6 +161,16 @@ fn sync_live_start_pages(
         // it) before this command applies — `try_insert` skips silently instead of panicking.
         commands.entity(e).try_insert(StartWorkSynced);
     }
+}
+
+fn should_refresh_start_payload(
+    spaces_changed: bool,
+    agents_changed: bool,
+    pages_changed: bool,
+    work_changed: bool,
+    focus_changed: bool,
+) -> bool {
+    spaces_changed || agents_changed || pages_changed || work_changed || focus_changed
 }
 
 fn should_focus_start_sync(
@@ -464,6 +477,16 @@ mod tests {
         assert!(should_focus_start_sync(true, true, true, false));
         assert!(should_focus_start_sync(true, true, false, true));
         assert!(!should_focus_start_sync(true, true, false, false));
+    }
+
+    #[test]
+    fn start_sync_refreshes_when_agent_recency_changes() {
+        assert!(should_refresh_start_payload(
+            false, true, false, false, false
+        ));
+        assert!(!should_refresh_start_payload(
+            false, false, false, false, false
+        ));
     }
 
     fn start_task(stack: Entity) -> PageOpenTask {

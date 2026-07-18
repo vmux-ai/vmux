@@ -3221,18 +3221,32 @@ fn terminal_loading_labels(session: Option<&vmux_core::agent::AgentSession>) -> 
 
 fn arm_agent_loading(
     newly_ready: Query<
-        (Entity, Option<&vmux_core::agent::AgentSession>),
+        (
+            Entity,
+            Option<&vmux_core::agent::AgentSession>,
+            Option<&PromptCapture>,
+        ),
         (With<Terminal>, Added<PageReady>, Without<AgentLoading>),
     >,
     mut commands: Commands,
 ) {
-    for (entity, session) in &newly_ready {
+    for (entity, session, capture) in &newly_ready {
         let (label, segment) = terminal_loading_labels(session);
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
-        if session.is_some() {
+        if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
+        }
+        if let Some(capture) = capture {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                AGENT_PROMPT_DRAFT_EVENT,
+                &AgentPromptDraftEvent {
+                    draft: capture.draft.clone(),
+                    skipped: capture.skipped,
+                },
+            ));
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
@@ -3248,7 +3262,11 @@ fn arm_agent_loading(
 
 fn arm_agent_loading_on_restart(
     restarted: Query<
-        (Entity, Option<&vmux_core::agent::AgentSession>),
+        (
+            Entity,
+            Option<&vmux_core::agent::AgentSession>,
+            Option<&PromptCapture>,
+        ),
         (
             With<Terminal>,
             With<PageReady>,
@@ -3258,13 +3276,23 @@ fn arm_agent_loading_on_restart(
     >,
     mut commands: Commands,
 ) {
-    for (entity, session) in &restarted {
+    for (entity, session, capture) in &restarted {
         let (label, segment) = terminal_loading_labels(session);
         commands.entity(entity).insert(AgentLoading {
             since: Instant::now(),
         });
-        if session.is_some() {
+        if session.is_some() && capture.is_none() {
             commands.entity(entity).insert(PromptCapture::default());
+        }
+        if let Some(capture) = capture {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                AGENT_PROMPT_DRAFT_EVENT,
+                &AgentPromptDraftEvent {
+                    draft: capture.draft.clone(),
+                    skipped: capture.skipped,
+                },
+            ));
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
@@ -5168,6 +5196,33 @@ mod tests {
             .id();
         app.update();
         assert!(app.world().get::<AgentLoading>(e).is_some());
+    }
+
+    #[test]
+    fn agent_loading_preserves_initial_prompt_capture() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, arm_agent_loading);
+        let e = app
+            .world_mut()
+            .spawn((
+                Terminal,
+                AgentSession {
+                    kind: AgentKind::Vibe,
+                },
+                PromptCapture {
+                    draft: "@asdfas".to_string(),
+                    skipped: false,
+                },
+                PageReady {},
+            ))
+            .id();
+
+        app.update();
+
+        let capture = app.world().get::<PromptCapture>(e).unwrap();
+        assert_eq!(capture.draft, "@asdfas");
+        assert!(!capture.skipped);
     }
 
     #[test]
