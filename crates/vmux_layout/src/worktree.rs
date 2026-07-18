@@ -110,6 +110,28 @@ pub fn sanitize_slug(name: &str) -> String {
     }
 }
 
+/// Whether a tab name is an automatically assigned placeholder.
+pub fn is_generated_tab_name(name: &str) -> bool {
+    name.is_empty()
+        || name.strip_prefix("Tab ").is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit())
+        })
+}
+
+/// Prefer the selected project name over a generated tab label when naming a worktree.
+pub fn tab_worktree_slug_hint(tab_name: &str, project_dir: &Path) -> String {
+    if is_generated_tab_name(tab_name) {
+        project_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("task")
+            .to_string()
+    } else {
+        tab_name.to_string()
+    }
+}
+
 fn repository_storage_dir(managed_root: &Path, checkout: &CheckoutInfo) -> PathBuf {
     let repository_name = checkout
         .common_dir
@@ -820,6 +842,18 @@ mod tests {
             "path is <managed-root>/<repo-hash>/auth-refactor: {checkout_dir:?}"
         );
         assert_eq!(activation.execution_dir, checkout_dir);
+    }
+
+    #[test]
+    fn generated_tab_names_use_project_name_as_slug_hint() {
+        assert_eq!(
+            tab_worktree_slug_hint("Tab 2", Path::new("/repo/dashboard")),
+            "dashboard"
+        );
+        assert_eq!(
+            tab_worktree_slug_hint("Auth Refactor", Path::new("/repo/dashboard")),
+            "Auth Refactor"
+        );
     }
 
     #[test]

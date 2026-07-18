@@ -30,7 +30,8 @@ use crate::chat_page::event::{
     ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT,
     ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
     ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SelectWorkspace, SlashCommandEntry,
+    SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
@@ -49,11 +50,11 @@ use crate::run_state::{AgentRunState, AgentTurnMeta};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_core::PageMetadata;
-#[cfg(not(target_arch = "wasm32"))]
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::team::Profile;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_service::client::ServiceClient;
 #[cfg(not(target_arch = "wasm32"))]
@@ -165,6 +166,7 @@ impl Plugin for AgentChatPagePlugin {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<AcpModelRequestCounter>()
             .add_message::<AcpSetModelRequest>()
+            .add_message::<WorkspaceSelected>()
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatSubmit,
                 ChatApproval,
@@ -177,6 +179,7 @@ impl Plugin for AgentChatPagePlugin {
                 ResumeSession,
                 RuntimeSwitchRequest,
                 SelectModel,
+                SelectWorkspace,
             )>::for_hosts(&["agent"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
@@ -201,12 +204,15 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
             .add_observer(on_select_model)
+            .add_observer(on_select_workspace)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(
                 Update,
                 (
                     (track_turn_duration, push_chat_to_page).chain(),
                     sync_chat_to_ready_views,
+                    push_pending_workspace_to_page,
+                    activate_selected_workspaces,
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
                     send_acp_model_requests,
@@ -249,6 +255,20 @@ fn track_turn_duration(
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Component)]
 pub struct AgentChatView;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug)]
+pub(crate) struct PendingAgentWorkspace {
+    pub target_url: String,
+    pub error: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone, Debug)]
+struct WorkspaceSelected {
+    stack: Entity,
+    path: std::path::PathBuf,
+}
 
 /// Set once the current snapshot has been pushed to a ready chat webview; cleared when the page
 /// (re)signals ready (mount or Cmd+R reload) so the transcript is re-pushed instead of blanking.
@@ -729,6 +749,7 @@ fn sync_chat_to_ready_views(
         &PromptQueue,
         Option<&ImportedConversation>,
     )>,
+    pending_workspaces: Query<&PendingAgentWorkspace>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -738,8 +759,68 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, turn_meta, profile, meta, queue, imported)) = sessions.get(stack)
-        else {
+        let session = sessions.get(stack).ok();
+        let snapshot = match session {
+            Some((messages, state, turn_meta, profile, meta, queue, imported)) => {
+                snapshot_of(messages, state, turn_meta, profile, meta, queue, imported)
+            }
+            None => {
+                let Ok(pending) = pending_workspaces.get(stack) else {
+                    continue;
+                };
+                workspace_snapshot(pending)
+            }
+        };
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            CHAT_SNAPSHOT_EVENT,
+            &snapshot,
+        ));
+        if session.is_some() {
+            let (cross, model_state) = acp_sessions
+                .get(stack)
+                .ok()
+                .map(|(acp, model)| {
+                    (
+                        acp_agent_kind(&acp.agent_id)
+                            .map(kind_supports_cross_runtime)
+                            .unwrap_or(false),
+                        model,
+                    )
+                })
+                .unwrap_or((false, None));
+            emit_model_state(webview, model_state, cross, &mut commands);
+        }
+        commands.entity(webview).insert(ChatSynced);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn workspace_snapshot(pending: &PendingAgentWorkspace) -> ChatSnapshot {
+    ChatSnapshot {
+        status: "workspace".to_string(),
+        workspace_required: true,
+        workspace_error: pending.error.clone(),
+        ..Default::default()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_pending_workspace_to_page(
+    pending: Query<(Entity, &PendingAgentWorkspace), Changed<PendingAgentWorkspace>>,
+    children: Query<&Children>,
+    chat_views: Query<(), With<AgentChatView>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (stack, pending) in &pending {
+        let Ok(children) = children.get(stack) else {
+            continue;
+        };
+        let Some(webview) = children.iter().find(|entity| chat_views.contains(*entity)) else {
             continue;
         };
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
@@ -748,22 +829,8 @@ fn sync_chat_to_ready_views(
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
-            &snapshot_of(messages, state, turn_meta, profile, meta, queue, imported),
+            &workspace_snapshot(pending),
         ));
-        let (cross, model_state) = acp_sessions
-            .get(stack)
-            .ok()
-            .map(|(acp, model)| {
-                (
-                    acp_agent_kind(&acp.agent_id)
-                        .map(kind_supports_cross_runtime)
-                        .unwrap_or(false),
-                    model,
-                )
-            })
-            .unwrap_or((false, None));
-        emit_model_state(webview, model_state, cross, &mut commands);
-        commands.entity(webview).insert(ChatSynced);
     }
 }
 
@@ -951,6 +1018,8 @@ fn snapshot_of(
             })
             .collect(),
         paused: queue.paused,
+        workspace_required: false,
+        workspace_error: String::new(),
     }
 }
 
@@ -1029,6 +1098,146 @@ fn on_chat_submit(
     };
     if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
         enqueue_prompt(&mut queue, &mut state, text, attachments);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn workspace_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("workspace")
+        .to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn ancestor_workspace_tab(
+    stack: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<&mut vmux_layout::tab::Tab>,
+) -> Option<Entity> {
+    let mut current = stack;
+    loop {
+        if tabs.contains(current) {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_select_workspace(
+    trigger: On<BinReceive<SelectWorkspace>>,
+    child_of: Query<&ChildOf>,
+    pending_workspaces: Query<(), With<PendingAgentWorkspace>>,
+    mut selected_workspaces: MessageWriter<WorkspaceSelected>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let stack = parent.parent();
+    if !pending_workspaces.contains(stack) {
+        return;
+    }
+    let Some(path) = rfd::FileDialog::new().pick_folder() else {
+        return;
+    };
+    selected_workspaces.write(WorkspaceSelected { stack, path });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn activate_selected_workspaces(
+    mut selected_workspaces: MessageReader<WorkspaceSelected>,
+    child_of: Query<&ChildOf>,
+    mut tabs: Query<&mut vmux_layout::tab::Tab>,
+    mut pending_workspaces: Query<&mut PendingAgentWorkspace>,
+    managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
+    mut page_open: MessageWriter<PageOpenRequest>,
+    mut commands: Commands,
+) {
+    let mut activated = std::collections::HashSet::new();
+    for request in selected_workspaces.read() {
+        if !activated.insert(request.stack) {
+            continue;
+        }
+        let stack = request.stack;
+        let Ok(pending) = pending_workspaces.get(stack) else {
+            continue;
+        };
+        let target_url = pending.target_url.clone();
+        let selected = match request.path.canonicalize() {
+            Ok(selected) if selected.is_dir() => selected,
+            Ok(selected) => {
+                if let Ok(mut pending) = pending_workspaces.get_mut(stack) {
+                    pending.error = format!("Workspace is not a directory: {}", selected.display());
+                }
+                continue;
+            }
+            Err(error) => {
+                if let Ok(mut pending) = pending_workspaces.get_mut(stack) {
+                    pending.error = format!("Invalid workspace directory: {error}");
+                }
+                continue;
+            }
+        };
+        let Some(tab_entity) = ancestor_workspace_tab(stack, &child_of, &tabs) else {
+            continue;
+        };
+        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
+            continue;
+        };
+        let selected_name = workspace_name(&selected);
+        let generated_name = vmux_layout::worktree::is_generated_tab_name(&tab.name);
+        let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(&tab.name, &selected);
+        if generated_name {
+            tab.name.clone_from(&selected_name);
+        }
+        let project_dir = selected.to_string_lossy().into_owned();
+        let activation = if vmux_git::worktree::checkout_info(&selected).is_ok() {
+            let managed_root = managed_root.as_deref().cloned().unwrap_or_default();
+            match vmux_layout::worktree::create_worktree_blocking(
+                &selected,
+                &slug_hint,
+                &managed_root.0,
+            ) {
+                Ok(activation) => Some(activation),
+                Err(error) => {
+                    if let Ok(mut pending) = pending_workspaces.get_mut(stack) {
+                        pending.error = error;
+                    }
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let mut tab_commands = commands.entity(tab_entity);
+        tab_commands
+            .insert((
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: project_dir.clone(),
+                },
+                vmux_layout::tab::TabDirDecided,
+            ))
+            .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+        match activation {
+            Some(activation) => {
+                tab.startup_dir = Some(activation.execution_dir.to_string_lossy().into_owned());
+                tab_commands.insert((activation.metadata, activation.ready));
+            }
+            None => {
+                tab.startup_dir = Some(project_dir);
+                tab_commands
+                    .remove::<vmux_layout::tab::TabWorktree>()
+                    .remove::<vmux_layout::worktree::TabWorktreeReady>();
+            }
+        }
+        commands.entity(stack).remove::<PendingAgentWorkspace>();
+        page_open.write(PageOpenRequest {
+            target: PageOpenTarget::Stack(stack),
+            url: target_url,
+            request_id: None,
+        });
     }
 }
 
@@ -1553,6 +1762,112 @@ fn on_runtime_switch_request(
 mod native_tests {
     use super::*;
     use std::path::Path;
+    use std::process::Command;
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn init_workspace_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("dashboard");
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["config", "user.email", "test@example.com"]);
+        git(&repo, &["config", "user.name", "Test"]);
+        std::fs::write(repo.join("seed.txt"), "seed\n").unwrap();
+        git(&repo, &["add", "seed.txt"]);
+        git(&repo, &["commit", "-qm", "seed"]);
+        (root, repo)
+    }
+
+    #[test]
+    fn selected_git_workspace_creates_worktree_and_resumes_agent_open() {
+        let (_root, repo) = init_workspace_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<WorkspaceSelected>()
+            .add_message::<PageOpenRequest>()
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .add_systems(Update, activate_selected_workspaces);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Tab 1".into(),
+                startup_dir: None,
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                PendingAgentWorkspace {
+                    target_url: "vmux://agent/codex/cli".into(),
+                    error: String::new(),
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<WorkspaceSelected>>()
+            .write(WorkspaceSelected {
+                stack,
+                path: repo.clone(),
+            });
+
+        app.update();
+
+        let tab_data = app.world().get::<vmux_layout::tab::Tab>(tab).unwrap();
+        assert_eq!(tab_data.name, "dashboard");
+        assert!(
+            Path::new(tab_data.startup_dir.as_deref().unwrap())
+                .starts_with(managed_root.path().canonicalize().unwrap())
+        );
+        let metadata = app
+            .world()
+            .get::<vmux_layout::tab::TabWorktree>(tab)
+            .unwrap();
+        assert_eq!(metadata.branch, "vmux/dashboard");
+        assert!(
+            app.world()
+                .get::<vmux_layout::worktree::TabWorktreeReady>(tab)
+                .is_some()
+        );
+        assert!(app.world().get::<PendingAgentWorkspace>(stack).is_none());
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].url, "vmux://agent/codex/cli");
+        assert!(matches!(requests[0].target, PageOpenTarget::Stack(target) if target == stack));
+    }
+
+    #[test]
+    fn workspace_snapshot_keeps_picker_error_visible() {
+        let snapshot = workspace_snapshot(&PendingAgentWorkspace {
+            target_url: "vmux://agent/codex/cli".into(),
+            error: "branch exists".into(),
+        });
+
+        assert!(snapshot.workspace_required);
+        assert_eq!(snapshot.workspace_error, "branch exists");
+        assert_eq!(snapshot.status, "workspace");
+    }
 
     #[test]
     fn media_query_paths_decode_percent_escapes() {
@@ -2125,6 +2440,14 @@ mod native_tests {
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
         assert!(source.contains("max-h-80 max-w-full object-contain"));
+    }
+
+    #[test]
+    fn workspace_gate_uses_native_folder_picker_event() {
+        let source = include_str!("chat_page/page.rs");
+        assert!(source.contains("Choose a workspace"));
+        assert!(source.contains("try_cef_bin_emit_rkyv(&SelectWorkspace)"));
+        assert!(source.contains("if !workspace_required()"));
     }
 
     #[test]

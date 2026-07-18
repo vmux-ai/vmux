@@ -153,7 +153,22 @@ pub struct ChatSnapshot {
     pub handoff_truncated: bool,
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
+    pub workspace_required: bool,
+    pub workspace_error: String,
 }
+
+/// Page → native: choose the workspace for an agent tab that has no startup directory.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SelectWorkspace;
 
 /// Page → native: the user submitted a prompt.
 #[derive(

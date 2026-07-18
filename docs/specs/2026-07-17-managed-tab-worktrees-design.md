@@ -15,6 +15,7 @@ Worktrees are also created inside the repository, which requires mutating Git's 
 - Preserve the original project directory separately from the mutable execution directory.
 - Recover a missing managed checkout from its persisted branch when possible.
 - Accept ACP workspace-change metadata from agents that create or restore their own worktree.
+- Allow tabs to exist without a startup directory and request a workspace inside the chat UI.
 - Never silently delete dirty or committed work.
 
 ## Lifecycle
@@ -30,6 +31,18 @@ the tab directory:
 
 The original directory is persisted in `TabWorkspace`. `Tab.startup_dir` remains the execution
 directory used by new agents and terminals. `TabWorktree` remains the attached checkout metadata.
+
+## Workspace Selection
+
+When neither the active space nor global settings define a startup directory, a new tab keeps
+`Tab.startup_dir` empty. Browser-only tabs still open normally. Opening an agent page attaches the
+chat UI in a workspace-required state and does not start an agent process.
+
+The chat page asks the user to choose a folder. Canceling leaves the picker state intact. A valid
+selection becomes `TabWorkspace`; Git-backed folders create the managed worktree before the
+original agent URL is reopened, while non-Git folders run directly from the selected directory.
+Generated names such as `Tab 2` are replaced by the folder name, producing branches such as
+`vmux/dashboard` and collision suffixes such as `vmux/dashboard-2`.
 
 ## Storage
 
@@ -95,6 +108,10 @@ model. Existing orphaned worktrees are left untouched.
 - Managed roots are global, repository-specific, and collision-safe.
 - Nested project directories preserve their relative path in the new checkout.
 - Opening the first agent page creates and uses one worktree; later agent pages reuse it.
+- An agent tab without a configured startup directory shows the workspace picker and emits no
+  agent spawn before selection.
+- Selecting a Git workspace creates a slugged worktree, updates the tab, and resumes the original
+  agent page open.
 - Non-Git tabs do not create worktrees.
 - Missing managed checkouts recover from their branch; invalid external checkouts remain marked.
 - `create_worktree` is idempotent and ordered before sibling run commands.

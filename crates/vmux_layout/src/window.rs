@@ -461,6 +461,7 @@ fn request_default_layout(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    startup_dir_configured: Option<Res<crate::settings::EffectiveStartupDirConfigured>>,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
@@ -477,7 +478,11 @@ fn request_default_layout(
         space,
         primary_window: *primary_window,
         name: None,
-        startup_dir,
+        startup_dir: startup_dir_configured
+            .as_deref()
+            .map_or(Some(startup_dir.clone()), |configured| {
+                configured.0.then_some(startup_dir.clone())
+            }),
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
@@ -565,14 +570,20 @@ pub fn spawn_requested_tab_layouts(
         if spaces.get(request.space).is_err() {
             continue;
         }
-        let Ok(startup_dir) = request.startup_dir.canonicalize() else {
-            continue;
-        };
-        if !startup_dir.is_dir() {
-            continue;
-        }
-        let Some(startup_dir) = startup_dir.to_str().map(str::to_string) else {
-            continue;
+        let startup_dir = match request.startup_dir.as_ref() {
+            Some(startup_dir) => {
+                let Ok(startup_dir) = startup_dir.canonicalize() else {
+                    continue;
+                };
+                if !startup_dir.is_dir() {
+                    continue;
+                }
+                let Some(startup_dir) = startup_dir.to_str().map(str::to_string) else {
+                    continue;
+                };
+                Some(startup_dir)
+            }
+            None => None,
         };
         let TabScaffold {
             tab: tab_e,
@@ -586,7 +597,7 @@ pub fn spawn_requested_tab_layouts(
         );
         commands.entity(tab_e).insert(Tab {
             name: request.name.clone().unwrap_or_default(),
-            startup_dir: Some(startup_dir),
+            startup_dir,
         });
 
         if request.clear_pending_stack
@@ -1345,6 +1356,40 @@ mod tests {
     }
 
     #[test]
+    fn default_tab_without_configured_startup_dir_has_no_workspace() {
+        let _home = HomeEnvGuard::use_temp_home("default-tab-no-workspace");
+        let fallback_dir = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<crate::NewStackContext>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<PageOpenRequest>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .insert_resource(test_settings(0.0))
+            .insert_resource(crate::settings::EffectiveStartupDirConfigured(false))
+            .add_systems(
+                Update,
+                (request_default_layout, spawn_requested_tab_layouts).chain(),
+            );
+
+        app.world_mut().spawn(PrimaryWindow);
+        let main = app.world_mut().spawn(Main).id();
+        let space = app
+            .world_mut()
+            .spawn((crate::space::Space, ChildOf(main)))
+            .id();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            fallback_dir.path().to_path_buf(),
+        ))));
+
+        app.update();
+
+        let tab = app.world_mut().query::<&Tab>().single(app.world()).unwrap();
+        assert_eq!(tab.startup_dir, None);
+    }
+
+    #[test]
     fn tab_request_keeps_space_active_when_request_was_created() {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
@@ -1371,7 +1416,7 @@ mod tests {
                 space: requested_space,
                 primary_window: window,
                 name: None,
-                startup_dir: startup_dir.path().to_path_buf(),
+                startup_dir: Some(startup_dir.path().to_path_buf()),
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,

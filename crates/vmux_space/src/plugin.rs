@@ -38,6 +38,7 @@ impl Plugin for SpacePlugin {
         vmux_core::register_host_spawn(app, "spaces");
         app.init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
@@ -114,10 +115,14 @@ fn update_effective_startup_dir(
         With<vmux_layout::space::Space>,
     >,
     mut effective: ResMut<vmux_layout::settings::EffectiveStartupDir>,
+    mut configured: ResMut<vmux_layout::settings::EffectiveStartupDirConfigured>,
 ) {
     let Some(settings) = settings else {
         if effective.0.is_some() {
             effective.0 = None;
+        }
+        if configured.0 {
+            configured.0 = false;
         }
         return;
     };
@@ -134,6 +139,9 @@ fn update_effective_startup_dir(
         if effective.0.is_some() {
             effective.0 = None;
         }
+        if configured.0 {
+            configured.0 = false;
+        }
         return;
     };
     if !settings.is_changed()
@@ -146,9 +154,15 @@ fn update_effective_startup_dir(
     {
         return;
     }
-    let next = (entity, vmux_setting::resolve_startup_dir(&settings, &id.0));
+    let (path, source) =
+        vmux_setting::resolve_startup_dir_for_tab_with_source(&settings, &id.0, None);
+    let next = (entity, path);
     if effective.0.as_ref() != Some(&next) {
         effective.0 = Some(next);
+    }
+    let next_configured = source != vmux_setting::DirSource::Default;
+    if configured.0 != next_configured {
+        configured.0 = next_configured;
     }
 }
 
@@ -559,11 +573,11 @@ fn on_space_command(
                 ))
                 .id();
             active_id.0 = Some(id.clone());
-            let default_dir = profile::space_dir(&id);
-            let startup_dir = settings
-                .as_deref()
-                .map(|settings| vmux_setting::resolve_startup_dir(settings, &id))
-                .unwrap_or(default_dir);
+            let startup_dir = settings.as_deref().and_then(|settings| {
+                let (path, source) =
+                    vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &id, None);
+                (source != vmux_setting::DirSource::Default).then_some(path)
+            });
             layout_requests.write(TabLayoutSpawnRequest {
                 space,
                 primary_window: *primary_window,
@@ -624,11 +638,11 @@ fn handle_open_in_new_space(
             ))
             .id();
         active_id.0 = Some(id.clone());
-        let default_dir = profile::space_dir(&id);
-        let startup_dir = settings
-            .as_deref()
-            .map(|settings| vmux_setting::resolve_startup_dir(settings, &id))
-            .unwrap_or(default_dir);
+        let startup_dir = settings.as_deref().and_then(|settings| {
+            let (path, source) =
+                vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &id, None);
+            (source != vmux_setting::DirSource::Default).then_some(path)
+        });
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
@@ -875,6 +889,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_systems(Update, update_effective_startup_dir);
         app.world_mut().spawn((
             vmux_layout::space::Space,
@@ -896,6 +911,34 @@ mod tests {
                 .resource::<vmux_layout::settings::EffectiveStartupDir>()
                 .0,
             Some((active, active_dir.path().to_path_buf()))
+        );
+        assert!(
+            app.world()
+                .resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
+                .0
+        );
+    }
+
+    #[test]
+    fn builtin_startup_dir_is_not_marked_configured() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
+            .add_systems(Update, update_effective_startup_dir);
+        app.world_mut().spawn((
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId("work".into()),
+            vmux_core::Active,
+        ));
+
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
+                .0
         );
     }
 
@@ -926,6 +969,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .init_resource::<ChangeCount>()
             .add_systems(
                 Update,
@@ -967,6 +1011,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_systems(Update, update_effective_startup_dir);
         let space = app
             .world_mut()

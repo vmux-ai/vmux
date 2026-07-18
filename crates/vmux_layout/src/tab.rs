@@ -155,6 +155,7 @@ fn handle_tab_commands(
     all_children: Query<&Children>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    startup_dir_configured: Option<Res<crate::settings::EffectiveStartupDirConfigured>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
@@ -188,7 +189,11 @@ fn handle_tab_commands(
                     space,
                     primary_window: *primary_window,
                     name: Some(name),
-                    startup_dir,
+                    startup_dir: startup_dir_configured
+                        .as_deref()
+                        .map_or(Some(startup_dir.clone()), |configured| {
+                            configured.0.then_some(startup_dir.clone())
+                        }),
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -200,13 +205,10 @@ fn handle_tab_commands(
                     close_requests.write(CloseTabRequest { tab: active });
                 }
                 TabCommand::New => {
-                    let Some((space, _)) = effective_startup_dir
+                    let Some((space, startup_dir)) = effective_startup_dir
                         .as_deref()
                         .and_then(|effective| effective.0.clone())
                     else {
-                        continue;
-                    };
-                    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
                         continue;
                     };
                     let name = format!("Tab {}", tabs.iter().count() + 1);
@@ -214,7 +216,11 @@ fn handle_tab_commands(
                         space,
                         primary_window: *primary_window,
                         name: Some(name),
-                        startup_dir: dir,
+                        startup_dir: startup_dir_configured
+                            .as_deref()
+                            .map_or(Some(startup_dir.clone()), |configured| {
+                                configured.0.then_some(startup_dir.clone())
+                            }),
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
@@ -783,6 +789,24 @@ mod tests {
     }
 
     #[test]
+    fn new_tab_without_configured_startup_dir_skips_folder_dialog() {
+        let mut app = build_app();
+        build_main_and_tab(&mut app);
+        app.insert_resource(crate::settings::EffectiveStartupDirConfigured(false));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+
+        app.update();
+
+        let tabs: Vec<_> = app.world_mut().query::<&Tab>().iter(app.world()).collect();
+        assert_eq!(tabs.len(), 2);
+        let new_tab = tabs.iter().find(|tab| tab.name == "Tab 2").unwrap();
+        assert_eq!(new_tab.startup_dir, None);
+    }
+
+    #[test]
     fn new_tab_becomes_active_in_single_update() {
         let mut app = build_app();
         app.init_resource::<crate::pane::PendingCursorWarp>()
@@ -845,7 +869,7 @@ mod tests {
                 space,
                 primary_window: window,
                 name: None,
-                startup_dir: std::env::current_dir().unwrap(),
+                startup_dir: Some(std::env::current_dir().unwrap()),
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,

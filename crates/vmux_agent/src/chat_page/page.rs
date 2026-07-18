@@ -16,8 +16,8 @@ use crate::chat_page::event::{
     ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
     ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERBS,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SelectWorkspace,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -282,6 +282,8 @@ pub fn Page() -> Element {
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
+    let mut workspace_required = use_signal(|| false);
+    let mut workspace_error = use_signal(String::new);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
@@ -391,6 +393,8 @@ pub fn Page() -> Element {
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
+        workspace_required.set(snap.workspace_required);
+        workspace_error.set(snap.workspace_error.clone());
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -508,7 +512,7 @@ pub fn Page() -> Element {
     };
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
-    let installing_splash = installing && items.read().is_empty();
+    let installing_splash = installing && items.read().is_empty() && !workspace_required();
     let show_capability_examples =
         items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
     let install_detail = {
@@ -615,7 +619,43 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            div {
+            if workspace_required() {
+                div { class: "relative z-10 flex flex-1 items-center justify-center px-6 py-10",
+                    div { class: "flex w-full max-w-md flex-col items-center gap-5 rounded-2xl bg-foreground/[0.035] px-8 py-9 text-center ring-1 ring-inset ring-foreground/10",
+                        div { class: "flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
+                            svg {
+                                class: "h-7 w-7 text-foreground/70",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.8",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }
+                            }
+                        }
+                        div { class: "flex flex-col gap-2",
+                            h2 { class: "text-xl font-semibold tracking-tight", "Choose a workspace" }
+                            p { class: "text-sm leading-relaxed text-muted-foreground",
+                                "Select a project folder before starting {header_name}. Git projects open in a dedicated worktree."
+                            }
+                        }
+                        button {
+                            class: "rounded-xl bg-foreground px-4 py-2.5 text-sm font-medium text-background transition hover:opacity-90 active:scale-[0.98]",
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&SelectWorkspace);
+                            },
+                            "Choose folder"
+                        }
+                        if !workspace_error().is_empty() {
+                            div { class: "w-full rounded-xl bg-red-500/10 px-4 py-3 text-left text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                                "{workspace_error}"
+                            }
+                        }
+                    }
+                }
+            } else {
+                div {
                 id: "chat-scroll",
                 class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 onscroll: move |_| {
@@ -686,6 +726,7 @@ pub fn Page() -> Element {
                         }
                     }
                 }
+                }
             }
 
             if !installing && let Some((call_id, name, args_json)) = approval() {
@@ -745,9 +786,10 @@ pub fn Page() -> Element {
                 }
             }
 
-            div {
-                class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
+            if !workspace_required() {
                 div {
+                    class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
+                    div {
                     class: "relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
                         div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
@@ -1313,6 +1355,7 @@ pub fn Page() -> Element {
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
