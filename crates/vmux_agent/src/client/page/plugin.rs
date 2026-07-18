@@ -129,12 +129,12 @@ fn send_page_agent_input(
         let Some(prompt) = queue.take_next() else {
             continue;
         };
-        service.0.send(ClientMessage::AgentInput {
-            sid: session.sid.clone(),
-            text: prompt.text,
-            context: None,
-            attachments: prompt.attachments,
-        });
+        service.0.send(ClientMessage::agent_input(
+            session.sid.clone(),
+            prompt.text,
+            None,
+            prompt.attachments,
+        ));
         *state = AgentRunState::Streaming;
     }
 }

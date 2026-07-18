@@ -804,12 +804,12 @@ fn send_acp_input(
         {
             imported.first_prompt = Some(text.clone());
         }
-        service.0.send(ClientMessage::AgentInput {
-            sid: session.sid.clone(),
+        service.0.send(ClientMessage::agent_input(
+            session.sid.clone(),
             text,
             context,
-            attachments: prompt.attachments,
-        });
+            prompt.attachments,
+        ));
         *state = AgentRunState::Streaming;
     }
 }

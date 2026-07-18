@@ -488,7 +488,6 @@ pub enum ClientMessage {
         sid: String,
         text: String,
         context: Option<String>,
-        attachments: Vec<AgentAttachment>,
     },
     /// Select a model exposed by an ACP session's model configuration option.
     AcpSetModel {
@@ -532,6 +531,33 @@ pub enum ClientMessage {
         resume_acp_session_id: Option<String>,
     },
     Status,
+    AgentInputWithAttachments {
+        sid: String,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+    },
+}
+
+impl ClientMessage {
+    /// Build a legacy-compatible prompt message when no attachments are present.
+    pub fn agent_input(
+        sid: String,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+    ) -> Self {
+        if attachments.is_empty() {
+            Self::AgentInput { sid, text, context }
+        } else {
+            Self::AgentInputWithAttachments {
+                sid,
+                text,
+                context,
+                attachments,
+            }
+        }
+    }
 }
 
 pub const PRIVATE_CONTEXT_PREFIX: &str = "<vmux_handoff_context>";
@@ -1337,6 +1363,11 @@ mod tests {
                 sid: "s".into(),
                 text: "hi".into(),
                 context: Some("prior conversation".into()),
+            },
+            ClientMessage::AgentInputWithAttachments {
+                sid: "s".into(),
+                text: "inspect".into(),
+                context: None,
                 attachments: vec![AgentAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
@@ -1366,6 +1397,30 @@ mod tests {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
             rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn agent_input_builder_preserves_legacy_variant_without_attachments() {
+        assert!(matches!(
+            ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
+            ClientMessage::AgentInput { sid, text, context }
+                if sid == "s" && text == "hi" && context.is_none()
+        ));
+        assert!(matches!(
+            ClientMessage::agent_input(
+                "s".into(),
+                "inspect".into(),
+                None,
+                vec![AgentAttachment {
+                    path: "/tmp/image.png".into(),
+                    name: "image.png".into(),
+                    mime_type: "image/png".into(),
+                    size: 42,
+                }],
+            ),
+            ClientMessage::AgentInputWithAttachments { attachments, .. }
+                if attachments.len() == 1
+        ));
     }
 
     #[test]

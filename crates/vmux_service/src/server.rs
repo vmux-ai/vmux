@@ -55,6 +55,36 @@ fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
     prompt
 }
 
+async fn route_agent_input(
+    acp_manager: &Arc<Mutex<crate::acp::AcpSessionManager>>,
+    agent_manager: &Arc<Mutex<crate::agent::AgentSessionManager>>,
+    sid: String,
+    text: String,
+    context: Option<String>,
+    attachments: Vec<AgentAttachment>,
+) {
+    let acp = acp_manager.lock().await;
+    if acp.contains(&sid) {
+        acp.input(
+            &sid,
+            crate::acp::AcpInput::User {
+                text,
+                context,
+                attachments,
+            },
+        );
+        return;
+    }
+    drop(acp);
+    agent_manager.lock().await.input(
+        &sid,
+        crate::agent::SessionInput::User {
+            text: page_agent_prompt(text, &attachments),
+            attachments,
+        },
+    );
+}
+
 /// Acquire the manager lock and run `f` against the process if it exists.
 /// Returns Some(result) when the process was found, None otherwise.
 async fn with_process_mut<F, R>(
@@ -796,30 +826,26 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AgentInput {
+            ClientMessage::AgentInput { sid, text, context } => {
+                route_agent_input(&acp_manager, &agent_manager, sid, text, context, Vec::new())
+                    .await;
+            }
+
+            ClientMessage::AgentInputWithAttachments {
                 sid,
                 text,
                 context,
                 attachments,
             } => {
-                if acp_manager.lock().await.contains(&sid) {
-                    acp_manager.lock().await.input(
-                        &sid,
-                        crate::acp::AcpInput::User {
-                            text,
-                            context,
-                            attachments,
-                        },
-                    );
-                } else {
-                    agent_manager.lock().await.input(
-                        &sid,
-                        crate::agent::SessionInput::User {
-                            text: page_agent_prompt(text, &attachments),
-                            attachments,
-                        },
-                    );
-                }
+                route_agent_input(
+                    &acp_manager,
+                    &agent_manager,
+                    sid,
+                    text,
+                    context,
+                    attachments,
+                )
+                .await;
             }
 
             ClientMessage::AcpSetModel {

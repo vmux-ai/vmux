@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -37,6 +38,8 @@ use crate::protocol::{
 };
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
+const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
+const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -419,48 +422,68 @@ fn attachment_uri(path: &str) -> String {
         .unwrap_or_else(|_| format!("file://{path}"))
 }
 
-fn prompt_content_blocks(
+async fn encoded_media(path: String, limit: u64) -> Option<(String, u64)> {
+    tokio::task::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() || metadata.len() > limit {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .ok()?
+            .take(limit.saturating_add(1))
+            .read_to_end(&mut bytes)
+            .ok()?;
+        let size = u64::try_from(bytes.len()).ok()?;
+        (size <= limit).then(|| {
+            (
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+                size,
+            )
+        })
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn prompt_content_blocks(
     text: &str,
     context: Option<&str>,
     attachments: &[AgentAttachment],
     capabilities: &PromptCapabilities,
 ) -> Vec<ContentBlock> {
     let mut blocks = Vec::with_capacity(attachments.len() + 1);
+    let mut remaining_media_bytes = PROMPT_MEDIA_TOTAL_LIMIT;
     let text = compose_agent_prompt(text, context);
     if !text.is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(text)));
     }
     for attachment in attachments {
         let uri = attachment_uri(&attachment.path);
-        let bytes = if (capabilities.image && attachment.mime_type.starts_with("image/"))
-            || (capabilities.audio && attachment.mime_type.starts_with("audio/"))
-        {
-            std::fs::read(&attachment.path).ok()
+        let media_supported = (capabilities.image && attachment.mime_type.starts_with("image/"))
+            || (capabilities.audio && attachment.mime_type.starts_with("audio/"));
+        let limit = PROMPT_MEDIA_FILE_LIMIT.min(remaining_media_bytes);
+        let encoded = if media_supported && attachment.size <= limit && limit > 0 {
+            encoded_media(attachment.path.clone(), limit).await
         } else {
             None
         };
-        if capabilities.image
-            && attachment.mime_type.starts_with("image/")
-            && let Some(bytes) = bytes.as_ref()
-        {
-            blocks.push(ContentBlock::Image(
-                ImageContent::new(
-                    base64::engine::general_purpose::STANDARD.encode(bytes),
+        if let Some((data, size)) = encoded {
+            remaining_media_bytes = remaining_media_bytes.saturating_sub(size);
+            if capabilities.image && attachment.mime_type.starts_with("image/") {
+                blocks.push(ContentBlock::Image(
+                    ImageContent::new(data, attachment.mime_type.clone()).uri(uri),
+                ));
+                continue;
+            }
+            if capabilities.audio && attachment.mime_type.starts_with("audio/") {
+                blocks.push(ContentBlock::Audio(AudioContent::new(
+                    data,
                     attachment.mime_type.clone(),
-                )
-                .uri(uri),
-            ));
-            continue;
-        }
-        if capabilities.audio
-            && attachment.mime_type.starts_with("audio/")
-            && let Some(bytes) = bytes
-        {
-            blocks.push(ContentBlock::Audio(AudioContent::new(
-                base64::engine::general_purpose::STANDARD.encode(bytes),
-                attachment.mime_type.clone(),
-            )));
-            continue;
+                )));
+                continue;
+            }
         }
         blocks.push(ContentBlock::ResourceLink(
             ResourceLink::new(attachment.name.clone(), uri)
@@ -796,7 +819,8 @@ pub async fn run(
                                     context.as_deref(),
                                     &attachments,
                                     &prompt_capabilities,
-                                ),
+                                )
+                                .await,
                             );
                             let errored = match cx_prompt.send_request(prompt).block_task().await {
                                 Ok(_) => None,
@@ -1415,8 +1439,8 @@ mod tests {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
     }
 
-    #[test]
-    fn prompt_content_embeds_supported_images() {
+    #[tokio::test]
+    async fn prompt_content_embeds_supported_images() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("image.png");
         std::fs::write(&path, b"png").unwrap();
@@ -1429,7 +1453,7 @@ mod tests {
         let mut capabilities = PromptCapabilities::default();
         capabilities.image = true;
 
-        let blocks = prompt_content_blocks("inspect", None, &[attachment], &capabilities);
+        let blocks = prompt_content_blocks("inspect", None, &[attachment], &capabilities).await;
 
         assert!(matches!(&blocks[0], ContentBlock::Text(text) if text.text == "inspect"));
         assert!(matches!(
@@ -1440,8 +1464,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn prompt_content_links_files_without_media_capability() {
+    #[tokio::test]
+    async fn prompt_content_links_files_without_media_capability() {
         let attachment = AgentAttachment {
             path: "/tmp/report.txt".into(),
             name: "report.txt".into(),
@@ -1449,12 +1473,40 @@ mod tests {
             size: 12,
         };
 
-        let blocks = prompt_content_blocks("", None, &[attachment], &PromptCapabilities::default());
+        let blocks =
+            prompt_content_blocks("", None, &[attachment], &PromptCapabilities::default()).await;
 
         assert!(matches!(
             &blocks[0],
             ContentBlock::ResourceLink(link)
                 if link.name == "report.txt" && link.uri == "file:///tmp/report.txt"
+        ));
+    }
+
+    #[tokio::test]
+    async fn prompt_content_links_supported_media_above_embed_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.png");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(PROMPT_MEDIA_FILE_LIMIT + 1)
+            .unwrap();
+        let attachment = AgentAttachment {
+            path: path.to_string_lossy().into_owned(),
+            name: "large.png".into(),
+            mime_type: "image/png".into(),
+            size: PROMPT_MEDIA_FILE_LIMIT + 1,
+        };
+        let mut capabilities = PromptCapabilities::default();
+        capabilities.image = true;
+
+        let blocks = prompt_content_blocks("", None, &[attachment], &capabilities).await;
+
+        assert!(matches!(
+            &blocks[0],
+            ContentBlock::ResourceLink(link)
+                if link.name == "large.png"
+                    && link.size == i64::try_from(PROMPT_MEDIA_FILE_LIMIT + 1).ok()
         ));
     }
 

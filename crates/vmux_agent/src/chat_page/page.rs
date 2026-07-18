@@ -5,8 +5,8 @@ use crate::chat_page::composer::{
     chat_page_title, edit_prompt, filter_models, filter_sessions, inline_media_query,
     is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
     prompt_history_direction, prompt_prefix_at_utf16, replace_inline_media_query,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
-    should_expand_thinking, tool_activity,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_expand_thinking,
+    should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
