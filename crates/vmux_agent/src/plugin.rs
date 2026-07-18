@@ -3616,9 +3616,9 @@ fn handle_spawn_agent_requests(
                 if let Some(prompt) = req.initial_prompt.clone().filter(|p| !p.trim().is_empty()) {
                     commands
                         .entity(terminal)
-                        .insert(vmux_terminal::BufferedAgentPrompt {
-                            text: prompt,
-                            submit: true,
+                        .insert(vmux_terminal::PromptCapture {
+                            draft: prompt,
+                            skipped: false,
                         });
                 }
                 commands.entity(req.stack).remove::<PendingAgentPrompt>();
@@ -5478,6 +5478,48 @@ mod tests {
         assert_eq!(spawns.len(), 1);
         assert_eq!(spawns[0].kind, AgentKind::Codex);
         assert_eq!(spawns[0].initial_prompt.as_deref(), Some("fix the tests"));
+    }
+
+    #[test]
+    fn cli_initial_prompt_waits_for_terminal_readiness() {
+        let mut strategies = AgentStrategies::default();
+        strategies.register_cli(Box::new(crate::client::cli::codex::CodexStrategy));
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(strategies)
+            .insert_resource(AgentExecutableOverride(std::collections::HashMap::from([
+                (AgentKind::Codex, true),
+            ])))
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_spawn_agent_requests);
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .write(SpawnAgentInStackRequest {
+                kind: AgentKind::Codex,
+                cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+                session_id: None,
+                stack,
+                initial_prompt: Some("@asdfas".to_string()),
+            });
+
+        app.update();
+        app.update();
+
+        let mut terminals = app.world_mut().query_filtered::<(
+            &vmux_terminal::PromptCapture,
+            Has<vmux_terminal::BufferedAgentPrompt>,
+        ), With<Terminal>>();
+        let (capture, buffered) = terminals.single(app.world()).unwrap();
+        assert_eq!(capture.draft, "@asdfas");
+        assert!(!capture.skipped);
+        assert!(!buffered);
     }
 
     #[test]
