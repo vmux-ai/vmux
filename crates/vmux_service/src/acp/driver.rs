@@ -555,7 +555,7 @@ pub async fn run(
         }
     };
     let fs_scope = AcpFsScope {
-        cwd: shared.cwd.clone(),
+        cwd: shared.cwd(),
         vibe_temp_root: vibe_temp_root
             .as_ref()
             .map(|root| root.path().to_path_buf()),
@@ -2280,18 +2280,16 @@ mod tests {
 
         let worktree = worktree.canonicalize().unwrap();
         assert_eq!(shared.cwd(), worktree);
+        let scope = AcpFsScope {
+            cwd: shared.cwd(),
+            vibe_temp_root: None,
+        };
         assert_eq!(
-            read_text_file(
-                &shared.cwd(),
-                &ReadTextFileRequest::new("s1", &worktree_file)
-            ),
+            read_text_file(&scope, &ReadTextFileRequest::new("s1", &worktree_file)),
             Ok("original".into())
         );
         assert_eq!(
-            read_text_file(
-                &shared.cwd(),
-                &ReadTextFileRequest::new("s1", &original_file)
-            ),
+            read_text_file(&scope, &ReadTextFileRequest::new("s1", &original_file)),
             Err("path outside session cwd".into())
         );
 

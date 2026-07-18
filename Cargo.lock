@@ -9876,6 +9876,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vmux_core",
+ "vmux_layout",
  "vmux_service_client",
  "vmux_ui",
  "vmux_wire",
