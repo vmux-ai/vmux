@@ -1765,12 +1765,32 @@ mod native_tests {
     use std::process::Command;
 
     fn git(repo: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo)
+        let mut command = Command::new("git");
+        command
+            .current_dir(repo)
             .args(args)
-            .output()
-            .unwrap();
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null");
+        for name in [
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_CONFIG",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_DIR",
+            "GIT_GRAFT_FILE",
+            "GIT_IMPLICIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_NO_REPLACE_OBJECTS",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_PREFIX",
+            "GIT_REPLACE_REF_BASE",
+            "GIT_SHALLOW_FILE",
+            "GIT_WORK_TREE",
+        ] {
+            command.env_remove(name);
+        }
+        let output = command.output().unwrap();
         assert!(
             output.status.success(),
             "git {args:?}: {}",
@@ -1834,6 +1854,8 @@ mod native_tests {
         assert_eq!(tab_data.name, "dashboard");
         assert!(
             Path::new(tab_data.startup_dir.as_deref().unwrap())
+                .canonicalize()
+                .unwrap()
                 .starts_with(managed_root.path().canonicalize().unwrap())
         );
         let metadata = app
@@ -2389,7 +2411,9 @@ mod native_tests {
     #[test]
     fn installing_chat_uses_matrix_loading_composer() {
         let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("let installing_splash = installing && items.read().is_empty();"));
+        assert!(source.contains(
+            "let installing_splash = installing && items.read().is_empty() && !workspace_required();"
+        ));
         assert!(source.contains("MatrixRain {"));
         assert!(source.contains("PromptGhost {"));
         assert!(source.contains("terminal: false"));
