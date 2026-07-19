@@ -3564,7 +3564,15 @@ fn push_bookmarks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    pins: Query<(&vmux_core::Uuid, &PageMetadata, &vmux_core::Order), With<vmux_core::Pin>>,
+    pins: Query<
+        (
+            &vmux_core::Uuid,
+            &PageMetadata,
+            &vmux_core::BookmarkOrder,
+            Has<vmux_core::Bookmark>,
+        ),
+        With<vmux_core::Pin>,
+    >,
     folders: Query<
         (
             Entity,
@@ -3572,22 +3580,28 @@ fn push_bookmarks_host_emit(
             &Name,
             Option<&Children>,
             Has<vmux_core::Collapsed>,
-            &vmux_core::Order,
+            &vmux_core::BookmarkOrder,
             Option<&ChildOf>,
         ),
         With<vmux_core::Folder>,
     >,
     top_bookmarks: Query<
-        (&vmux_core::Uuid, &PageMetadata, &vmux_core::Order),
         (
-            With<vmux_core::Bookmark>,
-            Without<vmux_core::Pin>,
-            Without<ChildOf>,
+            &vmux_core::Uuid,
+            &PageMetadata,
+            &vmux_core::BookmarkOrder,
+            Has<vmux_core::Pin>,
         ),
+        (With<vmux_core::Bookmark>, Without<ChildOf>),
     >,
     child_bookmarks: Query<
-        (&vmux_core::Uuid, &PageMetadata, &vmux_core::Order),
-        (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
+        (
+            &vmux_core::Uuid,
+            &PageMetadata,
+            &vmux_core::BookmarkOrder,
+            Has<vmux_core::Pin>,
+        ),
+        With<vmux_core::Bookmark>,
     >,
     mut last: Local<String>,
 ) {
@@ -3598,15 +3612,19 @@ fn push_bookmarks_host_emit(
         return;
     }
 
-    let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata| vmux_layout::event::BookmarkRow {
-        uuid: uuid.0.clone(),
-        url: meta.url.clone(),
-        title: meta.title.clone(),
-        favicon_url: meta.icon.favicon_url().to_string(),
+    let row = |uuid: &vmux_core::Uuid, meta: &PageMetadata, bookmarked: bool, pinned: bool| {
+        vmux_layout::event::BookmarkRow {
+            uuid: uuid.0.clone(),
+            metadata: meta.clone(),
+            bookmarked,
+            pinned,
+        }
     };
 
-    let mut pin_entries: Vec<(u32, vmux_layout::event::BookmarkRow)> =
-        pins.iter().map(|(u, m, o)| (o.0, row(u, m))).collect();
+    let mut pin_entries: Vec<(u32, vmux_layout::event::BookmarkRow)> = pins
+        .iter()
+        .map(|(u, m, o, bookmarked)| (o.0, row(u, m, bookmarked, true)))
+        .collect();
     pin_entries.sort_by_key(|(order, _)| *order);
     let pin_rows: Vec<vmux_layout::event::BookmarkRow> =
         pin_entries.into_iter().map(|(_, r)| r).collect();
@@ -3616,8 +3634,8 @@ fn push_bookmarks_host_emit(
         let mut kids = Vec::new();
         if let Some(children) = children {
             for child in children.iter() {
-                if let Ok((uuid, meta, order)) = child_bookmarks.get(child) {
-                    kids.push((order.0, row(uuid, meta)));
+                if let Ok((uuid, meta, order, pinned)) = child_bookmarks.get(child) {
+                    kids.push((order.0, row(uuid, meta, true, pinned)));
                 }
             }
         }
@@ -3639,10 +3657,10 @@ fn push_bookmarks_host_emit(
             }),
         ));
     }
-    for (uuid, meta, order) in top_bookmarks.iter() {
+    for (uuid, meta, order, pinned) in top_bookmarks.iter() {
         roots.push((
             order.0,
-            vmux_layout::event::BookmarkNode::Entry(row(uuid, meta)),
+            vmux_layout::event::BookmarkNode::Entry(row(uuid, meta, true, pinned)),
         ));
     }
     roots.sort_by_key(|(o, _)| *o);

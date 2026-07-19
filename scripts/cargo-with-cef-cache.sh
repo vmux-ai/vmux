@@ -17,14 +17,19 @@ if [[ -z "$cef_cache" && "${CI:-}" != "true" ]]; then
     esac
 fi
 
-if sccache_bin="$(command -v sccache 2>/dev/null)"; then
-    export CMAKE_C_COMPILER_LAUNCHER="${CMAKE_C_COMPILER_LAUNCHER:-$sccache_bin}"
-    export CMAKE_CXX_COMPILER_LAUNCHER="${CMAKE_CXX_COMPILER_LAUNCHER:-$sccache_bin}"
-    if [[ "${CI:-}" != "true" ]]; then
-        export RUSTC_WRAPPER="${RUSTC_WRAPPER:-$sccache_bin}"
-        if [[ "$RUSTC_WRAPPER" == "$sccache_bin" ]]; then
-            export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+if [[ "${VMUX_DISABLE_SCCACHE:-}" != "1" ]] && sccache_bin="$(command -v sccache 2>/dev/null)"; then
+    rustc_bin="$(command -v rustc 2>/dev/null || true)"
+    if [[ -n "$rustc_bin" ]] && "$sccache_bin" "$rustc_bin" -vV >/dev/null 2>&1; then
+        export CMAKE_C_COMPILER_LAUNCHER="${CMAKE_C_COMPILER_LAUNCHER:-$sccache_bin}"
+        export CMAKE_CXX_COMPILER_LAUNCHER="${CMAKE_CXX_COMPILER_LAUNCHER:-$sccache_bin}"
+        if [[ "${CI:-}" != "true" ]]; then
+            export RUSTC_WRAPPER="${RUSTC_WRAPPER:-$sccache_bin}"
+            if [[ "$RUSTC_WRAPPER" == "$sccache_bin" ]]; then
+                export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+            fi
         fi
+    else
+        echo "sccache unavailable; building without cache" >&2
     fi
 fi
 

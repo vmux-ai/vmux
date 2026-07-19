@@ -78,6 +78,7 @@ impl Plugin for CorePlugin {
             .register_type::<TransitionType>()
             .register_type::<Order>()
             .register_type::<Active>()
+            .register_type::<BookmarkOrder>()
             .register_type::<Pin>()
             .register_type::<Bookmark>()
             .register_type::<Folder>()
@@ -100,10 +101,21 @@ pub fn now_millis() -> i64 {
 
 // ── Shared components ────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Component, Clone, Debug, Reflect, Default)]
-#[reflect(Component, Default)]
-#[type_path = "vmux_header::system"]
+#[cfg_attr(not(target_arch = "wasm32"), derive(Component, Reflect))]
+#[cfg_attr(not(target_arch = "wasm32"), reflect(Component, Default))]
+#[cfg_attr(not(target_arch = "wasm32"), type_path = "vmux_header::system")]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PageMetadata {
     pub title: String,
     pub url: String,
@@ -211,6 +223,12 @@ pub struct Active;
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
+pub struct BookmarkOrder(pub u32);
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
+#[reflect(Component, Default)]
+#[type_path = "vmux_core"]
 pub struct Pin;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -296,6 +314,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(CorePlugin);
         let registry = app.world().resource::<AppTypeRegistry>().read();
+        assert!(
+            registry
+                .get(std::any::TypeId::of::<BookmarkOrder>())
+                .is_some()
+        );
         assert!(registry.get(std::any::TypeId::of::<Pin>()).is_some());
         assert!(registry.get(std::any::TypeId::of::<Bookmark>()).is_some());
         assert!(registry.get(std::any::TypeId::of::<Folder>()).is_some());

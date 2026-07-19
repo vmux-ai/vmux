@@ -1860,20 +1860,22 @@ fn handle_agent_commands(
                 favicon_url,
             } => {
                 use vmux_layout::bookmark::BookmarkOp;
+                let metadata = |url| vmux_core::PageMetadata {
+                    title: title.clone().unwrap_or_default(),
+                    url,
+                    icon: vmux_core::PageIcon::favicon(favicon_url.clone().unwrap_or_default()),
+                    bg_color: None,
+                };
                 let op = match command.as_str() {
                     "add" => url.clone().map(|url| BookmarkOp::Add {
-                        url,
-                        title: title.clone().unwrap_or_default(),
-                        favicon_url: favicon_url.clone().unwrap_or_default(),
+                        metadata: metadata(url),
                         folder: uuid.clone(),
                     }),
                     "remove" => uuid.clone().map(|uuid| BookmarkOp::Remove { uuid }),
                     "pin" => match (uuid.clone(), url.clone()) {
                         (Some(uuid), _) => Some(BookmarkOp::Pin { uuid }),
                         (None, Some(url)) => Some(BookmarkOp::PinUrl {
-                            url,
-                            title: title.clone().unwrap_or_default(),
-                            favicon_url: favicon_url.clone().unwrap_or_default(),
+                            metadata: metadata(url),
                         }),
                         _ => None,
                     },
@@ -3531,7 +3533,7 @@ fn handle_agent_queries(
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
-            &vmux_core::Order,
+            &vmux_core::BookmarkOrder,
         ),
         With<vmux_core::Pin>,
     >,
@@ -3541,7 +3543,7 @@ fn handle_agent_queries(
             &Name,
             Option<&Children>,
             Has<vmux_core::Collapsed>,
-            &vmux_core::Order,
+            &vmux_core::BookmarkOrder,
         ),
         With<vmux_core::Folder>,
     >,
@@ -3549,21 +3551,17 @@ fn handle_agent_queries(
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
-            &vmux_core::Order,
+            &vmux_core::BookmarkOrder,
         ),
-        (
-            With<vmux_core::Bookmark>,
-            Without<vmux_core::Pin>,
-            Without<ChildOf>,
-        ),
+        (With<vmux_core::Bookmark>, Without<ChildOf>),
     >,
     bm_children: Query<
         (
             &vmux_core::Uuid,
             &vmux_core::PageMetadata,
-            &vmux_core::Order,
+            &vmux_core::BookmarkOrder,
         ),
-        (With<vmux_core::Bookmark>, Without<vmux_core::Pin>),
+        With<vmux_core::Bookmark>,
     >,
     mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,

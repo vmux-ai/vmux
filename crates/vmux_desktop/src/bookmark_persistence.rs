@@ -2,7 +2,8 @@ use bevy::prelude::*;
 use bevy_world_serialization::WorldFilter;
 use moonshine_save::prelude::*;
 use std::path::PathBuf;
-use vmux_core::{Bookmark, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
+use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
+use vmux_layout::LayoutStartupSet;
 
 type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
@@ -20,7 +21,7 @@ fn bookmark_scene_filter() -> WorldFilter {
         .allow::<Folder>()
         .allow::<Collapsed>()
         .allow::<Uuid>()
-        .allow::<Order>()
+        .allow::<BookmarkOrder>()
         .allow::<PageMetadata>()
 }
 
@@ -47,18 +48,21 @@ fn load_bookmarks_on_startup(mut commands: Commands) {
     commands.trigger_load(LoadWorld::<BookmarkFilter>::from_file(path));
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct BookmarkAutoSave {
-    debounce: Timer,
     dirty: bool,
 }
 
-impl Default for BookmarkAutoSave {
-    fn default() -> Self {
-        Self {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            dirty: false,
-        }
+fn migrate_legacy_bookmark_order(
+    legacy: Query<(Entity, &Order), (BookmarkFilter, Without<BookmarkOrder>)>,
+    mut commands: Commands,
+) {
+    for (entity, order) in &legacy {
+        commands
+            .entity(entity)
+            .insert(BookmarkOrder(order.0))
+            .remove::<Order>()
+            .remove::<Save>();
     }
 }
 
@@ -74,7 +78,7 @@ fn mark_bookmarks_dirty(
                 Added<Folder>,
                 Added<Collapsed>,
                 Changed<Name>,
-                Changed<Order>,
+                Changed<BookmarkOrder>,
                 Changed<PageMetadata>,
                 Changed<ChildOf>,
             )>,
@@ -97,19 +101,15 @@ fn mark_bookmarks_dirty(
         | removed_child_of_bookmark;
     if any_removed || !changed.is_empty() {
         auto.dirty = true;
-        auto.debounce.reset();
     }
 }
 
-fn autosave_bookmarks(time: Res<Time>, mut auto: ResMut<BookmarkAutoSave>, mut commands: Commands) {
+fn autosave_bookmarks(mut auto: ResMut<BookmarkAutoSave>, mut commands: Commands) {
     if !auto.dirty {
         return;
     }
-    auto.debounce.tick(time.delta());
-    if auto.debounce.is_finished() {
-        save_bookmarks_to_path(&mut commands, bookmarks_path());
-        auto.dirty = false;
-    }
+    save_bookmarks_to_path(&mut commands, bookmarks_path());
+    auto.dirty = false;
 }
 
 pub(crate) struct BookmarkPersistencePlugin;
@@ -119,8 +119,19 @@ impl Plugin for BookmarkPersistencePlugin {
         app.init_resource::<BookmarkAutoSave>()
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_systems(Startup, load_bookmarks_on_startup)
-            .add_systems(Update, (mark_bookmarks_dirty, autosave_bookmarks).chain());
+            .add_systems(
+                Startup,
+                load_bookmarks_on_startup.after(LayoutStartupSet::Persistence),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    migrate_legacy_bookmark_order,
+                    mark_bookmarks_dirty,
+                    autosave_bookmarks,
+                )
+                    .chain(),
+            );
     }
 }
 
@@ -142,9 +153,12 @@ mod tests {
             .add_plugins(bevy::scene::ScenePlugin)
             .add_plugins(vmux_core::CorePlugin)
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>);
-        save_app
-            .world_mut()
-            .spawn((Folder, Uuid("f1".into()), Name::new("PRs"), Order(0)));
+        save_app.world_mut().spawn((
+            Folder,
+            Uuid("f1".into()),
+            Name::new("PRs"),
+            BookmarkOrder(0),
+        ));
         save_app.world_mut().spawn((
             Bookmark,
             Uuid("b1".into()),
@@ -154,7 +168,7 @@ mod tests {
                 icon: vmux_core::icon::PageIcon::default(),
                 bg_color: None,
             },
-            Order(1),
+            BookmarkOrder(1),
         ));
         save_app
             .world_mut()
@@ -207,5 +221,27 @@ mod tests {
         assert!(!excluded, "Save-only entity excluded");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_bookmark_order_migration_removes_space_save_marker() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .add_systems(Update, migrate_legacy_bookmark_order);
+        let entity = app
+            .world_mut()
+            .spawn((Bookmark, Uuid("b1".into()), Order(3)))
+            .id();
+        assert!(app.world().get::<Save>(entity).is_some());
+
+        app.update();
+
+        assert_eq!(
+            app.world().get::<BookmarkOrder>(entity),
+            Some(&BookmarkOrder(3))
+        );
+        assert!(app.world().get::<Order>(entity).is_none());
+        assert!(app.world().get::<Save>(entity).is_none());
     }
 }

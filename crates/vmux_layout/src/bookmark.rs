@@ -5,19 +5,17 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 use vmux_command::{AppCommand, BookmarkCommand, BrowserCommand, OpenCommand, ReadAppCommands};
-use vmux_core::{Bookmark, Collapsed, Folder, LastActivatedAt, Order, PageMetadata, Pin, Uuid};
+use vmux_core::{
+    Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageMetadata, Pin, Uuid,
+};
 
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub enum BookmarkOp {
     ToggleForUrl {
-        url: String,
-        title: String,
-        favicon_url: String,
+        metadata: PageMetadata,
     },
     Add {
-        url: String,
-        title: String,
-        favicon_url: String,
+        metadata: PageMetadata,
         folder: Option<String>,
     },
     Remove {
@@ -28,6 +26,10 @@ pub enum BookmarkOp {
         name: String,
     },
     Move {
+        uuid: String,
+        folder: Option<String>,
+    },
+    MovePin {
         uuid: String,
         folder: Option<String>,
     },
@@ -56,9 +58,7 @@ pub enum BookmarkOp {
         uuid: String,
     },
     PinUrl {
-        url: String,
-        title: String,
-        favicon_url: String,
+        metadata: PageMetadata,
     },
     Unpin {
         uuid: String,
@@ -137,17 +137,8 @@ fn find_by_uuid(target: &str, q: &Query<(Entity, &Uuid)>) -> Option<Entity> {
         .map(|(entity, _)| entity)
 }
 
-fn next_top_order(orders: impl Iterator<Item = u32>) -> Order {
-    Order(orders.max().map(|m| m + 1).unwrap_or(0))
-}
-
-fn page_metadata(title: &str, url: &str, favicon_url: &str) -> PageMetadata {
-    PageMetadata {
-        title: title.to_string(),
-        url: url.to_string(),
-        icon: vmux_core::icon::PageIcon::favicon(favicon_url.to_string()),
-        bg_color: None,
-    }
+fn next_top_order(orders: impl Iterator<Item = u32>) -> BookmarkOrder {
+    BookmarkOrder(orders.max().map(|m| m + 1).unwrap_or(0))
 }
 
 fn can_parent_folder(folder: Entity, parent: Entity, child_of_q: &Query<&ChildOf>) -> bool {
@@ -169,44 +160,37 @@ fn apply_bookmark_ops(
     pinned: Query<(Entity, &PageMetadata), With<Pin>>,
     folder_q: Query<(), With<Folder>>,
     collapsed_q: Query<(), With<Collapsed>>,
-    orders: Query<&Order>,
+    orders: Query<&BookmarkOrder>,
     children_q: Query<&Children>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
 ) {
     for op in reader.read() {
         match op {
-            BookmarkOp::ToggleForUrl {
-                url,
-                title,
-                favicon_url,
-            } => {
+            BookmarkOp::ToggleForUrl { metadata } => {
                 let existing = bookmarks
                     .iter()
-                    .find(|(_, meta)| &meta.url == url)
+                    .find(|(_, meta)| meta.url == metadata.url)
                     .map(|(entity, _)| entity);
                 if let Some(entity) = existing {
                     if pinned.get(entity).is_ok() {
-                        commands.entity(entity).remove::<Bookmark>();
+                        commands
+                            .entity(entity)
+                            .remove::<Bookmark>()
+                            .remove::<ChildOf>();
                     } else {
                         commands.entity(entity).despawn();
                     }
+                } else if let Some((entity, _)) =
+                    pinned.iter().find(|(_, meta)| meta.url == metadata.url)
+                {
+                    commands.entity(entity).insert((Bookmark, metadata.clone()));
                 } else {
                     let order = next_top_order(orders.iter().map(|o| o.0));
-                    commands.spawn((
-                        Bookmark,
-                        new_uuid(),
-                        page_metadata(title, url, favicon_url),
-                        order,
-                    ));
+                    commands.spawn((Bookmark, new_uuid(), metadata.clone(), order));
                 }
             }
-            BookmarkOp::Add {
-                url,
-                title,
-                favicon_url,
-                folder,
-            } => {
+            BookmarkOp::Add { metadata, folder } => {
                 let folder_entity = folder.as_ref().and_then(|folder_uuid| {
                     let entity = find_by_uuid(folder_uuid, &ids)?;
                     folder_q.get(entity).ok().map(|_| entity)
@@ -214,33 +198,27 @@ fn apply_bookmark_ops(
                 if folder.is_some() && folder_entity.is_none() {
                     continue;
                 }
-                if let Some((entity, _)) = bookmarks.iter().find(|(_, meta)| &meta.url == url) {
+                if let Some((entity, _)) =
+                    bookmarks.iter().find(|(_, meta)| meta.url == metadata.url)
+                {
                     let mut entity_commands = commands.entity(entity);
-                    entity_commands.insert(page_metadata(title, url, favicon_url));
+                    entity_commands.insert(metadata.clone());
                     if let Some(folder_entity) = folder_entity {
-                        entity_commands
-                            .insert(ChildOf(folder_entity))
-                            .remove::<Pin>();
+                        entity_commands.insert(ChildOf(folder_entity));
                     }
                     continue;
                 }
-                if let Some((entity, _)) = pinned.iter().find(|(_, meta)| &meta.url == url) {
+                if let Some((entity, _)) = pinned.iter().find(|(_, meta)| meta.url == metadata.url)
+                {
                     let mut entity_commands = commands.entity(entity);
-                    entity_commands.insert((Bookmark, page_metadata(title, url, favicon_url)));
+                    entity_commands.insert((Bookmark, metadata.clone()));
                     if let Some(folder_entity) = folder_entity {
-                        entity_commands
-                            .insert(ChildOf(folder_entity))
-                            .remove::<Pin>();
+                        entity_commands.insert(ChildOf(folder_entity));
                     }
                     continue;
                 }
                 let order = next_top_order(orders.iter().map(|o| o.0));
-                let mut e = commands.spawn((
-                    Bookmark,
-                    new_uuid(),
-                    page_metadata(title, url, favicon_url),
-                    order,
-                ));
+                let mut e = commands.spawn((Bookmark, new_uuid(), metadata.clone(), order));
                 if let Some(folder_entity) = folder_entity {
                     e.insert(ChildOf(folder_entity));
                 }
@@ -249,7 +227,14 @@ fn apply_bookmark_ops(
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && (bookmarks.get(entity).is_ok() || pinned.get(entity).is_ok())
                 {
-                    commands.entity(entity).despawn();
+                    if bookmarks.get(entity).is_ok() && pinned.get(entity).is_ok() {
+                        commands
+                            .entity(entity)
+                            .remove::<Bookmark>()
+                            .remove::<ChildOf>();
+                    } else {
+                        commands.entity(entity).despawn();
+                    }
                 }
             }
             BookmarkOp::Rename { uuid, name } => {
@@ -264,7 +249,6 @@ fn apply_bookmark_ops(
             BookmarkOp::Move { uuid, folder } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && bookmarks.get(entity).is_ok()
-                    && pinned.get(entity).is_err()
                 {
                     if let Some(folder_uuid) = folder
                         && let Some(folder_entity) = find_by_uuid(folder_uuid, &ids)
@@ -273,6 +257,26 @@ fn apply_bookmark_ops(
                         commands.entity(entity).insert(ChildOf(folder_entity));
                     } else if folder.is_none() {
                         commands.entity(entity).remove::<ChildOf>();
+                    }
+                }
+            }
+            BookmarkOp::MovePin { uuid, folder } => {
+                let folder_entity = folder.as_ref().and_then(|folder_uuid| {
+                    let entity = find_by_uuid(folder_uuid, &ids)?;
+                    folder_q.get(entity).ok().map(|_| entity)
+                });
+                if folder.is_some() && folder_entity.is_none() {
+                    continue;
+                }
+                if let Some(entity) = find_by_uuid(uuid, &ids)
+                    && pinned.get(entity).is_ok()
+                {
+                    let mut entity_commands = commands.entity(entity);
+                    entity_commands.insert(Bookmark);
+                    if let Some(folder_entity) = folder_entity {
+                        entity_commands.insert(ChildOf(folder_entity));
+                    } else {
+                        entity_commands.remove::<ChildOf>();
                     }
                 }
             }
@@ -359,35 +363,23 @@ fn apply_bookmark_ops(
                 if let Some(entity) = find_by_uuid(uuid, &ids)
                     && bookmarks.get(entity).is_ok()
                 {
-                    commands.entity(entity).insert(Pin).remove::<ChildOf>();
+                    commands.entity(entity).insert(Pin);
                 }
             }
-            BookmarkOp::PinUrl {
-                url,
-                title,
-                favicon_url,
-            } => {
-                if let Some((entity, _)) = pinned.iter().find(|(_, meta)| &meta.url == url) {
-                    commands
-                        .entity(entity)
-                        .insert(page_metadata(title, url, favicon_url))
-                        .remove::<ChildOf>();
+            BookmarkOp::PinUrl { metadata } => {
+                if let Some((entity, _)) = pinned.iter().find(|(_, meta)| meta.url == metadata.url)
+                {
+                    commands.entity(entity).insert(metadata.clone());
                     continue;
                 }
-                if let Some((entity, _)) = bookmarks.iter().find(|(_, meta)| &meta.url == url) {
-                    commands
-                        .entity(entity)
-                        .insert((Pin, page_metadata(title, url, favicon_url)))
-                        .remove::<ChildOf>();
+                if let Some((entity, _)) =
+                    bookmarks.iter().find(|(_, meta)| meta.url == metadata.url)
+                {
+                    commands.entity(entity).insert((Pin, metadata.clone()));
                     continue;
                 }
                 let order = next_top_order(orders.iter().map(|o| o.0));
-                commands.spawn((
-                    Pin,
-                    new_uuid(),
-                    page_metadata(title, url, favicon_url),
-                    order,
-                ));
+                commands.spawn((Pin, new_uuid(), metadata.clone(), order));
             }
             BookmarkOp::Unpin { uuid } => {
                 if let Some(entity) = find_by_uuid(uuid, &ids)
@@ -426,22 +418,16 @@ fn on_bookmarks_command_emit(
             }
         }
         "add" => {
-            if let Some(url) = e.url.clone() {
+            if let Some(metadata) = e.metadata.clone() {
                 ops.write(BookmarkOp::Add {
-                    url,
-                    title: e.title.clone().unwrap_or_default(),
-                    favicon_url: e.favicon_url.clone().unwrap_or_default(),
+                    metadata,
                     folder: e.folder.clone(),
                 });
             }
         }
         "pin_url" => {
-            if let Some(url) = e.url.clone() {
-                ops.write(BookmarkOp::PinUrl {
-                    url,
-                    title: e.title.clone().unwrap_or_default(),
-                    favicon_url: e.favicon_url.clone().unwrap_or_default(),
-                });
+            if let Some(metadata) = e.metadata.clone() {
+                ops.write(BookmarkOp::PinUrl { metadata });
             }
         }
         "remove" => {
@@ -457,6 +443,14 @@ fn on_bookmarks_command_emit(
         "move" => {
             if let Some(uuid) = e.uuid.clone() {
                 ops.write(BookmarkOp::Move {
+                    uuid,
+                    folder: e.folder.clone(),
+                });
+            }
+        }
+        "move_pin" => {
+            if let Some(uuid) = e.uuid.clone() {
+                ops.write(BookmarkOp::MovePin {
                     uuid,
                     folder: e.folder.clone(),
                 });
@@ -546,22 +540,13 @@ fn handle_bookmark_app_commands(
         if meta.url.is_empty() {
             continue;
         }
-        let (url, title, favicon_url) = (
-            meta.url.clone(),
-            meta.title.clone(),
-            meta.icon.favicon_url().to_string(),
-        );
         if pin {
             ops.write(BookmarkOp::PinUrl {
-                url,
-                title,
-                favicon_url,
+                metadata: meta.clone(),
             });
         } else {
             ops.write(BookmarkOp::ToggleForUrl {
-                url,
-                title,
-                favicon_url,
+                metadata: meta.clone(),
             });
         }
     }
@@ -593,6 +578,14 @@ mod tests {
             .count()
     }
 
+    fn metadata(title: &str) -> PageMetadata {
+        PageMetadata {
+            title: title.to_string(),
+            url: "https://a.test".to_string(),
+            ..default()
+        }
+    }
+
     #[test]
     fn open_event_requests_new_stack() {
         let mut app = App::new();
@@ -610,8 +603,7 @@ mod tests {
                     uuid: None,
                     name: None,
                     url: Some("https://a.test".into()),
-                    title: None,
-                    favicon_url: None,
+                    metadata: None,
                     folder: None,
                 },
             });
@@ -696,9 +688,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: None,
             },
         );
@@ -706,12 +696,48 @@ mod tests {
     }
 
     #[test]
+    fn bookmark_entities_are_not_space_save_entities() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::Add {
+                metadata: metadata("A"),
+                folder: None,
+            },
+        );
+        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        assert_eq!(count::<With<moonshine_save::prelude::Save>>(&mut app), 0);
+    }
+
+    #[test]
+    fn add_preserves_page_metadata() {
+        let mut app = test_app();
+        let expected = PageMetadata {
+            title: "Start".into(),
+            url: "vmux://start/".into(),
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+            bg_color: Some("#111111".into()),
+        };
+        send(
+            &mut app,
+            BookmarkOp::Add {
+                metadata: expected.clone(),
+                folder: None,
+            },
+        );
+        let actual = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Bookmark>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(actual, &expected);
+    }
+
+    #[test]
     fn toggle_for_url_is_idempotent_add_then_remove() {
         let mut app = test_app();
         let op = || BookmarkOp::ToggleForUrl {
-            url: "https://a.test".into(),
-            title: "A".into(),
-            favicon_url: String::new(),
+            metadata: metadata("A"),
         };
         send(&mut app, op());
         assert_eq!(count::<With<Bookmark>>(&mut app), 1);
@@ -725,9 +751,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: None,
             },
         );
@@ -740,6 +764,33 @@ mod tests {
             .clone();
         send(&mut app, BookmarkOp::Remove { uuid });
         assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+    }
+
+    #[test]
+    fn remove_bookmark_keeps_pin() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::PinUrl {
+                metadata: metadata("A"),
+            },
+        );
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Pin>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        send(
+            &mut app,
+            BookmarkOp::ToggleForUrl {
+                metadata: metadata("A"),
+            },
+        );
+        send(&mut app, BookmarkOp::Remove { uuid });
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
     }
 
     fn folder_uuid(app: &mut App) -> String {
@@ -777,9 +828,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: Some(fid),
             },
         );
@@ -856,9 +905,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: Some(child_uuid.clone()),
             },
         );
@@ -877,9 +924,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: None,
             },
         );
@@ -888,9 +933,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A updated".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A updated"),
                 folder: Some(fid),
             },
         );
@@ -914,18 +957,14 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: Some(fid),
             },
         );
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A updated".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A updated"),
                 folder: None,
             },
         );
@@ -938,9 +977,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: None,
             },
         );
@@ -970,9 +1007,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: None,
             },
         );
@@ -997,9 +1032,7 @@ mod tests {
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
                 folder: Some(fid.clone()),
             },
         );
@@ -1020,15 +1053,15 @@ mod tests {
     }
 
     #[test]
-    fn pin_promotes_bookmark_out_of_list_into_grid() {
+    fn pin_keeps_bookmark_in_its_folder() {
         let mut app = test_app();
+        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        let folder = folder_uuid(&mut app);
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
-                folder: None,
+                metadata: metadata("A"),
+                folder: Some(folder),
             },
         );
         let uuid = app
@@ -1040,32 +1073,101 @@ mod tests {
             .clone();
         send(&mut app, BookmarkOp::Pin { uuid: uuid.clone() });
         assert_eq!(count::<With<Pin>>(&mut app), 1);
-        assert_eq!(count::<(With<Bookmark>, Without<Pin>)>(&mut app), 0);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
         send(&mut app, BookmarkOp::Unpin { uuid });
-        assert_eq!(count::<(With<Bookmark>, Without<Pin>)>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, Without<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
     }
 
     #[test]
     fn pin_url_promotes_existing_bookmark_without_duplication() {
         let mut app = test_app();
+        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        let folder = folder_uuid(&mut app);
         send(
             &mut app,
             BookmarkOp::Add {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
-                folder: None,
+                metadata: metadata("A"),
+                folder: Some(folder),
             },
         );
         send(
             &mut app,
             BookmarkOp::PinUrl {
-                url: "https://a.test".into(),
-                title: "A".into(),
-                favicon_url: String::new(),
+                metadata: metadata("A"),
             },
         );
         assert_eq!(count::<With<Bookmark>>(&mut app), 1);
         assert_eq!(count::<With<Pin>>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
+    }
+
+    #[test]
+    fn toggle_bookmark_on_pin_reuses_the_pin_entity() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::PinUrl {
+                metadata: metadata("A"),
+            },
+        );
+        send(
+            &mut app,
+            BookmarkOp::ToggleForUrl {
+                metadata: metadata("A"),
+            },
+        );
+        assert_eq!(count::<With<PageMetadata>>(&mut app), 1);
+        assert_eq!(count::<With<Bookmark>>(&mut app), 1);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        send(
+            &mut app,
+            BookmarkOp::ToggleForUrl {
+                metadata: metadata("A"),
+            },
+        );
+        assert_eq!(count::<With<PageMetadata>>(&mut app), 1);
+        assert_eq!(count::<With<Bookmark>>(&mut app), 0);
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+    }
+
+    #[test]
+    fn move_pin_adds_it_to_a_folder_without_unpinning() {
+        let mut app = test_app();
+        send(
+            &mut app,
+            BookmarkOp::PinUrl {
+                metadata: metadata("A"),
+            },
+        );
+        send(&mut app, BookmarkOp::AddFolder { name: "PRs".into() });
+        let folder = folder_uuid(&mut app);
+        let uuid = app
+            .world_mut()
+            .query_filtered::<&Uuid, With<Pin>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        send(
+            &mut app,
+            BookmarkOp::MovePin {
+                uuid,
+                folder: Some(folder),
+            },
+        );
+        assert_eq!(count::<With<Pin>>(&mut app), 1);
+        assert_eq!(
+            count::<(With<Bookmark>, With<Pin>, With<ChildOf>)>(&mut app),
+            1
+        );
     }
 }

@@ -69,8 +69,38 @@ fn local_cargo_builds_share_cef_sdk_and_sccache() {
     assert!(wrapper.contains("Library/Caches/Vmux/cef-sdk"));
     assert!(wrapper.contains("CEF_PATH=\"$cef_cache\""));
     assert!(wrapper.contains("command -v sccache"));
+    assert!(wrapper.contains("VMUX_DISABLE_SCCACHE"));
+    assert!(wrapper.contains("building without cache"));
     assert!(wrapper.contains("CMAKE_C_COMPILER_LAUNCHER"));
     assert!(wrapper.contains("CMAKE_CXX_COMPILER_LAUNCHER"));
+}
+
+#[test]
+fn cef_wheel_forwarding_rejects_invalid_events() {
+    let source =
+        include_str!("../../../patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs");
+    let sprite_source =
+        include_str!("../../../patches/bevy_cef-0.5.2/src/webview/webview_sprite.rs");
+
+    assert!(source.contains("fn cef_mouse_wheel_event"));
+    assert!(source.contains("!position.is_finite() || !delta.is_finite()"));
+    assert!(source.contains("delta_x == 0 && delta_y == 0"));
+    assert!(source.contains("MAX_CEF_WHEEL_DELTA"));
+    assert!(sprite_source.contains("With<CefPointerTarget>"));
+    assert!(sprite_source.contains("Without<WebviewWindowed>"));
+    assert!(sprite_source.contains("let use_targets = webviews_targeted.iter().next().is_some()"));
+}
+
+#[test]
+fn bookmark_changes_save_without_a_debounce_window() {
+    let source = include_str!("../src/bookmark_persistence.rs");
+
+    assert!(!source.contains("Timer::from_seconds"));
+    assert!(source.contains("PostUpdate"));
+    assert!(source.contains("migrate_legacy_bookmark_order"));
+    assert!(source.contains("mark_bookmarks_dirty"));
+    assert!(source.contains("autosave_bookmarks"));
+    assert!(source.contains("BookmarkOrder"));
 }
 
 #[test]
