@@ -153,6 +153,7 @@ pub struct ChatSnapshot {
     pub handoff_truncated: bool,
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
+    pub workspace_selection_pending: bool,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -183,6 +184,19 @@ pub struct ChatSubmit {
     rkyv::Deserialize,
 )]
 pub struct ChatPickFiles;
+
+/// Page → native: open the workspace folder picker requested by the agent.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatChooseWorkspace;
 
 /// Page → native: attach image media from the system clipboard, if present.
 #[derive(
@@ -657,6 +671,7 @@ mod tests {
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
             handoff_message_count: 2,
+            workspace_selection_pending: true,
             queued: vec![
                 QueuedPromptSnapshot {
                     id: 4,
@@ -684,6 +699,7 @@ mod tests {
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);
         assert_eq!(back.handoff_message_count, 2);
+        assert!(back.workspace_selection_pending);
     }
 
     #[test]

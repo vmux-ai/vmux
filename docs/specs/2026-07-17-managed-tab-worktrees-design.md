@@ -43,12 +43,14 @@ When neither the active space nor global settings define a startup directory, a 
 `Tab.startup_dir` empty and starts its agent immediately with the user's home directory as a
 temporary runtime cwd. The home directory is not persisted as the tab workspace.
 
-The agent calls `choose_workspace` only when the request requires project files. The native folder
-picker opens without replacing the chat page. Non-Git selections become `TabWorkspace` directly.
-Git selections remain pending while the agent asks the user which branch to create. The agent then
-calls `create_worktree` with the exact user-selected branch. Generated names such as `Tab 2` are
-replaced by the selected folder name, and the branch name is sanitized only for the managed
-checkout directory slug.
+The agent calls `choose_workspace` only when the request requires project files. The chat shows an
+inline workspace-selection card above the composer instead of opening the native folder picker
+immediately. The picker opens only after the user clicks `Choose folder`, keeping the agent's
+request visible and making the system dialog intentional. Non-Git selections become `TabWorkspace`
+directly. Git selections remain pending while the agent asks the user which branch to create. The
+agent then calls `create_worktree` with the exact user-selected branch. Generated names such as
+`Tab 2` are replaced by the selected folder name, and the branch name is sanitized only for the
+managed checkout directory slug.
 
 While a tab is unbound, vmux adds private host context to ACP prompts requiring `choose_workspace`
 before any existing-project operation. The context explicitly forbids repository discovery under

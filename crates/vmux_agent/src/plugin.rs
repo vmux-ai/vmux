@@ -38,7 +38,8 @@ use crate::events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
     BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, NavAwaitingSnapshot,
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, WorkspacePickerStartRequest,
+    snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -198,6 +199,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
+            .add_observer(start_workspace_picker)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
@@ -2399,6 +2401,13 @@ struct AgentSelfCommandWriters<'w> {
 #[derive(Component, Clone, Debug)]
 pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
+#[derive(Component, Clone, Copy)]
+pub(crate) struct PendingWorkspaceSelection {
+    request_id: AgentRequestId,
+    tab_entity: Entity,
+    agent_entity: Entity,
+}
+
 #[derive(Component)]
 struct PendingWorkspacePicker {
     request_id: AgentRequestId,
@@ -2409,8 +2418,48 @@ struct PendingWorkspacePicker {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct WorkspacePickerContext<'w, 's> {
-    pending: Query<'w, 's, &'static PendingWorkspacePicker>,
+    selections: Query<'w, 's, &'static PendingWorkspaceSelection>,
+    pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
+    chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+}
+
+fn workspace_picker_task(
+    proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
+) -> Task<Option<PathBuf>> {
+    let wake = proxy.map(|proxy| (**proxy).clone());
+    IoTaskPool::get().spawn(async move {
+        let selected = rfd::AsyncFileDialog::new()
+            .pick_folder()
+            .await
+            .map(|handle| handle.path().to_path_buf());
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
+        selected
+    })
+}
+
+fn start_workspace_picker(
+    trigger: On<WorkspacePickerStartRequest>,
+    selections: Query<&PendingWorkspaceSelection>,
+    pickers: Query<&PendingWorkspacePicker>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(selection) = selections.get(webview) else {
+        return;
+    };
+    if pickers.iter().any(|picker| picker.agent_entity == webview) {
+        return;
+    }
+    commands.spawn(PendingWorkspacePicker {
+        request_id: selection.request_id,
+        tab_entity: selection.tab_entity,
+        agent_entity: selection.agent_entity,
+        task: workspace_picker_task(proxy.as_deref()),
+    });
 }
 
 fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
@@ -2514,10 +2563,16 @@ fn handle_agent_self_commands(
         std::collections::HashMap::new();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
-        .pending
+        .selections
         .iter()
-        .map(|picker| picker.tab_entity)
+        .map(|selection| selection.tab_entity)
         .collect();
+    workspace_picker_tabs.extend(
+        workspace_picker
+            .pickers
+            .iter()
+            .map(|picker| picker.tab_entity),
+    );
     let mut requests: Vec<_> = reader.read().collect();
     requests.sort_by_key(|request| self_command_priority(&request.command));
     for request in requests {
@@ -2824,26 +2879,22 @@ fn handle_agent_self_commands(
                             AgentCommandResult::Error(
                                 "Workspace selection is already open".to_string(),
                             )
+                        } else if workspace_picker.chat_views.contains(agent_entity) {
+                            commands
+                                .entity(agent_entity)
+                                .insert(PendingWorkspaceSelection {
+                                    request_id: request.request_id,
+                                    tab_entity,
+                                    agent_entity,
+                                })
+                                .remove::<crate::chat_page::ChatSynced>();
+                            continue;
                         } else {
-                            let wake = workspace_picker
-                                .proxy
-                                .as_ref()
-                                .map(|proxy| (***proxy).clone());
-                            let task = IoTaskPool::get().spawn(async move {
-                                let selected = rfd::AsyncFileDialog::new()
-                                    .pick_folder()
-                                    .await
-                                    .map(|handle| handle.path().to_path_buf());
-                                if let Some(wake) = wake {
-                                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-                                }
-                                selected
-                            });
                             commands.spawn(PendingWorkspacePicker {
                                 request_id: request.request_id,
                                 tab_entity,
                                 agent_entity,
-                                task,
+                                task: workspace_picker_task(workspace_picker.proxy.as_deref()),
                             });
                             continue;
                         }
@@ -3098,6 +3149,7 @@ fn handle_agent_self_commands(
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
+    workspace_selections: Query<(), With<PendingWorkspaceSelection>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
     mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
     child_of: Query<&ChildOf>,
@@ -3172,6 +3224,12 @@ fn drain_workspace_picker_tasks(
             request_id: picker.request_id,
             result,
         });
+        if workspace_selections.contains(picker.agent_entity) {
+            commands
+                .entity(picker.agent_entity)
+                .remove::<PendingWorkspaceSelection>()
+                .remove::<crate::chat_page::ChatSynced>();
+        }
         commands.entity(picker_entity).despawn();
     }
 }
@@ -7400,21 +7458,29 @@ mod tests {
     }
 
     #[test]
-    fn workspace_picker_does_not_block_agent_command_system() {
+    fn workspace_picker_waits_for_inline_user_action_without_blocking() {
         let source = include_str!("plugin.rs");
         let start = source
             .find("fn handle_agent_self_commands(")
             .expect("agent command handler");
         let end = source[start..]
-            .find("fn respond_process_stack_spawn(")
-            .expect("next system");
-        let workspace_source = &source[start..start + end];
+            .find("fn drain_workspace_picker_tasks(")
+            .expect("picker drain");
+        let handler = &source[start..start + end];
+        let task_start = source
+            .find("fn workspace_picker_task(")
+            .expect("picker task");
+        let task_end = source[task_start..]
+            .find("fn start_workspace_picker(")
+            .expect("picker start observer");
+        let task = &source[task_start..task_start + task_end];
 
-        assert!(!workspace_source.contains("rfd::FileDialog::new().pick_folder()"));
-        assert!(workspace_source.contains("rfd::AsyncFileDialog::new()"));
-        assert!(workspace_source.contains("IoTaskPool::get().spawn"));
-        assert!(workspace_source.contains("fn drain_workspace_picker_tasks("));
-        assert!(workspace_source.contains("WinitUserEvent::WakeUp"));
+        assert!(!handler.contains("rfd::FileDialog::new().pick_folder()"));
+        assert!(handler.contains("PendingWorkspaceSelection"));
+        assert!(handler.contains("workspace_picker.chat_views.contains(agent_entity)"));
+        assert!(task.contains("rfd::AsyncFileDialog::new()"));
+        assert!(task.contains("IoTaskPool::get().spawn"));
+        assert!(task.contains("WinitUserEvent::WakeUp"));
     }
 
     #[test]

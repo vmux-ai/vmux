@@ -6,6 +6,11 @@ pub use vmux_service::agent_events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
 };
 
+#[derive(Event, Clone, Copy)]
+pub struct WorkspacePickerStartRequest {
+    pub webview: Entity,
+}
+
 #[derive(Event, Clone, Debug)]
 pub struct AgentInput {
     pub session: Entity,
