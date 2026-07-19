@@ -410,13 +410,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 glass: is_start,
                 class: if is_start { "" } else { "p-2" },
                 div { class: if is_start { "relative z-10 flex min-w-0 w-full items-center gap-2 overflow-hidden px-2" } else { command_bar_input_row_class() },
-                if !space_name.is_empty() {
+                if !is_start && !space_name.is_empty() {
                     span {
                         title: "{space_name}",
                         class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
                         "{space_name}"
                     }
                 }
+                if !is_start {
                 {
                     let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
                     let (is_command, is_path, is_url) = if nav {
@@ -464,6 +465,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         } }
                     }
                 }
+                }
                 div { class: command_bar_input_wrap_class(),
                     if !ghost_text.is_empty() {
                         div {
@@ -476,8 +478,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         id: "command-bar-input",
                         r#type: "text",
                         "data-ghost": "{ghost_text}",
-                        class: command_bar_input_class(),
-                        placeholder,
+                        class: if is_start { "w-full min-w-0 cursor-text bg-transparent px-1.5 py-2 text-[15px] leading-6 text-foreground caret-foreground outline-none placeholder:text-muted-foreground/50" } else { command_bar_input_class() },
+                        placeholder: if is_start { "Ask anything…" } else { placeholder },
                         value: "{display_text}",
                         autofocus: true,
                         oninput: move |e| {
@@ -595,6 +597,29 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             }
                             }
                         },
+                    }
+                }
+                if is_start {
+                    button {
+                        class: if q.trim().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-foreground text-background shadow-lg transition hover:brightness-110 active:scale-95" },
+                        disabled: q.trim().is_empty(),
+                        title: "Send (Enter)",
+                        onclick: {
+                            let results = results.clone();
+                            let q = q.clone();
+                            move |_| {
+                                if let Some(item) = results.get(sel) {
+                                    execute(item);
+                                } else if !q.trim().is_empty() {
+                                    on_close.call(());
+                                    emit_prompt_action(q.trim(), open_target, "");
+                                }
+                            }
+                        },
+                        Icon { class: "h-4 w-4",
+                            path { d: "M12 19V5" }
+                            path { d: "M5 12l7-7 7 7" }
+                        }
                     }
                 }
                 if matches!(variant, PaletteVariant::Modal) {

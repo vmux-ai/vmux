@@ -321,7 +321,7 @@ pub fn Page(
     let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
-    let mut prompt_caret = use_signal(|| None::<u32>);
+    let prompt_caret = use_signal(|| Some(0u32));
     let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -343,6 +343,7 @@ pub fn Page(
     let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(focus_prompt_end);
     use_effect(move || {
         let _ = draft.read();
         resize_prompt_textarea();
@@ -803,7 +804,7 @@ pub fn Page(
             div {
                 class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                 div {
-                    class: "vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
+                    class: "agent-chat-prompt-shell vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
                         PromptPopup {
                             if media_loading() {
@@ -1064,7 +1065,7 @@ pub fn Page(
                             }
                         }
                     }
-                    PromptBox {
+                    PromptBox { class: "agent-chat-prompt-box",
                         button {
                             class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
                             title: "Attach files (/upload)",
@@ -1142,13 +1143,14 @@ pub fn Page(
                                             class: "min-h-10 w-full whitespace-pre-wrap break-words px-1.5 py-2 text-[15px] leading-6 text-transparent",
                                             style: "transform:translateY(-{prompt_scroll_offset}px);",
                                             span { "{prefix}" }
-                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle {agent_accent.accent_bg}" }
+                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle" }
                                         }
                                     }
                                 }
                                 textarea {
                                 id: PROMPT_ID,
                                 class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                                autofocus: true,
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -1163,7 +1165,7 @@ pub fn Page(
                                     let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
                                 },
                                 onfocus: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onblur: move |_| prompt_caret.set(None),
+                                onblur: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onkeyup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onmouseup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onscroll: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
@@ -2275,8 +2277,11 @@ fn md_to_html(src: &str) -> String {
 /// light and dark.
 const MD_CSS: &str = r#"
 .agent-chat-prompt{caret-color:transparent}
-.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite}
+.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite;background:var(--agent-accent)}
 @keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,color-mix(in srgb,var(--agent-accent) 18%,transparent),transparent 72%);filter:blur(16px);pointer-events:none}
+.agent-chat-prompt-box{border-color:color-mix(in srgb,var(--agent-accent) 20%,transparent);box-shadow:0 22px 70px -28px color-mix(in srgb,var(--agent-accent) 42%,rgba(0,0,0,0.72)),inset 0 1px 0 rgba(255,255,255,0.16),inset 0 -1px 0 rgba(255,255,255,0.04)}
+.agent-chat-prompt-box:focus-within{border-color:color-mix(in srgb,var(--agent-accent) 36%,transparent);box-shadow:0 26px 78px -26px color-mix(in srgb,var(--agent-accent) 56%,rgba(0,0,0,0.74)),inset 0 1px 0 rgba(255,255,255,0.2)}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
 .agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}
