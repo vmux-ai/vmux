@@ -221,14 +221,15 @@ fn dir_path_titles_truncate_at_start() {
 }
 
 #[test]
-fn bookmark_drag_uses_mouse_events_instead_of_html_drag() {
+fn bookmark_drag_uses_pointer_capture_instead_of_html_drag() {
     let source = include_str!("../src/page.rs");
 
     assert!(source.contains("fn begin_bookmark_drag"));
     assert!(source.contains("fn update_bookmark_drag"));
     assert!(source.contains("fn end_bookmark_drag"));
-    assert!(source.contains("onmousemove"));
-    assert!(source.contains("onmouseup"));
+    assert!(source.contains("set_pointer_capture"));
+    assert!(source.contains("onpointermove"));
+    assert!(source.contains("onpointerup"));
     assert!(!source.contains("DragData"));
     assert!(!source.contains("draggable: \"true\""));
 }

@@ -1,6 +1,6 @@
 use crate::common::{
     CefIgnorePinchZoom, CefPointerTarget, CefSuppressPointerInput, HistorySwipeVisualOffset,
-    WebviewSize, WebviewSource, ZoomLevel,
+    WebviewSize, WebviewSource, WebviewWindowed, ZoomLevel,
 };
 use crate::prelude::{
     WebviewExtendStandardMaterial, WebviewMaterialHandle, WebviewSurface, webview_placeholder_image,
@@ -185,7 +185,18 @@ fn on_mouse_wheel(
     mut commands: Commands,
     mut er: MessageReader<MouseWheel>,
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &Sprite, &WebviewSize, &GlobalTransform)>,
+    webviews: Query<
+        (Entity, &Sprite, &WebviewSize, &GlobalTransform),
+        (With<WebviewSource>, Without<WebviewWindowed>),
+    >,
+    webviews_targeted: Query<
+        Entity,
+        (
+            With<WebviewSource>,
+            With<CefPointerTarget>,
+            Without<WebviewWindowed>,
+        ),
+    >,
     cameras: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
     suppress: Res<CefSuppressPointerInput>,
@@ -196,6 +207,7 @@ fn on_mouse_wheel(
         return;
     }
     let mut pending = HashMap::<Entity, (Vec2, Vec2)>::default();
+    let use_targets = webviews_targeted.iter().next().is_some();
     for event in er.read() {
         let Ok(window) = windows.get(event.window) else {
             continue;
@@ -203,7 +215,17 @@ fn on_mouse_wheel(
         let Some(cursor_pos) = window.cursor_position() else {
             continue;
         };
-        for (webview, sprite, webview_size, gtf) in webviews.iter() {
+        let iter: Box<dyn Iterator<Item = (Entity, &Sprite, &WebviewSize, &GlobalTransform)>> =
+            if use_targets {
+                Box::new(
+                    webviews_targeted
+                        .iter()
+                        .filter_map(|entity| webviews.get(entity).ok()),
+                )
+            } else {
+                Box::new(webviews.iter())
+            };
+        for (webview, sprite, webview_size, gtf) in iter {
             let Some(pos) = obtain_relative_pos(sprite, webview_size, gtf, &cameras, cursor_pos)
             else {
                 continue;

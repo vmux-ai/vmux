@@ -1,4 +1,4 @@
-use vmux_core::PageIcon;
+use vmux_core::{PageIcon, PageMetadata};
 
 pub const LAYOUT_PAGE_URL: &str = "vmux://layout/";
 pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";
@@ -656,9 +656,9 @@ pub struct DebugSimulateDownload;
 )]
 pub struct BookmarkRow {
     pub uuid: String,
-    pub url: String,
-    pub title: String,
-    pub favicon_url: String,
+    pub metadata: PageMetadata,
+    pub bookmarked: bool,
+    pub pinned: bool,
 }
 
 #[derive(
@@ -731,9 +731,7 @@ pub struct BookmarksCommandEvent {
     #[serde(default)]
     pub url: Option<String>,
     #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub favicon_url: Option<String>,
+    pub metadata: Option<PageMetadata>,
     #[serde(default)]
     pub folder: Option<String>,
 }

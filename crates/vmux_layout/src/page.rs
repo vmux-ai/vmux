@@ -9,12 +9,12 @@ use crate::event::{
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use vmux_core::PageIcon;
 use vmux_core::event::extension::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
 };
@@ -296,7 +296,24 @@ fn HeaderView(
         .map(|r| r.url.clone())
         .unwrap_or_default();
     let show_bookmark = !active_url.is_empty();
-    let is_bookmarked = show_bookmark && bookmark_nodes_contain_url(&bookmarks.roots, &active_url);
+    let is_bookmarked = show_bookmark
+        && (bookmark_nodes_contain_url(&bookmarks.roots, &active_url)
+            || bookmarks
+                .pins
+                .iter()
+                .any(|pin| pin.metadata.url == active_url && pin.bookmarked));
+    let pinned_uuid = bookmarks
+        .pins
+        .iter()
+        .find(|pin| pin.metadata.url == active_url)
+        .map(|pin| pin.uuid.clone());
+    let is_pinned = pinned_uuid.is_some();
+    let active_metadata = active_row.as_ref().map(|row| PageMetadata {
+        title: row.title.clone(),
+        url: row.url.clone(),
+        icon: row.icon.clone(),
+        bg_color: row.bg_color.clone(),
+    });
 
     let (url_row_style, url_row_class) = url_row_cef(active_bg_color.as_deref());
 
@@ -356,8 +373,8 @@ fn HeaderView(
                     if show_bookmark {
                         button {
                             r#type: "button",
-                            aria_label: "Bookmark this page",
-                            title: "Bookmark this page (\u{2318}D)",
+                            aria_label: if is_bookmarked { "Remove bookmark" } else { "Bookmark this page" },
+                            title: if is_bookmarked { "Remove bookmark (\u{2318}D)" } else { "Bookmark this page (\u{2318}D)" },
                             class: if is_bookmarked {
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground transition-colors hover:bg-glass-hover"
                             } else {
@@ -369,8 +386,7 @@ fn HeaderView(
                                     uuid: None,
                                     name: None,
                                     url: None,
-                                    title: None,
-                                    favicon_url: None,
+                                    metadata: None,
                                     folder: None,
                                 });
                             },
@@ -378,6 +394,32 @@ fn HeaderView(
                                 path {
                                     d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z",
                                     fill: if is_bookmarked { "currentColor" } else { "none" },
+                                }
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            aria_label: if is_pinned { "Unpin this page" } else { "Pin this page" },
+                            title: if is_pinned { "Unpin this page" } else { "Pin this page" },
+                            class: if is_pinned {
+                                "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground transition-colors hover:bg-glass-hover"
+                            } else {
+                                "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
+                            },
+                            onclick: move |_| {
+                                if let Some(uuid) = pinned_uuid.clone() {
+                                    bookmark_cmd("unpin", Some(uuid));
+                                } else if let Some(metadata) = active_metadata.clone() {
+                                    add_to_bookmarks("pin_url", metadata, None);
+                                }
+                            },
+                            Icon { class: "h-4 w-4",
+                                path { d: "M12 17v5" }
+                                path { d: "M5 17h14" }
+                                path { d: "M6 3h12" }
+                                path {
+                                    d: "M8 3v5a6 6 0 0 1-2 4v1h12v-1a6 6 0 0 1-2-4V3",
+                                    fill: if is_pinned { "currentColor" } else { "none" },
                                 }
                             }
                         }
@@ -557,12 +599,13 @@ fn Tab(tab: TabRow) -> Element {
         )
     };
 
-    let bm_url = tab.url.clone();
-    let bm_title = display_title.clone();
-    let bm_favicon = tab.icon.favicon_url().to_string();
-    let pin_url = tab.url.clone();
-    let pin_title = display_title.clone();
-    let pin_favicon = tab.icon.favicon_url().to_string();
+    let bookmark_metadata = PageMetadata {
+        title: display_title.clone(),
+        url: tab.url.clone(),
+        icon: tab.icon.clone(),
+        bg_color: tab.bg_color.clone(),
+    };
+    let pin_metadata = bookmark_metadata.clone();
     let menu_val = use_signal(|| tab.id.clone());
 
     rsx! {
@@ -618,14 +661,14 @@ fn Tab(tab: TabRow) -> Element {
                 ContextMenuItem {
                     index: 0usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("add", bm_url.clone(), bm_title.clone(), bm_favicon.clone(), None),
+                    on_select: move |_: String| add_to_bookmarks("add", bookmark_metadata.clone(), None),
                     attributes: vec![],
                     "Bookmark"
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_url.clone(), pin_title.clone(), pin_favicon.clone(), None),
+                    on_select: move |_: String| add_to_bookmarks("pin_url", pin_metadata.clone(), None),
                     attributes: vec![],
                     "Pin"
                 }
@@ -758,16 +801,20 @@ fn SideSheetView(
     let folders = bookmark_folder_choices(&bookmarks.roots);
     let initial_folders = folders.clone();
     let mut folder_context = use_signal(|| initial_folders);
-    let mut drag_state = use_signal(|| None::<BookmarkDragState>);
+    let drag_state = use_signal(|| None::<BookmarkDragState>);
     use_context_provider(|| folder_context);
     use_context_provider(|| drag_state);
     use_effect(move || folder_context.set(folders.clone()));
+    use_drop(move || {
+        remove_bookmark_drag_ghost();
+        set_bookmark_context_menu_active(false);
+    });
     rsx! {
         div {
             class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
-            onmousemove: move |event| update_bookmark_drag(drag_state, &event, None),
-            onmouseup: move |event| end_bookmark_drag(drag_state, &event, None),
-            onmouseleave: move |_| drag_state.set(None),
+            onpointermove: move |event| update_bookmark_drag(drag_state, &event),
+            onpointerup: move |event| end_bookmark_drag(drag_state, &event),
+            onpointercancel: move |event| cancel_bookmark_drag(drag_state, &event),
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
@@ -817,13 +864,10 @@ struct BookmarkFolderChoice {
 
 #[derive(Clone, PartialEq)]
 enum BookmarkDragItem {
-    Page {
-        url: String,
-        title: String,
-        favicon_url: String,
-    },
-    Bookmark(String),
-    Folder(String),
+    Page { metadata: PageMetadata },
+    Bookmark { uuid: String },
+    Pin { uuid: String },
+    Folder { uuid: String },
 }
 
 #[derive(Clone, PartialEq)]
@@ -837,14 +881,19 @@ struct BookmarkDragState {
     item: BookmarkDragItem,
     start_x: f64,
     start_y: f64,
+    ghost_offset_x: f64,
+    ghost_offset_y: f64,
     active: bool,
     target: Option<BookmarkDropTarget>,
 }
 
 fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
     nodes.iter().any(|node| match node {
-        BookmarkNode::Entry(bookmark) => bookmark.url == url,
-        BookmarkNode::Folder(folder) => folder.children.iter().any(|bookmark| bookmark.url == url),
+        BookmarkNode::Entry(bookmark) => bookmark.metadata.url == url,
+        BookmarkNode::Folder(folder) => folder
+            .children
+            .iter()
+            .any(|bookmark| bookmark.metadata.url == url),
     })
 }
 
@@ -966,8 +1015,7 @@ fn open_bookmark(url: String) {
         url: Some(url),
         uuid: None,
         name: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: None,
     });
 }
@@ -978,26 +1026,18 @@ fn bookmark_cmd(command: &str, uuid: Option<String>) {
         uuid,
         name: None,
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: None,
     });
 }
 
-fn add_to_bookmarks(
-    command: &str,
-    url: String,
-    title: String,
-    favicon_url: String,
-    folder: Option<String>,
-) {
+fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String>) {
     let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
         command: command.into(),
         uuid: None,
         name: None,
-        url: Some(url),
-        title: Some(title),
-        favicon_url: Some(favicon_url),
+        url: None,
+        metadata: Some(metadata),
         folder,
     });
 }
@@ -1008,8 +1048,18 @@ fn move_bookmark(uuid: String, folder: Option<String>) {
         uuid: Some(uuid),
         name: None,
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
+        folder,
+    });
+}
+
+fn move_pin(uuid: String, folder: Option<String>) {
+    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+        command: "move_pin".into(),
+        uuid: Some(uuid),
+        name: None,
+        url: None,
+        metadata: None,
         folder,
     });
 }
@@ -1020,8 +1070,7 @@ fn move_bookmark_folder(uuid: String, folder: Option<String>) {
         uuid: Some(uuid),
         name: None,
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder,
     });
 }
@@ -1036,8 +1085,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
         uuid: Some(uuid),
         name: Some(name),
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: None,
     });
 }
@@ -1052,36 +1100,40 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
         uuid: None,
         name: Some(name),
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: parent,
     });
 }
 
 fn begin_bookmark_drag(
     mut state: Signal<Option<BookmarkDragState>>,
-    event: &Event<MouseData>,
+    event: &Event<PointerData>,
     item: BookmarkDragItem,
 ) {
     if event.trigger_button() != Some(MouseButton::Primary) {
         return;
     }
+    set_bookmark_pointer_capture(event, true);
     let coordinates = event.client_coordinates();
-    event.prevent_default();
+    let rect = bookmark_drag_source(event).map(|source| source.get_bounding_client_rect());
     state.set(Some(BookmarkDragState {
         item,
         start_x: coordinates.x,
         start_y: coordinates.y,
+        ghost_offset_x: rect
+            .as_ref()
+            .map(|rect| coordinates.x - rect.left())
+            .unwrap_or(12.0),
+        ghost_offset_y: rect
+            .as_ref()
+            .map(|rect| coordinates.y - rect.top())
+            .unwrap_or(12.0),
         active: false,
         target: None,
     }));
 }
 
-fn update_bookmark_drag(
-    mut state: Signal<Option<BookmarkDragState>>,
-    event: &Event<MouseData>,
-    target: Option<BookmarkDropTarget>,
-) {
+fn update_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
     let Some(mut drag) = state() else {
         return;
     };
@@ -1091,6 +1143,15 @@ fn update_bookmark_drag(
     if !drag.active && dx * dx + dy * dy < 16.0 {
         return;
     }
+    let target = bookmark_drop_target_at(event);
+    if !drag.active {
+        set_bookmark_context_menu_active(true);
+        create_bookmark_drag_ghost(event);
+    }
+    move_bookmark_drag_ghost(
+        coordinates.x - drag.ghost_offset_x,
+        coordinates.y - drag.ghost_offset_y,
+    );
     if !drag.active || drag.target != target {
         drag.active = true;
         drag.target = target;
@@ -1104,13 +1165,10 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
         BookmarkDropTarget::Folder(uuid) => Some(uuid),
     };
     match item {
-        BookmarkDragItem::Page {
-            url,
-            title,
-            favicon_url,
-        } => add_to_bookmarks("add", url, title, favicon_url, folder),
-        BookmarkDragItem::Bookmark(uuid) => move_bookmark(uuid, folder),
-        BookmarkDragItem::Folder(uuid) => {
+        BookmarkDragItem::Page { metadata } => add_to_bookmarks("add", metadata, folder),
+        BookmarkDragItem::Bookmark { uuid, .. } => move_bookmark(uuid, folder),
+        BookmarkDragItem::Pin { uuid } => move_pin(uuid, folder),
+        BookmarkDragItem::Folder { uuid, .. } => {
             if folder.as_deref() != Some(uuid.as_str()) {
                 move_bookmark_folder(uuid, folder);
             }
@@ -1130,11 +1188,8 @@ fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>)
     }
 }
 
-fn end_bookmark_drag(
-    mut state: Signal<Option<BookmarkDragState>>,
-    event: &Event<MouseData>,
-    target: Option<BookmarkDropTarget>,
-) {
+fn end_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
+    set_bookmark_pointer_capture(event, false);
     let Some(mut drag) = state() else {
         return;
     };
@@ -1145,15 +1200,114 @@ fn end_bookmark_drag(
         state.set(None);
         return;
     }
+    let target = bookmark_drop_target_at(event);
     event.prevent_default();
     event.stop_propagation();
     drag.active = true;
     drag.target = target.clone();
+    remove_bookmark_drag_ghost();
+    set_bookmark_context_menu_active(false);
     if let Some(target) = target {
         perform_bookmark_drop(drag.item.clone(), target);
     }
     state.set(Some(drag));
     clear_bookmark_drag_after_click(state);
+}
+
+fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
+    set_bookmark_pointer_capture(event, false);
+    remove_bookmark_drag_ghost();
+    set_bookmark_context_menu_active(false);
+    state.set(None);
+}
+
+const BOOKMARK_DRAG_GHOST_ID: &str = "vmux-bookmark-drag-ghost";
+
+fn bookmark_drag_source(event: &Event<PointerData>) -> Option<web_sys::Element> {
+    let data = event.data();
+    let pointer = data.downcast::<web_sys::PointerEvent>()?;
+    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
+    target.closest("[data-bookmark-drag-source]").ok().flatten()
+}
+
+fn set_bookmark_pointer_capture(event: &Event<PointerData>, capture: bool) {
+    let data = event.data();
+    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+        return;
+    };
+    let Some(element) = bookmark_drag_source(event) else {
+        return;
+    };
+    if capture {
+        let _ = element.set_pointer_capture(pointer.pointer_id());
+    } else {
+        let _ = element.release_pointer_capture(pointer.pointer_id());
+    }
+}
+
+fn create_bookmark_drag_ghost(event: &Event<PointerData>) {
+    remove_bookmark_drag_ghost();
+    let Some(source) = bookmark_drag_source(event) else {
+        return;
+    };
+    let Ok(node) = source.clone_node_with_deep(true) else {
+        return;
+    };
+    let Ok(ghost) = node.dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let rect = source.get_bounding_client_rect();
+    ghost.set_id(BOOKMARK_DRAG_GHOST_ID);
+    let _ = ghost.set_attribute("aria-hidden", "true");
+    let style = ghost.style();
+    let _ = style.set_property("position", "fixed");
+    let _ = style.set_property("z-index", "2000");
+    let _ = style.set_property("pointer-events", "none");
+    let _ = style.set_property("width", &format!("{}px", rect.width()));
+    let _ = style.set_property("height", &format!("{}px", rect.height()));
+    let _ = style.set_property("opacity", "0.92");
+    let _ = style.set_property("margin", "0");
+    let Some(body) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.body())
+    else {
+        return;
+    };
+    let _ = body.append_child(&ghost);
+}
+
+fn move_bookmark_drag_ghost(left: f64, top: f64) {
+    let Some(ghost) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    let style = ghost.style();
+    let _ = style.set_property("left", &format!("{left}px"));
+    let _ = style.set_property("top", &format!("{top}px"));
+}
+
+fn remove_bookmark_drag_ghost() {
+    if let Some(ghost) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
+    {
+        ghost.remove();
+    }
+}
+
+fn bookmark_drop_target_at(event: &Event<PointerData>) -> Option<BookmarkDropTarget> {
+    let coordinates = event.client_coordinates();
+    let document = web_sys::window()?.document()?;
+    let element = document.element_from_point(coordinates.x as f32, coordinates.y as f32)?;
+    let target = element.closest("[data-bookmark-drop]").ok().flatten()?;
+    match target.get_attribute("data-bookmark-drop").as_deref() {
+        Some("root") => Some(BookmarkDropTarget::Root),
+        Some(uuid) if !uuid.is_empty() => Some(BookmarkDropTarget::Folder(uuid.to_string())),
+        _ => None,
+    }
 }
 
 fn bookmark_drag_blocks_click(state: Signal<Option<BookmarkDragState>>) -> bool {
@@ -1281,8 +1435,7 @@ fn request_bookmark_menu() {
         uuid: None,
         name: None,
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: None,
     });
 }
@@ -1299,8 +1452,7 @@ fn commit_folder_rename(uuid: String, name: String) {
         uuid: Some(uuid),
         name: if name.is_empty() { None } else { Some(name) },
         url: None,
-        title: None,
-        favicon_url: None,
+        metadata: None,
         folder: None,
     });
 }
@@ -1314,21 +1466,19 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
     let folders = bookmark_folder_choices(&roots);
     let folder_rows = bookmark_folder_rows(&roots);
     let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDropTarget::Root);
+    let root_drop_label = drag_state()
+        .filter(|drag| drag.active)
+        .map(|drag| match drag.item {
+            BookmarkDragItem::Page { .. } => "Add to Bookmarks",
+            BookmarkDragItem::Bookmark { .. }
+            | BookmarkDragItem::Pin { .. }
+            | BookmarkDragItem::Folder { .. } => "Move to Bookmarks",
+        });
 
     rsx! {
         div {
-            class: if root_targeted {
-                "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
-            } else {
-                "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5"
-            },
-            onmousemove: move |event| {
-                update_bookmark_drag(drag_state, &event, Some(BookmarkDropTarget::Root));
-                event.stop_propagation();
-            },
-            onmouseup: move |event| {
-                end_bookmark_drag(drag_state, &event, Some(BookmarkDropTarget::Root));
-            },
+            "data-bookmark-drop": "root",
+            class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
             oncontextmenu: move |e: Event<MouseData>| {
                 let data = e.data();
                 let on_card = data
@@ -1340,27 +1490,43 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     request_bookmark_menu();
                 }
             },
-            div { class: "mb-0.5 flex h-8 items-center gap-1 px-2",
-                span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
-                button {
-                    r#type: "button",
-                    aria_label: "New bookmark folder",
-                    title: "New Folder",
-                    class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                    onclick: move |event| {
-                        event.prevent_default();
-                        event.stop_propagation();
-                        begin_new_folder(creating_folder, new_folder_draft);
-                    },
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                        path { d: "M12 10v6" }
-                        path { d: "M9 13h6" }
+            div {
+                "data-bookmark-drop": "root",
+                class: if root_targeted {
+                    "mb-0.5 flex h-8 items-center gap-1 rounded-md bg-foreground/10 px-2 ring-1 ring-ring"
+                } else {
+                    "mb-0.5 flex h-8 items-center gap-1 rounded-md px-2"
+                },
+                if let Some(label) = root_drop_label {
+                    Icon { class: "h-3.5 w-3.5 shrink-0",
+                        path { d: "m9 14-4-4 4-4" }
+                        path { d: "M5 10h11a4 4 0 0 1 4 4v4" }
+                    }
+                    span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
+                } else {
+                    span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
+                    button {
+                        r#type: "button",
+                        aria_label: "New bookmark folder",
+                        title: "New Folder",
+                        class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                        onclick: move |event| {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            begin_new_folder(creating_folder, new_folder_draft);
+                        },
+                        Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                            path { d: "M12 10v6" }
+                            path { d: "M9 13h6" }
+                        }
                     }
                 }
             }
             if !pins.is_empty() {
-                div { class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
+                div {
+                    "data-bookmark-drop": "",
+                    class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
                     for p in pins.iter() {
                         PinTile { key: "{p.uuid}", row: p.clone() }
                     }
@@ -1419,20 +1585,18 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
 #[component]
 fn PinTile(row: BookmarkRow) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let url_open = row.url.clone();
+    let url_open = row.metadata.url.clone();
     let uuid_unpin = row.uuid.clone();
-    let uuid_remove = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
-    let drag_item = BookmarkDragItem::Page {
-        url: row.url.clone(),
-        title: row.title.clone(),
-        favicon_url: row.favicon_url.clone(),
+    let drag_item = BookmarkDragItem::Pin {
+        uuid: row.uuid.clone(),
     };
     rsx! {
         LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
                 div {
-                    onmousedown: {
+                    "data-bookmark-drag-source": "true",
+                    onpointerdown: {
                         let item = drag_item.clone();
                         move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                     },
@@ -1448,12 +1612,12 @@ fn PinTile(row: BookmarkRow) -> Element {
                             open_bookmark(u.clone());
                         }
                     },
-                    title: "{row.title}",
-                    Favicon {
-                        favicon_url: row.favicon_url.clone(),
-                        url: row.url.clone(),
-                        class: "h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
-                        globe_class: "h-5 w-5 shrink-0 text-muted-foreground".to_string(),
+                    title: "{row.metadata.title}",
+                    PageIconView {
+                        icon: row.metadata.icon.clone(),
+                        url: row.metadata.url.clone(),
+                        img_class: "h-5 w-5 shrink-0 rounded-sm object-contain".to_string(),
+                        icon_class: "h-5 w-5 shrink-0 text-muted-foreground".to_string(),
                     }
                 }
             }
@@ -1472,12 +1636,14 @@ fn PinTile(row: BookmarkRow) -> Element {
                     attributes: vec![],
                     "Unpin"
                 }
-                ContextMenuItem {
-                    index: 2usize,
-                    value: Into::<ReadSignal<String>>::into(menu_val),
-                    on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
-                    attributes: vec![],
-                    "Remove"
+                if row.bookmarked {
+                    ContextMenuItem {
+                        index: 2usize,
+                        value: Into::<ReadSignal<String>>::into(menu_val),
+                        on_select: { let id = row.uuid.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
+                        attributes: vec![],
+                        "Remove Bookmark"
+                    }
                 }
             }
         }
@@ -1491,15 +1657,15 @@ fn BookmarkEntry(
     folders: Vec<BookmarkFolderChoice>,
 ) -> Element {
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let url_open = row.url.clone();
+    let url_open = row.metadata.url.clone();
     let uuid_pin = row.uuid.clone();
     let uuid_remove = row.uuid.clone();
     let uuid_rename = row.uuid.clone();
     let menu_val = use_signal(|| row.uuid.clone());
-    let title = if row.title.is_empty() {
-        row.url.clone()
+    let title = if row.metadata.title.is_empty() {
+        row.metadata.url.clone()
     } else {
-        row.title.clone()
+        row.metadata.title.clone()
     };
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| title.clone());
@@ -1520,15 +1686,17 @@ fn BookmarkEntry(
     );
     let remove_index = 3 + move_targets.len();
     let title_class = format!("min-w-0 flex-1 {} text-ui", dir_truncate_class(&title));
-    let drag_item = BookmarkDragItem::Bookmark(row.uuid.clone());
+    let drag_item = BookmarkDragItem::Bookmark {
+        uuid: row.uuid.clone(),
+    };
     rsx! {
         if editing() {
             div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-                Favicon {
-                    favicon_url: row.favicon_url.clone(),
-                    url: row.url.clone(),
-                    class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                    globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                PageIconView {
+                    icon: row.metadata.icon.clone(),
+                    url: row.metadata.url.clone(),
+                    img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                    icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                 }
                 BookmarkNameInput {
                     draft,
@@ -1549,7 +1717,8 @@ fn BookmarkEntry(
                 ContextMenuTrigger {
                     attributes: vec![],
                     div {
-                        onmousedown: {
+                        "data-bookmark-drag-source": "true",
+                        onpointerdown: {
                             let item = drag_item.clone();
                             move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                         },
@@ -1566,11 +1735,11 @@ fn BookmarkEntry(
                                     open_bookmark(u.clone());
                                 }
                             },
-                            Favicon {
-                                favicon_url: row.favicon_url.clone(),
-                                url: row.url.clone(),
-                                class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
-                                globe_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
+                            PageIconView {
+                                icon: row.metadata.icon.clone(),
+                                url: row.metadata.url.clone(),
+                                img_class: "h-4 w-4 shrink-0 rounded-sm object-contain".to_string(),
+                                icon_class: "h-4 w-4 shrink-0 text-muted-foreground".to_string(),
                             }
                             span { class: "{title_class}", "{title}" }
                         }
@@ -1597,9 +1766,13 @@ fn BookmarkEntry(
                     ContextMenuItem {
                         index: 2usize,
                         value: Into::<ReadSignal<String>>::into(menu_val),
-                        on_select: { let id = uuid_pin.clone(); move |_: String| bookmark_cmd("pin", Some(id.clone())) },
+                        on_select: {
+                            let id = uuid_pin.clone();
+                            let command = if row.pinned { "unpin" } else { "pin" };
+                            move |_: String| bookmark_cmd(command, Some(id.clone()))
+                        },
                         attributes: vec![],
-                        "Pin"
+                        if row.pinned { "Unpin" } else { "Pin" }
                     }
                     for (index, (target_folder, label)) in move_targets.iter().enumerate() {
                         ContextMenuItem {
@@ -1663,22 +1836,16 @@ fn BookmarkFolder(
     let remove_index = 4 + move_targets.len();
     let drop_target = BookmarkDropTarget::Folder(uuid.clone());
     let folder_targeted = bookmark_drop_targeted(drag_state, &drop_target);
-    let drag_item = BookmarkDragItem::Folder(uuid.clone());
+    let drag_item = BookmarkDragItem::Folder { uuid: uuid.clone() };
+    let has_child_folders = folder_rows
+        .iter()
+        .any(|child| child.parent.as_deref() == Some(folder.uuid.as_str()));
+    let folder_is_empty = !has_child_folders && folder.children.is_empty();
 
     rsx! {
         div {
+            "data-bookmark-drop": "{uuid}",
             class: "flex flex-col gap-1",
-            onmousemove: {
-                let target = drop_target.clone();
-                move |event| {
-                    update_bookmark_drag(drag_state, &event, Some(target.clone()));
-                    event.stop_propagation();
-                }
-            },
-            onmouseup: {
-                let target = drop_target.clone();
-                move |event| end_bookmark_drag(drag_state, &event, Some(target.clone()))
-            },
             if editing() {
                 div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
                     Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
@@ -1703,8 +1870,9 @@ fn BookmarkFolder(
                     ContextMenuTrigger {
                         attributes: vec![],
                         div {
+                            "data-bookmark-drag-source": "true",
                             class: if folder_targeted { "rounded-md ring-2 ring-ring" } else { "rounded-md" },
-                            onmousedown: {
+                            onpointerdown: {
                                 let item = drag_item.clone();
                                 move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                             },
@@ -1747,9 +1915,12 @@ fn BookmarkFolder(
                                     if let Some(page) = page.clone() {
                                         add_to_bookmarks(
                                             "add",
-                                            page.url,
-                                            page.title,
-                                            page.icon.favicon_url().to_string(),
+                                            PageMetadata {
+                                                title: page.title,
+                                                url: page.url,
+                                                icon: page.icon,
+                                                bg_color: page.bg_color,
+                                            },
                                             Some(id.clone()),
                                         );
                                     }
@@ -1846,6 +2017,9 @@ fn BookmarkFolder(
                             folder_uuid: Some(folder.uuid.clone()),
                             folders: folders.clone(),
                         }
+                    }
+                    if folder_is_empty {
+                        div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", "Empty folder" }
                     }
                 }
             }
@@ -2003,17 +2177,17 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let stack_index = stack.stack_index;
     let mut hovered = use_signal(|| false);
     let menu_val = use_signal(|| stack.url.clone());
-    let drag_item = BookmarkDragItem::Page {
-        url: stack.url.clone(),
+    let metadata = PageMetadata {
         title: stack.title.clone(),
-        favicon_url: stack.icon.favicon_url().to_string(),
+        url: stack.url.clone(),
+        icon: stack.icon.clone(),
+        bg_color: stack.bg_color.clone(),
     };
-    let bookmark_url = stack.url.clone();
-    let bookmark_title = stack.title.clone();
-    let bookmark_favicon = stack.icon.favicon_url().to_string();
-    let pin_url = stack.url.clone();
-    let pin_title = stack.title.clone();
-    let pin_favicon = stack.icon.favicon_url().to_string();
+    let drag_item = BookmarkDragItem::Page {
+        metadata: metadata.clone(),
+    };
+    let bookmark_metadata = metadata.clone();
+    let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
 
     let title_class = if is_active {
@@ -2033,7 +2207,8 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
             ContextMenuTrigger {
                 attributes: vec![],
                 div {
-                    onmousedown: {
+                    "data-bookmark-drag-source": "true",
+                    onpointerdown: {
                         let item = drag_item.clone();
                         move |event| begin_bookmark_drag(drag_state, &event, item.clone())
                     },
@@ -2072,6 +2247,10 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             evt.prevent_default();
                             evt.stop_propagation();
                         },
+                        onpointerdown: move |evt| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                        },
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
@@ -2094,9 +2273,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks(
                         "add",
-                        bookmark_url.clone(),
-                        bookmark_title.clone(),
-                        bookmark_favicon.clone(),
+                        bookmark_metadata.clone(),
                         None,
                     ),
                     attributes: vec![],
@@ -2108,15 +2285,16 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         index: 1usize + index,
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: {
-                            let url = stack.url.clone();
-                            let title = stack.title.clone();
-                            let favicon = stack.icon.favicon_url().to_string();
+                            let metadata = PageMetadata {
+                                title: stack.title.clone(),
+                                url: stack.url.clone(),
+                                icon: stack.icon.clone(),
+                                bg_color: stack.bg_color.clone(),
+                            };
                             let folder_uuid = folder.uuid.clone();
                             move |_: String| add_to_bookmarks(
                                 "add",
-                                url.clone(),
-                                title.clone(),
-                                favicon.clone(),
+                                metadata.clone(),
                                 Some(folder_uuid.clone()),
                             )
                         },
@@ -2129,9 +2307,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks(
                         "pin_url",
-                        pin_url.clone(),
-                        pin_title.clone(),
-                        pin_favicon.clone(),
+                        pin_metadata.clone(),
                         None,
                     ),
                     attributes: vec![],

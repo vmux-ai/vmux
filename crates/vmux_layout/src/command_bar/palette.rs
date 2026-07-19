@@ -559,8 +559,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 uuid: None,
                                 name: None,
                                 url: None,
-                                title: None,
-                                favicon_url: None,
+                                metadata: None,
                                 folder: None,
                             });
                         },

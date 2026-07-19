@@ -55,6 +55,7 @@ pub use keyboard::*;
 /// UI overlay webviews pass `0x00000000` for transparency.
 const CEF_OSR_BACKGROUND_COLOR_ARGB: u32 = 0xFFFFFFFF;
 pub const DEFAULT_WINDOWLESS_FRAME_RATE: i32 = 120;
+const MAX_CEF_WHEEL_DELTA: f32 = 10_000.0;
 
 /// Frame rate for a visible-but-unfocused host window (another app is focused).
 /// CEF keeps painting animations, but at a fraction of the focused rate to cut idle CPU.
@@ -62,6 +63,26 @@ pub const BACKGROUND_WINDOWLESS_FRAME_RATE: i32 = 30;
 
 /// Frame rate for a hidden host window. CEF still needs a nonzero rate to keep timers alive.
 pub const HIDDEN_WINDOWLESS_FRAME_RATE: i32 = 1;
+
+fn cef_mouse_wheel_event(position: Vec2, delta: Vec2) -> Option<(cef::MouseEvent, i32, i32)> {
+    if !position.is_finite() || !delta.is_finite() {
+        return None;
+    }
+    let delta_x = delta.x.clamp(-MAX_CEF_WHEEL_DELTA, MAX_CEF_WHEEL_DELTA) as i32;
+    let delta_y = delta.y.clamp(-MAX_CEF_WHEEL_DELTA, MAX_CEF_WHEEL_DELTA) as i32;
+    if delta_x == 0 && delta_y == 0 {
+        return None;
+    }
+    Some((
+        cef::MouseEvent {
+            x: position.x as i32,
+            y: position.y as i32,
+            modifiers: 0,
+        },
+        delta_x,
+        delta_y,
+    ))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NativeMouseButtons {
@@ -650,15 +671,12 @@ impl Browsers {
 
     /// [`SendMouseWheelEvent`](https://cef-builds.spotifycdn.com/docs/106.1/classCefBrowserHost.html#acd5d057bd5230baa9a94b7853ba755f7)
     pub fn send_mouse_wheel(&self, webview: &Entity, position: Vec2, delta: Vec2) {
-        if let Some(browser) = self.browsers.get(webview) {
-            let mouse_event = cef::MouseEvent {
-                x: position.x as i32,
-                y: position.y as i32,
-                modifiers: 0,
-            };
+        if let Some(browser) = self.browsers.get(webview)
+            && let Some((mouse_event, delta_x, delta_y)) = cef_mouse_wheel_event(position, delta)
+        {
             browser
                 .host
-                .send_mouse_wheel_event(Some(&mouse_event), delta.x as _, delta.y as _);
+                .send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
         }
     }
 
@@ -2259,8 +2277,8 @@ mod tests {
     use super::requires_extension_free_context;
     use super::{
         BACKGROUND_WINDOWLESS_FRAME_RATE, DEFAULT_WINDOWLESS_FRAME_RATE,
-        HIDDEN_WINDOWLESS_FRAME_RATE, effective_windowless_frame_rate,
-        windowless_frame_interval_from_refresh_millihertz,
+        HIDDEN_WINDOWLESS_FRAME_RATE, MAX_CEF_WHEEL_DELTA, cef_mouse_wheel_event,
+        effective_windowless_frame_rate, windowless_frame_interval_from_refresh_millihertz,
         windowless_frame_rate_from_refresh_millihertz,
     };
     use crate::prelude::{
@@ -2280,6 +2298,21 @@ mod tests {
         assert!(!requires_extension_free_context("https://example.com/"));
         assert!(!requires_extension_free_context("http://example.com/"));
         assert!(!requires_extension_free_context("about:blank"));
+    }
+
+    #[test]
+    fn mouse_wheel_rejects_zero_and_non_finite_events() {
+        assert!(cef_mouse_wheel_event(Vec2::ZERO, Vec2::ZERO).is_none());
+        assert!(cef_mouse_wheel_event(Vec2::NAN, Vec2::Y).is_none());
+        assert!(cef_mouse_wheel_event(Vec2::ZERO, Vec2::new(f32::INFINITY, 1.0)).is_none());
+    }
+
+    #[test]
+    fn mouse_wheel_clamps_large_deltas() {
+        let (_, delta_x, delta_y) =
+            cef_mouse_wheel_event(Vec2::new(12.0, 34.0), Vec2::new(f32::MAX, -f32::MAX)).unwrap();
+        assert_eq!(delta_x, MAX_CEF_WHEEL_DELTA as i32);
+        assert_eq!(delta_y, -(MAX_CEF_WHEEL_DELTA as i32));
     }
 
     #[test]
