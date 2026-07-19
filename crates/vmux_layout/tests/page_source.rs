@@ -29,13 +29,62 @@ fn tab_close_button_requests_tab_close() {
 fn tab_hover_area_switches_tab() {
     let tab = tab_component_source();
     let tab_root = tab
-        .split("div {\n            class: \"{tab_class}\"")
+        .split("\"data-layout-drop-tab\": \"{tab.id}\"")
         .nth(1)
         .and_then(|rest| rest.split("aria_label: \"Close tab\"").next())
         .expect("tab root");
 
-    assert!(tab_root.contains("onclick: move |_|"));
+    assert!(tab_root.contains("onclick: move |event|"));
     assert!(tab_root.contains("command: \"switch\".to_string()"));
+}
+
+#[test]
+fn tabs_and_side_sheet_stacks_use_pointer_drag_reordering() {
+    let source = include_str!("../src/page.rs");
+    let tab = tab_component_source();
+    let stack = side_sheet_stack_row_component_source();
+
+    assert!(source.contains("fn begin_layout_drag"));
+    assert!(source.contains("fn update_layout_drag"));
+    assert!(source.contains("fn end_layout_drag"));
+    assert!(source.contains("set_layout_pointer_capture"));
+    assert!(source.contains("event.prevent_default();"));
+    assert!(source.contains("event.stop_propagation();"));
+    assert!(source.contains("set_bookmark_context_menu_active(true);"));
+    assert!(tab.contains("data-layout-drag-source"));
+    assert!(tab.contains("data-layout-drop-tab"));
+    assert!(stack.contains("data-layout-drag-source"));
+    assert!(stack.contains("data-layout-drop-stack"));
+    assert!(source.contains("command: \"move_stack\".to_string()"));
+    assert!(source.contains("command: \"move\".to_string()"));
+}
+
+#[test]
+fn layout_drag_collapses_source_and_opens_animated_drop_gap() {
+    let source = include_str!("../src/page.rs");
+    let tab = tab_component_source();
+    let stack = side_sheet_stack_row_component_source();
+
+    assert!(source.contains("fn tab_drag_style"));
+    assert!(source.contains("fn stack_drag_style"));
+    assert!(source.contains("width:0;min-width:0;max-width:0;flex-basis:0"));
+    assert!(source.contains("height:0;min-height:0;opacity:0"));
+    assert!(source.contains("margin-right:208px"));
+    assert!(source.contains("margin-bottom:36px"));
+    assert!(source.contains("cubic-bezier(.2,.8,.2,1)"));
+    assert!(source.contains("set_timeout_with_callback_and_timeout_and_arguments_0"));
+    assert!(tab.contains("tab_drag_style"));
+    assert!(stack.contains("stack_drag_style"));
+}
+
+#[test]
+fn side_sheet_space_has_context_menu_rename() {
+    let row = side_sheet_space_row_component_source();
+
+    assert!(row.contains("LayoutContextMenu"));
+    assert!(row.contains("Rename Space"));
+    assert!(row.contains("command: \"rename\".to_string()"));
+    assert!(row.contains("BookmarkNameInput"));
 }
 
 #[test]
@@ -195,8 +244,12 @@ fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
 
     assert!(source.contains("layout_overlay_ready"));
     assert!(source.contains("let overlay_ready = layout_overlay_ready"));
-    assert!(source.contains("if overlay_ready && state.side_sheet_open"));
-    assert!(source.contains("if overlay_ready && state.header_visible()"));
+    assert!(source.contains("if overlay_ready && side_sheet_ready"));
+    assert!(source.contains("if overlay_ready && header_ready"));
+    assert!(source.contains("h-[var(--vmux-header-height)] overflow-hidden"));
+    assert!(source.contains("state.layout_hidden"));
+    assert!(source.contains("translate3d"));
+    assert!(source.contains("transition:transform 240ms"));
 }
 
 #[test]
@@ -289,4 +342,12 @@ fn pane_section_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn NewStackRow").next())
         .expect("pane section component")
+}
+
+fn side_sheet_space_row_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn SheetEntryRow").next())
+        .expect("side sheet space row component")
 }

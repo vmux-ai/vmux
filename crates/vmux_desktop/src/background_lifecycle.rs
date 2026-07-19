@@ -320,6 +320,8 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         });
     });
     let local_wake = wake.clone();
+    let layout_left_captured = Arc::new(AtomicBool::new(false));
+    let local_layout_left_captured = layout_left_captured.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
@@ -354,6 +356,30 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
             })
             .flatten();
+        let capture_layout_event = match event_type {
+            NSEventType::LeftMouseDown
+                if layout_pointer
+                    .is_some_and(|result| result.blocks_window_drag && result.presenter_active) =>
+            {
+                if let Some((x, y)) = location {
+                    vmux_browser::queue_native_layout_mouse_button(x, y, false);
+                    local_layout_left_captured.store(true, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+            NSEventType::LeftMouseDragged => local_layout_left_captured.load(Ordering::Relaxed),
+            NSEventType::LeftMouseUp
+                if local_layout_left_captured.swap(false, Ordering::Relaxed) =>
+            {
+                if let Some((x, y)) = location {
+                    vmux_browser::queue_native_layout_mouse_button(x, y, true);
+                }
+                true
+            }
+            _ => false,
+        };
         if event_type == NSEventType::LeftMouseDown
             && let Some((x_px, y_px)) = location
         {
@@ -386,6 +412,9 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 vmux_browser::flush_native_layout_pointer_move();
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+        }
+        if capture_layout_event {
+            return std::ptr::null_mut();
         }
         event.as_ptr()
     });
@@ -1000,6 +1029,23 @@ mod tests {
 
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
+    }
+
+    #[test]
+    fn native_tab_drag_does_not_move_window() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("NSEventType::LeftMouseDragged =>"));
+        assert!(monitor.contains("result.blocks_window_drag && result.presenter_active"));
+        assert!(monitor.contains("queue_native_layout_mouse_button(x, y, false)"));
+        assert!(monitor.contains("queue_native_layout_mouse_button(x, y, true)"));
+        assert!(monitor.contains("local_layout_left_captured"));
+        assert!(monitor.contains("return std::ptr::null_mut();"));
     }
 
     #[test]

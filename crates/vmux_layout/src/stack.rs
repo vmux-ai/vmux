@@ -2,7 +2,7 @@ use crate::event::SERVICES_PAGE_URL;
 use crate::{
     NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    swap::{find_kind_index, move_child_to_parent, resolve_next, resolve_prev, swap_siblings},
     tab::Tab,
 };
 use bevy::{
@@ -48,6 +48,14 @@ pub struct CloseStackRequest {
     pub stack: Entity,
 }
 
+#[derive(Message, Clone, Copy)]
+pub struct MoveStackRequest {
+    pub stack: Entity,
+    pub target_pane: Entity,
+    pub target_stack: Option<Entity>,
+    pub after: bool,
+}
+
 /// System set for `handle_stack_commands`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StackCommandSet;
@@ -59,6 +67,7 @@ impl Plugin for StackPlugin {
         app.register_type::<Stack>()
             .init_resource::<FocusedStack>()
             .add_message::<CloseStackRequest>()
+            .add_message::<MoveStackRequest>()
             .add_systems(
                 Update,
                 (
@@ -66,6 +75,7 @@ impl Plugin for StackPlugin {
                         .in_set(ReadAppCommands)
                         .in_set(StackCommandSet),
                     handle_close_stack_requests.in_set(ReadAppCommands),
+                    handle_move_stack_requests.in_set(ReadAppCommands),
                 ),
             )
             .add_systems(
@@ -78,6 +88,48 @@ impl Plugin for StackPlugin {
                     .after(crate::active::ensure_active_branch),
             )
             .add_systems(PostUpdate, sync_stack_picking);
+    }
+}
+
+fn handle_move_stack_requests(
+    mut reader: MessageReader<MoveStackRequest>,
+    pane_children: Query<&Children, (With<Pane>, Without<PaneSplit>)>,
+    child_of_q: Query<&ChildOf>,
+    stack_q: Query<(), With<Stack>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if !stack_q.contains(request.stack) {
+            continue;
+        }
+        let Ok(target_children) = pane_children.get(request.target_pane) else {
+            continue;
+        };
+        if let Some(target_stack) = request.target_stack {
+            if target_stack == request.stack {
+                continue;
+            }
+            let Ok(target_parent) = child_of_q.get(target_stack).map(Relationship::get) else {
+                continue;
+            };
+            if target_parent != request.target_pane || !stack_q.contains(target_stack) {
+                continue;
+            }
+        }
+        move_child_to_parent(
+            &mut commands,
+            request.stack,
+            request.target_pane,
+            target_children,
+            request.target_stack,
+            request.after,
+        );
+        commands
+            .entity(request.target_pane)
+            .insert(LastActivatedAt::now());
+        commands
+            .entity(request.stack)
+            .insert(LastActivatedAt::now());
     }
 }
 
@@ -751,6 +803,50 @@ mod tests {
             side_sheet: SideSheetSettings::default(),
             focus_ring: FocusRingSettings::default(),
         }
+    }
+
+    #[test]
+    fn move_stack_request_reorders_and_reparents() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<MoveStackRequest>()
+            .add_systems(Update, handle_move_stack_requests);
+        let source_pane = app.world_mut().spawn(Pane).id();
+        let target_pane = app.world_mut().spawn(Pane).id();
+        let moving = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(source_pane)))
+            .id();
+        let first = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(target_pane)))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((Stack::default(), ChildOf(target_pane)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<MoveStackRequest>>()
+            .write(MoveStackRequest {
+                stack: moving,
+                target_pane,
+                target_stack: Some(second),
+                after: false,
+            });
+
+        app.update();
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(target_pane)
+            .unwrap()
+            .iter()
+            .collect();
+        assert_eq!(children, vec![first, moving, second]);
+        assert_eq!(
+            app.world().get::<ChildOf>(moving).map(Relationship::get),
+            Some(target_pane)
+        );
     }
 
     #[test]

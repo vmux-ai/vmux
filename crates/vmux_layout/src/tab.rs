@@ -1,7 +1,7 @@
 use crate::event::TabsCommandEvent;
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    swap::{find_kind_index, move_child_to_parent, resolve_next, resolve_prev, swap_siblings},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -27,6 +27,13 @@ pub struct CloseTabRequest {
     pub tab: Entity,
 }
 
+#[derive(Message, Clone, Copy)]
+pub struct MoveTabRequest {
+    pub tab: Entity,
+    pub target: Entity,
+    pub after: bool,
+}
+
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
@@ -36,16 +43,20 @@ impl Plugin for TabPlugin {
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .add_message::<CloseTabRequest>()
+            .add_message::<MoveTabRequest>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
             ]))
             .add_observer(on_tabs_command_emit)
             .add_systems(
                 Update,
-                handle_tab_commands
-                    .in_set(ReadAppCommands)
-                    .in_set(TabCommandSet)
-                    .after(crate::settings::EffectiveStartupDirSet),
+                (
+                    handle_tab_commands
+                        .in_set(ReadAppCommands)
+                        .in_set(TabCommandSet)
+                        .after(crate::settings::EffectiveStartupDirSet),
+                    handle_move_tab_requests.in_set(ReadAppCommands),
+                ),
             )
             .add_systems(
                 Update,
@@ -392,6 +403,7 @@ fn on_tabs_command_emit(
     mut issued: ResMut<Messages<vmux_command::CommandIssued>>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut close_requests: MessageWriter<CloseTabRequest>,
+    mut move_requests: Option<MessageWriter<MoveTabRequest>>,
     mut commands: Commands,
 ) {
     let evt = &trigger.event().payload;
@@ -425,7 +437,65 @@ fn on_tabs_command_emit(
             };
             commands.entity(target).insert(LastActivatedAt::now());
         }
+        "move" => {
+            let Some(move_requests) = move_requests.as_mut() else {
+                return;
+            };
+            let Some(tab) =
+                tab_target(evt.tab_id.as_deref(), tabs.iter().map(|(entity, _)| entity))
+            else {
+                return;
+            };
+            let Some(target) = tab_target(
+                evt.target_tab_id.as_deref(),
+                tabs.iter().map(|(entity, _)| entity),
+            ) else {
+                return;
+            };
+            move_requests.write(MoveTabRequest {
+                tab,
+                target,
+                after: evt.drop_after,
+            });
+        }
         _ => {}
+    }
+}
+
+fn handle_move_tab_requests(
+    mut reader: MessageReader<MoveTabRequest>,
+    child_of_q: Query<&ChildOf>,
+    all_children: Query<&Children>,
+    tab_q: Query<(), With<Tab>>,
+    mut commands: Commands,
+) {
+    for request in reader.read() {
+        if request.tab == request.target
+            || !tab_q.contains(request.tab)
+            || !tab_q.contains(request.target)
+        {
+            continue;
+        }
+        let Ok(source_parent) = child_of_q.get(request.tab).map(Relationship::get) else {
+            continue;
+        };
+        let Ok(target_parent) = child_of_q.get(request.target).map(Relationship::get) else {
+            continue;
+        };
+        if source_parent != target_parent {
+            continue;
+        }
+        let Ok(children) = all_children.get(target_parent) else {
+            continue;
+        };
+        move_child_to_parent(
+            &mut commands,
+            request.tab,
+            target_parent,
+            children,
+            Some(request.target),
+            request.after,
+        );
     }
 }
 
@@ -443,6 +513,44 @@ mod tests {
     };
     use crate::window::Main as MainNode;
     use bevy::reflect::{FromReflect, TypeRegistry, serde::TypedReflectDeserializer};
+
+    #[test]
+    fn move_tab_request_reorders_siblings() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<MoveTabRequest>()
+            .add_systems(Update, handle_move_tab_requests);
+        let parent = app.world_mut().spawn_empty().id();
+        let first = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(parent)))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(parent)))
+            .id();
+        let third = app
+            .world_mut()
+            .spawn((Tab::default(), ChildOf(parent)))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<MoveTabRequest>>()
+            .write(MoveTabRequest {
+                tab: third,
+                target: first,
+                after: false,
+            });
+
+        app.update();
+
+        let children: Vec<Entity> = app
+            .world()
+            .get::<Children>(parent)
+            .unwrap()
+            .iter()
+            .collect();
+        assert_eq!(children, vec![third, first, second]);
+    }
     use serde::de::DeserializeSeed;
     use vmux_command::CommandPlugin;
     use vmux_core::PageOpenRequest;
@@ -982,6 +1090,7 @@ mod tests {
             payload: TabsCommandEvent {
                 command: "close".to_string(),
                 tab_id: Some(tab.to_bits().to_string()),
+                ..Default::default()
             },
         });
         app.update();
@@ -1005,6 +1114,7 @@ mod tests {
             payload: TabsCommandEvent {
                 command: "close".to_string(),
                 tab_id: None,
+                ..Default::default()
             },
         });
         app.update();
@@ -1115,6 +1225,7 @@ mod tests {
             payload: TabsCommandEvent {
                 command: "close".to_string(),
                 tab_id: Some(d.to_bits().to_string()),
+                ..Default::default()
             },
         });
         app.update();

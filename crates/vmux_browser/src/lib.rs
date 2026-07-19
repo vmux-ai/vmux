@@ -235,6 +235,7 @@ impl Plugin for BrowserPlugin {
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
+                    drain_native_layout_mouse_buttons,
                     dismiss_windowed_command_bar_from_native_monitor,
                     dismiss_windowed_command_bar_on_outside_click
                         .run_if(on_message::<MouseButtonInput>),
@@ -401,6 +402,7 @@ struct CefPointerHitRect {
     center: Vec2,
     size: Vec2,
     interactive: bool,
+    blocks_window_drag: bool,
 }
 
 #[cfg(target_os = "macos")]
@@ -408,14 +410,25 @@ struct CefPointerHitRect {
 struct NativeLayoutPointerState {
     regions: Vec<CefPointerHitRect>,
     pointer_inside: bool,
+    window_drag_blocked: bool,
     position_px: Option<Vec2>,
     buttons: NativeMouseButtons,
     pending: bool,
 }
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+struct NativeLayoutMouseButtonSample {
+    position_px: Vec2,
+    mouse_up: bool,
+}
+
+#[cfg(target_os = "macos")]
 static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
     LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
+#[cfg(target_os = "macos")]
+static NATIVE_LAYOUT_MOUSE_BUTTON_SAMPLES: LazyLock<Mutex<Vec<NativeLayoutMouseButtonSample>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
@@ -438,6 +451,7 @@ pub struct NativeLayoutPointerMoveResult {
     pub presenter_active: bool,
     pub region_changed: bool,
     pub pending: bool,
+    pub blocks_window_drag: bool,
 }
 
 fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
@@ -495,6 +509,7 @@ fn clear_native_layout_pointer_state() {
         state.regions.clear();
         let should_flush = state.pointer_inside && state.position_px.is_some();
         state.pointer_inside = false;
+        state.window_drag_blocked = false;
         state.pending |= should_flush;
         should_flush
     };
@@ -516,10 +531,17 @@ fn queue_native_layout_pointer_sample(
         .iter()
         .copied()
         .any(|rect| cef_pointer_hit_rect_contains(rect, position));
+    let window_drag_blocked = state
+        .regions
+        .iter()
+        .copied()
+        .any(|rect| rect.blocks_window_drag && cef_pointer_hit_rect_contains(rect, position));
     let was_inside = state.pointer_inside;
+    let was_window_drag_blocked = state.window_drag_blocked;
     let sample_changed =
         state.position_px != Some(position) || state.buttons != buttons || was_inside != inside;
     state.pointer_inside = inside;
+    state.window_drag_blocked = window_drag_blocked;
     state.position_px = Some(position);
     state.buttons = buttons;
     if (was_inside || inside) && sample_changed {
@@ -530,6 +552,7 @@ fn queue_native_layout_pointer_sample(
         presenter_active: false,
         region_changed: was_inside != inside,
         pending: state.pending,
+        blocks_window_drag: was_window_drag_blocked || window_drag_blocked,
     }
 }
 
@@ -595,6 +618,59 @@ pub fn native_layout_pointer_is_inside() -> bool {
     NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
 }
 
+#[cfg(target_os = "macos")]
+pub fn queue_native_layout_mouse_button(x_px: f32, y_px: f32, mouse_up: bool) {
+    if !x_px.is_finite() || !y_px.is_finite() {
+        return;
+    }
+    let mut samples = NATIVE_LAYOUT_MOUSE_BUTTON_SAMPLES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if samples.len() >= 16 {
+        samples.remove(0);
+    }
+    samples.push(NativeLayoutMouseButtonSample {
+        position_px: Vec2::new(x_px, y_px),
+        mouse_up,
+    });
+}
+
+fn drain_native_layout_mouse_buttons(
+    browsers: NonSend<Browsers>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    layout_q: Query<Entity, With<LayoutCef>>,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(layout) = layout_q.single() else {
+            return;
+        };
+        let Ok(window) = windows.single() else {
+            return;
+        };
+        let scale = window.resolution.scale_factor();
+        if !scale.is_finite() || scale <= 0.0 {
+            return;
+        }
+        let samples = {
+            let mut samples = NATIVE_LAYOUT_MOUSE_BUTTON_SAMPLES
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            std::mem::take(&mut *samples)
+        };
+        for sample in samples {
+            browsers.send_mouse_click(
+                &layout,
+                sample.position_px / scale,
+                PointerButton::Primary,
+                sample.mouse_up,
+            );
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (browsers, windows, layout_q);
+}
+
 fn cef_pointer_hit_rect(
     header: Option<&Header>,
     side_sheet: Option<&SideSheet>,
@@ -614,6 +690,7 @@ fn cef_pointer_hit_rect(
         center: transform.transform_point2(Vec2::ZERO),
         size: computed.size,
         interactive,
+        blocks_window_drag: header.is_some(),
     }
 }
 
@@ -1542,6 +1619,7 @@ fn sync_windowed_frames(
         .iter()
         .find_map(|(computed, ui_gt)| windowed_frame_rect_from_computed(computed, ui_gt));
     let force_raise = layout_hidden.is_changed();
+    let animate_frame = force_raise && !last_visible_pages.is_empty();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
@@ -1569,14 +1647,26 @@ fn sync_windowed_frames(
         if became_visible {
             browsers.set_windowed_hidden(&entity, false);
         }
-        browsers.set_windowed_frame(
-            &entity,
-            frame.left,
-            frame.top,
-            frame.width,
-            frame.height,
-            scale,
-        );
+        if animate_frame {
+            browsers.animate_windowed_frame(
+                &entity,
+                frame.left,
+                frame.top,
+                frame.width,
+                frame.height,
+                scale,
+                vmux_layout::toggle::LAYOUT_TRANSITION_SECONDS as f64,
+            );
+        } else {
+            browsers.set_windowed_frame(
+                &entity,
+                frame.left,
+                frame.top,
+                frame.width,
+                frame.height,
+                scale,
+            );
+        }
         let all_corners = windowed_page_all_corners(layout_hidden.0, visible_pane_count);
         browsers.set_windowed_corner_radius(
             &entity,
@@ -1912,6 +2002,7 @@ fn refresh_layout_cef_hover(
                     center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
                     size: Vec2::new(window.width(), window.height()),
                     interactive: true,
+                    blocks_window_drag: false,
                 },
                 scale,
             )]);
@@ -2085,6 +2176,7 @@ fn sync_layout_cef_frame_rate(
     mut button_events: MessageReader<MouseButtonInput>,
     mut wheel_events: MessageReader<MouseWheel>,
     buttons: Res<ButtonInput<MouseButton>>,
+    transition: Option<Res<vmux_layout::toggle::LayoutTransition>>,
     mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
     mut state: Local<LayoutFrameRateState>,
 ) {
@@ -2114,7 +2206,15 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
-    let desired = layout_frame_rate(now, state.last_input, inside, state.dragging_layout);
+    let desired = layout_frame_rate(
+        now,
+        state.last_input,
+        inside,
+        state.dragging_layout
+            || transition
+                .as_deref()
+                .is_some_and(vmux_layout::toggle::LayoutTransition::is_animating),
+    );
     let Ok(mut cap) = layout_q.single_mut() else {
         return;
     };
@@ -3019,10 +3119,11 @@ fn push_layout_state_emit(
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     header_q: Query<(Has<Open>, Option<&ComputedNode>, Option<&UiGlobalTransform>), With<Header>>,
-    side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
+    side_sheet_q: Query<(&SideSheetPosition, Has<Open>, Option<&ComputedNode>), With<SideSheet>>,
     window_q: Query<&Node, With<VmuxWindow>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     side_sheet_width: Res<SideSheetWidth>,
+    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     settings: Res<AppSettings>,
     mut last: Local<String>,
 ) {
@@ -3048,16 +3149,21 @@ fn push_layout_state_emit(
         let transform = transform?;
         layout_fixed_offsets_from_computed(computed, transform, window_width_px)
     });
+    let side_sheet = side_sheet_q
+        .iter()
+        .find(|(position, _, _)| **position == SideSheetPosition::Left);
+    let side_sheet_open = side_sheet.is_some_and(|(_, open, _)| open);
+    let visible_side_sheet_width = side_sheet
+        .and_then(|(_, _, computed)| computed)
+        .map(|computed| computed.size.x * computed.inverse_scale_factor.max(1.0e-6))
+        .unwrap_or(side_sheet_width.0);
 
     let payload = LayoutStateEvent {
+        layout_hidden: layout_hidden.0,
         header_open,
-        side_sheet_open: side_sheet_q
-            .iter()
-            .any(|(pos, is_open)| *pos == SideSheetPosition::Left && is_open),
-        header_height: header_offsets
-            .map(|offsets| offsets.height)
-            .unwrap_or(HEADER_HEIGHT_PX),
-        side_sheet_width: side_sheet_width.0,
+        side_sheet_open,
+        header_height: HEADER_HEIGHT_PX,
+        side_sheet_width: visible_side_sheet_width,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
@@ -4106,6 +4212,7 @@ fn on_side_sheet_command_emit(
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut move_requests: MessageWriter<vmux_layout::stack::MoveStackRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -4173,6 +4280,39 @@ fn on_side_sheet_command_emit(
                 command: cmd.clone(),
             });
             messages.write(cmd);
+        }
+        "move_stack" => {
+            let Some(&stack) = stack_entities.get(evt.stack_index as usize) else {
+                return;
+            };
+            let Ok(target_pane_id) = evt.target_pane_id.parse::<u64>() else {
+                return;
+            };
+            let Some(target_pane) = leaf_panes
+                .iter()
+                .find(|entity| entity.to_bits() == target_pane_id)
+            else {
+                return;
+            };
+            let Ok(target_children) = pane_children.get(target_pane) else {
+                return;
+            };
+            let target_stacks: Vec<Entity> = target_children
+                .iter()
+                .filter(|&entity| stack_q.contains(entity))
+                .collect();
+            let target_stack = evt
+                .target_stack_index
+                .and_then(|index| target_stacks.get(index as usize).copied());
+            if evt.target_stack_index.is_some() && target_stack.is_none() {
+                return;
+            }
+            move_requests.write(vmux_layout::stack::MoveStackRequest {
+                stack,
+                target_pane,
+                target_stack,
+                after: evt.drop_after,
+            });
         }
         _ => {}
     }
@@ -5026,6 +5166,7 @@ mod tests {
             center: Vec2::new(50.0, 20.0),
             size: Vec2::new(100.0, 40.0),
             interactive: true,
+            blocks_window_drag: false,
         };
 
         assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(0.0, 0.0)));
@@ -5039,6 +5180,7 @@ mod tests {
             center: Vec2::new(50.0, 20.0),
             size: Vec2::new(100.0, 40.0),
             interactive: false,
+            blocks_window_drag: false,
         };
 
         assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 20.0)));
@@ -5282,6 +5424,20 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
+    }
+
+    #[test]
+    fn zen_transition_uses_native_frame_animation_once() {
+        let source = include_str!("lib.rs");
+        let sync_fn = source
+            .split("fn sync_windowed_frames")
+            .nth(1)
+            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
+            .unwrap_or_default();
+
+        assert!(sync_fn.contains("layout_hidden.is_changed()"));
+        assert!(sync_fn.contains("browsers.animate_windowed_frame"));
+        assert!(sync_fn.contains("LAYOUT_TRANSITION_SECONDS"));
     }
 
     #[test]
@@ -6189,6 +6345,7 @@ mod tests {
                 center: Vec2::new(50.0, 25.0),
                 size: Vec2::new(20.0, 10.0),
                 interactive: true,
+                blocks_window_drag: true,
             }],
             ..Default::default()
         };
@@ -6197,6 +6354,7 @@ mod tests {
         let entered =
             queue_native_layout_pointer_sample(&mut state, Vec2::new(50.0, 25.0), buttons);
         assert!(entered.owns_pointer);
+        assert!(entered.blocks_window_drag);
         assert!(entered.region_changed);
         assert!(entered.pending);
         state.pending = false;
@@ -6246,11 +6404,27 @@ mod tests {
     }
 
     #[test]
+    fn native_layout_click_queue_forwards_swallowed_titlebar_input() {
+        let source = include_str!("lib.rs");
+        let drain = source
+            .split("fn drain_native_layout_mouse_buttons")
+            .nth(1)
+            .and_then(|tail| tail.split("fn cef_pointer_hit_rect").next())
+            .unwrap_or_default();
+
+        assert!(source.contains("queue_native_layout_mouse_button"));
+        assert!(drain.contains("NATIVE_LAYOUT_MOUSE_BUTTON_SAMPLES"));
+        assert!(drain.contains("PointerButton::Primary"));
+        assert!(drain.contains("browsers.send_mouse_click"));
+    }
+
+    #[test]
     fn layout_pointer_regions_match_layout_coordinates() {
         let rect = CefPointerHitRect {
             center: Vec2::new(50.0, 25.0),
             size: Vec2::new(20.0, 10.0),
             interactive: true,
+            blocks_window_drag: false,
         };
 
         assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 25.0)));

@@ -32,6 +32,39 @@ pub fn swap_siblings(
     }
 }
 
+pub fn move_child_to_parent(
+    commands: &mut Commands,
+    child: Entity,
+    target_parent: Entity,
+    target_children: &Children,
+    target: Option<Entity>,
+    after: bool,
+) {
+    if target == Some(child) {
+        return;
+    }
+
+    let mut ordered: Vec<Entity> = target_children
+        .iter()
+        .filter(|&entity| entity != child)
+        .collect();
+    let insert_at = target
+        .and_then(|target| ordered.iter().position(|&entity| entity == target))
+        .map(|index| index + usize::from(after))
+        .unwrap_or(ordered.len());
+    ordered.insert(insert_at, child);
+
+    commands.entity(child).remove::<ChildOf>();
+    for &entity in target_children {
+        if entity != child {
+            commands.entity(entity).remove::<ChildOf>();
+        }
+    }
+    for entity in ordered {
+        commands.entity(entity).insert(ChildOf(target_parent));
+    }
+}
+
 /// Find the index of `entity` within the filtered positions list.
 pub fn find_kind_index(
     entity: Entity,
