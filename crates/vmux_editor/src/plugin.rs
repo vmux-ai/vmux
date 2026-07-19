@@ -157,8 +157,14 @@ struct ExplorerChrome {
 #[derive(Resource, Default)]
 struct ExplorerChromeSynced(bool);
 
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 struct SharedFileViewMode(FileViewMode);
+
+impl Default for SharedFileViewMode {
+    fn default() -> Self {
+        Self(FileViewMode::Note)
+    }
+}
 
 #[derive(Component)]
 struct FileViewModeSent;
@@ -2988,8 +2994,13 @@ mod edit_flow_tests {
 
         assert_eq!(
             app.world().resource::<SharedFileViewMode>().0,
-            FileViewMode::Editor
+            FileViewMode::Note
         );
+    }
+
+    #[test]
+    fn file_view_mode_defaults_to_note() {
+        assert_eq!(SharedFileViewMode::default().0, FileViewMode::Note);
     }
 
     #[test]

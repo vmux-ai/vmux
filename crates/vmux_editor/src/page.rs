@@ -44,6 +44,45 @@ fn file_mode_class(active: bool) -> &'static str {
     }
 }
 
+fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32) -> u32 {
+    let count = end.saturating_sub(start).max(1);
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
+        return start;
+    };
+    let Some(target) = raw
+        .current_target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    else {
+        return start;
+    };
+    let rect = target.get_bounding_client_rect();
+    if rect.height() <= 0.0 {
+        return start;
+    }
+    let ratio = ((raw.client_y() as f64 - rect.top()) / rect.height()).clamp(0.0, 1.0);
+    start + ((ratio * count as f64).floor() as u32).min(count - 1)
+}
+
+fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
+        return 0;
+    };
+    let Some(target) = raw
+        .current_target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    else {
+        return 0;
+    };
+    let rect = target.get_bounding_client_rect();
+    if rect.width() <= 0.0 {
+        return 0;
+    }
+    let ratio = ((raw.client_x() as f64 - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    (ratio * text.chars().count() as f64).round() as u32
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Dir,
@@ -513,9 +552,10 @@ pub fn Page() -> Element {
     let mut git_path = use_signal(String::new);
     let mut git_has_diff = use_signal(|| false);
     let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
-    let mut file_view_mode = use_signal(|| FileViewMode::Editor);
+    let mut file_view_mode = use_signal(|| FileViewMode::Note);
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
     let mut note_active = use_signal(|| Option::<u32>::None);
+    let mut note_editing = use_signal(|| false);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
@@ -591,6 +631,7 @@ pub fn Page() -> Element {
         mode.set(Mode::Text);
         note_blocks.set(Vec::new());
         note_active.set(None);
+        note_editing.set(false);
         git_nonce.set(git_nonce() + 1);
     });
 
@@ -624,6 +665,9 @@ pub fn Page() -> Element {
 
     let _view_mode =
         use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
+            if file_view_mode() != event.mode {
+                note_editing.set(false);
+            }
             file_view_mode.set(event.mode);
         });
 
@@ -779,13 +823,18 @@ pub fn Page() -> Element {
         theme_style.set(s);
     });
 
-    use_effect(move || {
-        setup_measurement(cell_dims);
-        if mode() == Mode::Text {
-            focus_file_input();
-        } else {
-            focus_container();
+    use_effect(move || setup_measurement(cell_dims));
+
+    use_effect(move || match mode() {
+        Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
+            if note_editing() {
+                focus_file_input();
+            } else {
+                focus_container();
+            }
         }
+        Mode::Text => focus_file_input(),
+        Mode::Dir | Mode::Media(_) => focus_container(),
     });
 
     let gw = gutter_width(total_lines());
@@ -861,7 +910,14 @@ pub fn Page() -> Element {
                 match mode() {
                     Mode::Text => {
                         e.prevent_default();
-                        focus_file_input();
+                        if file_view_mode() == FileViewMode::Note
+                            && is_markdown_file(&git_path())
+                        {
+                            note_editing.set(false);
+                            focus_container();
+                        } else {
+                            focus_file_input();
+                        }
                     }
                     Mode::Dir => {
                         e.prevent_default();
@@ -1020,9 +1076,10 @@ pub fn Page() -> Element {
                                 class: file_mode_class(file_view_mode() == FileViewMode::Note),
                                 title: "Rendered Markdown with live editing",
                                 onclick: move |_| {
+                                    note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Note);
                                     let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
-                                    focus_file_input();
+                                    focus_container();
                                 },
                                 "Note"
                             }
@@ -1035,6 +1092,7 @@ pub fn Page() -> Element {
                             ),
                             title: "Source editor",
                             onclick: move |_| {
+                                note_editing.set(false);
                                 file_view_mode.set(FileViewMode::Editor);
                                 reveal_git_change(git_line_markers, cell_dims);
                                 let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
@@ -1236,7 +1294,6 @@ pub fn Page() -> Element {
                         {
                             let active = note_active();
                             let current = cursor();
-                            let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
                                     id: "file-scroll",
@@ -1244,7 +1301,7 @@ pub fn Page() -> Element {
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         for (index, note_block) in note_blocks().iter().enumerate() {
-                                            if Some(index as u32) == active {
+                                            if note_editing() && Some(index as u32) == active {
                                                 {
                                                     let start = note_block.start_line;
                                                     let source_lines = if note_block.source.is_empty() {
@@ -1255,11 +1312,11 @@ pub fn Page() -> Element {
                                                     rsx! {
                                                         div {
                                                             key: "active-{index}",
-                                                            class: "relative -mx-2 my-0.5 min-h-7 rounded-lg bg-primary/[0.04] px-2 py-1 ring-1 ring-inset ring-primary/10",
-                                                            onmousedown: move |_| focus_file_input(),
+                                                            class: "relative cursor-text",
                                                             for (line_offset, raw) in source_lines.iter().enumerate() {
                                                                 {
                                                                     let line = start + line_offset as u32;
+                                                                    let pointer_raw = raw.clone();
                                                                     if line == current.line {
                                                                         let column = current.col as usize;
                                                                         let byte = raw
@@ -1270,23 +1327,42 @@ pub fn Page() -> Element {
                                                                         let before = raw[..byte].to_string();
                                                                         let after = raw[byte..].to_string();
                                                                         rsx! {
-                                                                            div { key: "{line}", class: "min-h-7 whitespace-pre-wrap break-words font-mono text-sm leading-7",
+                                                                            div {
+                                                                                key: "{line}",
+                                                                                class: "min-h-7 min-w-[1ch] w-fit max-w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
+                                                                                onmousedown: move |event| {
+                                                                                    event.stop_propagation();
+                                                                                    event.prevent_default();
+                                                                                    let col = note_pointer_col(&event, &pointer_raw);
+                                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
+                                                                                    focus_file_input();
+                                                                                },
                                                                                 span { "{before}" }
-                                                                                span { class: "inline-block w-[2px] animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
+                                                                                span { class: "inline-block w-px animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
                                                                                 span { "{after}" }
                                                                             }
                                                                         }
                                                                     } else {
                                                                         rsx! {
-                                                                            div { key: "{line}", class: "min-h-7 whitespace-pre-wrap break-words font-mono text-sm leading-7", "{raw}" }
+                                                                            div {
+                                                                                key: "{line}",
+                                                                                class: "min-h-7 min-w-[1ch] w-fit max-w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
+                                                                                onmousedown: move |event| {
+                                                                                    event.stop_propagation();
+                                                                                    event.prevent_default();
+                                                                                    let col = note_pointer_col(&event, &pointer_raw);
+                                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
+                                                                                    focus_file_input();
+                                                                                },
+                                                                                "{raw}"
+                                                                            }
                                                                         }
                                                                     }
                                                                 }
                                                             }
                                                             textarea {
                                                                 id: "file-input",
-                                                                class: "absolute inset-0 z-10 h-full w-full resize-none border-0 bg-transparent p-0 caret-transparent outline-none",
-                                                                style: "color:{txtcol};",
+                                                                class: "pointer-events-none absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none",
                                                                 autocomplete: "off",
                                                                 autocapitalize: "off",
                                                                 spellcheck: "false",
@@ -1310,6 +1386,18 @@ pub fn Page() -> Element {
                                                                     }
                                                                     let key = raw.key();
                                                                     let mods = key_mods(raw);
+                                                                    if key == "Escape" {
+                                                                        event.prevent_default();
+                                                                        note_editing.set(false);
+                                                                        let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+                                                                            key,
+                                                                            code: raw.code(),
+                                                                            mods,
+                                                                            repeat: raw.repeat(),
+                                                                        });
+                                                                        focus_container();
+                                                                        return;
+                                                                    }
                                                                     let chord = mods.ctrl || mods.alt || mods.meta;
                                                                     if ed_mode().accepts_text() && !chord && is_text_key(&key) {
                                                                         return;
@@ -1328,19 +1416,23 @@ pub fn Page() -> Element {
                                                 }
                                             } else {
                                                 {
-                                                    let line = note_block.start_line;
+                                                    let start = note_block.start_line;
+                                                    let end = note_block.end_line;
                                                     rsx! {
                                                         div {
                                                             key: "block-{index}",
-                                                            class: "cursor-text rounded px-0.5 transition-colors hover:bg-foreground/[0.025]",
+                                                            class: "cursor-text",
                                                             onmousedown: move |event| {
+                                                                event.stop_propagation();
                                                                 event.prevent_default();
+                                                                let line = note_pointer_line(&event, start, end);
+                                                                note_active.set(Some(index as u32));
+                                                                note_editing.set(true);
                                                                 let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
                                                                     line,
                                                                     col: 0,
                                                                     extend: false,
                                                                 });
-                                                                focus_file_input();
                                                             },
                                                             {render_block(&note_block.block, index)}
                                                         }

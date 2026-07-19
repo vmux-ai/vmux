@@ -70,6 +70,7 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("FileViewModeEvent"));
     assert!(s.contains("FileViewModeSet"));
     assert!(s.contains("FileViewMode::Note"));
+    assert!(s.contains("let mut file_view_mode = use_signal(|| FileViewMode::Note)"));
     assert!(s.contains("Rendered Markdown with live editing"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Editor)"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Diff)"));
@@ -88,5 +89,11 @@ fn page_wires_shared_note_editor_diff_toggle() {
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
     assert!(s.contains("render_block(&note_block.block, index)"));
+    assert!(s.contains("let mut note_editing = use_signal(|| false)"));
+    assert!(s.contains("if note_editing() && Some(index as u32) == active"));
+    assert!(s.contains("note_pointer_line(&event, start, end)"));
+    assert!(s.contains("note_pointer_col(&event, &pointer_raw)"));
+    assert!(s.contains("class: \"relative cursor-text\""));
+    assert!(!s.contains("rounded-lg bg-primary/[0.04]"));
     assert!(s.contains("if git_path() != m.abs_path"));
 }
