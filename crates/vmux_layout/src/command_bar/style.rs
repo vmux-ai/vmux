@@ -305,6 +305,19 @@ mod tests {
     }
 
     #[test]
+    fn start_uses_the_shared_center_prompt_and_upward_popup() {
+        let palette = include_str!("palette.rs");
+        let page = include_str!("../start/page.rs");
+
+        assert!(palette.contains("PromptBox {"));
+        assert!(palette.contains("PromptPopup {"));
+        assert!(palette.contains("upward: is_start"));
+        assert!(page.contains("max-w-3xl"));
+        assert!(page.contains("items-center justify-center"));
+        assert!(page.contains("relative w-full"));
+    }
+
+    #[test]
     fn results_list_disables_horizontal_scroll() {
         let class = result_list_class();
 

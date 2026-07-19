@@ -348,6 +348,24 @@ pub fn attach_page_agent_to_stack(
     idx: &crate::client::page::strategy_index::PageStrategyIndex,
     kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Option<()> {
+    attach_page_agent_to_stack_with_webview(
+        stack, provider, model, sid, None, commands, meshes, webview_mt, idx, kind_q,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attach_page_agent_to_stack_with_webview(
+    stack: Entity,
+    provider: &str,
+    model: &str,
+    sid: &str,
+    webview: Option<Entity>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+    idx: &crate::client::page::strategy_index::PageStrategyIndex,
+    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+) -> Option<()> {
     let entity = idx.get_by_strs(provider, model)?;
     let kind = kind_q.get(entity).ok()?.0;
     let url = format!("{}{sid}", crate::url::page_url_prefix(provider, model));
@@ -375,11 +393,26 @@ pub fn attach_page_agent_to_stack(
         },
     ));
     let url = format!("vmux://agent/{provider}");
-    commands.spawn((
-        vmux_layout::Browser::new(meshes, webview_mt, &url),
-        crate::chat_page::AgentChatView,
-        ChildOf(stack),
-    ));
+    if let Some(webview) = webview {
+        commands
+            .entity(webview)
+            .insert((
+                crate::chat_page::AgentChatView,
+                PageMetadata {
+                    url,
+                    title: format!("{provider}/{model}"),
+                    bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+                    ..default()
+                },
+            ))
+            .remove::<crate::chat_page::ChatSynced>();
+    } else {
+        commands.spawn((
+            vmux_layout::Browser::new(meshes, webview_mt, &url),
+            crate::chat_page::AgentChatView,
+            ChildOf(stack),
+        ));
+    }
     Some(())
 }
 
@@ -392,6 +425,25 @@ pub fn attach_acp_agent_to_stack(
     cwd: &std::path::Path,
     icon: Option<&str>,
     resume: Option<&str>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    attach_acp_agent_to_stack_with_webview(
+        stack, agent_id, name, sid, cwd, icon, resume, None, commands, meshes, webview_mt,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attach_acp_agent_to_stack_with_webview(
+    stack: Entity,
+    agent_id: &str,
+    name: &str,
+    sid: &str,
+    cwd: &std::path::Path,
+    icon: Option<&str>,
+    resume: Option<&str>,
+    webview: Option<Entity>,
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
@@ -434,12 +486,28 @@ pub fn attach_acp_agent_to_stack(
         commands.entity(stack).insert(imported);
     }
     // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
-    commands.spawn((
-        vmux_layout::Browser::new(meshes, webview_mt, &url),
-        crate::chat_page::AgentChatView,
-        ChildOf(stack),
-        anchor,
-    ));
+    if let Some(webview) = webview {
+        commands
+            .entity(webview)
+            .insert((
+                crate::chat_page::AgentChatView,
+                PageMetadata {
+                    url,
+                    title: name.to_string(),
+                    bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
+                    icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
+                },
+                anchor,
+            ))
+            .remove::<crate::chat_page::ChatSynced>();
+    } else {
+        commands.spawn((
+            vmux_layout::Browser::new(meshes, webview_mt, &url),
+            crate::chat_page::AgentChatView,
+            ChildOf(stack),
+            anchor,
+        ));
+    }
 }
 
 /// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
@@ -4169,6 +4237,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
+    transitions: Query<&vmux_layout::start::StartAgentTransition>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
         .p0()
@@ -4206,9 +4275,15 @@ fn handle_agent_page_open(
             .get(task.stack)
             .ok()
             .map(|prompt| prompt.0.clone());
+        let transition_webview = transitions
+            .get(task.stack)
+            .ok()
+            .map(|transition| transition.webview)
+            .filter(|_| vmux_layout::start::supports_inline_agent_transition(&task.url));
         match handle_agent_page_open_task(
             &task,
             initial_prompt,
+            transition_webview,
             &children_q,
             &agents,
             &acp_sessions,
@@ -4226,6 +4301,9 @@ fn handle_agent_page_open(
         ) {
             Ok(()) => {
                 commands.entity(entity).insert(PageOpenHandled);
+                commands
+                    .entity(task.stack)
+                    .remove::<vmux_layout::start::StartAgentTransition>();
             }
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
@@ -4362,6 +4440,7 @@ fn handle_swap_stack_session(
 fn handle_agent_page_open_task(
     task: &PageOpenTask,
     initial_prompt: Option<String>,
+    transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
     acp_sessions: &Query<&crate::client::acp::AcpSession>,
@@ -4390,10 +4469,21 @@ fn handle_agent_page_open_task(
             model,
             sid,
         }) => {
-            clear_stack_children(task.stack, children_q, commands);
+            if transition_webview.is_none() {
+                clear_stack_children(task.stack, children_q, commands);
+            }
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
-            attach_page_agent_to_stack(
-                task.stack, &provider, &model, &sid, commands, meshes, webview_mt, idx, kind_q,
+            attach_page_agent_to_stack_with_webview(
+                task.stack,
+                &provider,
+                &model,
+                &sid,
+                transition_webview,
+                commands,
+                meshes,
+                webview_mt,
+                idx,
+                kind_q,
             )
             .ok_or_else(|| format!("no Page agent strategy registered for {provider}/{model}"))?;
             insert_initial_prompt_queue(task.stack, initial_prompt, commands);
@@ -4406,12 +4496,15 @@ fn handle_agent_page_open_task(
             })?;
             let idx = idx.ok_or_else(|| "page strategy index not registered".to_string())?;
             let sid = uuid::Uuid::new_v4().to_string();
-            clear_stack_children(task.stack, children_q, commands);
-            attach_page_agent_to_stack(
+            if transition_webview.is_none() {
+                clear_stack_children(task.stack, children_q, commands);
+            }
+            attach_page_agent_to_stack_with_webview(
                 task.stack,
                 provider.provider,
                 provider.default_model,
                 &sid,
+                transition_webview,
                 commands,
                 meshes,
                 webview_mt,
@@ -4489,13 +4582,15 @@ fn handle_agent_page_open_task(
             {
                 return Ok(());
             }
-            clear_stack_children(task.stack, children_q, commands);
+            if transition_webview.is_none() {
+                clear_stack_children(task.stack, children_q, commands);
+            }
             // `sid` (when present) is the agent-assigned ACP session id from a restored url — pass
             // it as the resume target. Fresh opens mint a routing sid and load nothing.
             let routing_sid = uuid::Uuid::new_v4().to_string();
             let icon = acp_icon_for_id(catalog, &id);
             let name = acp_profile_name_for_id(&id, cfg, catalog);
-            attach_acp_agent_to_stack(
+            attach_acp_agent_to_stack_with_webview(
                 task.stack,
                 &id,
                 &name,
@@ -4503,6 +4598,7 @@ fn handle_agent_page_open_task(
                 default_cwd,
                 icon.as_deref(),
                 sid.as_deref(),
+                transition_webview,
                 commands,
                 meshes,
                 webview_mt,
@@ -7218,6 +7314,70 @@ mod tests {
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn inline_start_transition_reuses_the_existing_webview() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        let webview = app
+            .world_mut()
+            .spawn((
+                vmux_layout::Browser,
+                bevy_cef::prelude::WebviewSource::new("vmux://start/"),
+                PageMetadata {
+                    url: "vmux://start/".to_string(),
+                    title: "Start".to_string(),
+                    ..default()
+                },
+                vmux_layout::start::StartAgentTransitionView,
+                ChildOf(stack),
+            ))
+            .id();
+        app.world_mut()
+            .entity_mut(stack)
+            .insert(vmux_layout::start::StartAgentTransition { webview });
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert!(app.world().get_entity(webview).is_ok());
+        assert!(
+            app.world()
+                .get::<crate::chat_page::AgentChatView>(webview)
+                .is_some()
+        );
+        assert!(
+            matches!(
+                app.world()
+                    .get::<bevy_cef::prelude::WebviewSource>(webview),
+                Some(bevy_cef::prelude::WebviewSource::Url(url)) if url == "vmux://start/"
+            ),
+            "the existing document remains loaded"
+        );
+        assert_eq!(
+            app.world().get::<PageMetadata>(webview).unwrap().url,
+            "vmux://agent/claude"
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::start::StartAgentTransition>(stack)
+                .is_none()
         );
     }
 

@@ -3,6 +3,11 @@
 
 pub mod event;
 
+/// Whether an agent page can replace the launcher inside its existing webview.
+pub fn supports_inline_agent_transition(url: &str) -> bool {
+    url.starts_with("vmux://agent/") && !url.contains("/cli") && !url.contains("/setup")
+}
+
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
@@ -10,6 +15,16 @@ pub mod page;
 mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::StartPlugin;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(bevy::prelude::Component, Clone, Copy, Debug)]
+pub struct StartAgentTransition {
+    pub webview: bevy::prelude::Entity,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(bevy::prelude::Component)]
+pub struct StartAgentTransitionView;
 
 /// Canonical URL of the start launcher page.
 #[cfg(not(target_arch = "wasm32"))]

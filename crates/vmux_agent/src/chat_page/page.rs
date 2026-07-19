@@ -25,6 +25,7 @@ use std::collections::{HashMap, HashSet};
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_terminal::page::PromptGhost;
 use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -295,9 +296,13 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
 }
 
 #[component]
-pub fn Page() -> Element {
+pub fn Page(
+    #[props(default)] agent_override: Option<String>,
+    #[props(default)] transition_prompt: Option<String>,
+) -> Element {
     use_theme();
-    let agent = current_agent();
+    let agent = agent_override.unwrap_or_else(current_agent);
+    let mut transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
@@ -336,6 +341,14 @@ pub fn Page() -> Element {
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
     let mut verb = use_signal(|| "Working".to_string());
+
+    use_future(move || async move {
+        if transition_preview.peek().is_empty() {
+            return;
+        }
+        gloo_timers::future::TimeoutFuture::new(340).await;
+        transition_preview.set(String::new());
+    });
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
     use_effect(move || {
@@ -652,7 +665,7 @@ pub fn Page() -> Element {
                     div { class: "agent-chat-glow agent-chat-glow-tertiary absolute bottom-[-12rem] left-1/3 h-96 w-96 rounded-full blur-[140px]" }
                 }
             }
-            header { class: "agent-chat-header relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
@@ -666,7 +679,7 @@ pub fn Page() -> Element {
             }
             div {
                 id: "chat-scroll",
-                class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
+                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 onscroll: move |_| {
                     if let Some(el) = web_sys::window()
                         .and_then(|w| w.document())
@@ -797,9 +810,9 @@ pub fn Page() -> Element {
             div {
                 class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                 div {
-                    class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+                    class: "vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if media_loading() {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
                             } else if media_entries.read().is_empty() {
@@ -848,7 +861,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if cmd_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             for (i , command) in filtered_cmds.iter().enumerate() {
                                 {
                                     let command = command.clone();
@@ -867,7 +880,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if session_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if resume_state == Some(ResumeMenuState::Loading) {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading sessions…" }
                             } else if resume_state == Some(ResumeMenuState::Empty) {
@@ -899,7 +912,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if model_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if filtered_models.is_empty() {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching models" }
                             } else {
@@ -977,7 +990,7 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    if !queued.read().is_empty() {
+                    if transition_preview.read().is_empty() && !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for queued_prompt in queued.read().iter().cloned() {
                                 div {
@@ -1058,9 +1071,7 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    div { class: "relative flex items-center overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25",
-                        div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
-                        div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
+                    PromptBox {
                         button {
                             class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
                             title: "Attach files (/upload)",
@@ -1120,7 +1131,9 @@ pub fn Page() -> Element {
                             div { class: "relative min-w-32 flex-1 overflow-hidden",
                                 if draft.read().is_empty() {
                                     div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
-                                        if show_capability_examples {
+                                        if !transition_preview.read().is_empty() {
+                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{transition_preview}" }
+                                        } else if show_capability_examples {
                                             PromptGhost {
                                                 accent_bg: agent_accent.accent_bg.to_string(),
                                                 terminal: false,

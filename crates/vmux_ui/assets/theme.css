@@ -247,6 +247,44 @@
   to { opacity: 1; }
 }
 
+@keyframes vmux-prompt-popup-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.vmux-prompt-popup {
+  animation: vmux-prompt-popup-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: bottom center;
+}
+
+@keyframes vmux-agent-surface-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.vmux-agent-surface-enter {
+  animation: vmux-agent-surface-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.vmux-agent-surface-enter-delayed {
+  animation-delay: 40ms;
+}
+
+@keyframes vmux-agent-prompt-dock-in {
+  from { opacity: 0.92; transform: translateY(calc(-50vh + 7rem)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.vmux-agent-prompt-dock-enter {
+  animation: vmux-agent-prompt-dock-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vmux-agent-prompt-dock-enter,
+  .vmux-agent-surface-enter,
+  .vmux-prompt-popup { animation: none; }
+}
+
 @keyframes spin-once {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

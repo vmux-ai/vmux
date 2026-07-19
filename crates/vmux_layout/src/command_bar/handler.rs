@@ -1210,6 +1210,29 @@ struct CommandBarActionQueries<'w, 's> {
             Without<Modal>,
         ),
     >,
+    webview_sources: Query<'w, 's, &'static WebviewSource>,
+}
+
+fn start_agent_transition_stack(
+    webview: Entity,
+    queries: &CommandBarActionQueries,
+) -> Option<Entity> {
+    let WebviewSource::Url(url) = queries.webview_sources.get(webview).ok()? else {
+        return None;
+    };
+    if !url.starts_with(crate::start::START_PAGE_URL) {
+        return None;
+    }
+    queries.child_of_q.get(webview).ok().map(|parent| parent.0)
+}
+
+fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
+    commands
+        .entity(stack)
+        .insert(crate::start::StartAgentTransition { webview });
+    commands
+        .entity(webview)
+        .insert(crate::start::StartAgentTransitionView);
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -1294,6 +1317,7 @@ fn on_command_bar_action(
     let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
+    let inline_transition_stack = start_agent_transition_stack(webview, &queries);
 
     match evt.action.as_str() {
         "prompt" => {
@@ -1311,6 +1335,11 @@ fn on_command_bar_action(
                     && let Some(url) =
                         prompt_agent_url(&resource_params.p2(), evt.agent_url.as_deref())
                 {
+                    if inline_transition_stack == Some(stack)
+                        && crate::start::supports_inline_agent_transition(&url)
+                    {
+                        mark_start_agent_transition(stack, webview, &mut commands);
+                    }
                     commands
                         .entity(stack)
                         .insert(PendingAgentPrompt(prompt.to_string()));
@@ -1365,6 +1394,12 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(&evt.value);
+                if matches!(evt.target, None | Some(OpenTarget::InPlace))
+                    && crate::start::supports_inline_agent_transition(&url)
+                    && let Some(stack) = inline_transition_stack
+                {
+                    mark_start_agent_transition(stack, webview, &mut commands);
+                }
                 if matches!(url.as_str(), "vmux://agent/" | "vmux://agent") {
                     if let Some(stack_e) = empty_stack {
                         page_default_attach_writer.write(

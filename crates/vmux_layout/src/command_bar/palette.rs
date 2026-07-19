@@ -24,6 +24,7 @@ use vmux_command::event::{
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_ui::components::icon::Icon;
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
@@ -39,6 +40,12 @@ pub enum PaletteVariant {
     Start,
 }
 
+#[derive(Clone, PartialEq)]
+pub struct StartAgentTransition {
+    pub agent_url: String,
+    pub prompt: String,
+}
+
 /// Props for [`CommandPalette`].
 #[derive(Props, Clone, PartialEq)]
 pub struct PaletteProps {
@@ -52,6 +59,8 @@ pub struct PaletteProps {
     pub on_dismiss: EventHandler<()>,
     /// Called on query/selection change (the modal re-emits its size).
     pub on_activity: EventHandler<()>,
+    #[props(default)]
+    pub on_start_agent_transition: Option<EventHandler<StartAgentTransition>>,
 }
 
 /// The shared command-bar body: input, live-filtered results, file-path completion,
@@ -61,9 +70,11 @@ pub struct PaletteProps {
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
     let variant = props.variant;
+    let is_start = matches!(variant, PaletteVariant::Start);
     let on_close = props.on_close;
     let on_dismiss = props.on_dismiss;
     let on_activity = props.on_activity;
+    let on_start_agent_transition = props.on_start_agent_transition;
 
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
@@ -166,9 +177,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
 
     let q = query();
-    let start_prompt_mode = matches!(variant, PaletteVariant::Start) && is_start_prompt_query(&q);
-    let start_agent_mode =
-        matches!(variant, PaletteVariant::Start) && (q.trim().is_empty() || start_prompt_mode);
+    let start_prompt_mode = is_start && is_start_prompt_query(&q);
+    let start_agent_mode = is_start && (q.trim().is_empty() || start_prompt_mode);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
     } else if start_agent_mode {
@@ -205,7 +215,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             combined.extend(r);
             combined
         };
-        if matches!(variant, PaletteVariant::Start) {
+        if is_start {
             r.into_iter()
                 .filter(|item| {
                     !matches!(
@@ -288,6 +298,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let execute = move |item: &ResultItem| {
         let prompt = query();
+        if is_start
+            && let Some(agent_url) = agent_page_url(item)
+            && crate::start::supports_inline_agent_transition(agent_url)
+            && let Some(handler) = on_start_agent_transition
+        {
+            handler.call(StartAgentTransition {
+                agent_url: agent_url.to_string(),
+                prompt: prompt.trim().to_string(),
+            });
+        }
         if matches!(variant, PaletteVariant::Start)
             && is_start_prompt_query(&prompt)
             && let Some(agent_url) = agent_page_url(item)
@@ -359,8 +379,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     rsx! {
-        div { class: "p-2",
-            div { class: command_bar_input_row_class(),
+        div { class: "relative",
+            PromptBox {
+                glass: is_start,
+                class: if is_start { "" } else { "p-2" },
+                div { class: if is_start { "relative z-10 flex min-w-0 w-full items-center gap-2 overflow-hidden px-2" } else { command_bar_input_row_class() },
                 if !space_name.is_empty() {
                     span {
                         title: "{space_name}",
@@ -436,7 +459,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             selected.set(0);
                             nav_mode.set(false);
                         },
-                        onkeydown: move |e| {
+                        onkeydown: {
+                            let q = q.clone();
+                            let results = results.clone();
+                            move |e| {
                             if e.key() == Key::Tab {
                                 e.prevent_default();
                                 let gt = ghost_text.clone();
@@ -541,6 +567,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     }
                                 }
                             }
+                            }
                         },
                     }
                 }
@@ -569,9 +596,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-        }
-        if !results.is_empty() {
-            div { id: "command-bar-results", class: result_list_class(),
+            }
+            if !results.is_empty() {
+                PromptPopup {
+                    upward: is_start,
+                    id: "command-bar-results",
+                    class: if is_start { "" } else { result_list_class() },
                 for (i, item) in results.iter().enumerate() {
                     div {
                         key: "{i}",
@@ -788,6 +818,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             },
                         }
                     }
+                }
                 }
             }
         }

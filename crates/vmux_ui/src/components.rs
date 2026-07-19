@@ -26,6 +26,7 @@ pub mod navbar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
+pub mod prompt_box;
 pub mod radio_group;
 pub mod scroll_area;
 pub mod select;
