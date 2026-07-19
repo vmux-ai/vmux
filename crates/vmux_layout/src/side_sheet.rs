@@ -13,7 +13,9 @@ impl Plugin for SideSheetLayoutPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    sync_side_sheet_visibility.before(UiSystems::Layout),
+                    sync_side_sheet_visibility
+                        .before(crate::toggle::LayoutChromeTransitionSet)
+                        .before(UiSystems::Layout),
                     sync_window_buttons_visibility,
                 ),
             );

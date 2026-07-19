@@ -178,7 +178,7 @@ impl Plugin for WindowPlugin {
                 PostUpdate,
                 (
                     fit_window_to_screen,
-                    sync_window_layout_to_settings,
+                    sync_window_layout_to_settings.before(crate::toggle::LayoutChromeTransitionSet),
                     sync_main_column_gap_to_pane_count,
                 ),
             )

@@ -263,12 +263,38 @@ mod tests {
         let original = TabsCommandEvent {
             command: "switch-tab".into(),
             tab_id: Some("work".into()),
+            target_tab_id: Some("other".into()),
+            drop_after: true,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
         let recovered =
             rkyv::from_bytes::<TabsCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
         assert_eq!(recovered.command, "switch-tab");
         assert_eq!(recovered.tab_id.as_deref(), Some("work"));
+        assert_eq!(recovered.target_tab_id.as_deref(), Some("other"));
+        assert!(recovered.drop_after);
+    }
+
+    #[test]
+    fn side_sheet_move_event_rkyv_roundtrip() {
+        let original = SideSheetCommandEvent {
+            command: "move_stack".into(),
+            pane_id: "1".into(),
+            stack_index: 2,
+            target_pane_id: "3".into(),
+            target_stack_index: Some(4),
+            drop_after: true,
+            ..Default::default()
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&original).expect("ser");
+        let recovered =
+            rkyv::from_bytes::<SideSheetCommandEvent, rkyv::rancor::Error>(&bytes).expect("de");
+        assert_eq!(recovered.command, "move_stack");
+        assert_eq!(recovered.pane_id, "1");
+        assert_eq!(recovered.stack_index, 2);
+        assert_eq!(recovered.target_pane_id, "3");
+        assert_eq!(recovered.target_stack_index, Some(4));
+        assert!(recovered.drop_after);
     }
 }
 
@@ -374,6 +400,7 @@ pub struct TabRow {
 #[derive(
     Clone,
     Debug,
+    Default,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -384,6 +411,10 @@ pub struct TabsCommandEvent {
     pub command: String,
     #[serde(default)]
     pub tab_id: Option<String>,
+    #[serde(default)]
+    pub target_tab_id: Option<String>,
+    #[serde(default)]
+    pub drop_after: bool,
 }
 
 #[derive(
@@ -444,6 +475,7 @@ pub struct StackNode {
 #[derive(
     Clone,
     Debug,
+    Default,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -458,6 +490,12 @@ pub struct SideSheetCommandEvent {
     pub stack_index: u32,
     #[serde(default)]
     pub path: String,
+    #[serde(default)]
+    pub target_pane_id: String,
+    #[serde(default)]
+    pub target_stack_index: Option<u32>,
+    #[serde(default)]
+    pub drop_after: bool,
 }
 
 /// The active tab's working directory + live git status, auto-detected from git. Rendered as the

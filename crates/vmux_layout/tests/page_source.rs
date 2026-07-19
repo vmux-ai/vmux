@@ -29,13 +29,41 @@ fn tab_close_button_requests_tab_close() {
 fn tab_hover_area_switches_tab() {
     let tab = tab_component_source();
     let tab_root = tab
-        .split("div {\n            class: \"{tab_class}\"")
+        .split("\"data-layout-drop-tab\": \"{tab.id}\"")
         .nth(1)
         .and_then(|rest| rest.split("aria_label: \"Close tab\"").next())
         .expect("tab root");
 
-    assert!(tab_root.contains("onclick: move |_|"));
+    assert!(tab_root.contains("onclick: move |event|"));
     assert!(tab_root.contains("command: \"switch\".to_string()"));
+}
+
+#[test]
+fn tabs_and_side_sheet_stacks_use_pointer_drag_reordering() {
+    let source = include_str!("../src/page.rs");
+    let tab = tab_component_source();
+    let stack = side_sheet_stack_row_component_source();
+
+    assert!(source.contains("fn begin_layout_drag"));
+    assert!(source.contains("fn update_layout_drag"));
+    assert!(source.contains("fn end_layout_drag"));
+    assert!(source.contains("set_layout_pointer_capture"));
+    assert!(tab.contains("data-layout-drag-source"));
+    assert!(tab.contains("data-layout-drop-tab"));
+    assert!(stack.contains("data-layout-drag-source"));
+    assert!(stack.contains("data-layout-drop-stack"));
+    assert!(source.contains("command: \"move_stack\".to_string()"));
+    assert!(source.contains("command: \"move\".to_string()"));
+}
+
+#[test]
+fn side_sheet_space_has_context_menu_rename() {
+    let row = side_sheet_space_row_component_source();
+
+    assert!(row.contains("LayoutContextMenu"));
+    assert!(row.contains("Rename Space"));
+    assert!(row.contains("command: \"rename\".to_string()"));
+    assert!(row.contains("BookmarkNameInput"));
 }
 
 #[test]
@@ -289,4 +317,12 @@ fn pane_section_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn NewStackRow").next())
         .expect("pane section component")
+}
+
+fn side_sheet_space_row_component_source() -> &'static str {
+    include_str!("../src/page.rs")
+        .split("fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow)")
+        .nth(1)
+        .and_then(|rest| rest.split("fn SheetEntryRow").next())
+        .expect("side sheet space row component")
 }

@@ -29,6 +29,13 @@ use wasm_bindgen::{JsCast, closure::Closure};
 pub fn Page() -> Element {
     use_theme();
 
+    let layout_drag_state = use_signal(|| None::<LayoutDragState>);
+    use_context_provider(|| layout_drag_state);
+    use_drop(move || {
+        remove_layout_drag_ghost();
+        set_bookmark_context_menu_active(false);
+    });
+
     let mut layout_state = use_signal(LayoutStateEvent::default);
     let mut layout_state_received = use_signal(|| false);
     let layout_listener =
@@ -209,7 +216,11 @@ pub fn Page() -> Element {
     );
 
     rsx! {
-        div { class: "fixed inset-0 pointer-events-none text-foreground",
+        div {
+            class: "fixed inset-0 pointer-events-none text-foreground",
+            onpointermove: move |event| update_layout_drag(layout_drag_state, &event),
+            onpointerup: move |event| end_layout_drag(layout_drag_state, &event),
+            onpointercancel: move |event| cancel_layout_drag(layout_drag_state, &event),
             if overlay_ready && state.side_sheet_open {
                 aside {
                     id: "vmux-side-sheet",
@@ -573,6 +584,7 @@ fn dir_truncate_class(title: &str) -> &'static str {
 
 #[component]
 fn Tab(tab: TabRow) -> Element {
+    let layout_drag_state: Signal<Option<LayoutDragState>> = use_context();
     let id_switch = tab.id.clone();
     let id_close = tab.id.clone();
     let display_title = if !tab.title.is_empty() {
@@ -618,17 +630,37 @@ fn Tab(tab: TabRow) -> Element {
     };
     let pin_metadata = bookmark_metadata.clone();
     let menu_val = use_signal(|| tab.id.clone());
+    let drag_item = LayoutDragItem::Tab {
+        tab_id: tab.id.clone(),
+    };
+    let tab_class = if layout_tab_drop_targeted(layout_drag_state, &tab.id) {
+        format!("{tab_class} ring-2 ring-ring")
+    } else {
+        tab_class
+    };
 
     rsx! {
         LayoutContextMenu {
             ContextMenuTrigger { attributes: vec![],
         div {
+            "data-layout-drag-source": "true",
+            "data-layout-drop-tab": "{tab.id}",
             class: "{tab_class}",
             style: "{tab_style}",
-            onclick: move |_| {
+            onpointerdown: {
+                let item = drag_item.clone();
+                move |event| begin_layout_drag(layout_drag_state, &event, item.clone())
+            },
+            onclick: move |event| {
+                if layout_drag_blocks_click(layout_drag_state) {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    return;
+                }
                 let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                     command: "switch".to_string(),
                     tab_id: Some(id_switch.clone()),
+                    ..Default::default()
                 });
             },
             div {
@@ -653,12 +685,17 @@ fn Tab(tab: TabRow) -> Element {
                     evt.prevent_default();
                     evt.stop_propagation();
                 },
+                onpointerdown: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                },
                 onclick: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();
                     let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                         command: "close".to_string(),
                         tab_id: Some(id_close.clone()),
+                        ..Default::default()
                     });
                 },
                 Icon { class: "h-2.5 w-2.5",
@@ -700,6 +737,7 @@ fn NewTabButton() -> Element {
                 let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
                     command: "new".to_string(),
                     tab_id: None,
+                    ..Default::default()
                 });
             },
             Icon { class: "h-3.5 w-3.5",
@@ -884,7 +922,6 @@ struct BookmarkFolderChoice {
 
 #[derive(Clone, PartialEq)]
 enum BookmarkDragItem {
-    Page { metadata: PageMetadata },
     Bookmark { uuid: String },
     Pin { uuid: String },
     Folder { uuid: String },
@@ -905,6 +942,383 @@ struct BookmarkDragState {
     ghost_offset_y: f64,
     active: bool,
     target: Option<BookmarkDropTarget>,
+}
+
+#[derive(Clone, PartialEq)]
+enum LayoutDragItem {
+    Tab {
+        tab_id: String,
+    },
+    Stack {
+        pane_id: u64,
+        stack_index: u32,
+        metadata: PageMetadata,
+    },
+}
+
+#[derive(Clone, PartialEq)]
+enum LayoutDropTarget {
+    Tab {
+        tab_id: String,
+        after: bool,
+    },
+    Stack {
+        pane_id: u64,
+        stack_index: u32,
+        after: bool,
+    },
+    Pane {
+        pane_id: u64,
+    },
+    Bookmark(BookmarkDropTarget),
+}
+
+#[derive(Clone, PartialEq)]
+struct LayoutDragState {
+    item: LayoutDragItem,
+    start_x: f64,
+    start_y: f64,
+    ghost_offset_x: f64,
+    ghost_offset_y: f64,
+    active: bool,
+    target: Option<LayoutDropTarget>,
+}
+
+const LAYOUT_DRAG_GHOST_ID: &str = "vmux-layout-drag-ghost";
+
+fn begin_layout_drag(
+    mut state: Signal<Option<LayoutDragState>>,
+    event: &Event<PointerData>,
+    item: LayoutDragItem,
+) {
+    if event.trigger_button() != Some(MouseButton::Primary) {
+        return;
+    }
+    set_layout_pointer_capture(event, true);
+    let coordinates = event.client_coordinates();
+    let rect = layout_drag_source(event).map(|source| source.get_bounding_client_rect());
+    state.set(Some(LayoutDragState {
+        item,
+        start_x: coordinates.x,
+        start_y: coordinates.y,
+        ghost_offset_x: rect
+            .as_ref()
+            .map(|rect| coordinates.x - rect.left())
+            .unwrap_or(12.0),
+        ghost_offset_y: rect
+            .as_ref()
+            .map(|rect| coordinates.y - rect.top())
+            .unwrap_or(12.0),
+        active: false,
+        target: None,
+    }));
+}
+
+fn update_layout_drag(mut state: Signal<Option<LayoutDragState>>, event: &Event<PointerData>) {
+    let Some(mut drag) = state() else {
+        return;
+    };
+    let coordinates = event.client_coordinates();
+    let dx = coordinates.x - drag.start_x;
+    let dy = coordinates.y - drag.start_y;
+    if !drag.active && dx * dx + dy * dy < 16.0 {
+        return;
+    }
+    let target = layout_drop_target_at(event, &drag.item);
+    if !drag.active {
+        set_bookmark_context_menu_active(true);
+        create_layout_drag_ghost(event);
+    }
+    move_layout_drag_ghost(
+        coordinates.x - drag.ghost_offset_x,
+        coordinates.y - drag.ghost_offset_y,
+    );
+    if !drag.active || drag.target != target {
+        drag.active = true;
+        drag.target = target;
+        state.set(Some(drag));
+    }
+}
+
+fn end_layout_drag(mut state: Signal<Option<LayoutDragState>>, event: &Event<PointerData>) {
+    set_layout_pointer_capture(event, false);
+    let Some(mut drag) = state() else {
+        return;
+    };
+    let coordinates = event.client_coordinates();
+    let dx = coordinates.x - drag.start_x;
+    let dy = coordinates.y - drag.start_y;
+    if !drag.active && dx * dx + dy * dy < 16.0 {
+        state.set(None);
+        return;
+    }
+    let target = layout_drop_target_at(event, &drag.item);
+    event.prevent_default();
+    event.stop_propagation();
+    drag.active = true;
+    drag.target = target.clone();
+    remove_layout_drag_ghost();
+    set_bookmark_context_menu_active(false);
+    if let Some(target) = target {
+        perform_layout_drop(drag.item.clone(), target);
+    }
+    state.set(Some(drag));
+    clear_layout_drag_after_click(state);
+}
+
+fn cancel_layout_drag(mut state: Signal<Option<LayoutDragState>>, event: &Event<PointerData>) {
+    set_layout_pointer_capture(event, false);
+    remove_layout_drag_ghost();
+    set_bookmark_context_menu_active(false);
+    state.set(None);
+}
+
+fn layout_drag_source(event: &Event<PointerData>) -> Option<web_sys::Element> {
+    let data = event.data();
+    let pointer = data.downcast::<web_sys::PointerEvent>()?;
+    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
+    target.closest("[data-layout-drag-source]").ok().flatten()
+}
+
+fn set_layout_pointer_capture(event: &Event<PointerData>, capture: bool) {
+    let data = event.data();
+    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+        return;
+    };
+    let Some(element) = layout_drag_source(event) else {
+        return;
+    };
+    if capture {
+        let _ = element.set_pointer_capture(pointer.pointer_id());
+    } else {
+        let _ = element.release_pointer_capture(pointer.pointer_id());
+    }
+}
+
+fn create_layout_drag_ghost(event: &Event<PointerData>) {
+    remove_layout_drag_ghost();
+    let Some(source) = layout_drag_source(event) else {
+        return;
+    };
+    let Ok(node) = source.clone_node_with_deep(true) else {
+        return;
+    };
+    let Ok(ghost) = node.dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let rect = source.get_bounding_client_rect();
+    ghost.set_id(LAYOUT_DRAG_GHOST_ID);
+    let _ = ghost.set_attribute("aria-hidden", "true");
+    let style = ghost.style();
+    let _ = style.set_property("position", "fixed");
+    let _ = style.set_property("z-index", "2000");
+    let _ = style.set_property("pointer-events", "none");
+    let _ = style.set_property("width", &format!("{}px", rect.width()));
+    let _ = style.set_property("height", &format!("{}px", rect.height()));
+    let _ = style.set_property("opacity", "0.92");
+    let _ = style.set_property("margin", "0");
+    let Some(body) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.body())
+    else {
+        return;
+    };
+    let _ = body.append_child(&ghost);
+}
+
+fn move_layout_drag_ghost(left: f64, top: f64) {
+    let Some(ghost) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(LAYOUT_DRAG_GHOST_ID))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    let style = ghost.style();
+    let _ = style.set_property("left", &format!("{left}px"));
+    let _ = style.set_property("top", &format!("{top}px"));
+}
+
+fn remove_layout_drag_ghost() {
+    if let Some(ghost) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(LAYOUT_DRAG_GHOST_ID))
+    {
+        ghost.remove();
+    }
+}
+
+fn layout_drop_target_at(
+    event: &Event<PointerData>,
+    item: &LayoutDragItem,
+) -> Option<LayoutDropTarget> {
+    let coordinates = event.client_coordinates();
+    let document = web_sys::window()?.document()?;
+    let element = document.element_from_point(coordinates.x as f32, coordinates.y as f32)?;
+    let target = element
+        .closest(
+            "[data-layout-drop-tab], [data-layout-drop-stack], [data-layout-drop-pane], [data-bookmark-drop]",
+        )
+        .ok()
+        .flatten()?;
+    if let Some(tab_id) = target.get_attribute("data-layout-drop-tab") {
+        let rect = target.get_bounding_client_rect();
+        return Some(LayoutDropTarget::Tab {
+            tab_id,
+            after: coordinates.x >= rect.left() + rect.width() * 0.5,
+        });
+    }
+    if let Some(value) = target.get_attribute("data-layout-drop-stack") {
+        let (pane_id, stack_index) = value.split_once(':')?;
+        let rect = target.get_bounding_client_rect();
+        return Some(LayoutDropTarget::Stack {
+            pane_id: pane_id.parse().ok()?,
+            stack_index: stack_index.parse().ok()?,
+            after: coordinates.y >= rect.top() + rect.height() * 0.5,
+        });
+    }
+    if let Some(pane_id) = target.get_attribute("data-layout-drop-pane") {
+        return Some(LayoutDropTarget::Pane {
+            pane_id: pane_id.parse().ok()?,
+        });
+    }
+    if matches!(item, LayoutDragItem::Stack { .. }) {
+        return match target.get_attribute("data-bookmark-drop").as_deref() {
+            Some("root") => Some(LayoutDropTarget::Bookmark(BookmarkDropTarget::Root)),
+            Some(uuid) if !uuid.is_empty() => Some(LayoutDropTarget::Bookmark(
+                BookmarkDropTarget::Folder(uuid.to_string()),
+            )),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn perform_layout_drop(item: LayoutDragItem, target: LayoutDropTarget) {
+    match (item, target) {
+        (
+            LayoutDragItem::Tab { tab_id },
+            LayoutDropTarget::Tab {
+                tab_id: target,
+                after,
+            },
+        ) => {
+            let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                command: "move".to_string(),
+                tab_id: Some(tab_id),
+                target_tab_id: Some(target),
+                drop_after: after,
+            });
+        }
+        (
+            LayoutDragItem::Stack {
+                pane_id,
+                stack_index,
+                ..
+            },
+            LayoutDropTarget::Stack {
+                pane_id: target_pane_id,
+                stack_index: target_stack_index,
+                after,
+            },
+        ) => emit_stack_move(
+            pane_id,
+            stack_index,
+            target_pane_id,
+            Some(target_stack_index),
+            after,
+        ),
+        (
+            LayoutDragItem::Stack {
+                pane_id,
+                stack_index,
+                ..
+            },
+            LayoutDropTarget::Pane {
+                pane_id: target_pane_id,
+            },
+        ) => emit_stack_move(pane_id, stack_index, target_pane_id, None, false),
+        (LayoutDragItem::Stack { metadata, .. }, LayoutDropTarget::Bookmark(target)) => {
+            let folder = match target {
+                BookmarkDropTarget::Root => None,
+                BookmarkDropTarget::Folder(uuid) => Some(uuid),
+            };
+            add_to_bookmarks("add", metadata, folder);
+        }
+        _ => {}
+    }
+}
+
+fn emit_stack_move(
+    pane_id: u64,
+    stack_index: u32,
+    target_pane_id: u64,
+    target_stack_index: Option<u32>,
+    drop_after: bool,
+) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "move_stack".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index,
+        target_pane_id: target_pane_id.to_string(),
+        target_stack_index,
+        drop_after,
+        ..Default::default()
+    });
+}
+
+fn clear_layout_drag_after_click(mut state: Signal<Option<LayoutDragState>>) {
+    let Some(window) = web_sys::window() else {
+        state.set(None);
+        return;
+    };
+    let callback = Closure::once(move || state.set(None));
+    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+        Ok(_) => callback.forget(),
+        Err(_) => state.set(None),
+    }
+}
+
+fn layout_drag_blocks_click(state: Signal<Option<LayoutDragState>>) -> bool {
+    state().is_some_and(|drag| drag.active)
+}
+
+fn layout_tab_drop_targeted(state: Signal<Option<LayoutDragState>>, tab_id: &str) -> bool {
+    state().is_some_and(|drag| {
+        drag.active
+            && matches!(
+                drag.target,
+                Some(LayoutDropTarget::Tab { tab_id: ref target, .. }) if target == tab_id
+            )
+    })
+}
+
+fn layout_stack_drop_targeted(
+    state: Signal<Option<LayoutDragState>>,
+    pane_id: u64,
+    stack_index: u32,
+) -> bool {
+    state().is_some_and(|drag| {
+        drag.active
+            && matches!(
+                drag.target,
+                Some(LayoutDropTarget::Stack {
+                    pane_id: target_pane,
+                    stack_index: target_stack,
+                    ..
+                }) if target_pane == pane_id && target_stack == stack_index
+            )
+    })
+}
+
+fn layout_pane_drop_targeted(state: Signal<Option<LayoutDragState>>, pane_id: u64) -> bool {
+    state().is_some_and(|drag| {
+        drag.active
+            && matches!(
+                drag.target,
+                Some(LayoutDropTarget::Pane { pane_id: target }) if target == pane_id
+            )
+    })
 }
 
 fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
@@ -985,6 +1399,7 @@ fn open_knowledge_path(pane_id: u64, path: String) {
         pane_id: pane_id.to_string(),
         stack_index: 0,
         path,
+        ..Default::default()
     });
 }
 
@@ -1349,7 +1764,6 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
         BookmarkDropTarget::Folder(uuid) => Some(uuid),
     };
     match item {
-        BookmarkDragItem::Page { metadata } => add_to_bookmarks("add", metadata, folder),
         BookmarkDragItem::Bookmark { uuid, .. } => move_bookmark(uuid, folder),
         BookmarkDragItem::Pin { uuid } => move_pin(uuid, folder),
         BookmarkDragItem::Folder { uuid, .. } => {
@@ -1653,7 +2067,6 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
     let root_drop_label = drag_state()
         .filter(|drag| drag.active)
         .map(|drag| match drag.item {
-            BookmarkDragItem::Page { .. } => "Add to Bookmarks",
             BookmarkDragItem::Bookmark { .. }
             | BookmarkDragItem::Pin { .. }
             | BookmarkDragItem::Folder { .. } => "Move to Bookmarks",
@@ -2213,26 +2626,70 @@ fn BookmarkFolder(
 
 #[component]
 fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
+    let mut editing = use_signal(|| false);
+    let draft = use_signal(|| space.name.clone());
+    let menu_val = use_signal(|| space.id.clone());
     rsx! {
-        button {
-            r#type: "button",
-            class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-foreground/5",
-            onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
-                    command: "open_page".to_string(),
-                    space_id: Some(space.id.clone()),
-                    name: None,
-                });
-            },
-            Icon { class: "h-4 w-4 shrink-0",
-                path { d: "M3 3h7v7H3z" }
-                path { d: "M14 3h7v7h-7z" }
-                path { d: "M3 14h7v7H3z" }
-                path { d: "M14 14h7v7h-7z" }
+        LayoutContextMenu {
+            ContextMenuTrigger { attributes: vec![],
+                div {
+                    class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-foreground/5",
+                    onclick: move |_| {
+                        if editing() {
+                            return;
+                        }
+                        let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
+                            command: "open_page".to_string(),
+                            space_id: Some(space.id.clone()),
+                            name: None,
+                        });
+                    },
+                    Icon { class: "h-4 w-4 shrink-0",
+                        path { d: "M3 3h7v7H3z" }
+                        path { d: "M14 3h7v7h-7z" }
+                        path { d: "M3 14h7v7H3z" }
+                        path { d: "M14 14h7v7h-7z" }
+                    }
+                    if editing() {
+                        BookmarkNameInput {
+                            draft,
+                            class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                            placeholder: "Space name".to_string(),
+                            on_commit: {
+                                let space_id = space.id.clone();
+                                move |name: String| {
+                                    editing.set(false);
+                                    let name = name.trim().to_string();
+                                    if !name.is_empty() {
+                                        let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
+                                            command: "rename".to_string(),
+                                            space_id: Some(space_id.clone()),
+                                            name: Some(name),
+                                        });
+                                    }
+                                }
+                            },
+                            on_cancel: move |_| editing.set(false),
+                        }
+                    } else {
+                        span {
+                            class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left",
+                            "{space.name}"
+                        }
+                    }
+                }
             }
-            span {
-                class: "min-w-0 flex-1 truncate text-ui font-medium text-foreground text-left",
-                "{space.name}"
+            SideSheetContextMenuContent {
+                ContextMenuItem {
+                    index: 0usize,
+                    value: Into::<ReadSignal<String>>::into(menu_val),
+                    on_select: {
+                        let name = space.name.clone();
+                        move |_: String| begin_inline_rename(editing, draft, name.clone())
+                    },
+                    attributes: vec![],
+                    "Rename Space"
+                }
             }
         }
     }
@@ -2268,20 +2725,27 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
+    let layout_drag_state: Signal<Option<LayoutDragState>> = use_context();
     let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
     let folded_stack = pane.stacks.iter().find(|stack| stack.is_active).cloned();
     let mut folded = use_signal(|| false);
+    let pane_targeted = layout_pane_drop_targeted(layout_drag_state, pane_id);
+    let pane_class = if pane_targeted {
+        "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 ring-2 ring-ring"
+    } else if pane.is_active && any_loading {
+        "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 pane-loading-ring"
+    } else if pane.is_active {
+        "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 ring-2 ring-ring"
+    } else {
+        "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5"
+    };
 
     rsx! {
-        div { class: if pane.is_active && any_loading {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 pane-loading-ring"
-            } else if pane.is_active {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 ring-2 ring-ring"
-            } else {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5"
-            },
+        div {
+            "data-layout-drop-pane": "{pane_id}",
+            class: "{pane_class}",
             div {
                 class: "mb-0.5 flex items-center gap-1 rounded-md px-2 py-1",
                 span {
@@ -2346,7 +2810,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
-                    path: String::new(),
+                    ..Default::default()
                 });
             },
         }
@@ -2356,7 +2820,7 @@ fn NewStackRow(pane_id: u64) -> Element {
 #[component]
 fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let folder_context: Signal<Vec<BookmarkFolderChoice>> = use_context();
-    let drag_state: Signal<Option<BookmarkDragState>> = use_context();
+    let layout_drag_state: Signal<Option<LayoutDragState>> = use_context();
     let folders = folder_context();
     let is_active = stack.is_active;
     let stack_index = stack.stack_index;
@@ -2368,12 +2832,15 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
         icon: stack.icon.clone(),
         bg_color: stack.bg_color.clone(),
     };
-    let drag_item = BookmarkDragItem::Page {
+    let drag_item = LayoutDragItem::Stack {
+        pane_id,
+        stack_index,
         metadata: metadata.clone(),
     };
     let bookmark_metadata = metadata.clone();
     let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
+    let drop_targeted = layout_stack_drop_targeted(layout_drag_state, pane_id, stack_index);
 
     let title_class = if is_active {
         format!(
@@ -2392,13 +2859,16 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
             ContextMenuTrigger {
                 attributes: vec![],
                 div {
-                    "data-bookmark-drag-source": "true",
+                    "data-layout-drag-source": "true",
+                    "data-layout-drop-stack": "{pane_id}:{stack_index}",
                     onpointerdown: {
                         let item = drag_item.clone();
-                        move |event| begin_bookmark_drag(drag_state, &event, item.clone())
+                        move |event| begin_layout_drag(layout_drag_state, &event, item.clone())
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_index}",
-                    class: if is_active {
+                    class: if drop_targeted {
+                        "glass flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 ring-2 ring-ring"
+                    } else if is_active {
                         "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"
                     } else {
                         "flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 border border-transparent text-muted-foreground hover:bg-glass-hover hover:text-foreground"
@@ -2406,7 +2876,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                     onmouseenter: move |_| hovered.set(true),
                     onmouseleave: move |_| hovered.set(false),
                     onclick: move |event| {
-                        if bookmark_drag_blocks_click(drag_state) {
+                        if layout_drag_blocks_click(layout_drag_state) {
                             event.prevent_default();
                             event.stop_propagation();
                             return;
@@ -2415,7 +2885,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_index,
-                            path: String::new(),
+                            ..Default::default()
                         });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
@@ -2444,7 +2914,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                                 command: "close_stack".to_string(),
                                 pane_id: pane_id.to_string(),
                                 stack_index,
-                                path: String::new(),
+                                ..Default::default()
                             });
                         },
                         Icon { class: "h-3 w-3 pointer-events-none",

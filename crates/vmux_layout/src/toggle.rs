@@ -1,55 +1,115 @@
 use crate::Open;
 use crate::header::Header;
 use crate::settings::LayoutSettings;
-use crate::side_sheet::SideSheet;
+use crate::side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth};
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
+use bevy::ui::UiSystems;
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 
 /// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
 #[derive(Resource, Default, Debug)]
 pub struct LayoutHidden(pub bool);
 
+#[derive(Resource, Debug)]
+pub struct LayoutTransition {
+    hidden_fraction: f32,
+    target_hidden: bool,
+}
+
+impl Default for LayoutTransition {
+    fn default() -> Self {
+        Self {
+            hidden_fraction: 0.0,
+            target_hidden: false,
+        }
+    }
+}
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct LayoutChromeTransitionSet;
+
+const LAYOUT_TRANSITION_SECONDS: f32 = 0.2;
+
 pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LayoutHidden>()
+            .init_resource::<LayoutTransition>()
             .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
             .add_systems(
                 PostUpdate,
-                sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout),
+                animate_layout_transition
+                    .in_set(LayoutChromeTransitionSet)
+                    .before(UiSystems::Layout),
             );
     }
 }
 
-/// When the CEF shell is hidden, the pane fills the full window. Apply
-/// WINDOW_PAD_PX on all four sides to keep the pane off the system window
-/// edge. When visible, keep top + left at 0 (pane is flush against the
-/// CEF shell / system edge) and pad only the right + bottom corners.
-fn sync_window_padding_to_layout_hidden(
-    hidden: Res<LayoutHidden>,
+fn animate_layout_transition(
+    time: Res<Time>,
+    mut transition: ResMut<LayoutTransition>,
     settings: Res<LayoutSettings>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,
+    mut header_q: Query<&mut Node, (With<Header>, Without<VmuxWindow>, Without<SideSheet>)>,
+    mut side_sheet_q: Query<
+        (Entity, &SideSheetPosition, Has<Open>, &mut Node),
+        (With<SideSheet>, Without<VmuxWindow>, Without<Header>),
+    >,
+    side_sheet_width: Res<SideSheetWidth>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+    mut commands: Commands,
 ) {
-    let (top, left) = if hidden.0 {
-        (settings.window.pad_top(), settings.window.pad_left())
-    } else {
-        (0.0, 0.0)
-    };
+    let target = if transition.target_hidden { 1.0 } else { 0.0 };
+    let was_animating = transition.hidden_fraction != target;
+    transition.hidden_fraction = advance_transition(
+        transition.hidden_fraction,
+        target,
+        time.delta_secs() / LAYOUT_TRANSITION_SECONDS,
+    );
+    let hidden = smoothstep(transition.hidden_fraction);
+    let visible = 1.0 - hidden;
+
     for mut node in &mut window_q {
-        let want_top = Val::Px(top);
-        let want_left = Val::Px(left);
-        if node.padding.top != want_top || node.padding.left != want_left {
-            node.padding.top = want_top;
-            node.padding.left = want_left;
+        node.padding.top = Val::Px(settings.window.pad_top() * hidden);
+        node.padding.left = Val::Px(settings.window.pad_left() * hidden);
+    }
+    for mut node in &mut header_q {
+        node.height = Val::Px(crate::event::CEF_RESERVED_HEIGHT_PX * visible);
+    }
+    for (entity, position, open, mut node) in &mut side_sheet_q {
+        if *position != SideSheetPosition::Left {
+            continue;
+        }
+        node.width = Val::Px(side_sheet_width.0 * visible);
+        if transition.target_hidden && transition.hidden_fraction >= 1.0 && open {
+            commands.entity(entity).remove::<Open>();
         }
     }
+
+    if was_animating && let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+fn advance_transition(current: f32, target: f32, step: f32) -> f32 {
+    if current < target {
+        (current + step).min(target)
+    } else {
+        (current - step).max(target)
+    }
+}
+
+fn smoothstep(value: f32) -> f32 {
+    value * value * (3.0 - 2.0 * value)
 }
 
 fn handle_toggle(
     mut reader: MessageReader<AppCommand>,
     mut hidden: ResMut<LayoutHidden>,
+    mut transition: ResMut<LayoutTransition>,
     header_q: Query<Entity, With<Header>>,
     sidesheet_q: Query<Entity, With<SideSheet>>,
     mut commands: Commands,
@@ -62,12 +122,9 @@ fn handle_toggle(
             continue;
         }
         hidden.0 = !hidden.0;
+        transition.target_hidden = hidden.0;
 
-        if hidden.0 {
-            for entity in header_q.iter().chain(sidesheet_q.iter()) {
-                commands.entity(entity).remove::<Open>();
-            }
-        } else {
+        if !hidden.0 {
             for entity in header_q.iter().chain(sidesheet_q.iter()) {
                 commands.entity(entity).insert(Open);
             }
@@ -78,137 +135,33 @@ fn handle_toggle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        settings::{
-            FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
-        },
-        window::VmuxWindow,
-    };
-    use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
 
     #[test]
-    fn window_padding_sync_runs_before_ui_layout() {
+    fn layout_transition_runs_before_ui_layout() {
         let source = include_str!("toggle.rs");
         let plugin_build = source
             .split("impl Plugin for TogglePlugin")
             .nth(1)
-            .and_then(|tail| tail.split("/// When").next())
+            .and_then(|tail| tail.split("fn animate_layout_transition").next())
             .unwrap_or_default();
 
         assert!(plugin_build.contains(".add_systems(\n                PostUpdate,"));
-        assert!(
-            plugin_build.contains(
-                "sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout)"
-            )
-        );
+        assert!(plugin_build.contains("animate_layout_transition"));
+        assert!(plugin_build.contains(".before(UiSystems::Layout)"));
     }
 
     #[test]
-    fn hidden_layout_padding_uses_layout_window_settings() {
-        let source = include_str!("toggle.rs");
-        let sync_fn = source
-            .split("fn sync_window_padding_to_layout_hidden")
-            .nth(1)
-            .and_then(|tail| tail.split("fn handle_toggle").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.window.pad_top()"));
-        assert!(sync_fn.contains("settings.window.pad_left()"));
+    fn transition_advances_and_reverses_without_jumping() {
+        assert_eq!(advance_transition(0.25, 1.0, 0.1), 0.35);
+        assert_eq!(advance_transition(0.35, 0.0, 0.1), 0.25);
+        assert_eq!(advance_transition(0.95, 1.0, 0.1), 1.0);
+        assert_eq!(advance_transition(0.05, 0.0, 0.1), 0.0);
     }
 
     #[test]
-    fn visible_fullscreen_layout_clears_top_left_padding() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(LayoutHidden(false))
-            .insert_resource(LayoutSettings {
-                radius: 0.0,
-                window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
-        app.world_mut().spawn((
-            Window {
-                mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
-
-        app.update();
-
-        let node = app.world().get::<Node>(root).expect("window node");
-        assert_eq!(node.padding.top, Val::Px(0.0));
-        assert_eq!(node.padding.left, Val::Px(0.0));
-    }
-
-    #[test]
-    fn visible_maximized_layout_clears_top_left_padding() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(LayoutHidden(false))
-            .insert_resource(LayoutSettings {
-                radius: 0.0,
-                window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
-        app.world_mut().spawn((
-            Window {
-                resolution: (1200, 800).into(),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-        app.world_mut().spawn(Monitor {
-            name: None,
-            physical_width: 1200,
-            physical_height: 800,
-            physical_position: IVec2::ZERO,
-            refresh_rate_millihertz: None,
-            scale_factor: 1.0,
-            video_modes: Vec::new(),
-        });
-        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
-
-        app.update();
-
-        let node = app.world().get::<Node>(root).expect("window node");
-        assert_eq!(node.padding.top, Val::Px(0.0));
-        assert_eq!(node.padding.left, Val::Px(0.0));
-    }
-
-    #[test]
-    fn hidden_layout_uses_top_left_padding() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(LayoutHidden(true))
-            .insert_resource(LayoutSettings {
-                radius: 0.0,
-                window: WindowSettings { padding: 16.0 },
-                pane: PaneSettings { gap: 0.0 },
-                side_sheet: SideSheetSettings::default(),
-                focus_ring: FocusRingSettings::default(),
-            })
-            .add_systems(Update, sync_window_padding_to_layout_hidden);
-        app.world_mut().spawn((
-            Window {
-                resolution: (1200, 800).into(),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-        let root = app.world_mut().spawn((VmuxWindow, Node::default())).id();
-
-        app.update();
-
-        let node = app.world().get::<Node>(root).expect("window node");
-        assert_eq!(node.padding.top, Val::Px(16.0));
-        assert_eq!(node.padding.left, Val::Px(16.0));
+    fn smoothstep_keeps_transition_endpoints() {
+        assert_eq!(smoothstep(0.0), 0.0);
+        assert_eq!(smoothstep(1.0), 1.0);
+        assert_eq!(smoothstep(0.5), 0.5);
     }
 }

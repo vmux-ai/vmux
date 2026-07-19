@@ -11,7 +11,9 @@ impl Plugin for HeaderLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PostUpdate,
-            sync_header_visibility.before(bevy::ui::UiSystems::Layout),
+            sync_header_visibility
+                .before(crate::toggle::LayoutChromeTransitionSet)
+                .before(bevy::ui::UiSystems::Layout),
         );
     }
 }

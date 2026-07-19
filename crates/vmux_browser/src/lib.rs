@@ -3019,7 +3019,7 @@ fn push_layout_state_emit(
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     header_q: Query<(Has<Open>, Option<&ComputedNode>, Option<&UiGlobalTransform>), With<Header>>,
-    side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
+    side_sheet_q: Query<(&SideSheetPosition, Has<Open>, Option<&ComputedNode>), With<SideSheet>>,
     window_q: Query<&Node, With<VmuxWindow>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     side_sheet_width: Res<SideSheetWidth>,
@@ -3048,16 +3048,22 @@ fn push_layout_state_emit(
         let transform = transform?;
         layout_fixed_offsets_from_computed(computed, transform, window_width_px)
     });
+    let side_sheet = side_sheet_q
+        .iter()
+        .find(|(position, _, _)| **position == SideSheetPosition::Left);
+    let side_sheet_open = side_sheet.is_some_and(|(_, open, _)| open);
+    let visible_side_sheet_width = side_sheet
+        .and_then(|(_, _, computed)| computed)
+        .map(|computed| computed.size.x * computed.inverse_scale_factor.max(1.0e-6))
+        .unwrap_or(side_sheet_width.0);
 
     let payload = LayoutStateEvent {
         header_open,
-        side_sheet_open: side_sheet_q
-            .iter()
-            .any(|(pos, is_open)| *pos == SideSheetPosition::Left && is_open),
+        side_sheet_open,
         header_height: header_offsets
             .map(|offsets| offsets.height)
             .unwrap_or(HEADER_HEIGHT_PX),
-        side_sheet_width: side_sheet_width.0,
+        side_sheet_width: visible_side_sheet_width,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
         header_left: header_offsets.map(|offsets| offsets.left),
@@ -4106,6 +4112,7 @@ fn on_side_sheet_command_emit(
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut move_requests: MessageWriter<vmux_layout::stack::MoveStackRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -4173,6 +4180,39 @@ fn on_side_sheet_command_emit(
                 command: cmd.clone(),
             });
             messages.write(cmd);
+        }
+        "move_stack" => {
+            let Some(&stack) = stack_entities.get(evt.stack_index as usize) else {
+                return;
+            };
+            let Ok(target_pane_id) = evt.target_pane_id.parse::<u64>() else {
+                return;
+            };
+            let Some(target_pane) = leaf_panes
+                .iter()
+                .find(|entity| entity.to_bits() == target_pane_id)
+            else {
+                return;
+            };
+            let Ok(target_children) = pane_children.get(target_pane) else {
+                return;
+            };
+            let target_stacks: Vec<Entity> = target_children
+                .iter()
+                .filter(|&entity| stack_q.contains(entity))
+                .collect();
+            let target_stack = evt
+                .target_stack_index
+                .and_then(|index| target_stacks.get(index as usize).copied());
+            if evt.target_stack_index.is_some() && target_stack.is_none() {
+                return;
+            }
+            move_requests.write(vmux_layout::stack::MoveStackRequest {
+                stack,
+                target_pane,
+                target_stack,
+                after: evt.drop_after,
+            });
         }
         _ => {}
     }
