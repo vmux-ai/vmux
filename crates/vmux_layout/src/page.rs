@@ -14,6 +14,7 @@ use vmux_core::event::extension::{
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -83,6 +84,14 @@ pub fn Page() -> Element {
         crate::event::TAB_BOUNDARY_EVENT,
         crate::event::TabBoundaryEvent::default,
     );
+
+    let mut knowledge_state = use_signal(KnowledgeTreeEvent::default);
+    let mut knowledge_state_received = use_signal(|| false);
+    let _knowledge_listener =
+        use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
+            knowledge_state_received.set(true);
+            knowledge_state.set(data);
+        });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
@@ -212,6 +221,8 @@ pub fn Page() -> Element {
                             active_space,
                             tab_boundary,
                             bookmarks: bookmarks_state(),
+                            knowledge: knowledge_state(),
+                            knowledge_loaded: knowledge_state_received(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -790,6 +801,8 @@ fn SideSheetView(
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
     bookmarks: BookmarksHostEvent,
+    knowledge: KnowledgeTreeEvent,
+    knowledge_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
     let active_page = panes
@@ -809,9 +822,15 @@ fn SideSheetView(
         remove_bookmark_drag_ghost();
         set_bookmark_context_menu_active(false);
     });
+    let active_pane_id = panes
+        .iter()
+        .find(|pane| pane.is_active)
+        .or_else(|| panes.first())
+        .map(|pane| pane.id);
     rsx! {
         div {
-            class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
+            class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground",
+            style: "scrollbar-gutter:stable;",
             onpointermove: move |event| update_bookmark_drag(drag_state, &event),
             onpointerup: move |event| end_bookmark_drag(drag_state, &event),
             onpointercancel: move |event| cancel_bookmark_drag(drag_state, &event),
@@ -836,19 +855,20 @@ fn SideSheetView(
                 }
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
-            div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
-                if let Some(err) = pane_tree_error {
-                    div { class: "flex items-center px-2 py-1",
-                        span { class: "text-ui text-destructive", "{err}" }
-                    }
-                } else if panes.is_empty() {
-                    div { class: "flex items-center px-2 py-1",
-                        span { class: "text-ui text-muted-foreground", "No stacks" }
-                    }
-                } else {
-                    for (i, pane) in panes.iter().enumerate() {
-                        PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
-                    }
+            if let Some(pane_id) = active_pane_id {
+                KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
+            }
+            if let Some(err) = pane_tree_error {
+                div { class: "flex shrink-0 items-center px-2 py-1",
+                    span { class: "text-ui text-destructive", "{err}" }
+                }
+            } else if panes.is_empty() {
+                div { class: "flex shrink-0 items-center px-2 py-1",
+                    span { class: "text-ui text-muted-foreground", "No stacks" }
+                }
+            } else {
+                for (i, pane) in panes.iter().enumerate() {
+                    PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
                 }
             }
         }
@@ -957,6 +977,170 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
         &mut output,
     );
     output
+}
+
+fn open_knowledge_path(pane_id: u64, path: String) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_knowledge_path".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path,
+    });
+}
+
+fn compact_knowledge_path(path: &str) -> String {
+    path.rfind("/.vmux/")
+        .map(|index| format!("~{}", &path[index..]))
+        .unwrap_or_else(|| path.to_string())
+}
+
+#[component]
+fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> Element {
+    let mut folded = use_signal(|| false);
+    let root = knowledge.root.clone();
+    let landing_path = knowledge
+        .entries
+        .iter()
+        .find(|entry| {
+            !entry.is_directory
+                && entry.parent == knowledge.root
+                && entry.name.eq_ignore_ascii_case("welcome.md")
+        })
+        .map(|entry| entry.path.clone())
+        .unwrap_or_else(|| root.clone());
+    let root_title = compact_knowledge_path(&root);
+    let root_action_title = if landing_path != root {
+        "Open Welcome to Knowledge".to_string()
+    } else if root.is_empty() {
+        "Knowledge".to_string()
+    } else {
+        format!("Open {root}")
+    };
+    rsx! {
+        div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            div { class: "flex items-center transition-colors hover:bg-glass-hover",
+                button {
+                    r#type: "button",
+                    disabled: !loaded || root.is_empty(),
+                    title: "{root_action_title}",
+                    class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left enabled:cursor-pointer disabled:cursor-default",
+                    onclick: move |_| open_knowledge_path(pane_id, landing_path.clone()),
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        Icon { class: "h-3.5 w-3.5",
+                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                        }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "text-ui font-semibold text-foreground", "Knowledge" }
+                        div { class: "truncate text-[10px] text-muted-foreground", "{root_title}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    aria_label: if folded() { "Unfold knowledge" } else { "Fold knowledge" },
+                    title: if folded() { "Unfold knowledge" } else { "Fold knowledge" },
+                    class: if folded() {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    onclick: move |_| folded.set(!folded()),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                }
+            }
+            div { class: if folded() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "border-t border-foreground/10 p-1.5",
+                        if !loaded {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Loading…" }
+                        } else if !knowledge.error.is_empty() {
+                            div { class: "px-2 py-2 text-ui-xs text-destructive", "{knowledge.error}" }
+                        } else if knowledge.entries.is_empty() {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No Markdown files" }
+                        } else {
+                            div { class: "flex flex-col gap-0.5",
+                                for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
+                                    KnowledgeEntryRow {
+                                        key: "{entry.path}",
+                                        entry: entry.clone(),
+                                        entries: knowledge.entries.clone(),
+                                        pane_id,
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_id: u64) -> Element {
+    let mut expanded = use_signal(|| false);
+    if entry.is_directory {
+        let has_children = entries.iter().any(|child| child.parent == entry.path);
+        rsx! {
+            div { class: "flex flex-col gap-0.5",
+                button {
+                    r#type: "button",
+                    title: "{entry.path}",
+                    class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                    onclick: move |_| expanded.set(!expanded()),
+                    Icon { class: "h-3 w-3 shrink-0",
+                        path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    }
+                    Icon { class: "h-3.5 w-3.5 shrink-0",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    }
+                    span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
+                }
+                if expanded() {
+                    div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
+                        if has_children {
+                            for child in entries.iter().filter(|child| child.parent == entry.path) {
+                                KnowledgeEntryRow {
+                                    key: "{child.path}",
+                                    entry: child.clone(),
+                                    entries: entries.clone(),
+                                    pane_id,
+                                }
+                            }
+                        } else {
+                            div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", "Empty folder" }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        let path = entry.path.clone();
+        let title = if entry.title.is_empty() {
+            entry.name.clone()
+        } else {
+            entry.title.clone()
+        };
+        rsx! {
+            button {
+                r#type: "button",
+                title: "{entry.path}",
+                class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                onclick: move |_| open_knowledge_path(pane_id, path.clone()),
+                Icon { class: "h-3.5 w-3.5 shrink-0",
+                    path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }
+                    path { d: "M14 2v6h6" }
+                }
+                span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
+            }
+        }
+    }
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the
@@ -2092,11 +2276,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "glass group mb-2 flex flex-col rounded-lg p-1.5 pane-loading-ring"
+                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 pane-loading-ring"
             } else if pane.is_active {
-                "glass group mb-2 flex flex-col rounded-lg p-1.5 ring-2 ring-ring"
+                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 ring-2 ring-ring"
             } else {
-                "glass group mb-2 flex flex-col rounded-lg p-1.5"
+                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5"
             },
             div {
                 class: "mb-0.5 flex items-center gap-1 rounded-md px-2 py-1",
@@ -2162,6 +2346,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
+                    path: String::new(),
                 });
             },
         }
@@ -2230,6 +2415,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_index,
+                            path: String::new(),
                         });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
@@ -2258,6 +2444,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                                 command: "close_stack".to_string(),
                                 pane_id: pane_id.to_string(),
                                 stack_index,
+                                path: String::new(),
                             });
                         },
                         Icon { class: "h-3 w-3 pointer-events-none",

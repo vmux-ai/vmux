@@ -9666,6 +9666,7 @@ dependencies = [
  "vmux_editor",
  "vmux_git",
  "vmux_history",
+ "vmux_knowledge",
  "vmux_layout",
  "vmux_mcp",
  "vmux_server",
@@ -9692,6 +9693,7 @@ dependencies = [
  "lsp-types",
  "notify 6.1.1",
  "percent-encoding",
+ "pulldown-cmark",
  "reqwest",
  "rkyv",
  "ron 0.8.1",
@@ -9758,6 +9760,21 @@ dependencies = [
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_knowledge"
+version = "0.0.25"
+dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
+ "notify 6.1.1",
+ "rkyv",
+ "serde",
+ "tempfile",
+ "vmux_core",
+ "vmux_layout",
 ]
 
 [[package]]

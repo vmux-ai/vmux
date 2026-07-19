@@ -149,6 +149,7 @@ impl Plugin for VmuxPlugin {
             .add_plugins((
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
+                vmux_knowledge::KnowledgePlugin,
                 vmux_agent::AgentChatPagePlugin,
                 vmux_agent::AgentsManagerPlugin,
                 vmux_agent::AgentSetupPlugin,

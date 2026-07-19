@@ -62,6 +62,13 @@ impl CliAgentStrategy for VibeStrategy {
                 "VIBE_ENABLE_EXPERIMENTAL_HOOKS".to_string(),
                 "true".to_string(),
             ),
+            (
+                "VIBE_SKILL_PATHS".to_string(),
+                merged_skill_paths(
+                    std::env::var("VIBE_SKILL_PATHS").ok().as_deref(),
+                    &vmux_core::knowledge::skills_dir(),
+                ),
+            ),
         ]
     }
 
@@ -109,6 +116,17 @@ impl CliAgentStrategy for VibeStrategy {
     fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
         load_vibe_transcript(&self.sessions_root(), session_id)
     }
+}
+
+fn merged_skill_paths(existing: Option<&str>, knowledge: &Path) -> String {
+    let mut paths = existing
+        .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+        .unwrap_or_default();
+    let knowledge = knowledge.to_string_lossy().into_owned();
+    if !paths.contains(&knowledge) {
+        paths.push(knowledge);
+    }
+    serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string())
 }
 
 #[derive(Serialize)]
@@ -471,6 +489,13 @@ mod tests {
             env.iter()
                 .any(|(k, v)| k == "VIBE_ENABLE_EXPERIMENTAL_HOOKS" && v == "true")
         );
+    }
+
+    #[test]
+    fn knowledge_skills_extend_existing_vibe_paths() {
+        let merged = merged_skill_paths(Some("[\"/existing\"]"), Path::new("/knowledge"));
+        let paths: Vec<String> = serde_json::from_str(&merged).unwrap();
+        assert_eq!(paths, vec!["/existing", "/knowledge"]);
     }
 
     #[test]

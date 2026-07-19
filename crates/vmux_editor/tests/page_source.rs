@@ -6,6 +6,10 @@ fn page_source() -> &'static str {
     include_str!("../src/page.rs")
 }
 
+fn note_source() -> &'static str {
+    include_str!("../src/note.rs")
+}
+
 #[test]
 fn explorer_panel_renders_three_sections() {
     let s = explorer_source();
@@ -65,13 +69,17 @@ fn page_mounts_panel_and_wires_toggle() {
 }
 
 #[test]
-fn page_wires_shared_editor_diff_toggle() {
+fn page_wires_shared_note_editor_diff_toggle() {
     let s = page_source();
     assert!(s.contains("FileViewModeEvent"));
     assert!(s.contains("FileViewModeSet"));
-    assert!(s.contains("Show diffs in all open files"));
-    assert!(s.contains("file_view_mode.set(next)"));
-    assert!(s.contains("if next == FileViewMode::Diff"));
+    assert!(s.contains("FileViewMode::Note"));
+    assert!(s.contains("let mut file_view_mode = use_signal(|| FileViewMode::Note)"));
+    assert!(s.contains("Rendered Markdown with live editing"));
+    assert!(s.contains("file_view_mode.set(FileViewMode::Editor)"));
+    assert!(s.contains("file_view_mode.set(FileViewMode::Diff)"));
+    assert!(s.contains("file-mode-note-enter"));
+    assert!(s.contains("file-mode-editor-enter"));
     assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
     assert!(s.contains("markers: git_line_markers"));
     assert!(s.contains("diff_marker_sign(marker)"));
@@ -86,6 +94,25 @@ fn page_wires_shared_editor_diff_toggle() {
     let line_number = s.find("\"{ln + 1}\"").unwrap();
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
-    assert!(s.contains("transition-transform duration-150"));
+    assert!(s.contains("render_block(&note_block.block, index)"));
+    assert!(s.contains("document.set_title(&title)"));
+    assert!(s.contains("let mut note_editing = use_signal(|| false)"));
+    assert!(s.contains("if note_editing() && Some(index as u32) == active"));
+    assert!(s.contains("note_pointer_line(&event, start, end)"));
+    assert!(s.contains("note_pointer_col(&event, &pointer_raw)"));
+    assert!(s.contains("query_selector(\"[data-note-line-text]\")"));
+    assert!(s.contains("class: \"flow-root w-full cursor-text\""));
+    assert!(
+        !s.contains("note_editing.set(false);\n                            focus_container();")
+    );
+    assert!(s.contains("class: \"relative w-full cursor-text\""));
+    assert!(!s.contains("rounded-lg bg-primary/[0.04]"));
     assert!(s.contains("if git_path() != m.abs_path"));
+}
+
+#[test]
+fn note_lists_render_every_block_with_stable_keys() {
+    let s = note_source();
+    assert!(s.contains("render_block(block, block_index)"));
+    assert!(!s.contains("if let MdBlock::Paragraph { inlines } = block"));
 }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, StyledSpan, TreeRow,
+    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +146,28 @@ pub fn span_style(span: &StyledSpan) -> String {
         s.push_str("font-style:italic;");
     }
     s
+}
+
+pub fn heading_class(level: u8) -> &'static str {
+    match level {
+        1 => "mb-3 mt-6 text-3xl font-bold tracking-tight text-foreground",
+        2 => {
+            "mb-2 mt-5 border-b border-border pb-2 text-2xl font-semibold tracking-tight text-foreground"
+        }
+        3 => "mb-2 mt-4 text-xl font-semibold text-foreground/95",
+        4 => "mb-1 mt-3 text-lg font-semibold text-foreground/90",
+        5 => "mb-1 mt-3 text-base font-semibold text-foreground/85",
+        _ => "mb-1 mt-3 text-sm font-semibold uppercase tracking-wide text-foreground/70",
+    }
+}
+
+pub fn table_align_style(align: MdTableAlign) -> &'static str {
+    match align {
+        MdTableAlign::Left => "text-align:left",
+        MdTableAlign::Center => "text-align:center",
+        MdTableAlign::Right => "text-align:right",
+        MdTableAlign::None => "",
+    }
 }
 
 pub fn line_severity(diags: &[FileDiagnostic], line: u32) -> Option<DiagSeverity> {

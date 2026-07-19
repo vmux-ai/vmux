@@ -157,11 +157,20 @@ struct ExplorerChrome {
 #[derive(Resource, Default)]
 struct ExplorerChromeSynced(bool);
 
-#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 struct SharedFileViewMode(FileViewMode);
+
+impl Default for SharedFileViewMode {
+    fn default() -> Self {
+        Self(FileViewMode::Note)
+    }
+}
 
 #[derive(Component)]
 struct FileViewModeSent;
+
+#[derive(Component)]
+struct NoteSent;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
@@ -189,6 +198,8 @@ type ReadySentViewMode = (
     With<FileViewModeSent>,
     With<vmux_core::page::PageReady>,
 );
+type ReadyUnsentNote = (Without<NoteSent>, With<vmux_core::page::PageReady>);
+type ChangedNoteEditor = (With<FileView>, With<EditState>, Changed<EditState>);
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
@@ -587,6 +598,51 @@ fn send_file_view_mode(
     }
 }
 
+fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
+    blocks
+        .iter()
+        .position(|block| block.start_line <= line && line < block.end_line)
+        .map(|index| index as u32)
+}
+
+fn send_note(
+    mode: Res<SharedFileViewMode>,
+    q: Query<(Entity, &FileView, &EditState), ReadyUnsentNote>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    if mode.0 != FileViewMode::Note {
+        return;
+    }
+    for (entity, file, edit) in &q {
+        if !crate::markdown::is_markdown_path(&file.path) {
+            commands.entity(entity).insert(NoteSent);
+            continue;
+        }
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        let note = crate::markdown::parse_note_document(&edit.core.buffer.text());
+        let active = active_note_block(&note.blocks, edit.core.cursor_pos().line);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_NOTE_EVENT,
+            &FileNoteEvent {
+                title: note.title,
+                blocks: note.blocks,
+                active,
+            },
+        ));
+        commands.entity(entity).insert(NoteSent);
+    }
+}
+
+fn mark_note_dirty(q: Query<Entity, ChangedNoteEditor>, mut commands: Commands) {
+    for entity in &q {
+        commands.entity(entity).remove::<NoteSent>();
+    }
+}
+
 fn send_initial_dir(
     q: Query<(Entity, &FileView, &FileDir), ReadyUnsentMeta>,
     browsers: NonSend<Browsers>,
@@ -725,6 +781,7 @@ fn reset_file_sent_markers_on_page_ready(
         .remove::<FileInitialMetaSent>()
         .remove::<FileThemeSent>()
         .remove::<FileViewModeSent>()
+        .remove::<NoteSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
         .remove::<crate::lsp::manager::DiagSent>()
         .remove::<ExplorerChromeSent>()
@@ -738,10 +795,20 @@ fn reset_file_sent_markers_on_page_ready(
 fn on_file_view_mode_set(
     trigger: On<BinReceive<FileViewModeSet>>,
     views: Query<(), With<FileView>>,
+    files: Query<&FileView>,
     mut mode: ResMut<SharedFileViewMode>,
+    mut commands: Commands,
 ) {
-    if views.contains(trigger.event().webview) {
+    let entity = trigger.event().webview;
+    if views.contains(entity) {
         mode.0 = trigger.event().payload.mode;
+        if mode.0 == FileViewMode::Note
+            && files
+                .get(entity)
+                .is_ok_and(|file| crate::markdown::is_markdown_path(&file.path))
+        {
+            commands.entity(entity).remove::<NoteSent>();
+        }
     }
 }
 
@@ -1114,6 +1181,7 @@ fn navigate_file_view(
         .remove::<EditState>()
         .remove::<vmux_git::GitDiffSource>()
         .remove::<EditorKeymap>()
+        .remove::<NoteSent>()
         .remove::<LspEditDirty>()
         .remove::<FileInitialMetaSent>()
         .remove::<crate::lsp::manager::LspOpened>()
@@ -2827,6 +2895,7 @@ impl Plugin for EditorPlugin {
                     (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
+            .add_systems(Update, (mark_note_dirty, send_note.after(mark_note_dirty)))
             .add_systems(Update, (drain_explorer_dir_loads, drain_explorer_mutations))
             .add_systems(
                 Update,
@@ -2929,8 +2998,13 @@ mod edit_flow_tests {
 
         assert_eq!(
             app.world().resource::<SharedFileViewMode>().0,
-            FileViewMode::Editor
+            FileViewMode::Note
         );
+    }
+
+    #[test]
+    fn file_view_mode_defaults_to_note() {
+        assert_eq!(SharedFileViewMode::default().0, FileViewMode::Note);
     }
 
     #[test]

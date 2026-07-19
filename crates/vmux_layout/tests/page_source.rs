@@ -90,6 +90,38 @@ fn side_sheet_close_button_tracks_stack_row_hover() {
 }
 
 #[test]
+fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
+    let source = include_str!("../src/page.rs");
+    let knowledge_card = source
+        .split("fn KnowledgeCard")
+        .nth(1)
+        .and_then(|rest| rest.split("fn KnowledgeEntryRow").next())
+        .expect("knowledge card");
+
+    assert!(source.contains("KNOWLEDGE_TREE_EVENT"));
+    assert!(source.contains("KnowledgeEntryRow"));
+    assert!(source.contains("open_knowledge_path"));
+    assert!(source.contains("entry.name.eq_ignore_ascii_case(\"welcome.md\")"));
+    assert!(source.contains("open_knowledge_path(pane_id, landing_path.clone())"));
+    assert!(source.contains("if entry.title.is_empty()"));
+    assert!(source.contains("\"Empty folder\""));
+    assert!(source.contains("if expanded() {"));
+    assert!(!source.contains("if expanded() && has_children"));
+    assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
+    assert!(knowledge_card.contains("\"Unfold knowledge\""));
+    assert!(knowledge_card.contains("\"Fold knowledge\""));
+    assert!(knowledge_card.contains("grid-rows-[0fr]"));
+    assert!(knowledge_card.contains("grid-rows-[1fr]"));
+    assert!(source.contains("overflow-x-hidden overflow-y-auto"));
+    assert!(source.contains("scrollbar-gutter:stable"));
+    assert!(!knowledge_card.contains("overflow-y-auto"));
+    assert!(!knowledge_card.contains("max-h-64"));
+    assert!(!source.contains("KnowledgeUse"));
+    assert!(!source.contains("Build with"));
+    assert!(!source.contains("vmux://notes"));
+}
+
+#[test]
 fn folded_pane_shows_its_active_stack() {
     let pane = pane_section_component_source();
 
@@ -97,6 +129,7 @@ fn folded_pane_shows_its_active_stack() {
     assert!(pane.contains("if folded()"));
     assert!(pane.contains("if let Some(stack) = folded_stack"));
     assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
+    assert!(pane.contains("flex shrink-0 flex-col"));
 }
 
 #[test]

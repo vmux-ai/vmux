@@ -28,6 +28,7 @@ use bevy_cef_core::prelude::{
 use bevy_cef_core::prelude::{NativeMouseButtons, NativeMouseMovePresenter};
 #[cfg(target_os = "macos")]
 use std::cell::RefCell;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
@@ -4071,6 +4072,32 @@ fn on_hard_reload_notify_header(
     }
 }
 
+fn knowledge_path_url(root: &Path, requested: &Path) -> Option<String> {
+    let root = root.canonicalize().ok()?;
+    let metadata = std::fs::symlink_metadata(requested).ok()?;
+    if metadata.file_type().is_symlink() {
+        return None;
+    }
+    let path = requested.canonicalize().ok()?;
+    if !path.starts_with(&root) {
+        return None;
+    }
+    let markdown = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("md")
+                || extension.eq_ignore_ascii_case("markdown")
+                || extension.eq_ignore_ascii_case("mdx")
+        });
+    if !path.is_dir() && !markdown {
+        return None;
+    }
+    url::Url::from_file_path(path)
+        .ok()
+        .map(|url| url.to_string())
+}
+
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -4125,6 +4152,22 @@ fn on_side_sheet_command_emit(
             commands.entity(target_pane).insert(LastActivatedAt::now());
             let cmd =
                 AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack { url: None }));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
+        }
+        "open_knowledge_path" => {
+            let Some(url) =
+                knowledge_path_url(&vmux_core::knowledge::knowledge_dir(), Path::new(&evt.path))
+            else {
+                return;
+            };
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                url: Some(url),
+            }));
             issued.write(vmux_command::CommandIssued {
                 caller,
                 command: cmd.clone(),
@@ -4756,6 +4799,26 @@ fn cef_root_cache_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn knowledge_paths_only_open_vault_markdown_and_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("knowledge");
+        let folder = vault.join("projects");
+        std::fs::create_dir_all(&folder).unwrap();
+        let note = folder.join("brief.md");
+        let text = folder.join("brief.txt");
+        let outside = temp.path().join("outside.md");
+        std::fs::write(&note, "# Brief").unwrap();
+        std::fs::write(&text, "Brief").unwrap();
+        std::fs::write(&outside, "# Outside").unwrap();
+
+        assert!(knowledge_path_url(&vault, &vault).is_some());
+        assert!(knowledge_path_url(&vault, &folder).is_some());
+        assert!(knowledge_path_url(&vault, &note).is_some());
+        assert!(knowledge_path_url(&vault, &text).is_none());
+        assert!(knowledge_path_url(&vault, &outside).is_none());
+    }
 
     #[test]
     fn stored_tab_dir_is_sidebar_source_of_truth() {

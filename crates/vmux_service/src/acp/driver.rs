@@ -1098,12 +1098,38 @@ If you invoke a required Skill tool, continue the original user request in the s
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if agent_id != "claude" {
+    session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_skills_prompt())
+}
+
+fn session_meta_for_agent_with_knowledge(
+    agent_id: &str,
+    knowledge: &str,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let prompt = if agent_id == "claude" {
+        if knowledge.is_empty() {
+            CLAUDE_ACP_STEER_PROMPT.to_string()
+        } else {
+            format!("{CLAUDE_ACP_STEER_PROMPT}\n\n{knowledge}")
+        }
+    } else {
+        knowledge.to_string()
+    };
+    if prompt.is_empty() {
         return None;
+    }
+    if agent_id != "claude" {
+        let serde_json::Value::Object(meta) = serde_json::json!({
+            "systemPrompt": {
+                "append": prompt,
+            },
+        }) else {
+            unreachable!()
+        };
+        return Some(meta);
     }
     let serde_json::Value::Object(meta) = serde_json::json!({
         "systemPrompt": {
-            "append": CLAUDE_ACP_STEER_PROMPT,
+            "append": prompt,
         },
         "claudeCode": {
             "options": {
@@ -2119,7 +2145,12 @@ mod tests {
         let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
         assert!(prompt.contains("mcp__vmux__run"));
         assert!(prompt.contains("continue the original user request"));
-        assert!(session_meta_for_agent("vibe-acp").is_none());
+        assert!(session_meta_for_agent_with_knowledge("vibe-acp", "").is_none());
+        assert_eq!(
+            session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()["systemPrompt"]
+                ["append"],
+            "skill context"
+        );
     }
 
     #[test]

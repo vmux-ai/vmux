@@ -5,6 +5,7 @@ pub mod dom_snapshot;
 pub mod editor;
 pub mod event;
 pub mod icon;
+pub mod knowledge;
 pub mod media;
 pub mod process_id;
 pub mod scroll;
