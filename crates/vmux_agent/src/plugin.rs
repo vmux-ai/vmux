@@ -3832,6 +3832,23 @@ fn prepare_agent_tab_worktrees(
                     });
                     if workspace.project_dir.is_empty() {
                         Ok(())
+                    } else if metadata.is_none()
+                        && stored_tab_cwd(tab.startup_dir.as_deref())
+                            .ok()
+                            .flatten()
+                            .is_none()
+                        && stored_tab_cwd(Some(&workspace.project_dir))
+                            .ok()
+                            .flatten()
+                            .is_none()
+                    {
+                        tab.startup_dir = None;
+                        commands
+                            .entity(tab_entity)
+                            .remove::<vmux_layout::tab::TabWorkspace>()
+                            .remove::<vmux_layout::tab::TabDirDecided>()
+                            .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                        Ok(())
                     } else {
                         if !has_workspace {
                             commands.entity(tab_entity).insert(workspace.clone());
@@ -6868,6 +6885,72 @@ mod tests {
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn acp_open_discards_missing_restored_tab_workspace() {
+        let missing = std::env::temp_dir().join(format!(
+            "vmux-missing-restored-workspace-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let stale = missing.to_string_lossy().into_owned();
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Tab 1".into(),
+                    startup_dir: Some(stale.clone()),
+                },
+                vmux_layout::tab::TabWorkspace { project_dir: stale },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://agent/codex".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        assert!(app.world().get::<PageOpenError>(task).is_none());
+        assert_eq!(
+            app.world()
+                .get::<crate::client::acp::AcpSession>(stack)
+                .unwrap()
+                .cwd,
+            process_cwd()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir,
+            None
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .is_none()
         );
     }
 
