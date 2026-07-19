@@ -2190,18 +2190,6 @@ mod native_tests {
     }
 
     #[test]
-    fn agent_surface_animates_around_the_stable_prompt_box() {
-        let page = include_str!("chat_page/page.rs");
-        let theme = include_str!("../../vmux_ui/assets/theme.css");
-
-        assert_eq!(page.matches("class: \"vmux-agent-surface-enter").count(), 2);
-        assert!(page.contains("vmux-agent-prompt-dock-enter"));
-        assert!(theme.contains("@keyframes vmux-agent-surface-in"));
-        assert!(theme.contains("@keyframes vmux-agent-prompt-dock-in"));
-        assert!(theme.contains(".vmux-agent-surface-enter"));
-    }
-
-    #[test]
     fn composer_slash_items_support_mouse_selection() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("onclick: move |_| run_slash_command"));

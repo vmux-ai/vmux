@@ -1235,6 +1235,10 @@ fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Co
         .insert(crate::start::StartAgentTransitionView);
 }
 
+fn use_legacy_default_agent_open(url: &str, inline_transition: bool) -> bool {
+    matches!(url, "vmux://agent/" | "vmux://agent") && !inline_transition
+}
+
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     match target {
         Some(OpenTarget::InPlace) | None => OpenCommand::InPlace { url: Some(url) },
@@ -1394,13 +1398,16 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(&evt.value);
-                if matches!(evt.target, None | Some(OpenTarget::InPlace))
+                let inline_transition = if matches!(evt.target, None | Some(OpenTarget::InPlace))
                     && crate::start::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
                     mark_start_agent_transition(stack, webview, &mut commands);
-                }
-                if matches!(url.as_str(), "vmux://agent/" | "vmux://agent") {
+                    true
+                } else {
+                    false
+                };
+                if use_legacy_default_agent_open(&url, inline_transition) {
                     if let Some(stack_e) = empty_stack {
                         page_default_attach_writer.write(
                             vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
@@ -2995,6 +3002,14 @@ mod tests {
             prompt_agent_url(&CommandBarAgentsSnapshot::default(), None),
             None
         );
+    }
+
+    #[test]
+    fn inline_default_agent_open_uses_standard_page_flow() {
+        assert!(use_legacy_default_agent_open("vmux://agent/", false));
+        assert!(use_legacy_default_agent_open("vmux://agent", false));
+        assert!(!use_legacy_default_agent_open("vmux://agent/", true));
+        assert!(!use_legacy_default_agent_open("vmux://agent/codex", false));
     }
 
     #[test]

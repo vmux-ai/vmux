@@ -705,7 +705,7 @@ pub fn Page(
                             }
                         }
                     } else if items.read().is_empty() && status() == "idle" {
-                        div { class: "flex flex-col items-center gap-3 py-24 text-center",
+                        div { class: "vmux-agent-ready-enter flex flex-col items-center gap-3 py-24 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"

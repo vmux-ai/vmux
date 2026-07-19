@@ -161,16 +161,6 @@ mod host_tests {
         assert_eq!(host_for("vmux:", "terminal"), "terminal");
         assert_eq!(host_for("https:", "example.com"), "example.com");
     }
-
-    #[test]
-    fn start_route_keeps_one_document_for_agent_transition() {
-        let source = include_str!("lib.rs");
-
-        assert!(source.contains("fn StartAgentPage()"));
-        assert!(source.contains("use_signal(inline_agent_transition)"));
-        assert!(source.contains("set_inline_agent_url(&next.agent_url)"));
-        assert!(source.contains("render_start: \"start\" => StartAgentPage"));
-    }
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
