@@ -444,7 +444,7 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description: "Create an isolated worktree for the project selected with choose_workspace. The branch must come from the user; if they did not specify one, ask them in chat before calling this tool. Returns the absolute worktree path."
+        description: "Create vmux's isolated worktree for the project selected with choose_workspace. Never run git worktree add manually. The branch must come from the user; if they did not specify one, ask them in chat before calling this tool. Returns the absolute worktree path."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -460,7 +460,7 @@ fn create_worktree_definition() -> ToolDefinition {
 fn choose_workspace_definition() -> ToolDefinition {
     ToolDefinition {
         name: "choose_workspace".into(),
-        description: "Open the native folder picker when the user's request requires project files and this conversation has no project yet. Do not call for general questions or tasks that can run without a repository. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
+        description: "Open the native folder picker before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -1404,6 +1404,11 @@ mod tests {
             choose_definition
                 .description
                 .contains("Do not call for general questions")
+        );
+        assert!(
+            choose_definition
+                .description
+                .contains("Do not search the user's home directory")
         );
         assert!(
             choose_definition

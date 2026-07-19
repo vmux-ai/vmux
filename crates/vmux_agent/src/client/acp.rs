@@ -20,6 +20,57 @@ use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. If the user's request requires inspecting, searching, editing, testing, or running an existing project, your first project action must be to call the vmux choose_workspace tool. Do not search the user's home directory for repositories, do not access project paths directly, and never run git worktree add yourself. General questions and self-contained terminal demonstrations may run in the temporary current directory. After a Git folder is selected, use a branch already named by the user; if none was named, ask the user which branch to create, then call the vmux create_worktree tool with that exact branch before touching project files.";
+const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The user selected a Git project, but this tab has no worktree yet. Do not access the project path directly and never run git worktree add yourself. Use a branch already named by the user; if none was named, ask which branch to create. Then call the vmux create_worktree tool with that exact branch before inspecting, editing, testing, or running the project.";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AcpWorkspaceState {
+    Bound,
+    Unbound,
+    PendingWorktree,
+}
+
+fn ancestor_acp_workspace_state(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<&vmux_layout::tab::Tab>,
+    workspaces: &Query<(), With<vmux_layout::tab::TabWorkspace>>,
+    pending_projects: &Query<(), With<crate::plugin::PendingAgentProject>>,
+) -> Option<AcpWorkspaceState> {
+    let mut current = entity;
+    loop {
+        if let Ok(tab) = tabs.get(current) {
+            return Some(
+                if workspaces.contains(current) || tab.startup_dir.is_some() {
+                    AcpWorkspaceState::Bound
+                } else if pending_projects.contains(current) {
+                    AcpWorkspaceState::PendingWorktree
+                } else {
+                    AcpWorkspaceState::Unbound
+                },
+            );
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn acp_prompt_context(
+    handoff: Option<String>,
+    workspace_state: Option<AcpWorkspaceState>,
+) -> Option<String> {
+    let policy = match workspace_state {
+        Some(AcpWorkspaceState::Unbound) => Some(UNBOUND_WORKSPACE_CONTEXT),
+        Some(AcpWorkspaceState::PendingWorktree) => Some(PENDING_WORKTREE_CONTEXT),
+        Some(AcpWorkspaceState::Bound) | None => None,
+    };
+    match (handoff, policy) {
+        (Some(handoff), Some(policy)) => Some(format!("{handoff}\n\n{policy}")),
+        (Some(handoff), None) => Some(handoff),
+        (None, Some(policy)) => Some(policy.to_string()),
+        (None, None) => None,
+    }
+}
+
 /// Marks a stack entity as an ACP agent session. vmux is ACP-only, so this is the agent
 /// identity (there is no `AgentVariant`/`AgentKind` for ACP).
 #[derive(Component, Clone, Debug)]
@@ -871,18 +922,23 @@ fn apply_acp_terminal_created(
 
 fn send_acp_input(
     mut q: Query<(
+        Entity,
         &AcpSession,
         &mut AgentRunState,
         &mut PromptQueue,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
+    child_of: Query<&ChildOf>,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
+    pending_projects: Query<(), With<crate::plugin::PendingAgentProject>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    for (session, mut state, mut queue, mut pending, mut imported) in &mut q {
+    for (entity, session, mut state, mut queue, mut pending, mut imported) in &mut q {
         if !queue.ready(matches!(*state, AgentRunState::Idle)) {
             continue;
         }
@@ -890,15 +946,18 @@ fn send_acp_input(
             continue;
         };
         let text = prompt.text;
-        let context = pending
+        let handoff = pending
             .as_deref_mut()
             .and_then(PendingHandoff::context_for_send);
-        if context.is_some()
+        if handoff.is_some()
             && let Some(imported) = imported.as_deref_mut()
             && imported.first_prompt.is_none()
         {
             imported.first_prompt = Some(text.clone());
         }
+        let workspace_state =
+            ancestor_acp_workspace_state(entity, &child_of, &tabs, &workspaces, &pending_projects);
+        let context = acp_prompt_context(handoff, workspace_state);
         service.0.send(ClientMessage::agent_input(
             session.sid.clone(),
             text,
@@ -931,6 +990,91 @@ mod tests {
 
     fn s(k: &str, v: &str) -> (String, String) {
         (k.to_string(), v.to_string())
+    }
+
+    #[test]
+    fn unbound_workspace_context_requires_picker_before_project_work() {
+        let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
+
+        assert!(context.contains("first project action"));
+        assert!(context.contains("choose_workspace"));
+        assert!(context.contains("Do not search the user's home directory"));
+        assert!(context.contains("never run git worktree add"));
+        assert!(context.contains("create_worktree"));
+    }
+
+    #[test]
+    fn pending_worktree_context_requires_branch_and_managed_creation() {
+        let context = acp_prompt_context(
+            Some("prior conversation".into()),
+            Some(AcpWorkspaceState::PendingWorktree),
+        )
+        .unwrap();
+
+        assert!(context.starts_with("prior conversation\n\n"));
+        assert!(context.contains("ask which branch to create"));
+        assert!(context.contains("create_worktree"));
+        assert!(context.contains("before inspecting"));
+    }
+
+    #[test]
+    fn bound_workspace_keeps_only_handoff_context() {
+        assert_eq!(
+            acp_prompt_context(
+                Some("prior conversation".into()),
+                Some(AcpWorkspaceState::Bound),
+            )
+            .as_deref(),
+            Some("prior conversation")
+        );
+    }
+
+    #[test]
+    fn ancestor_workspace_state_tracks_pending_and_bound_tab() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut app = App::new();
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Tab 1".into(),
+                startup_dir: None,
+            })
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        let state = |world: &mut World| {
+            world
+                .run_system_once(
+                    move |child_of: Query<&ChildOf>,
+                          tabs: Query<&vmux_layout::tab::Tab>,
+                          workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
+                          pending: Query<(), With<crate::plugin::PendingAgentProject>>| {
+                        ancestor_acp_workspace_state(
+                            stack,
+                            &child_of,
+                            &tabs,
+                            &workspaces,
+                            &pending,
+                        )
+                    },
+                )
+                .unwrap()
+        };
+
+        assert_eq!(state(app.world_mut()), Some(AcpWorkspaceState::Unbound));
+        app.world_mut()
+            .entity_mut(tab)
+            .insert(crate::plugin::PendingAgentProject("/repo".into()));
+        assert_eq!(
+            state(app.world_mut()),
+            Some(AcpWorkspaceState::PendingWorktree)
+        );
+        app.world_mut()
+            .entity_mut(tab)
+            .insert(vmux_layout::tab::TabWorkspace {
+                project_dir: "/repo".into(),
+            });
+        assert_eq!(state(app.world_mut()), Some(AcpWorkspaceState::Bound));
     }
 
     #[test]

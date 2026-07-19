@@ -50,6 +50,12 @@ calls `create_worktree` with the exact user-selected branch. Generated names suc
 replaced by the selected folder name, and the branch name is sanitized only for the managed
 checkout directory slug.
 
+While a tab is unbound, vmux adds private host context to ACP prompts requiring `choose_workspace`
+before any existing-project operation. The context explicitly forbids repository discovery under
+the user's home directory and manual `git worktree add`, while still allowing general questions and
+self-contained terminal demonstrations. A selected Git project receives a pending-worktree policy
+until `create_worktree` completes.
+
 Workspace activation mutates the existing tab and ACP session in place. The chat entity, webview,
 transcript, routing session id, and agent process remain unchanged. Tab cwd and host-side ACP file
 scope move to the selected directory or managed worktree.

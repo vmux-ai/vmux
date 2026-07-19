@@ -2395,7 +2395,7 @@ struct AgentSelfCommandWriters<'w> {
 }
 
 #[derive(Component, Clone, Debug)]
-struct PendingAgentProject(PathBuf);
+pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
 fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
