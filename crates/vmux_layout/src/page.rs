@@ -853,11 +853,11 @@ fn SideSheetView(
                     }
                 }
             }
-            BookmarksSection { bookmarks: bookmarks.clone(), active_page }
-            if let Some(pane_id) = active_pane_id {
-                KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
-            }
-            div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
+            div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                BookmarksSection { bookmarks: bookmarks.clone(), active_page }
+                if let Some(pane_id) = active_pane_id {
+                    KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
+                }
                 if let Some(err) = pane_tree_error {
                     div { class: "flex items-center px-2 py-1",
                         span { class: "text-ui text-destructive", "{err}" }
@@ -1027,7 +1027,7 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                     path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
                 }
             }
-            div { class: "max-h-64 overflow-y-auto border-t border-foreground/10 p-1.5",
+            div { class: "border-t border-foreground/10 p-1.5",
                 if !loaded {
                     div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Loading…" }
                 } else if !knowledge.error.is_empty() {

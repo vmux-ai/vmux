@@ -92,10 +92,18 @@ fn side_sheet_close_button_tracks_stack_row_hover() {
 #[test]
 fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     let source = include_str!("../src/page.rs");
+    let knowledge_card = source
+        .split("fn KnowledgeCard")
+        .nth(1)
+        .and_then(|rest| rest.split("fn KnowledgeEntryRow").next())
+        .expect("knowledge card");
 
     assert!(source.contains("KNOWLEDGE_TREE_EVENT"));
     assert!(source.contains("KnowledgeEntryRow"));
     assert!(source.contains("open_knowledge_path"));
+    assert!(source.contains("overflow-y-auto overscroll-contain"));
+    assert!(!knowledge_card.contains("overflow-y-auto"));
+    assert!(!knowledge_card.contains("max-h-64"));
     assert!(!source.contains("KnowledgeUse"));
     assert!(!source.contains("Build with"));
     assert!(!source.contains("vmux://notes"));
