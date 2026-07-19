@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
@@ -270,6 +271,7 @@ impl Plugin for AgentPlugin {
                     handle_agent_self_commands
                         .after(vmux_layout::worktree::TabDirectoryRebindSet)
                         .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
+                    drain_workspace_picker_tasks,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -2397,6 +2399,20 @@ struct AgentSelfCommandWriters<'w> {
 #[derive(Component, Clone, Debug)]
 pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
+#[derive(Component)]
+struct PendingWorkspacePicker {
+    request_id: AgentRequestId,
+    tab_entity: Entity,
+    agent_entity: Entity,
+    task: Task<Option<PathBuf>>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorkspacePickerContext<'w, 's> {
+    pending: Query<'w, 's, &'static PendingWorkspacePicker>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+}
+
 fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
     if vmux_layout::worktree::is_generated_tab_name(&tab.name)
@@ -2474,6 +2490,7 @@ fn handle_agent_self_commands(
     mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
+    workspace_picker: WorkspacePickerContext,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -2496,6 +2513,11 @@ fn handle_agent_self_commands(
     let mut pending_run_spawns: std::collections::HashMap<ProcessId, PendingRunTerminalSpawn> =
         std::collections::HashMap::new();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
+    let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
+        .pending
+        .iter()
+        .map(|picker| picker.tab_entity)
+        .collect();
     let mut requests: Vec<_> = reader.read().collect();
     requests.sort_by_key(|request| self_command_priority(&request.command));
     for request in requests {
@@ -2798,77 +2820,32 @@ fn handle_agent_self_commands(
                             });
                             continue;
                         };
-                        let Some(selected) = rfd::FileDialog::new().pick_folder() else {
-                            service.0.send(ClientMessage::AgentCommandResponse {
+                        if !workspace_picker_tabs.insert(tab_entity) {
+                            AgentCommandResult::Error(
+                                "Workspace selection is already open".to_string(),
+                            )
+                        } else {
+                            let wake = workspace_picker
+                                .proxy
+                                .as_ref()
+                                .map(|proxy| (***proxy).clone());
+                            let task = IoTaskPool::get().spawn(async move {
+                                let selected = rfd::AsyncFileDialog::new()
+                                    .pick_folder()
+                                    .await
+                                    .map(|handle| handle.path().to_path_buf());
+                                if let Some(wake) = wake {
+                                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                                }
+                                selected
+                            });
+                            commands.spawn(PendingWorkspacePicker {
                                 request_id: request.request_id,
-                                result: AgentCommandResult::Error(
-                                    "Workspace selection was cancelled".to_string(),
-                                ),
+                                tab_entity,
+                                agent_entity,
+                                task,
                             });
                             continue;
-                        };
-                        let selected = match selected.canonicalize() {
-                            Ok(path) if path.is_dir() => path,
-                            Ok(_) => {
-                                service.0.send(ClientMessage::AgentCommandResponse {
-                                    request_id: request.request_id,
-                                    result: AgentCommandResult::Error(
-                                        "Selected workspace is not a directory".to_string(),
-                                    ),
-                                });
-                                continue;
-                            }
-                            Err(error) => {
-                                service.0.send(ClientMessage::AgentCommandResponse {
-                                    request_id: request.request_id,
-                                    result: AgentCommandResult::Error(format!(
-                                        "Invalid workspace directory: {error}"
-                                    )),
-                                });
-                                continue;
-                            }
-                        };
-                        if let Ok(checkout) = vmux_git::worktree::checkout_info(&selected) {
-                            let branch = vmux_git::worktree::head_ref(&checkout.root)
-                                .unwrap_or_else(|_| "unknown".to_string());
-                            commands
-                                .entity(tab_entity)
-                                .insert(PendingAgentProject(selected.clone()));
-                            AgentCommandResult::Text(format!(
-                                "Selected Git project: {}\nCurrent branch: {branch}\nUse a branch already specified by the user. If none was specified, ask which new branch to create. Then call create_worktree with that exact branch.",
-                                selected.display()
-                            ))
-                        } else {
-                            if let Ok(mut tab) = tab_worktree.tabs.get_mut(tab_entity) {
-                                bind_tab_workspace(&mut tab, &selected, &selected);
-                            }
-                            let path = selected.to_string_lossy().into_owned();
-                            commands
-                                .entity(tab_entity)
-                                .insert((
-                                    vmux_layout::tab::TabWorkspace {
-                                        project_dir: path.clone(),
-                                    },
-                                    vmux_layout::tab::TabDirDecided,
-                                ))
-                                .remove::<PendingAgentProject>()
-                                .remove::<vmux_layout::tab::TabWorktree>()
-                                .remove::<vmux_layout::worktree::TabWorktreeReady>()
-                                .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
-                            if let Some(stack) =
-                                ancestor_acp_stack(agent_entity, &acp_sessions, &ctx.child_of_q)
-                                && let Some(message) = rebind_acp_workspace(
-                                    stack,
-                                    &selected,
-                                    &mut acp_sessions,
-                                    &mut commands,
-                                )
-                            {
-                                service.0.send(message);
-                            }
-                            AgentCommandResult::Text(format!(
-                                "Selected workspace: {path}\nContinue the user's request in this directory."
-                            ))
                         }
                     }
                 }
@@ -3116,6 +3093,86 @@ fn handle_agent_self_commands(
     }
     for spawn in terminal_spawns {
         writers.terminal_stack_spawn.write(spawn);
+    }
+}
+
+fn drain_workspace_picker_tasks(
+    mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
+    mut tabs: Query<&mut vmux_layout::tab::Tab>,
+    mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
+    child_of: Query<&ChildOf>,
+    mut commands: Commands,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    for (picker_entity, mut picker) in &mut pickers {
+        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
+            continue;
+        };
+        let result = match selected {
+            None => AgentCommandResult::Error("Workspace selection was cancelled".to_string()),
+            Some(selected) => match selected.canonicalize() {
+                Ok(selected) if selected.is_dir() => {
+                    if tabs.get(picker.tab_entity).is_err() {
+                        AgentCommandResult::Error("Workspace tab no longer exists".to_string())
+                    } else if let Ok(checkout) = vmux_git::worktree::checkout_info(&selected) {
+                        let branch = vmux_git::worktree::head_ref(&checkout.root)
+                            .unwrap_or_else(|_| "unknown".to_string());
+                        commands
+                            .entity(picker.tab_entity)
+                            .insert(PendingAgentProject(selected.clone()));
+                        AgentCommandResult::Text(format!(
+                            "Selected Git project: {}\nCurrent branch: {branch}\nUse a branch already specified by the user. If none was specified, ask which new branch to create. Then call create_worktree with that exact branch.",
+                            selected.display()
+                        ))
+                    } else {
+                        if let Ok(mut tab) = tabs.get_mut(picker.tab_entity) {
+                            bind_tab_workspace(&mut tab, &selected, &selected);
+                        }
+                        let path = selected.to_string_lossy().into_owned();
+                        commands
+                            .entity(picker.tab_entity)
+                            .insert((
+                                vmux_layout::tab::TabWorkspace {
+                                    project_dir: path.clone(),
+                                },
+                                vmux_layout::tab::TabDirDecided,
+                            ))
+                            .remove::<PendingAgentProject>()
+                            .remove::<vmux_layout::tab::TabWorktree>()
+                            .remove::<vmux_layout::worktree::TabWorktreeReady>()
+                            .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                        if let Some(stack) =
+                            ancestor_acp_stack(picker.agent_entity, &acp_sessions, &child_of)
+                            && let Some(message) = rebind_acp_workspace(
+                                stack,
+                                &selected,
+                                &mut acp_sessions,
+                                &mut commands,
+                            )
+                        {
+                            service.0.send(message);
+                        }
+                        AgentCommandResult::Text(format!(
+                            "Selected workspace: {path}\nContinue the user's request in this directory."
+                        ))
+                    }
+                }
+                Ok(_) => {
+                    AgentCommandResult::Error("Selected workspace is not a directory".to_string())
+                }
+                Err(error) => {
+                    AgentCommandResult::Error(format!("Invalid workspace directory: {error}"))
+                }
+            },
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: picker.request_id,
+            result,
+        });
+        commands.entity(picker_entity).despawn();
     }
 }
 
@@ -7340,6 +7397,24 @@ mod tests {
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
         );
+    }
+
+    #[test]
+    fn workspace_picker_does_not_block_agent_command_system() {
+        let source = include_str!("plugin.rs");
+        let start = source
+            .find("fn handle_agent_self_commands(")
+            .expect("agent command handler");
+        let end = source[start..]
+            .find("fn respond_process_stack_spawn(")
+            .expect("next system");
+        let workspace_source = &source[start..start + end];
+
+        assert!(!workspace_source.contains("rfd::FileDialog::new().pick_folder()"));
+        assert!(workspace_source.contains("rfd::AsyncFileDialog::new()"));
+        assert!(workspace_source.contains("IoTaskPool::get().spawn"));
+        assert!(workspace_source.contains("fn drain_workspace_picker_tasks("));
+        assert!(workspace_source.contains("WinitUserEvent::WakeUp"));
     }
 
     #[test]
