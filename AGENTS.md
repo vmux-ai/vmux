@@ -8,11 +8,30 @@ Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-
 
 CI runs fmt, clippy, and tests for PRs.
 
-Run targeted tests during the edit loop when they support TDD, debugging, or behavior verification. Run broader local checks only when the user asks.
+Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run broader local checks only when the user asks.
 
 If a change affects an excluded patched CEF crate, run the appropriate package checks too.
 
 If any check fails, fix the issue before committing. Do not push broken code.
+
+## Test Quality
+
+Keep the suite lean. Every test must have an independent behavioral oracle and catch a plausible regression.
+
+Do not add tests that only:
+
+- Assert static Tailwind/CSS class literals, source-code substrings, or implementation shape.
+- Read Rust source with `include_str!`/`read_to_string` and check `contains(...)`.
+- Restate a constant, constructor input, struct field, enum payload, derived `Default`, or framework behavior.
+- Check one item in a registry/list when one table-driven exact-set test can cover the contract.
+- Duplicate behavior already covered by a stronger integration or boundary test.
+- Silently pass when a required fixture or generated artifact is missing.
+
+Prefer tests for observable behavior: pure decision logic, parser and serialization contracts, persistence, typed ECS message/system integration, and packaging/runtime invariants. For important UI behavior, test rendered DOM, computed state, interaction output, or a visual regression; otherwise leave styling untested.
+
+Source scans are allowed only for explicit repository-wide policies or packaging invariants that cannot reasonably be tested through behavior. Keep them narrow and state the protected invariant in the test name.
+
+Before adding a test, verify that it would fail under a realistic bug and remain valid after a behavior-preserving refactor. If not, do not add it.
 
 ## Debugging
 
