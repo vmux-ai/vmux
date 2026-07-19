@@ -557,6 +557,8 @@ pub struct ChatPlanStep {
 pub enum ChatItem {
     User {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<ChatSubmitAttachment>,
     },
@@ -567,6 +569,7 @@ impl ChatItem {
     pub fn user(text: impl Into<String>) -> Self {
         Self::User {
             text: text.into(),
+            context: None,
             attachments: Vec::new(),
         }
     }
@@ -732,6 +735,7 @@ mod tests {
         let items = vec![
             ChatItem::User {
                 text: "hi".into(),
+                context: Some("workspace policy".into()),
                 attachments: vec![ChatSubmitAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
@@ -759,8 +763,9 @@ mod tests {
         assert_eq!(back.len(), 2);
         assert!(matches!(
             &back[0],
-            ChatItem::User { attachments, .. }
-                if attachments.first().is_some_and(|attachment| attachment.name == "image.png")
+            ChatItem::User { context, attachments, .. }
+                if context.as_deref() == Some("workspace policy")
+                    && attachments.first().is_some_and(|attachment| attachment.name == "image.png")
         ));
         let ChatItem::Turn(turn) = &back[1] else {
             panic!("expected turn")

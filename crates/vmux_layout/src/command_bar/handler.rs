@@ -209,7 +209,7 @@ fn agent_pages(agents_snapshot: &CommandBarAgentsSnapshot) -> Vec<CommandBarPage
         .map(|agent| CommandBarPage {
             host: "agent".to_string(),
             url: agent.url.clone(),
-            title: format!("{} (ACP)", agent.name),
+            title: agent.name.clone(),
             keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
             icon: if agent.icon.is_empty() {
                 vmux_core::PageIcon::None
@@ -3039,7 +3039,7 @@ mod tests {
         assert_eq!(pages[0].url, "vmux://agent/codex/cli");
         assert_eq!(pages[0].title, "Codex (CLI)");
         assert_eq!(pages[0].host, "agent");
-        assert_eq!(pages[1].title, "Claude Agent (ACP)");
+        assert_eq!(pages[1].title, "Claude Agent");
         assert!(matches!(
             pages[1].icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
