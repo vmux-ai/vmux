@@ -732,7 +732,7 @@ mod tests {
         pages.push(CommandBarPage {
             host: "agent".into(),
             url: "vmux://agent/codex-acp".into(),
-            title: "Codex (ACP)".into(),
+            title: "Codex".into(),
             keywords: vec!["codex-acp".into(), "acp".into(), "agent".into()],
             icon: vmux_core::PageIcon::None,
             shortcut: String::new(),
@@ -741,7 +741,6 @@ mod tests {
 
         assert!(agent_page_matches_query(&codex, "cod"));
         assert!(agent_page_matches_query(&codex, "codex"));
-        assert!(agent_page_matches_query(&codex, "Codex (ACP)"));
         assert!(agent_page_matches_query(&codex, "codex-acp"));
         assert!(!agent_page_matches_query(&codex, "fix the failing test"));
     }

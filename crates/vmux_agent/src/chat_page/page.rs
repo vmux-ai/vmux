@@ -48,6 +48,32 @@ fn current_agent() -> String {
         .unwrap_or_else(|| "agent".to_string())
 }
 
+fn hex_accent_rgb(color: &str) -> Option<(u8, u8, u8)> {
+    let hex = color.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some((
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+    ))
+}
+
+fn normalized_accent(color: &str, fallback_rgb: &str) -> String {
+    if hex_accent_rgb(color).is_some() {
+        color.to_string()
+    } else {
+        format!("rgb({fallback_rgb})")
+    }
+}
+
+fn accent_rgb(color: &str, fallback_rgb: &str) -> String {
+    hex_accent_rgb(color)
+        .map(|(red, green, blue)| format!("{red} {green} {blue}"))
+        .unwrap_or_else(|| fallback_rgb.to_string())
+}
+
 fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
     web_sys::window()?
         .document()?
@@ -495,16 +521,28 @@ pub fn Page() -> Element {
         }
     });
 
+    let favicon_agent = agent.clone();
     use_effect(move || {
         let name = {
             let n = agent_name();
             if n.is_empty() { current_agent() } else { n }
         };
-        let title = chat_page_title(&items.read(), &status(), &name);
-        if let Some(doc) = web_sys::window().and_then(|w| w.document())
-            && doc.title() != title
-        {
-            doc.set_title(&title);
+        let status = status();
+        let items = items.read();
+        let title = chat_page_title(&items, &status, &name);
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            if document.title() != title {
+                document.set_title(&title);
+            }
+            let fallback = agent_accent(&favicon_agent).rain_rgb;
+            let accent = normalized_accent(&accent(), fallback);
+            let href = current_activity_icon(&items, &status)
+                .map(|activity| activity_favicon(activity, &accent))
+                .or_else(|| {
+                    favicon_src_for_url(&agent_icon(), &format!("vmux://agent/{favicon_agent}"))
+                })
+                .unwrap_or_else(|| activity_favicon(ActivityIcon::Tool, &accent));
+            set_page_favicon(&href);
         }
     });
 
@@ -513,6 +551,9 @@ pub fn Page() -> Element {
         if n.is_empty() { agent.clone() } else { n }
     };
     let agent_accent = agent_accent(&agent);
+    let profile_accent = accent();
+    let theme_accent = normalized_accent(&profile_accent, agent_accent.rain_rgb);
+    let rain_accent = accent_rgb(&theme_accent, agent_accent.rain_rgb);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
     let show_capability_examples =
@@ -594,22 +635,24 @@ pub fn Page() -> Element {
 
     rsx! {
         main {
-            class: "relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
-            style: "background-image:radial-gradient(120% 80% at 50% -10%, rgba(129,140,248,0.05), transparent 55%);",
+            class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
+            style: "--agent-accent:{theme_accent};",
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
                     MatrixRain {
-                        accent_rgb: agent_accent.rain_rgb.to_string(),
+                        accent_rgb: rain_accent,
                         words: vec![header_name.to_uppercase()],
                     }
                 }
             } else {
                 div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
-                    div { class: "absolute left-1/2 top-[-10%] h-[30rem] w-[30rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/10" }
+                    div { class: "agent-chat-glow agent-chat-glow-primary absolute -left-32 top-16 h-80 w-80 rounded-full blur-[110px]" }
+                    div { class: "agent-chat-glow agent-chat-glow-secondary absolute -right-24 top-1/3 h-72 w-72 rounded-full blur-[110px]" }
+                    div { class: "agent-chat-glow agent-chat-glow-tertiary absolute bottom-[-12rem] left-1/3 h-96 w-96 rounded-full blur-[140px]" }
                 }
             }
-            header { class: "relative z-10 flex items-center gap-2.5 border-b border-foreground/10 bg-background/50 px-5 py-3 backdrop-blur-xl",
+            header { class: "agent-chat-header relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
@@ -643,7 +686,7 @@ pub fn Page() -> Element {
                         last_top.set(top);
                     }
                 },
-                div { class: "mx-auto flex min-h-full max-w-3xl flex-col gap-4",
+                div { class: "mx-auto flex min-h-full max-w-3xl flex-col gap-5",
                     if installing_splash {
                         div { class: "my-auto flex flex-col items-center gap-3 py-16 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
@@ -1469,10 +1512,36 @@ fn render_item(
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
 ) -> Element {
     match item {
-        ChatItem::User { text, attachments } => rsx! {
+        ChatItem::User {
+            text,
+            context,
+            attachments,
+        } => rsx! {
             div {
                 key: "{key}",
-                class: "flex max-w-[80%] self-end flex-col gap-2 rounded-2xl bg-foreground/[0.08] p-2.5 text-sm",
+                class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm backdrop-blur-sm",
+                if let Some(context) = context {
+                    details { class: "disclosure user-context-panel rounded-xl border",
+                        summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
+                            span { class: "agent-themed-activity flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
+                                svg {
+                                    class: "h-3 w-3",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.8",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z" }
+                                }
+                            }
+                            span { class: "font-medium", "Prompt context" }
+                            span { class: "text-[10px] text-muted-foreground", "{context.len()} bytes" }
+                            {render_disclosure_icon()}
+                        }
+                        pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
+                    }
+                }
                 if !text.is_empty() {
                     div { class: "whitespace-pre-wrap px-1.5", "{text}" }
                 }
@@ -1542,23 +1611,33 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
             Some((key, block, children))
         })
         .collect::<Vec<_>>();
+    let duration_label = turn.duration_secs.map(|duration| {
+        if turn.step_count == 0 {
+            format!("Worked for {}", fmt_elapsed(duration))
+        } else if turn.step_count == 1 {
+            format!("Worked for {} · 1 step", fmt_elapsed(duration))
+        } else {
+            format!(
+                "Worked for {} · {} steps",
+                fmt_elapsed(duration),
+                turn.step_count
+            )
+        }
+    });
     rsx! {
-        div { key: "{key}", class: "flex max-w-[90%] flex-col gap-2.5 self-start",
+        div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3 backdrop-blur-sm",
             for (j , block , children) in blocks {
                 {render_block(j, block, &children, should_expand_thinking(j, block_count))}
             }
             if turn.running && !reconnecting {
                 {render_working(verb, elapsed)}
             }
-            if !turn.running && let Some(duration) = turn.duration_secs {
-                div { class: "grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2.5 text-[11px] text-muted-foreground/70",
+            if !turn.running && let Some(label) = duration_label {
+                div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 pt-0.5 text-[11px] text-muted-foreground/70",
                     span {}
-                    if turn.step_count == 0 {
-                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)}" }
-                    } else if turn.step_count == 1 {
-                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)} · 1 step" }
-                    } else {
-                        span { class: "tabular-nums", "Worked for {fmt_elapsed(duration)} · {turn.step_count} steps" }
+                    span { class: "agent-turn-meta inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 tabular-nums",
+                        span { class: "agent-turn-meta-dot h-1.5 w-1.5 rounded-full" }
+                        "{label}"
                     }
                 }
             }
@@ -1577,8 +1656,8 @@ fn render_disclosure_icon() -> Element {
 
 fn render_working(verb: &str, elapsed: u32) -> Element {
     rsx! {
-        div { class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
-            span { class: "flex h-5 w-5 items-center justify-center",
+        div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
+            span { class: "agent-themed-activity flex h-6 w-6 items-center justify-center rounded-lg",
                 span { class: "flex items-end gap-0.5",
                     span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.32s]" }
                     span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.16s]" }
@@ -1586,7 +1665,7 @@ fn render_working(verb: &str, elapsed: u32) -> Element {
                 }
             }
             div { class: "flex items-baseline gap-2",
-                span { class: "animate-pulse font-medium text-foreground/75", "{verb}" }
+                span { class: "agent-working-label animate-pulse font-medium", "{verb}" }
                 span { class: "tabular-nums text-xs", "{fmt_elapsed(elapsed)}" }
             }
         }
@@ -1596,6 +1675,10 @@ fn render_working(verb: &str, elapsed: u32) -> Element {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ActivityIcon {
     Thinking,
+    Writing,
+    Installing,
+    Awaiting,
+    Python,
     ReadFile,
     Search,
     Image,
@@ -1610,12 +1693,27 @@ enum ActivityIcon {
     Reconnect,
 }
 
-fn render_activity_icon(kind: ActivityIcon) -> Element {
-    let paths: &[&str] = match kind {
+fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
+    match kind {
         ActivityIcon::Thinking => &[
-            "M9.5 4A2.5 2.5 0 0 1 12 6.5v11a2.5 2.5 0 0 1-4.96.44A2.5 2.5 0 0 1 4.5 15.5a3 3 0 0 1 .34-5.14A2.5 2.5 0 0 1 6.5 6a3 3 0 0 1 3-2Z",
-            "M14.5 4A2.5 2.5 0 0 0 12 6.5v11a2.5 2.5 0 0 0 4.96.44A2.5 2.5 0 0 0 19.5 15.5a3 3 0 0 0-.34-5.14A2.5 2.5 0 0 0 17.5 6a3 3 0 0 0-3-2Z",
+            "M9.5 4.5a3.2 3.2 0 0 1 5.35 1.05 3.35 3.35 0 0 1 2.8 3.35 3.5 3.5 0 0 1 .55 6.45A3.4 3.4 0 0 1 15 18.5H9a4 4 0 0 1-3.75-5.4 3.5 3.5 0 0 1 1.2-6.3A3.2 3.2 0 0 1 9.5 4.5Z",
+            "M14.5 18.5c0 1.4.9 2.5 2.5 2.5v-4.4",
+            "M9.4 4.7c-.9 1.2-.8 2.8.3 3.8",
+            "M6.2 9.4c1.3-.7 2.8-.4 3.8.6",
+            "M13.9 5.8c-.7 1-.6 2.2.2 3.1",
+            "M14.1 9c1.4-.2 2.6.6 3.1 1.7",
+            "M8.5 13.2c1-.7 2.4-.5 3.2.4",
+            "M12.6 11.9c-.1 1.9.8 3.6 2.4 4.4",
         ],
+        ActivityIcon::Writing => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+        ActivityIcon::Installing => &[
+            "m7.5 4.27 9 5.15",
+            "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
+            "M3.3 7 12 12l8.7-5",
+            "M12 22V12",
+        ],
+        ActivityIcon::Awaiting => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
+        ActivityIcon::Python => &[],
         ActivityIcon::ReadFile => &[
             "M12 7v14",
             "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
@@ -1665,16 +1763,64 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
             "M8.53 16.11a6 6 0 0 1 6.95 0",
             "M12 20h.01",
         ],
-    };
-    let tone = if kind == ActivityIcon::Error {
-        "text-red-500"
-    } else {
-        "text-muted-foreground"
+    }
+}
+
+fn render_activity_icon(kind: ActivityIcon) -> Element {
+    if kind == ActivityIcon::Python {
+        return rsx! {
+            span { class: "python-activity-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset", aria_hidden: "true",
+                svg {
+                    class: "h-[17px] w-[17px]",
+                    view_box: "0 0 24 24",
+                    path {
+                        fill: "#3776ab",
+                        d: "M11.7 2C7 2 7.3 4 7.3 4v2.1h4.5V7H5.5S2 6.6 2 12.2s3.1 5.4 3.1 5.4h1.8v-2.5s-.1-3 2.9-3h4.7s2.7 0 2.7-2.7V4.8S17.6 2 11.7 2Zm-2.5 1.5a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6Z",
+                    }
+                    path {
+                        fill: "#ffd43b",
+                        d: "M12.3 22c4.7 0 4.4-2 4.4-2v-2.1h-4.5V17h6.3s3.5.4 3.5-5.2-3.1-5.4-3.1-5.4h-1.8v2.5s.1 3-2.9 3H9.5s-2.7 0-2.7 2.7v4.6S6.4 22 12.3 22Zm2.5-1.5a.8.8 0 1 1 0-1.6.8.8 0 0 1 0 1.6Z",
+                    }
+                }
+            }
+        };
+    }
+    let paths = activity_icon_paths(kind);
+    let tone = match kind {
+        ActivityIcon::Thinking
+        | ActivityIcon::Writing
+        | ActivityIcon::Installing
+        | ActivityIcon::Awaiting => "agent-themed-activity",
+        ActivityIcon::Python => unreachable!(),
+        ActivityIcon::ReadFile => "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300",
+        ActivityIcon::Search => "bg-cyan-500/10 text-cyan-600 ring-cyan-500/20 dark:text-cyan-300",
+        ActivityIcon::Image => "bg-pink-500/10 text-pink-600 ring-pink-500/20 dark:text-pink-300",
+        ActivityIcon::Command => {
+            "bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-300"
+        }
+        ActivityIcon::Browser => "bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-300",
+        ActivityIcon::Guardian => {
+            "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+        }
+        ActivityIcon::Tool => {
+            "bg-orange-500/10 text-orange-600 ring-orange-500/20 dark:text-orange-300"
+        }
+        ActivityIcon::Output => "bg-teal-500/10 text-teal-600 ring-teal-500/20 dark:text-teal-300",
+        ActivityIcon::Error => "bg-red-500/10 text-red-600 ring-red-500/20 dark:text-red-300",
+        ActivityIcon::Plan => {
+            "bg-indigo-500/10 text-indigo-600 ring-indigo-500/20 dark:text-indigo-300"
+        }
+        ActivityIcon::Diff => {
+            "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
+        }
+        ActivityIcon::Reconnect => {
+            "bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-300"
+        }
     };
     rsx! {
-        span { class: "flex h-5 w-5 shrink-0 items-center justify-center {tone}", aria_hidden: "true",
+        span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset {tone}", aria_hidden: "true",
             svg {
-                class: "h-[17px] w-[17px]",
+                class: "h-4 w-4",
                 view_box: "0 0 24 24",
                 fill: "none",
                 stroke: "currentColor",
@@ -1689,16 +1835,126 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
     }
 }
 
-fn tool_presentation(name: &str) -> (ActivityIcon, Cow<'static, str>) {
-    match tool_activity(name) {
-        ToolActivity::Guardian => (ActivityIcon::Guardian, Cow::Borrowed("Guardian Review")),
-        ToolActivity::ReadFile => (ActivityIcon::ReadFile, Cow::Borrowed("Read files")),
-        ToolActivity::Image => (ActivityIcon::Image, Cow::Borrowed("Viewed image")),
-        ToolActivity::Browser => (ActivityIcon::Browser, Cow::Borrowed("Used browser")),
-        ToolActivity::Search => (ActivityIcon::Search, Cow::Borrowed("Searched files")),
-        ToolActivity::Command => (ActivityIcon::Command, Cow::Borrowed("Ran commands")),
+fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
+    match activity {
+        ToolActivity::Guardian => ActivityIcon::Guardian,
+        ToolActivity::ReadFile => ActivityIcon::ReadFile,
+        ToolActivity::Image => ActivityIcon::Image,
+        ToolActivity::Browser => ActivityIcon::Browser,
+        ToolActivity::Search => ActivityIcon::Search,
+        ToolActivity::Command => ActivityIcon::Command,
+        ToolActivity::Other => ActivityIcon::Tool,
+    }
+}
+
+fn language_activity_icon(value: &str) -> Option<ActivityIcon> {
+    let lower = value.to_ascii_lowercase();
+    (lower.contains(".py") || lower == "py" || lower.contains("python"))
+        .then_some(ActivityIcon::Python)
+}
+
+fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
+    language_activity_icon(args)
+        .or_else(|| language_activity_icon(name))
+        .unwrap_or_else(|| tool_activity_icon(tool_activity(name)))
+}
+
+fn current_activity_icon(items: &[ChatItem], status: &str) -> Option<ActivityIcon> {
+    match status {
+        "installing" => Some(ActivityIcon::Installing),
+        "awaiting" => Some(ActivityIcon::Awaiting),
+        "errored" => Some(ActivityIcon::Error),
+        "streaming" => {
+            let block = items.iter().rev().find_map(|item| match item {
+                ChatItem::Turn(turn) if turn.running => turn.blocks.last(),
+                _ => None,
+            });
+            Some(match block {
+                Some(ChatBlock::Text(_)) => ActivityIcon::Writing,
+                Some(ChatBlock::Thinking(_)) | None => ActivityIcon::Thinking,
+                Some(ChatBlock::ToolUse { name, args, .. }) => tool_activity_icon_for(name, args),
+                Some(ChatBlock::Diff { path, .. }) => {
+                    language_activity_icon(path).unwrap_or(ActivityIcon::Diff)
+                }
+                Some(ChatBlock::Plan { .. }) => ActivityIcon::Plan,
+                Some(ChatBlock::ToolResult { is_error: true, .. }) => ActivityIcon::Error,
+                Some(ChatBlock::ToolResult { .. }) => ActivityIcon::Output,
+                Some(ChatBlock::Reconnect { .. }) => ActivityIcon::Reconnect,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn svg_data_url(svg: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(svg.len() * 2);
+    encoded.push_str("data:image/svg+xml,");
+    for byte in svg.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(HEX[(byte >> 4) as usize] as char);
+            encoded.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
+}
+
+fn activity_favicon(kind: ActivityIcon, accent: &str) -> String {
+    if kind == ActivityIcon::Python {
+        return svg_data_url(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='#151515' stroke='#3776ab' stroke-opacity='.7'/><path fill='#3776ab' d='M15.6 4C9.3 4 9.7 6.7 9.7 6.7v2.8h6v1.2H7.3s-4.6-.5-4.6 6.9 4.1 7.1 4.1 7.1h2.4v-3.3s-.1-4 3.9-4h6.3s3.6 0 3.6-3.6V7.7S23.4 4 15.6 4Zm-3.3 2a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2Z'/><path fill='#ffd43b' d='M16.4 28c6.3 0 5.9-2.7 5.9-2.7v-2.8h-6v-1.2h8.4s4.6.5 4.6-6.9-4.1-7.1-4.1-7.1h-2.4v3.3s.1 4-3.9 4h-6.3S9 14.6 9 18.2v6.1S8.6 28 16.4 28Zm3.3-2a1.1 1.1 0 1 1 0-2.2 1.1 1.1 0 0 1 0 2.2Z'/></svg>",
+        );
+    }
+    let mut paths = String::new();
+    for path in activity_icon_paths(kind) {
+        paths.push_str("<path d='");
+        paths.push_str(path);
+        paths.push_str("'/>");
+    }
+    svg_data_url(&format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='1' y='1' width='30' height='30' rx='8' fill='{accent}' fill-opacity='.15' stroke='{accent}' stroke-opacity='.45'/><g transform='translate(4 4)' fill='none' stroke='{accent}' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>{paths}</g></svg>"
+    ))
+}
+
+fn set_page_favicon(href: &str) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let link = document
+        .query_selector("link[rel~='icon']")
+        .ok()
+        .flatten()
+        .or_else(|| {
+            let link = document.create_element("link").ok()?;
+            link.set_attribute("rel", "icon").ok()?;
+            document
+                .query_selector("head")
+                .ok()
+                .flatten()?
+                .append_child(&link)
+                .ok()?;
+            Some(link)
+        });
+    if let Some(link) = link {
+        let _ = link.set_attribute("href", href);
+    }
+}
+
+fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>) {
+    let activity = tool_activity(name);
+    let icon = tool_activity_icon_for(name, args);
+    match activity {
+        ToolActivity::Guardian => (icon, Cow::Borrowed("Guardian Review")),
+        ToolActivity::ReadFile => (icon, Cow::Borrowed("Read files")),
+        ToolActivity::Image => (icon, Cow::Borrowed("Viewed image")),
+        ToolActivity::Browser => (icon, Cow::Borrowed("Used browser")),
+        ToolActivity::Search => (icon, Cow::Borrowed("Searched files")),
+        ToolActivity::Command => (icon, Cow::Borrowed("Ran commands")),
         ToolActivity::Other => (
-            ActivityIcon::Tool,
+            icon,
             Cow::Owned(
                 name.rsplit(['.', ':'])
                     .next()
@@ -1719,12 +1975,12 @@ fn render_block(
         ChatBlock::Text(text) => rsx! {
             div {
                 key: "{key}",
-                class: "chat-md text-sm leading-relaxed",
+                class: "chat-md px-0.5 text-sm leading-relaxed text-foreground/95",
                 dangerous_inner_html: md_to_html(text),
             }
         },
         ChatBlock::Thinking(text) => rsx! {
-            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+            div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 {render_activity_icon(ActivityIcon::Thinking)}
                 details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
@@ -1736,9 +1992,9 @@ fn render_block(
             }
         },
         ChatBlock::ToolUse { name, args, .. } => {
-            let (icon, label) = tool_presentation(name);
+            let (icon, label) = tool_presentation(name, args);
             rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
                     {render_activity_icon(icon)}
                     div { class: "min-w-0",
                         details { class: "disclosure text-sm text-muted-foreground",
@@ -1748,11 +2004,11 @@ fn render_block(
                             }
                             div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                             if !args.is_empty() && args != "{}" {
-                                pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                                pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
                             }
                         }
                         if !children.is_empty() {
-                            div { class: "ml-0.5 mt-1.5 flex flex-col gap-1 border-l border-foreground/15 pl-3",
+                            div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
                                 for (child_key , child) in children {
                                     {render_tool_child(*child_key, child)}
                                 }
@@ -1765,7 +2021,7 @@ fn render_block(
         ChatBlock::Plan { steps } => {
             let n = steps.len();
             rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
                     {render_activity_icon(ActivityIcon::Plan)}
                     details { open: true, class: "disclosure min-w-0 text-sm",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
@@ -1773,7 +2029,7 @@ fn render_block(
                             span { class: "text-xs text-muted-foreground", "{n} tasks" }
                             {render_disclosure_icon()}
                         }
-                        ul { class: "mt-2 flex flex-col gap-1.5 border-l border-foreground/15 pl-3",
+                        ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
                             for (i , step) in steps.iter().enumerate() {
                                 li { key: "{i}", class: "flex items-start gap-2 text-xs",
                                     span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
@@ -1808,9 +2064,10 @@ fn render_block(
                     })
                     .collect();
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
+            let icon = language_activity_icon(path).unwrap_or(ActivityIcon::Diff);
             rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
-                    {render_activity_icon(ActivityIcon::Diff)}
+                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
+                    {render_activity_icon(icon)}
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "Edited " }
@@ -1832,7 +2089,7 @@ fn render_block(
             content, is_error, ..
         } => render_standalone_tool_result(key, content, *is_error),
         ChatBlock::Reconnect { attempt, total } => rsx! {
-            div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
+            div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-amber-500/[0.035]",
                 {render_activity_icon(ActivityIcon::Reconnect)}
                 span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
             }
@@ -1843,7 +2100,7 @@ fn render_block(
 fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
     match block {
         ChatBlock::ToolUse { name, args, .. } => {
-            let (_, label) = tool_presentation(name);
+            let (_, label) = tool_presentation(name, args);
             rsx! {
                 details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
@@ -1852,7 +2109,7 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                     }
                     div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                     if !args.is_empty() && args != "{}" {
-                        pre { class: "mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{args}" }
+                        pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
                     }
                 }
             }
@@ -1866,9 +2123,14 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
 
 fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Element {
     let tone = if is_error {
-        "text-red-500"
+        "text-red-600 dark:text-red-300"
     } else {
-        "text-muted-foreground"
+        "text-teal-700/80 dark:text-teal-300/80"
+    };
+    let panel = if is_error {
+        "bg-red-500/[0.045] ring-red-500/15"
+    } else {
+        "bg-teal-500/[0.035] ring-teal-500/10"
     };
     let label = if is_error { "Error" } else { "Output" };
     rsx! {
@@ -1877,16 +2139,26 @@ fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Eleme
                 span { class: "font-medium", "{label}" }
                 {render_disclosure_icon()}
             }
-            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
+            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
         }
     }
 }
 
 fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> Element {
     let tone = if is_error {
-        "text-red-500"
+        "text-red-600 dark:text-red-300"
     } else {
-        "text-muted-foreground"
+        "text-teal-700/80 dark:text-teal-300/80"
+    };
+    let panel = if is_error {
+        "bg-red-500/[0.045] ring-red-500/15"
+    } else {
+        "bg-teal-500/[0.035] ring-teal-500/10"
+    };
+    let row = if is_error {
+        "hover:bg-red-500/[0.035]"
+    } else {
+        "hover:bg-teal-500/[0.035]"
     };
     let label = if is_error { "Error" } else { "Output" };
     let icon = if is_error {
@@ -1895,14 +2167,14 @@ fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> E
         ActivityIcon::Output
     };
     rsx! {
-        div { key: "{key}", class: "grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 py-1",
+        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
             {render_activity_icon(icon)}
             details { class: "disclosure min-w-0 text-sm {tone}",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     span { class: "font-medium", "{label}" }
                     {render_disclosure_icon()}
                 }
-                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-foreground/[0.04] p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/10", "{content}" }
+                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
             }
         }
     }
@@ -1999,6 +2271,29 @@ const MD_CSS: &str = r#"
 .agent-chat-prompt{caret-color:transparent}
 .agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite}
 @keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
+.agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
+.agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}
+.agent-chat-glow-tertiary{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
+.agent-chat-header{border-color:color-mix(in srgb,var(--agent-accent) 12%,transparent)}
+.chat-user-bubble,.chat-assistant-turn{transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
+.chat-user-bubble{border-color:color-mix(in srgb,var(--agent-accent) 18%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 19%,transparent),color-mix(in srgb,var(--agent-accent) 9%,transparent) 58%,color-mix(in srgb,var(--agent-accent) 4%,transparent));box-shadow:0 10px 32px color-mix(in srgb,var(--agent-accent) 9%,transparent)}
+.chat-user-bubble:hover{border-color:color-mix(in srgb,var(--agent-accent) 30%,transparent);box-shadow:0 14px 38px color-mix(in srgb,var(--agent-accent) 14%,transparent);transform:translateY(-1px)}
+.chat-assistant-turn{border-color:color-mix(in srgb,var(--agent-accent) 9%,rgba(127,127,127,0.08));background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 5%,transparent),rgba(127,127,127,0.025) 55%,transparent);box-shadow:0 10px 35px rgba(0,0,0,0.035)}
+.chat-assistant-turn::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:linear-gradient(180deg,color-mix(in srgb,var(--agent-accent) 82%,transparent),color-mix(in srgb,var(--agent-accent) 52%,transparent),color-mix(in srgb,var(--agent-accent) 28%,transparent));opacity:0.75}
+.chat-assistant-turn:hover{border-color:color-mix(in srgb,var(--agent-accent) 17%,transparent);box-shadow:0 14px 40px color-mix(in srgb,var(--agent-accent) 5%,rgba(0,0,0,0.055))}
+.chat-assistant-turn .disclosure>summary{transition:color 160ms ease}
+.chat-assistant-turn .disclosure>summary:hover{color:color-mix(in srgb,currentColor 68%,var(--agent-accent))}
+.agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
+.python-activity-icon{background:linear-gradient(145deg,rgba(55,118,171,0.15),rgba(255,212,59,0.11));color:#3776ab;box-shadow:inset 0 0 0 1px rgba(55,118,171,0.3)}
+.agent-working-label{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor)}
+.agent-row-hover:hover{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
+.agent-code-panel,.user-context-content{background:color-mix(in srgb,var(--agent-accent) 4%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 11%,transparent)}
+.agent-context-tree{border-color:color-mix(in srgb,var(--agent-accent) 22%,transparent)}
+.agent-turn-meta{color:color-mix(in srgb,var(--agent-accent) 72%,currentColor);border-color:color-mix(in srgb,var(--agent-accent) 13%,transparent);background:color-mix(in srgb,var(--agent-accent) 7%,transparent)}
+.agent-turn-meta-dot{background:var(--agent-accent)}
+.user-context-panel{border-color:color-mix(in srgb,var(--agent-accent) 14%,transparent);background:color-mix(in srgb,var(--agent-accent) 5%,rgba(127,127,127,0.025))}
+.user-context-panel>summary:hover{color:color-mix(in srgb,currentColor 65%,var(--agent-accent))}
 .chat-md{line-height:1.6;word-break:break-word}
 .chat-md>*:first-child{margin-top:0}
 .chat-md>*:last-child{margin-bottom:0}
@@ -2015,12 +2310,13 @@ const MD_CSS: &str = r#"
 .chat-md li>ul,.chat-md li>ol{margin:0.15em 0}
 .chat-md strong{font-weight:600}
 .chat-md em{font-style:italic}
-.chat-md a{color:#6ea8fe;text-decoration:underline}
-.chat-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.88em;background:rgba(127,127,127,0.18);padding:0.1em 0.35em;border-radius:0.35em}
-.chat-md pre{background:rgba(127,127,127,0.14);padding:0.7em 0.9em;border-radius:0.6em;overflow-x:auto;margin:0.6em 0}
-.chat-md pre code{background:none;padding:0;font-size:0.85em}
-.chat-md blockquote{border-left:2px solid rgba(127,127,127,0.4);padding-left:0.8em;margin:0.5em 0;opacity:0.85}
+.chat-md a{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor);text-decoration-color:color-mix(in srgb,var(--agent-accent) 45%,transparent);text-underline-offset:0.16em}
+.chat-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.88em;background:color-mix(in srgb,var(--agent-accent) 10%,transparent);border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.1em 0.35em;border-radius:0.4em}
+.chat-md pre{background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 7%,transparent),color-mix(in srgb,var(--agent-accent) 3%,transparent));border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.7em 0.9em;border-radius:0.7em;overflow-x:auto;margin:0.6em 0}
+.chat-md pre code{background:none;border:0;padding:0;font-size:0.85em}
+.chat-md blockquote{border-left:2px solid color-mix(in srgb,var(--agent-accent) 48%,transparent);padding-left:0.8em;margin:0.5em 0;opacity:0.85}
 .chat-md hr{border:0;border-top:1px solid rgba(127,127,127,0.25);margin:0.9em 0}
 .chat-md table{border-collapse:collapse;margin:0.5em 0;font-size:0.95em}
 .chat-md th,.chat-md td{border:1px solid rgba(127,127,127,0.3);padding:0.3em 0.6em;text-align:left}
+@media (prefers-reduced-motion:reduce){.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
 "#;

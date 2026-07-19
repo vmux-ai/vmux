@@ -1915,6 +1915,15 @@ mod native_tests {
     }
 
     #[test]
+    fn chat_activity_updates_favicon_and_python_rows_use_language_icon() {
+        let page = include_str!("chat_page/page.rs");
+        assert!(page.contains("set_page_favicon(&href)"));
+        assert!(page.contains("current_activity_icon(&items, &status)"));
+        assert!(page.contains("ActivityIcon::Python"));
+        assert!(page.contains("language_activity_icon(path)"));
+    }
+
+    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());

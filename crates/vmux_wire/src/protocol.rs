@@ -608,35 +608,43 @@ pub fn compose_agent_prompt(display_text: &str, context: Option<&str>) -> String
 
 /// Returns the visible user prompt from a vmux private-context envelope.
 pub fn extract_display_prompt(prompt: &str) -> Option<&str> {
-    extract_length_delimited_display_prompt(prompt).or_else(|| {
-        let body = prompt
-            .strip_prefix(PRIVATE_CONTEXT_PREFIX)?
-            .strip_prefix('\n')?;
+    split_private_context_prompt(prompt).map(|(_, display)| display)
+}
+
+/// Returns the private context and visible prompt from a vmux context envelope.
+pub fn split_private_context_prompt(prompt: &str) -> Option<(&str, &str)> {
+    split_length_delimited_private_context(prompt).or_else(|| {
+        let body = private_context_body(prompt)?;
         let separator = format!("{PRIVATE_CONTEXT_CLOSING_TAG}{PRIVATE_CONTEXT_PROMPT_MARKER}");
-        body.rsplit_once(&separator).map(|(_, display)| display)
+        body.rsplit_once(&separator)
     })
 }
 
 /// Returns whether text contains a complete vmux private-context envelope.
 pub fn has_private_context_envelope(prompt: &str) -> bool {
-    prompt
-        .strip_prefix(PRIVATE_CONTEXT_PREFIX)
-        .and_then(|body| body.strip_prefix('\n'))
-        .is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
+    private_context_body(prompt).is_some_and(|body| body.contains(PRIVATE_CONTEXT_CLOSING_TAG))
 }
 
-fn extract_length_delimited_display_prompt(prompt: &str) -> Option<&str> {
-    let body = prompt
-        .strip_prefix(PRIVATE_CONTEXT_PREFIX)?
-        .strip_prefix('\n')?;
+fn private_context_body(prompt: &str) -> Option<&str> {
+    prompt
+        .find(PRIVATE_CONTEXT_PREFIX)
+        .and_then(|start| prompt.get(start + PRIVATE_CONTEXT_PREFIX.len()..))?
+        .strip_prefix('\n')
+}
+
+fn split_length_delimited_private_context(prompt: &str) -> Option<(&str, &str)> {
+    let body = private_context_body(prompt)?;
     let (length, body) = body.split_once('\n')?;
     let context_len = length
         .strip_prefix(PRIVATE_CONTEXT_LENGTH_PREFIX)?
         .parse::<usize>()
         .ok()?;
-    body.get(context_len..)?
+    let context = body.get(..context_len)?;
+    let display = body
+        .get(context_len..)?
         .strip_prefix(PRIVATE_CONTEXT_CLOSING_TAG)?
-        .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)
+        .strip_prefix(PRIVATE_CONTEXT_PROMPT_MARKER)?;
+    Some((context, display))
 }
 
 /// Vim-style visual/copy-mode action sent by the GUI to the service.
@@ -933,6 +941,18 @@ mod tests {
         );
 
         assert_eq!(extract_display_prompt(&wire), Some("display"));
+    }
+
+    #[test]
+    fn embedded_private_context_is_split_from_visible_prompt() {
+        let envelope = compose_agent_prompt("show me something fun", Some("host policy"));
+        let echoed = format!("show me something fun{envelope}");
+
+        assert_eq!(
+            split_private_context_prompt(&echoed),
+            Some(("host policy", "show me something fun"))
+        );
+        assert!(has_private_context_envelope(&echoed));
     }
 
     #[test]

@@ -18,13 +18,16 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
         match msg {
             Message::User { text, attachments } => {
                 flush(&mut items, &mut current, &mut ordinal, durations);
-                let text = vmux_service::protocol::extract_display_prompt(text).unwrap_or(text);
+                let (context, text) = vmux_service::protocol::split_private_context_prompt(text)
+                    .map(|(context, display)| (Some(context.to_string()), display))
+                    .unwrap_or((None, text));
                 if text.trim().is_empty() && attachments.is_empty() {
                     current = Some(ChatTurn::default());
                     continue;
                 }
                 items.push(ChatItem::User {
                     text: text.to_string(),
+                    context,
                     attachments: attachments
                         .iter()
                         .map(|attachment| ChatSubmitAttachment {
@@ -216,7 +219,9 @@ mod tests {
 
         assert!(matches!(
             &items[0],
-            ChatItem::User { text, attachments }
+            ChatItem::User {
+                text, attachments, ..
+            }
                 if text == "inspect"
                     && attachments.len() == 1
                     && attachments[0].path == "/tmp/image.png"
@@ -269,6 +274,24 @@ mod tests {
             &items[2],
             ChatItem::Turn(turn)
                 if matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Which branch?")
+        ));
+    }
+
+    #[test]
+    fn private_context_is_collapsed_separately_from_display_prompt() {
+        let private = vmux_service::protocol::compose_agent_prompt(
+            "show me something fun",
+            Some("workspace policy"),
+        );
+        let messages = vec![Message::user(format!("show me something fun{private}"))];
+
+        let items = group_turns(&messages, &[], false);
+
+        assert!(matches!(
+            &items[0],
+            ChatItem::User { text, context, .. }
+                if text == "show me something fun"
+                    && context.as_deref() == Some("workspace policy")
         ));
     }
 
