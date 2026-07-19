@@ -3406,11 +3406,11 @@ fn tab_boundary_dir(
         )),
         None => {
             let active_space = active_space?;
-            Some(vmux_setting::resolve_startup_dir_for_tab_with_source(
+            vmux_setting::resolve_startup_dir_for_tab_with_source(
                 settings,
                 &active_space.record.id,
                 None,
-            ))
+            )
         }
     }
 }
@@ -3474,7 +3474,6 @@ fn push_tab_boundary_emit(
                 vmux_setting::DirSource::Tab => "tab",
                 vmux_setting::DirSource::Space => "space",
                 vmux_setting::DirSource::Global => "global",
-                vmux_setting::DirSource::Default => "default",
             }
             .to_string(),
             is_git_repo: info.is_some(),

@@ -204,7 +204,7 @@ pub struct TabLayoutSpawnRequest {
     pub space: Entity,
     pub primary_window: Entity,
     pub name: Option<String>,
-    pub startup_dir: std::path::PathBuf,
+    pub startup_dir: Option<std::path::PathBuf>,
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,

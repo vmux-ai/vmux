@@ -189,6 +189,17 @@ pub enum AgentCommand {
     ResumeInAcp {
         anchor: ProcessId,
     },
+    /// Ask the user to select a project directory for the calling agent's tab.
+    /// Appended to preserve existing positional enum discriminants.
+    ChooseWorkspace {
+        anchor: ProcessId,
+    },
+    /// Create an isolated worktree on an exact user-selected branch.
+    /// Appended to preserve existing positional enum discriminants.
+    CreateWorktreeOnBranch {
+        anchor: ProcessId,
+        branch: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -350,6 +361,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::FileTouched { path, .. } if path.trim().is_empty() => {
             Err("file_touched.path is empty")
+        }
+        AgentCommand::CreateWorktreeOnBranch { branch, .. } if branch.trim().is_empty() => {
+            Err("create_worktree.branch is empty")
         }
         _ => Ok(()),
     }
@@ -536,6 +550,11 @@ pub enum ClientMessage {
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
+    },
+    /// Update the host-side working directory used by an existing ACP session.
+    RebindAcpWorkspace {
+        sid: String,
+        cwd: String,
     },
 }
 
@@ -839,6 +858,13 @@ pub enum ServiceMessage {
         sid: String,
         name: String,
     },
+    AcpWorkspaceChanged {
+        sid: String,
+        name: String,
+        branch: String,
+        cwd: String,
+        workspace_cwd: String,
+    },
     /// Current model and selectable models reported by an ACP session.
     AcpModelInfo {
         sid: String,
@@ -917,6 +943,34 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&st).unwrap();
         let back = rkyv::from_bytes::<AgentRunStatus, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, AgentRunStatus::Interrupted);
+    }
+
+    #[test]
+    fn acp_workspace_changed_roundtrips() {
+        let message = ServiceMessage::AcpWorkspaceChanged {
+            sid: "s1".into(),
+            name: "quiet-amber-wolf".into(),
+            branch: "vibe/quiet-amber-wolf".into(),
+            cwd: "/worktrees/quiet-amber-wolf".into(),
+            workspace_cwd: "/repo".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&message).unwrap();
+        let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert!(matches!(
+            decoded,
+            ServiceMessage::AcpWorkspaceChanged {
+                sid,
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } if sid == "s1"
+                && name == "quiet-amber-wolf"
+                && branch == "vibe/quiet-amber-wolf"
+                && cwd == "/worktrees/quiet-amber-wolf"
+                && workspace_cwd == "/repo"
+        ));
     }
 
     #[test]
@@ -1347,6 +1401,33 @@ mod tests {
     }
 
     #[test]
+    fn create_worktree_validation_rejects_empty_branch() {
+        let cmd = AgentCommand::CreateWorktreeOnBranch {
+            anchor: ProcessId::new(),
+            branch: "  ".to_string(),
+        };
+        assert!(validate_agent_command(&cmd).is_err());
+    }
+
+    #[test]
+    fn workspace_commands_rkyv_roundtrip() {
+        let commands = [
+            AgentCommand::ChooseWorkspace {
+                anchor: ProcessId::new(),
+            },
+            AgentCommand::CreateWorktreeOnBranch {
+                anchor: ProcessId::new(),
+                branch: "feature/fun-terminal".into(),
+            },
+        ];
+        for command in commands {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
+            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+            assert_eq!(decoded, command);
+        }
+    }
+
+    #[test]
     fn page_agent_client_messages_roundtrip() {
         let messages = [
             ClientMessage::SpawnPageAgent {
@@ -1391,6 +1472,10 @@ mod tests {
                 request_id: AgentRequestId::new(),
                 content: "ok".into(),
                 is_error: false,
+            },
+            ClientMessage::RebindAcpWorkspace {
+                sid: "s".into(),
+                cwd: "/tmp/worktree".into(),
             },
         ];
         for msg in messages {

@@ -12,12 +12,12 @@ use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
-    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERBS,
+    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
+    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -282,6 +282,8 @@ pub fn Page() -> Element {
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
+    let mut workspace_selection_pending = use_signal(|| false);
+    let mut workspace_picker_open = use_signal(|| false);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
@@ -391,6 +393,10 @@ pub fn Page() -> Element {
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
+        workspace_selection_pending.set(snap.workspace_selection_pending);
+        if !snap.workspace_selection_pending {
+            workspace_picker_open.set(false);
+        }
         if snap.status == "awaiting" {
             approval.set(Some((
                 snap.approval_call_id.clone(),
@@ -876,6 +882,54 @@ pub fn Page() -> Element {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+                    if workspace_selection_pending() {
+                        div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-2.5 pl-3.5 shadow-sm backdrop-blur-xl",
+                            div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.07] text-foreground/55 ring-1 ring-inset ring-foreground/10",
+                                svg {
+                                    class: "h-4 w-4",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M3 6h6l2 2h10v10H3z" }
+                                }
+                            }
+                            div { class: "min-w-0 flex-1",
+                                div { class: "text-sm font-medium text-foreground", "Choose a workspace" }
+                                div { class: "truncate text-xs text-muted-foreground", "Select the project folder the agent should work in." }
+                            }
+                            button {
+                                class: if workspace_picker_open() { "flex h-8 shrink-0 cursor-default items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 text-xs font-medium text-muted-foreground/60" } else { "flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-2.5 text-xs font-medium text-background transition hover:opacity-85 active:scale-[0.98]" },
+                                disabled: workspace_picker_open(),
+                                onclick: move |_| {
+                                    if workspace_picker_open() {
+                                        return;
+                                    }
+                                    workspace_picker_open.set(true);
+                                    if try_cef_bin_emit_rkyv(&ChatChooseWorkspace).is_err() {
+                                        workspace_picker_open.set(false);
+                                    }
+                                },
+                                svg {
+                                    class: "h-3.5 w-3.5",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "2",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    path { d: "M3 6h6l2 2h10v10H3z" }
+                                }
+                                if workspace_picker_open() {
+                                    span { "Choosing…" }
+                                } else {
+                                    span { "Choose folder" }
                                 }
                             }
                         }

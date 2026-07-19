@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-pub use vmux_core::profile::{default_space_dir, space_dir};
-
 pub fn valid_cwd(cwd: &str) -> Result<Option<PathBuf>, String> {
     let trimmed = cwd.trim();
     if trimmed.is_empty() {

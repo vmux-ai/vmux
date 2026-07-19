@@ -40,6 +40,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
 vmux_core = { path = "../vmux_core" }
+vmux_layout = { path = "../vmux_layout" }
 vmux_service_client = { path = "../vmux_service_client" }
 vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"

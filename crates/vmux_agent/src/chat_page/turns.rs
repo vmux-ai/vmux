@@ -18,8 +18,13 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
         match msg {
             Message::User { text, attachments } => {
                 flush(&mut items, &mut current, &mut ordinal, durations);
+                let text = vmux_service::protocol::extract_display_prompt(text).unwrap_or(text);
+                if text.trim().is_empty() && attachments.is_empty() {
+                    current = Some(ChatTurn::default());
+                    continue;
+                }
                 items.push(ChatItem::User {
-                    text: text.clone(),
+                    text: text.to_string(),
                     attachments: attachments
                         .iter()
                         .map(|attachment| ChatSubmitAttachment {
@@ -236,6 +241,35 @@ mod tests {
         };
         assert_eq!(t0.duration_secs, Some(5));
         assert_eq!(t1.duration_secs, Some(9));
+    }
+
+    #[test]
+    fn private_continuation_starts_hidden_turn() {
+        let private = vmux_service::protocol::compose_agent_prompt(
+            "",
+            Some("Workspace selected. Continue the original request."),
+        );
+        let messages = vec![
+            Message::user("fix it"),
+            assistant(vec![AssistantBlock::Text("Choose a workspace.".into())]),
+            Message::user(private),
+            assistant(vec![AssistantBlock::Text("Which branch?".into())]),
+        ];
+
+        let items = group_turns(&messages, &[], false);
+
+        assert_eq!(items.len(), 3);
+        assert!(matches!(&items[0], ChatItem::User { text, .. } if text == "fix it"));
+        assert!(matches!(
+            &items[1],
+            ChatItem::Turn(turn)
+                if matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Choose a workspace.")
+        ));
+        assert!(matches!(
+            &items[2],
+            ChatItem::Turn(turn)
+                if matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Which branch?")
+        ));
     }
 
     #[test]

@@ -504,7 +504,7 @@ fn spawn_layout_requested_content(
                             &mut meshes,
                             &mut webview_mt,
                             &settings,
-                            Some(&cwd),
+                            cwd.as_deref(),
                         ),
                         ChildOf(*stack),
                     ))
@@ -593,11 +593,11 @@ fn open_terminal_page(
         vmux_space::cwd::valid_cwd(cwd)?
     } else {
         let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, child_of_q, tabs);
-        Some(vmux_setting::resolve_tab_workspace_dir(
+        vmux_setting::resolve_tab_workspace_dir(
             settings,
             &active_space.record.id,
             tab_dir.as_deref(),
-        )?)
+        )?
     };
     clear_stack_children(task.stack, children_q, commands);
     let title = cwd
@@ -1169,6 +1169,8 @@ struct PollServiceWriters<'w> {
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
+    page_agent_workspace_changed:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentWorkspaceChanged>,
     page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
     page_agent_model_selection_result:
         MessageWriter<'w, vmux_service::agent_events::PageAgentModelSelectionResult>,
@@ -1672,6 +1674,23 @@ fn poll_service_messages(
                 writers
                     .page_agent_info
                     .write(vmux_service::agent_events::PageAgentInfo { sid, name });
+            }
+            ServiceMessage::AcpWorkspaceChanged {
+                sid,
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } => {
+                writers.page_agent_workspace_changed.write(
+                    vmux_service::agent_events::PageAgentWorkspaceChanged {
+                        sid,
+                        name,
+                        branch,
+                        cwd,
+                        workspace_cwd,
+                    },
+                );
             }
             ServiceMessage::AcpModelInfo {
                 sid,
@@ -4197,6 +4216,37 @@ mod tests {
             .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
         let launch = launches.iter(app.world()).next().expect("terminal spawned");
         assert_eq!(launch.cwd, dir.path().to_string_lossy());
+    }
+
+    #[test]
+    fn open_terminal_page_without_workspace_uses_shell_default() {
+        let record = vmux_space::model::bootstrap_space_record();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .insert_resource(vmux_space::spaces::ActiveSpace { record })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_terminal_page_open);
+
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://terminal".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let mut launches = app
+            .world_mut()
+            .query_filtered::<&crate::launch::TerminalLaunch, With<Terminal>>();
+        let launch = launches.iter(app.world()).next().expect("terminal spawned");
+        assert!(launch.cwd.is_empty());
     }
 
     #[test]

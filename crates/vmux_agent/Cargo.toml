@@ -71,4 +71,5 @@ web-sys = { version = "0.3", features = [
 [dev-dependencies]
 mockito = "1"
 serial_test = "3"
+tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }

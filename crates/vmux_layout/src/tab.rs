@@ -31,6 +31,7 @@ impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
             .register_type::<Option<String>>()
+            .register_type::<TabWorkspace>()
             .register_type::<TabWorktree>()
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
@@ -66,6 +67,16 @@ pub struct Tab {
     pub startup_dir: Option<String>,
 }
 
+/// Stable project directory for a tab. Unlike [`Tab::startup_dir`], this does not change when
+/// the tab is rebound to a managed worktree.
+#[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::tab"]
+#[require(Save)]
+pub struct TabWorkspace {
+    pub project_dir: String,
+}
+
 /// Present iff a tab's `startup_dir` points at a vmux-managed git worktree.
 #[derive(Component, Reflect, Default, Clone, Debug, PartialEq, Eq)]
 #[reflect(Component)]
@@ -73,8 +84,16 @@ pub struct Tab {
 #[require(Save)]
 pub struct TabWorktree {
     pub repo_root: String,
+    #[reflect(default)]
+    pub checkout_dir: String,
     pub branch: String,
     pub base_ref: String,
+}
+
+/// Runtime failure state for a persisted managed worktree. Ownership metadata remains attached.
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct TabWorktreeUnavailable {
+    pub message: String,
 }
 
 /// Marks that the worktree/work-here decision has been made for a tab, so the isolate offer
@@ -169,7 +188,7 @@ fn handle_tab_commands(
                     space,
                     primary_window: *primary_window,
                     name: Some(name),
-                    startup_dir,
+                    startup_dir: startup_dir.clone(),
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -181,13 +200,10 @@ fn handle_tab_commands(
                     close_requests.write(CloseTabRequest { tab: active });
                 }
                 TabCommand::New => {
-                    let Some((space, _)) = effective_startup_dir
+                    let Some((space, startup_dir)) = effective_startup_dir
                         .as_deref()
                         .and_then(|effective| effective.0.clone())
                     else {
-                        continue;
-                    };
-                    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
                         continue;
                     };
                     let name = format!("Tab {}", tabs.iter().count() + 1);
@@ -195,7 +211,7 @@ fn handle_tab_commands(
                         space,
                         primary_window: *primary_window,
                         name: Some(name),
-                        startup_dir: dir,
+                        startup_dir: startup_dir.clone(),
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
@@ -426,8 +442,39 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use crate::window::Main as MainNode;
+    use bevy::reflect::{FromReflect, TypeRegistry, serde::TypedReflectDeserializer};
+    use serde::de::DeserializeSeed;
     use vmux_command::CommandPlugin;
     use vmux_core::PageOpenRequest;
+
+    #[test]
+    fn tab_worktree_deserializes_legacy_metadata_without_checkout_dir() {
+        let mut registry = TypeRegistry::default();
+        registry.register::<TabWorktree>();
+        let registration = registry.get(std::any::TypeId::of::<TabWorktree>()).unwrap();
+        let mut deserializer = ron::de::Deserializer::from_str(
+            r#"(
+                repo_root: "/repo",
+                branch: "vmux/task",
+                base_ref: "main",
+            )"#,
+        )
+        .unwrap();
+        let reflected = TypedReflectDeserializer::new(registration, &registry)
+            .deserialize(&mut deserializer)
+            .unwrap();
+        let metadata = TabWorktree::from_reflect(reflected.as_partial_reflect()).unwrap();
+
+        assert_eq!(
+            metadata,
+            TabWorktree {
+                repo_root: "/repo".into(),
+                checkout_dir: String::new(),
+                branch: "vmux/task".into(),
+                base_ref: "main".into(),
+            }
+        );
+    }
 
     #[test]
     fn tab_target_uses_event_tab_id() {
@@ -654,7 +701,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            std::env::current_dir().unwrap(),
+            Some(std::env::current_dir().unwrap()),
         ))));
         app.world_mut().spawn((
             Tab {
@@ -733,6 +780,87 @@ mod tests {
     }
 
     #[test]
+    fn new_tab_without_configured_startup_dir_does_not_inherit_active_tab_workspace() {
+        let mut app = build_app();
+        let main = build_main_and_tab(&mut app);
+        let space = app
+            .world()
+            .get::<Children>(main)
+            .and_then(|children| children.iter().next())
+            .unwrap();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
+        let existing_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        let existing_dir = std::env::current_dir().unwrap();
+        app.world_mut().entity_mut(existing_tab).insert((
+            Tab {
+                name: "vmux".into(),
+                startup_dir: Some(existing_dir.to_string_lossy().into_owned()),
+            },
+            TabWorkspace {
+                project_dir: existing_dir.to_string_lossy().into_owned(),
+            },
+            TabDirDecided,
+        ));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+
+        app.update();
+
+        let tabs: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &Tab)>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(tabs.len(), 2);
+        let (new_tab_entity, new_tab) = tabs.iter().find(|(_, tab)| tab.name == "Tab 2").unwrap();
+        assert_eq!(new_tab.startup_dir, None);
+        assert!(app.world().get::<TabWorkspace>(*new_tab_entity).is_none());
+        assert!(app.world().get::<TabDirDecided>(*new_tab_entity).is_none());
+    }
+
+    #[test]
+    fn new_tab_uses_only_configured_startup_dir() {
+        let mut app = build_app();
+        let main = build_main_and_tab(&mut app);
+        let space = app
+            .world()
+            .get::<Children>(main)
+            .and_then(|children| children.iter().next())
+            .unwrap();
+        let configured = tempfile::tempdir().unwrap();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            Some(configured.path().to_path_buf()),
+        ))));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+
+        app.update();
+
+        let tabs: Vec<_> = app.world_mut().query::<&Tab>().iter(app.world()).collect();
+        let new_tab = tabs.iter().find(|tab| tab.name == "Tab 2").unwrap();
+        assert_eq!(
+            new_tab.startup_dir.as_deref(),
+            Some(
+                configured
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
     fn new_tab_becomes_active_in_single_update() {
         let mut app = build_app();
         app.init_resource::<crate::pane::PendingCursorWarp>()
@@ -795,7 +923,7 @@ mod tests {
                 space,
                 primary_window: window,
                 name: None,
-                startup_dir: std::env::current_dir().unwrap(),
+                startup_dir: Some(std::env::current_dir().unwrap()),
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,

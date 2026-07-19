@@ -95,6 +95,17 @@ pub fn space_of(
     }
 }
 
+/// Resolve the ancestor space ID for an entity.
+pub fn space_id_of(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    spaces: &Query<(), With<Space>>,
+    ids: &Query<&SpaceId>,
+) -> Option<String> {
+    let space = space_of(entity, child_of, spaces)?;
+    ids.get(space).ok().map(|id| id.0.clone())
+}
+
 pub fn space_container_node() -> Node {
     Node {
         position_type: PositionType::Absolute,

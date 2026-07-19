@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -118,7 +118,7 @@ impl VibeTempRoot {
 /// State shared between the driver's request handlers and its prompt loop.
 pub struct AcpShared {
     pub sid: String,
-    pub cwd: PathBuf,
+    cwd: Mutex<PathBuf>,
     pub anchor: ProcessId,
     pub stream_tx: broadcast::Sender<ServiceMessage>,
     pub projector: Mutex<AcpProjector>,
@@ -151,7 +151,7 @@ impl AcpShared {
     ) -> Self {
         Self {
             sid,
-            cwd,
+            cwd: Mutex::new(cwd),
             anchor,
             stream_tx,
             projector: Mutex::new(AcpProjector::new()),
@@ -175,6 +175,40 @@ impl AcpShared {
             sid: self.sid.clone(),
             messages_json,
         }
+    }
+
+    fn cwd(&self) -> PathBuf {
+        self.cwd.lock().unwrap().clone()
+    }
+
+    pub fn rebind_cwd(&self, cwd: PathBuf) -> Result<(), String> {
+        let cwd = cwd
+            .canonicalize()
+            .map_err(|error| format!("invalid workspace directory: {error}"))?;
+        if !cwd.is_dir() {
+            return Err("workspace path is not a directory".to_string());
+        }
+        *self.cwd.lock().unwrap() = cwd;
+        Ok(())
+    }
+
+    fn publish_workspace_change(&self, name: &str, branch: &str, cwd: &str, workspace_cwd: &str) {
+        let Ok(validated) = vmux_layout::worktree::validate_linked_workspace(
+            Path::new(cwd),
+            Path::new(workspace_cwd),
+            branch,
+        ) else {
+            tracing::warn!(target: "acp", sid = %self.sid, "ignored invalid ACP workspace update");
+            return;
+        };
+        *self.cwd.lock().unwrap() = validated.cwd.clone();
+        self.emit(ServiceMessage::AcpWorkspaceChanged {
+            sid: self.sid.clone(),
+            name: name.to_string(),
+            branch: branch.to_string(),
+            cwd: validated.cwd.to_string_lossy().into_owned(),
+            workspace_cwd: validated.workspace_cwd.to_string_lossy().into_owned(),
+        });
     }
 
     pub fn agent_info_message(&self) -> Option<ServiceMessage> {
@@ -288,6 +322,17 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
     let mut projector = shared.projector.lock().unwrap();
     let intents = projector.apply(update);
     if shared.history_replay.load(Ordering::SeqCst) {
+        for intent in &intents {
+            if let Intent::WorkspaceChanged {
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } = intent
+            {
+                shared.publish_workspace_change(name, branch, cwd, workspace_cwd);
+            }
+        }
         let update_count = shared.history_replay_updates.fetch_add(1, Ordering::SeqCst) + 1;
         if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
             let messages_json =
@@ -333,6 +378,12 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
                     },
                 });
             }
+            Intent::WorkspaceChanged {
+                name,
+                branch,
+                cwd,
+                workspace_cwd,
+            } => shared.publish_workspace_change(&name, &branch, &cwd, &workspace_cwd),
         }
     }
 }
@@ -515,7 +566,7 @@ pub async fn run(
         }
     };
     let fs_scope = AcpFsScope {
-        cwd: shared.cwd.clone(),
+        cwd: shared.cwd(),
         vibe_temp_root: vibe_temp_root
             .as_ref()
             .map(|root| root.path().to_path_buf()),
@@ -526,10 +577,11 @@ pub async fn run(
         None => env,
     };
     let session_meta = session_meta_for_agent(&agent_id);
+    let agent_cwd = shared.cwd();
     let mut child = match Command::new(&command)
         .args(&args)
         .envs(env)
-        .current_dir(&shared.cwd)
+        .current_dir(agent_cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -558,6 +610,8 @@ pub async fn run(
     let release_shared = shared.clone();
     let read_scope = fs_scope.clone();
     let write_scope = fs_scope;
+    let read_shared = shared.clone();
+    let write_shared = shared.clone();
 
     let result = Client
         .builder()
@@ -597,7 +651,11 @@ pub async fn run(
             async move |req: ReadTextFileRequest,
                         responder: Responder<ReadTextFileResponse>,
                         _cx| {
-                match read_text_file(&read_scope, &req) {
+                let scope = AcpFsScope {
+                    cwd: read_shared.cwd(),
+                    vibe_temp_root: read_scope.vibe_temp_root.clone(),
+                };
+                match read_text_file(&scope, &req) {
                     Ok(content) => responder.respond(ReadTextFileResponse::new(content)),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -608,7 +666,11 @@ pub async fn run(
             async move |req: WriteTextFileRequest,
                         responder: Responder<WriteTextFileResponse>,
                         _cx| {
-                match write_text_file(&write_scope, &req) {
+                let scope = AcpFsScope {
+                    cwd: write_shared.cwd(),
+                    vibe_temp_root: write_scope.vibe_temp_root.clone(),
+                };
+                match write_text_file(&scope, &req) {
                     Ok(()) => responder.respond(WriteTextFileResponse::new()),
                     Err(err) => responder.respond_with_internal_error(err),
                 }
@@ -697,7 +759,7 @@ pub async fn run(
             }
             let mut session_id =
                 load_requested_session(resume, init_resp.agent_capabilities.load_session, |sid| {
-                    let mut load = LoadSessionRequest::new(sid, main_shared.cwd.clone());
+                    let mut load = LoadSessionRequest::new(sid, main_shared.cwd());
                     load.mcp_servers = mcp_servers.clone();
                     load.meta = session_meta.clone();
                     let shared = main_shared.clone();
@@ -722,7 +784,7 @@ pub async fn run(
             }
             if session_id.is_none() {
                 let ensured = ensure_session(&mut session_id, || {
-                    let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                    let mut new_session = NewSessionRequest::new(main_shared.cwd());
                     new_session.mcp_servers = mcp_servers.clone();
                     new_session.meta = session_meta.clone();
                     let shared = main_shared.clone();
@@ -775,7 +837,7 @@ pub async fn run(
                         main_shared.emit(main_shared.snapshot_message());
                         main_shared.emit_status(AgentRunStatus::Streaming);
                         let ensured = ensure_session(&mut session_id, || {
-                            let mut new_session = NewSessionRequest::new(main_shared.cwd.clone());
+                            let mut new_session = NewSessionRequest::new(main_shared.cwd());
                             new_session.mcp_servers = mcp_servers.clone();
                             new_session.meta = session_meta.clone();
                             let shared = main_shared.clone();
@@ -1090,7 +1152,7 @@ async fn create_terminal(
         ..
     } = req;
     let env: Vec<(String, String)> = env.into_iter().map(|var| (var.name, var.value)).collect();
-    let cwd = cwd.unwrap_or_else(|| shared.cwd.clone());
+    let cwd = cwd.unwrap_or_else(|| shared.cwd());
     if !cwd.is_absolute() {
         return Err(format!(
             "acp: terminal cwd must be absolute: {}",
@@ -2171,6 +2233,96 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
+    }
+
+    #[test]
+    fn explicit_workspace_rebind_updates_host_file_scope() {
+        let target = tempfile::tempdir().unwrap();
+        let (shared, _) = test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+
+        shared.rebind_cwd(target.path().to_path_buf()).unwrap();
+
+        assert_eq!(shared.cwd(), target.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn workspace_change_rebinds_runtime_file_operations() {
+        let original = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(original.path())
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        let original_file = original.path().join("original.txt");
+        std::fs::write(&original_file, "original").unwrap();
+        git(&["add", "original.txt"]);
+        git(&["commit", "-qm", "init"]);
+        let worktree_parent = tempfile::tempdir().unwrap();
+        let worktree = worktree_parent.path().join("quiet-amber-wolf");
+        git(&[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "vibe/quiet-amber-wolf",
+            worktree.to_str().unwrap(),
+            "main",
+        ]);
+        let worktree_file = worktree.join("original.txt");
+        let original_file = original_file.canonicalize().unwrap();
+        let worktree_file = worktree_file.canonicalize().unwrap();
+        let (stream_tx, _stream_rx) = broadcast::channel(4);
+        let shared = AcpShared::new(
+            "s1".into(),
+            original.path().canonicalize().unwrap(),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+
+        shared.publish_workspace_change(
+            "quiet-amber-wolf",
+            "vibe/quiet-amber-wolf",
+            worktree.to_str().unwrap(),
+            original.path().to_str().unwrap(),
+        );
+
+        let worktree = worktree.canonicalize().unwrap();
+        assert_eq!(shared.cwd(), worktree);
+        let scope = AcpFsScope {
+            cwd: shared.cwd(),
+            vibe_temp_root: None,
+        };
+        assert_eq!(
+            read_text_file(&scope, &ReadTextFileRequest::new("s1", &worktree_file)),
+            Ok("original".into())
+        );
+        assert_eq!(
+            read_text_file(&scope, &ReadTextFileRequest::new("s1", &original_file)),
+            Err("path outside session cwd".into())
+        );
+
+        let arbitrary = tempfile::tempdir().unwrap();
+        shared.publish_workspace_change(
+            "malicious",
+            "vibe/quiet-amber-wolf",
+            arbitrary.path().to_str().unwrap(),
+            original.path().to_str().unwrap(),
+        );
+
+        assert_eq!(shared.cwd(), worktree);
     }
 
     /// End-to-end of the daemon terminal path: `terminal/create` spawns a real PTY + emits

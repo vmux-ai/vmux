@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
@@ -37,7 +38,8 @@ use crate::events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
     BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, NavAwaitingSnapshot,
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, snapshot_response_to_query_result,
+    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, WorkspacePickerStartRequest,
+    snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -45,10 +47,12 @@ use crate::session::{
 };
 use crate::strategy::AgentStrategies;
 
-pub use vmux_space::cwd::{default_space_dir, space_dir, valid_cwd};
+pub use vmux_space::cwd::valid_cwd;
 
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
+const WORKSPACE_SELECTION_REQUESTED: &str = "Workspace selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const WORKSPACE_SELECTION_PENDING: &str = "Workspace selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
 /// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
 /// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
@@ -197,6 +201,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
+            .add_observer(start_workspace_picker)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
@@ -270,6 +275,8 @@ impl Plugin for AgentPlugin {
                     handle_agent_self_commands
                         .after(vmux_layout::worktree::TabDirectoryRebindSet)
                         .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
+                    drain_workspace_picker_tasks,
+                    send_pending_agent_continuations,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -296,6 +303,9 @@ impl Plugin for AgentPlugin {
                     handle_focus_pane_requests.after(handle_agent_commands),
                     handle_rename_profile_requests.after(handle_agent_commands),
                     respond_process_stack_spawn.after(handle_agent_commands),
+                    prepare_agent_tab_worktrees
+                        .in_set(PageOpenSet::HandleKnownPages)
+                        .before(handle_agent_page_open),
                     handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
                     handle_restart_agent_pty.before(ServiceMessageSet),
                     respond_page_agent_attach,
@@ -497,6 +507,14 @@ pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> Str
 struct SettingsParams<'w> {
     settings: ResMut<'w, AppSettings>,
     writes: MessageWriter<'w, vmux_setting::SettingsWriteRequest>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentPageOpenWorkspace<'w, 's> {
+    active_space: Option<Res<'w, ActiveSpace>>,
+    tabs: Query<'w, 's, &'static vmux_layout::tab::Tab>,
+    spaces: Query<'w, 's, (), With<vmux_layout::space::Space>>,
+    space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
 }
 
 #[derive(Message, Clone)]
@@ -1631,25 +1649,23 @@ fn handle_agent_commands(
                     Err(message) => AgentCommandResult::Error(message),
                     Ok(cwd_opt) => {
                         let activate = !origin_is_agent(&request.origin);
-                        let cwd_path = cwd_opt.unwrap_or_else(|| {
-                            active_space
-                                .as_ref()
-                                .map(|s| {
-                                    vmux_setting::resolve_startup_dir(&sp.settings, &s.record.id)
-                                })
-                                .unwrap_or_else(default_space_dir)
+                        let cwd_path = cwd_opt.or_else(|| {
+                            active_space.as_ref().and_then(|space| {
+                                vmux_setting::resolve_startup_dir(&sp.settings, &space.record.id)
+                            })
                         });
                         if command.trim().is_empty() {
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane,
-                                cwd: Some(cwd_path),
+                                cwd: cwd_path,
                                 shell: None,
                                 agent_run: false,
                                 pending_input: None,
                                 process_id: None,
                                 activate,
                             });
-                        } else {
+                            AgentCommandResult::Ok
+                        } else if let Some(cwd_path) = cwd_path {
                             process_stack_spawn_writer.write(ProcessStackSpawnRequest {
                                 pane,
                                 command: command.clone(),
@@ -1658,8 +1674,12 @@ fn handle_agent_commands(
                                 env: env.clone(),
                                 activate,
                             });
+                            AgentCommandResult::Ok
+                        } else {
+                            AgentCommandResult::Error(
+                                "workspace directory is required to run a command".to_string(),
+                            )
                         }
-                        AgentCommandResult::Ok
                     }
                 },
             },
@@ -1833,6 +1853,8 @@ fn handle_agent_commands(
             | ServiceAgentCommand::Run { .. }
             | ServiceAgentCommand::RunWithPlacementOverride { .. }
             | ServiceAgentCommand::CreateWorktree { .. }
+            | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
             | ServiceAgentCommand::ResumeInAcp { .. } => {
                 continue;
             }
@@ -1856,6 +1878,110 @@ fn resolve_self_pane(
     let stack = term_co.get();
     let pane = child_of_q.get(stack).ok()?.get();
     Some((term, pane))
+}
+
+fn ancestor_self_tab(
+    pane: Entity,
+    tabs: &Query<&mut vmux_layout::tab::Tab>,
+    child_of: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = pane;
+    loop {
+        if tabs.contains(current) {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn ancestor_acp_stack(
+    entity: Entity,
+    sessions: &Query<&mut crate::client::acp::AcpSession>,
+    child_of: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if sessions.contains(current) {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn ancestor_agent_session(
+    entity: Entity,
+    acp_sessions: &Query<&mut crate::client::acp::AcpSession>,
+    page_sessions: &Query<&crate::components::AgentSession>,
+    cli_sessions: &Query<&AgentSession>,
+    child_of: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if acp_sessions.contains(current)
+            || page_sessions.contains(current)
+            || cli_sessions.contains(current)
+        {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn rebind_acp_workspace(
+    stack: Entity,
+    cwd: &Path,
+    sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    commands: &mut Commands,
+) -> Option<ClientMessage> {
+    let Ok(mut session) = sessions.get_mut(stack) else {
+        return None;
+    };
+    session.cwd = cwd.to_path_buf();
+    let cwd = cwd.to_string_lossy().into_owned();
+    commands
+        .entity(stack)
+        .insert(vmux_core::AgentWorkingDir(cwd.clone()));
+    Some(ClientMessage::RebindAcpWorkspace {
+        sid: session.sid.clone(),
+        cwd,
+    })
+}
+
+fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
+    match command {
+        ServiceAgentCommand::OpenBeside { anchor, .. }
+        | ServiceAgentCommand::Run { anchor, .. }
+        | ServiceAgentCommand::RunWithPlacementOverride { anchor, .. }
+        | ServiceAgentCommand::CreateWorktree { anchor }
+        | ServiceAgentCommand::ChooseWorkspace { anchor }
+        | ServiceAgentCommand::CreateWorktreeOnBranch { anchor, .. } => Some(*anchor),
+        _ => None,
+    }
+}
+
+fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
+    if matches!(
+        command,
+        ServiceAgentCommand::CreateWorktree { .. }
+            | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
+    ) {
+        0
+    } else {
+        1
+    }
+}
+
+fn self_command_blocked_by_worktree_failure(
+    command: &ServiceAgentCommand,
+    failed: &std::collections::HashSet<ProcessId>,
+) -> bool {
+    !matches!(
+        command,
+        ServiceAgentCommand::CreateWorktree { .. }
+            | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
+    ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
 
 /// The pane containing the terminal whose `ProcessId` is `pid` (its stack's
@@ -2249,10 +2375,18 @@ fn stored_tab_cwd(tab_cwd: Option<&str>) -> Result<Option<PathBuf>, String> {
     vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
 }
 
+fn process_cwd() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .or_else(|| std::env::current_dir().ok())
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
 fn run_terminal_cwd(
     tab_cwd: Option<&str>,
     agent_launch_cwd: Option<&str>,
-    active_space: Option<&ActiveSpace>,
 ) -> Result<PathBuf, String> {
     if let Some(path) = stored_tab_cwd(tab_cwd)? {
         return Ok(path);
@@ -2260,9 +2394,7 @@ fn run_terminal_cwd(
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return Ok(path);
     }
-    Ok(active_space
-        .map(|s| space_dir(&s.record.id))
-        .unwrap_or_else(default_space_dir))
+    Err("tab and agent workspace directories are missing".to_string())
 }
 
 #[cfg(test)]
@@ -2288,6 +2420,158 @@ struct AgentSelfCommandWriters<'w> {
     terminal_reinput: MessageWriter<'w, vmux_terminal::TerminalReinputRequest>,
 }
 
+#[derive(Component, Clone, Debug)]
+pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct PendingAgentContinuation(String);
+
+#[derive(Component, Clone, Copy)]
+pub(crate) struct PendingWorkspaceSelection {
+    tab_entity: Entity,
+    agent_entity: Entity,
+    session_entity: Entity,
+    picker_started: bool,
+}
+
+#[derive(Component)]
+struct PendingWorkspacePicker {
+    tab_entity: Entity,
+    agent_entity: Entity,
+    session_entity: Entity,
+    task: Task<Option<PathBuf>>,
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct WorkspacePickerContext<'w, 's> {
+    selections: Query<'w, 's, &'static PendingWorkspaceSelection>,
+    pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
+    chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
+    page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
+    cli_sessions: Query<'w, 's, &'static AgentSession>,
+    proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+}
+
+fn workspace_picker_task(
+    proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
+) -> Task<Option<PathBuf>> {
+    let wake = proxy.map(|proxy| (**proxy).clone());
+    IoTaskPool::get().spawn(async move {
+        let selected = rfd::AsyncFileDialog::new()
+            .pick_folder()
+            .await
+            .map(|handle| handle.path().to_path_buf());
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
+        selected
+    })
+}
+
+fn start_workspace_picker(
+    trigger: On<WorkspacePickerStartRequest>,
+    mut selections: Query<&mut PendingWorkspaceSelection>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(mut selection) = selections.get_mut(webview) else {
+        return;
+    };
+    if selection.picker_started {
+        return;
+    }
+    selection.picker_started = true;
+    commands.spawn(PendingWorkspacePicker {
+        tab_entity: selection.tab_entity,
+        agent_entity: selection.agent_entity,
+        session_entity: selection.session_entity,
+        task: workspace_picker_task(proxy.as_deref()),
+    });
+}
+
+fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
+    tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
+    if vmux_layout::worktree::is_generated_tab_name(&tab.name)
+        && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
+        && !name.is_empty()
+    {
+        tab.name = name.to_string();
+    }
+}
+
+fn git_workspace_continuation(path: &Path, branch: &str) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION COMPLETED: The user selected Git project {}. Its current branch is {branch}. Continue the original user request in this same conversation. Do not inspect or modify the project directly yet. If the original request specified a branch, call create_worktree with that exact branch. Otherwise ask the user which new branch to create, then call create_worktree.",
+        path.display()
+    )
+}
+
+fn directory_workspace_continuation(path: &Path) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION COMPLETED: The user selected workspace {}. Continue the original user request in this same conversation using this directory.",
+        path.display()
+    )
+}
+
+fn failed_workspace_continuation(message: &str) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request workspace selection again."
+    )
+}
+
+fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
+    ClientMessage::agent_input(
+        sid.to_string(),
+        String::new(),
+        Some(context.to_string()),
+        Vec::new(),
+    )
+}
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct AgentTabWorktreeContext<'w, 's> {
+    tabs: Query<'w, 's, &'static mut vmux_layout::tab::Tab>,
+    worktrees: Query<'w, 's, &'static vmux_layout::tab::TabWorktree>,
+    workspaces: Query<'w, 's, &'static vmux_layout::tab::TabWorkspace>,
+    pending_projects: Query<'w, 's, &'static PendingAgentProject>,
+    managed_root: Option<Res<'w, vmux_layout::worktree::ManagedWorktreeRoot>>,
+}
+
+fn activate_agent_worktree(
+    tab_entity: Entity,
+    agent_entity: Entity,
+    project_dir: &Path,
+    activation: vmux_layout::worktree::TabWorktreeActivation,
+    tabs: &mut Query<&mut vmux_layout::tab::Tab>,
+    acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    child_of: &Query<&ChildOf>,
+    commands: &mut Commands,
+) -> Result<(PathBuf, Option<ClientMessage>), String> {
+    let execution_dir = activation.execution_dir.clone();
+    {
+        let Ok(mut tab) = tabs.get_mut(tab_entity) else {
+            return Err("tab not found".to_string());
+        };
+        bind_tab_workspace(&mut tab, project_dir, &execution_dir);
+    }
+    commands
+        .entity(tab_entity)
+        .insert((
+            vmux_layout::tab::TabWorkspace {
+                project_dir: project_dir.to_string_lossy().into_owned(),
+            },
+            activation.metadata,
+            activation.ready,
+            vmux_layout::tab::TabDirDecided,
+        ))
+        .remove::<PendingAgentProject>()
+        .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+    let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
+        .and_then(|stack| rebind_acp_workspace(stack, &execution_dir, acp_sessions, commands));
+    Ok((execution_dir, rebind))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
@@ -2302,6 +2586,7 @@ fn handle_agent_self_commands(
         ),
     >,
     launch_q: Query<&TerminalLaunch>,
+    mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
     ctx: vmux_layout::pane::PlacementCtx,
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
@@ -2310,24 +2595,54 @@ fn handle_agent_self_commands(
     settings: Res<AppSettings>,
     mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
-    mut tabs: Query<&mut vmux_layout::tab::Tab>,
-    tab_worktrees: Query<&vmux_layout::tab::TabWorktree>,
+    mut tab_worktree: AgentTabWorktreeContext,
+    workspace_picker: WorkspacePickerContext,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
         for _ in reader.read() {}
         return;
     };
+    let managed_root = tab_worktree
+        .managed_root
+        .as_deref()
+        .cloned()
+        .unwrap_or_default()
+        .0;
     // Anchors split during this batch. Several `run`s dispatched in one tick all
     // resolve to the same agent pane; the first splits it, the rest must extend
     // that split rather than re-split the leaf (which would orphan empty panes).
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
-    let mut worktree_created_this_batch: std::collections::HashSet<Entity> =
-        std::collections::HashSet::new();
+    let mut worktree_created_this_batch: std::collections::HashMap<Entity, String> =
+        std::collections::HashMap::new();
     let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
     let mut pending_run_spawns: std::collections::HashMap<ProcessId, PendingRunTerminalSpawn> =
         std::collections::HashMap::new();
-    for request in reader.read() {
+    let mut failed_worktree_anchors = std::collections::HashSet::new();
+    let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
+        .selections
+        .iter()
+        .map(|selection| selection.tab_entity)
+        .collect();
+    workspace_picker_tabs.extend(
+        workspace_picker
+            .pickers
+            .iter()
+            .map(|picker| picker.tab_entity),
+    );
+    let mut requests: Vec<_> = reader.read().collect();
+    requests.sort_by_key(|request| self_command_priority(&request.command));
+    for request in requests {
+        let request_anchor = self_command_anchor(&request.command);
+        if self_command_blocked_by_worktree_failure(&request.command, &failed_worktree_anchors) {
+            service.0.send(ClientMessage::AgentCommandResponse {
+                request_id: request.request_id,
+                result: AgentCommandResult::Error(
+                    "Skipped because worktree activation did not complete.".to_string(),
+                ),
+            });
+            continue;
+        }
         let result = match &request.command {
             ServiceAgentCommand::OpenBeside {
                 anchor,
@@ -2403,7 +2718,7 @@ fn handle_agent_self_commands(
                         let tab_cwd = {
                             let mut current = self_pane;
                             loop {
-                                if let Ok(tab) = tabs.get(current) {
+                                if let Ok(tab) = tab_worktree.tabs.get(current) {
                                     break tab.startup_dir.clone();
                                 }
                                 match ctx.child_of_q.get(current) {
@@ -2412,12 +2727,19 @@ fn handle_agent_self_commands(
                                 }
                             }
                         };
-                        let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
-                        let cwd = match run_terminal_cwd(
-                            tab_cwd.as_deref(),
-                            agent_cwd.as_deref(),
-                            active_space.as_deref(),
-                        ) {
+                        let agent_cwd = launch_q
+                            .get(agent_term)
+                            .ok()
+                            .map(|launch| launch.cwd.clone())
+                            .or_else(|| {
+                                let stack =
+                                    ancestor_acp_stack(agent_term, &acp_sessions, &ctx.child_of_q)?;
+                                acp_sessions
+                                    .get(stack)
+                                    .ok()
+                                    .map(|session| session.cwd.to_string_lossy().into_owned())
+                            });
+                        let cwd = match run_terminal_cwd(tab_cwd.as_deref(), agent_cwd.as_deref()) {
                             Ok(cwd) => cwd,
                             Err(message) => break 'spawn AgentCommandResult::Error(message),
                         };
@@ -2597,13 +2919,66 @@ fn handle_agent_self_commands(
                     }
                 }
             }
+            ServiceAgentCommand::ChooseWorkspace { anchor } => {
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, pane)) => {
+                        let Some(tab_entity) =
+                            ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        else {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error("no tab for agent".to_string()),
+                            });
+                            continue;
+                        };
+                        let Some(session_entity) = ancestor_agent_session(
+                            agent_entity,
+                            &acp_sessions,
+                            &workspace_picker.page_sessions,
+                            &workspace_picker.cli_sessions,
+                            &ctx.child_of_q,
+                        ) else {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "agent session not found".to_string(),
+                                ),
+                            });
+                            continue;
+                        };
+                        if !workspace_picker_tabs.insert(tab_entity) {
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
+                        } else if workspace_picker.chat_views.contains(agent_entity) {
+                            commands
+                                .entity(agent_entity)
+                                .insert(PendingWorkspaceSelection {
+                                    tab_entity,
+                                    agent_entity,
+                                    session_entity,
+                                    picker_started: false,
+                                })
+                                .remove::<crate::chat_page::ChatSynced>();
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
+                        } else {
+                            commands.spawn(PendingWorkspacePicker {
+                                tab_entity,
+                                agent_entity,
+                                session_entity,
+                                task: workspace_picker_task(workspace_picker.proxy.as_deref()),
+                            });
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
+                        }
+                    }
+                }
+            }
             ServiceAgentCommand::CreateWorktree { anchor } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
                     Some((_, pane)) => {
                         let mut cur = pane;
                         let tab_e = loop {
-                            if tabs.get(cur).is_ok() {
+                            if tab_worktree.tabs.get(cur).is_ok() {
                                 break Some(cur);
                             }
                             match ctx.child_of_q.get(cur) {
@@ -2614,11 +2989,14 @@ fn handle_agent_self_commands(
                         match tab_e {
                             None => AgentCommandResult::Error("no tab for agent".to_string()),
                             Some(tab_e)
-                                if tab_worktrees.get(tab_e).is_ok()
-                                    || worktree_created_this_batch.contains(&tab_e) =>
+                                if tab_worktree.worktrees.get(tab_e).is_ok()
+                                    || worktree_created_this_batch.contains_key(&tab_e) =>
                             {
-                                let tab_dir =
-                                    tabs.get(tab_e).ok().and_then(|t| t.startup_dir.clone());
+                                let tab_dir = tab_worktree
+                                    .tabs
+                                    .get(tab_e)
+                                    .ok()
+                                    .and_then(|t| t.startup_dir.clone());
                                 match stored_tab_cwd(tab_dir.as_deref()) {
                                     Ok(Some(path)) => AgentCommandResult::Text(
                                         path.to_string_lossy().into_owned(),
@@ -2630,42 +3008,93 @@ fn handle_agent_self_commands(
                                 }
                             }
                             Some(tab_e) => {
-                                let tab_dir =
-                                    tabs.get(tab_e).ok().and_then(|t| t.startup_dir.clone());
-                                let name =
-                                    tabs.get(tab_e).map(|t| t.name.clone()).unwrap_or_default();
-                                let space_id = active_space
-                                    .as_deref()
-                                    .map(|s| s.record.id.clone())
+                                let tab_dir = tab_worktree
+                                    .tabs
+                                    .get(tab_e)
+                                    .ok()
+                                    .and_then(|t| t.startup_dir.clone());
+                                let name = tab_worktree
+                                    .tabs
+                                    .get(tab_e)
+                                    .map(|t| t.name.clone())
                                     .unwrap_or_default();
                                 match stored_tab_cwd(tab_dir.as_deref()) {
                                     Err(message) => AgentCommandResult::Error(message),
-                                    Ok(stored) => {
-                                        let base_dir = stored.unwrap_or_else(|| {
-                                            vmux_setting::resolve_startup_dir(&settings, &space_id)
-                                        });
-                                        match vmux_layout::worktree::create_worktree_blocking(
-                                            &base_dir, &name,
-                                        ) {
-                                            Ok(info) => {
-                                                let path = info.path.to_string_lossy().into_owned();
-                                                if let Ok(mut t) = tabs.get_mut(tab_e) {
-                                                    t.startup_dir = Some(path.clone());
-                                                }
+                                    Ok(stored) => 'create_worktree: {
+                                        let configured_dir =
+                                            active_space.as_deref().and_then(|space| {
+                                                vmux_setting::resolve_startup_dir(
+                                                    &settings,
+                                                    &space.record.id,
+                                                )
+                                            });
+                                        let workspace_dir =
+                                            tab_worktree.workspaces.get(tab_e).ok().and_then(
+                                                |workspace| {
+                                                    stored_tab_cwd(Some(&workspace.project_dir))
+                                                        .ok()
+                                                        .flatten()
+                                                },
+                                            );
+                                        let Some(current_dir) = stored
+                                            .or(configured_dir)
+                                            .or_else(|| workspace_dir.clone())
+                                        else {
+                                            break 'create_worktree AgentCommandResult::Error(
+                                                "tab workspace directory is missing".to_string(),
+                                            );
+                                        };
+                                        if vmux_git::worktree::is_linked_worktree(&current_dir) {
+                                            AgentCommandResult::Text(
+                                                current_dir.to_string_lossy().into_owned(),
+                                            )
+                                        } else {
+                                            let base_dir = workspace_dir
+                                                .unwrap_or_else(|| current_dir.clone());
+                                            if tab_worktree.workspaces.get(tab_e).is_err() {
                                                 commands.entity(tab_e).insert(
-                                                    vmux_layout::tab::TabWorktree {
-                                                        repo_root: info
-                                                            .repo_root
+                                                    vmux_layout::tab::TabWorkspace {
+                                                        project_dir: base_dir
                                                             .to_string_lossy()
                                                             .into_owned(),
-                                                        branch: info.branch.clone(),
-                                                        base_ref: info.base_ref.clone(),
                                                     },
                                                 );
-                                                worktree_created_this_batch.insert(tab_e);
-                                                AgentCommandResult::Text(path)
                                             }
-                                            Err(e) => AgentCommandResult::Error(e),
+                                            let slug_hint =
+                                                vmux_layout::worktree::tab_worktree_slug_hint(
+                                                    &name, &base_dir,
+                                                );
+                                            match vmux_layout::worktree::create_worktree_blocking(
+                                                &base_dir,
+                                                &slug_hint,
+                                                &managed_root,
+                                            ) {
+                                                Ok(activation) => {
+                                                    let branch = activation.metadata.branch.clone();
+                                                    let path = activation
+                                                        .execution_dir
+                                                        .to_string_lossy()
+                                                        .into_owned();
+                                                    if let Ok(mut t) =
+                                                        tab_worktree.tabs.get_mut(tab_e)
+                                                    {
+                                                        t.startup_dir = Some(path.clone());
+                                                    }
+                                                    commands
+                                                        .entity(tab_e)
+                                                        .insert((
+                                                            activation.metadata,
+                                                            activation.ready,
+                                                        ))
+                                                        .remove::<
+                                                            vmux_layout::tab::TabWorktreeUnavailable,
+                                                        >();
+                                                    worktree_created_this_batch
+                                                        .insert(tab_e, branch);
+                                                    AgentCommandResult::Text(path)
+                                                }
+                                                Err(e) => AgentCommandResult::Error(e),
+                                            }
                                         }
                                     }
                                 }
@@ -2674,8 +3103,117 @@ fn handle_agent_self_commands(
                     }
                 }
             }
+            ServiceAgentCommand::CreateWorktreeOnBranch { anchor, branch } => {
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, pane)) => {
+                        let Some(tab_entity) =
+                            ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                        else {
+                            failed_worktree_anchors.insert(*anchor);
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error("no tab for agent".to_string()),
+                            });
+                            continue;
+                        };
+                        let existing_branch = tab_worktree
+                            .worktrees
+                            .get(tab_entity)
+                            .ok()
+                            .map(|worktree| worktree.branch.clone())
+                            .or_else(|| worktree_created_this_batch.get(&tab_entity).cloned());
+                        if let Some(existing_branch) = existing_branch {
+                            if existing_branch != *branch {
+                                AgentCommandResult::Error(format!(
+                                    "Tab already has a worktree on branch {existing_branch}; requested {branch}"
+                                ))
+                            } else {
+                                let path = tab_worktree
+                                    .tabs
+                                    .get(tab_entity)
+                                    .ok()
+                                    .and_then(|tab| tab.startup_dir.clone());
+                                match path {
+                                    Some(path) => AgentCommandResult::Text(path),
+                                    None => AgentCommandResult::Error(
+                                        "tab worktree directory is missing".to_string(),
+                                    ),
+                                }
+                            }
+                        } else {
+                            let base_dir = tab_worktree
+                                .pending_projects
+                                .get(tab_entity)
+                                .ok()
+                                .map(|project| project.0.clone())
+                                .or_else(|| {
+                                    tab_worktree.workspaces.get(tab_entity).ok().and_then(
+                                        |workspace| {
+                                            stored_tab_cwd(Some(&workspace.project_dir))
+                                                .ok()
+                                                .flatten()
+                                        },
+                                    )
+                                });
+                            let Some(base_dir) = base_dir else {
+                                failed_worktree_anchors.insert(*anchor);
+                                service.0.send(ClientMessage::AgentCommandResponse {
+                                    request_id: request.request_id,
+                                    result: AgentCommandResult::Error(
+                                        "No project selected. Call choose_workspace first."
+                                            .to_string(),
+                                    ),
+                                });
+                                continue;
+                            };
+                            match vmux_layout::worktree::create_worktree_for_branch_blocking(
+                                &base_dir,
+                                branch,
+                                &managed_root,
+                            ) {
+                                Ok(activation) => match activate_agent_worktree(
+                                    tab_entity,
+                                    agent_entity,
+                                    &base_dir,
+                                    activation,
+                                    &mut tab_worktree.tabs,
+                                    &mut acp_sessions,
+                                    &ctx.child_of_q,
+                                    &mut commands,
+                                ) {
+                                    Ok((execution_dir, rebind)) => {
+                                        if let Some(message) = rebind {
+                                            service.0.send(message);
+                                        }
+                                        worktree_created_this_batch
+                                            .insert(tab_entity, branch.clone());
+                                        let path = execution_dir.to_string_lossy().into_owned();
+                                        AgentCommandResult::Text(format!(
+                                            "Worktree ready: {path}\nContinue the user's request in this directory."
+                                        ))
+                                    }
+                                    Err(error) => AgentCommandResult::Error(error),
+                                },
+                                Err(error) => AgentCommandResult::Error(error),
+                            }
+                        }
+                    }
+                }
+            }
             _ => continue,
         };
+        if matches!(
+            (&request.command, &result),
+            (
+                ServiceAgentCommand::CreateWorktree { .. }
+                    | ServiceAgentCommand::CreateWorktreeOnBranch { .. },
+                AgentCommandResult::Error(_)
+            )
+        ) && let Some(anchor) = request_anchor
+        {
+            failed_worktree_anchors.insert(anchor);
+        }
         service.0.send(ClientMessage::AgentCommandResponse {
             request_id: request.request_id,
             result,
@@ -2683,6 +3221,131 @@ fn handle_agent_self_commands(
     }
     for spawn in terminal_spawns {
         writers.terminal_stack_spawn.write(spawn);
+    }
+}
+
+fn drain_workspace_picker_tasks(
+    mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
+    workspace_selections: Query<(), With<PendingWorkspaceSelection>>,
+    mut tabs: Query<&mut vmux_layout::tab::Tab>,
+    mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
+    child_of: Query<&ChildOf>,
+    mut commands: Commands,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    for (picker_entity, mut picker) in &mut pickers {
+        let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
+            continue;
+        };
+        let continuation = match selected {
+            None => failed_workspace_continuation("The user cancelled workspace selection"),
+            Some(selected) => match selected.canonicalize() {
+                Ok(selected) if selected.is_dir() => {
+                    if tabs.get(picker.tab_entity).is_err() {
+                        failed_workspace_continuation("The workspace tab no longer exists")
+                    } else if let Ok(checkout) = vmux_git::worktree::checkout_info(&selected) {
+                        let branch = vmux_git::worktree::head_ref(&checkout.root)
+                            .unwrap_or_else(|_| "unknown".to_string());
+                        commands
+                            .entity(picker.tab_entity)
+                            .insert(PendingAgentProject(selected.clone()));
+                        git_workspace_continuation(&selected, &branch)
+                    } else {
+                        if let Ok(mut tab) = tabs.get_mut(picker.tab_entity) {
+                            bind_tab_workspace(&mut tab, &selected, &selected);
+                        }
+                        let path = selected.to_string_lossy().into_owned();
+                        commands
+                            .entity(picker.tab_entity)
+                            .insert((
+                                vmux_layout::tab::TabWorkspace {
+                                    project_dir: path.clone(),
+                                },
+                                vmux_layout::tab::TabDirDecided,
+                            ))
+                            .remove::<PendingAgentProject>()
+                            .remove::<vmux_layout::tab::TabWorktree>()
+                            .remove::<vmux_layout::worktree::TabWorktreeReady>()
+                            .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                        if let Some(stack) =
+                            ancestor_acp_stack(picker.agent_entity, &acp_sessions, &child_of)
+                            && let Some(message) = rebind_acp_workspace(
+                                stack,
+                                &selected,
+                                &mut acp_sessions,
+                                &mut commands,
+                            )
+                        {
+                            service.0.send(message);
+                        }
+                        directory_workspace_continuation(Path::new(&path))
+                    }
+                }
+                Ok(_) => failed_workspace_continuation("The selected workspace is not a directory"),
+                Err(error) => failed_workspace_continuation(&format!(
+                    "The selected workspace directory is invalid: {error}"
+                )),
+            },
+        };
+        commands
+            .entity(picker.session_entity)
+            .insert(PendingAgentContinuation(continuation));
+        if workspace_selections.contains(picker.agent_entity) {
+            commands
+                .entity(picker.agent_entity)
+                .remove::<PendingWorkspaceSelection>()
+                .remove::<crate::chat_page::ChatSynced>();
+        }
+        commands.entity(picker_entity).despawn();
+    }
+}
+
+fn send_pending_agent_continuations(
+    mut sessions: Query<(
+        Entity,
+        &PendingAgentContinuation,
+        Option<&crate::client::acp::AcpSession>,
+        Option<&crate::components::AgentSession>,
+        Option<&AgentSession>,
+        Option<&mut crate::run_state::AgentRunState>,
+    )>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
+    for (entity, continuation, acp, page, cli, state) in &mut sessions {
+        if cli.is_some() {
+            commands
+                .entity(entity)
+                .insert(vmux_terminal::BufferedAgentPrompt {
+                    text: continuation.0.clone(),
+                    submit: true,
+                })
+                .remove::<PendingAgentContinuation>();
+            continue;
+        }
+        let Some(service) = service.as_deref() else {
+            continue;
+        };
+        let sid = acp
+            .map(|session| session.sid.as_str())
+            .or_else(|| page.map(|session| session.sid.as_str()));
+        let (Some(sid), Some(mut state)) = (sid, state) else {
+            continue;
+        };
+        if !matches!(
+            *state,
+            crate::run_state::AgentRunState::Idle | crate::run_state::AgentRunState::Errored(_)
+        ) {
+            continue;
+        }
+        service
+            .0
+            .send(chat_agent_continuation_message(sid, &continuation.0));
+        *state = crate::run_state::AgentRunState::Streaming;
+        commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }
 
@@ -3060,6 +3723,236 @@ fn forward_record_stop_responses(
     }
 }
 
+fn agent_url_uses_local_workspace(url: &str) -> bool {
+    if AgentKind::all()
+        .into_iter()
+        .any(|kind| url == kind.setup_url())
+    {
+        return false;
+    }
+    crate::AgentUrl::parse(url).is_some()
+}
+
+fn ancestor_tab_entity(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<(
+        Entity,
+        &mut vmux_layout::tab::Tab,
+        Option<&vmux_layout::tab::TabWorkspace>,
+        Option<&vmux_layout::tab::TabWorktree>,
+        Option<&vmux_layout::worktree::TabWorktreeReady>,
+        Option<&vmux_layout::tab::TabDirDecided>,
+    )>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if tabs.contains(current) {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn ancestor_agent_tab(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<&vmux_layout::tab::Tab>,
+) -> Option<(Entity, Option<String>)> {
+    let mut current = entity;
+    loop {
+        if let Ok(tab) = tabs.get(current) {
+            return Some((current, tab.startup_dir.clone()));
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn resolved_space_startup_dir(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    spaces: &Query<(), With<vmux_layout::space::Space>>,
+    space_ids: &Query<&vmux_layout::space::SpaceId>,
+    settings: &AppSettings,
+    active_space: Option<&ActiveSpace>,
+) -> Option<(PathBuf, vmux_setting::DirSource)> {
+    let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
+        .or_else(|| active_space.map(|space| space.record.id.clone()))?;
+    vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &space_id, None)
+}
+
+fn prepare_agent_tab_worktrees(
+    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
+    child_of: Query<&ChildOf>,
+    spaces: Query<(), With<vmux_layout::space::Space>>,
+    space_ids: Query<&vmux_layout::space::SpaceId>,
+    mut tabs: Query<(
+        Entity,
+        &mut vmux_layout::tab::Tab,
+        Option<&vmux_layout::tab::TabWorkspace>,
+        Option<&vmux_layout::tab::TabWorktree>,
+        Option<&vmux_layout::worktree::TabWorktreeReady>,
+        Option<&vmux_layout::tab::TabDirDecided>,
+    )>,
+    settings: Option<Res<AppSettings>>,
+    active_space: Option<Res<ActiveSpace>>,
+    managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
+    mut commands: Commands,
+) {
+    let managed_root = managed_root.as_deref().cloned().unwrap_or_default().0;
+    let mut outcomes: std::collections::HashMap<Entity, Result<(), String>> =
+        std::collections::HashMap::new();
+    for (task_entity, task) in &tasks {
+        if !agent_url_uses_local_workspace(&task.url) {
+            continue;
+        }
+        let Some(tab_entity) = ancestor_tab_entity(task.stack, &child_of, &tabs) else {
+            continue;
+        };
+        let configured_project_dir = settings.as_deref().and_then(|settings| {
+            resolved_space_startup_dir(
+                task.stack,
+                &child_of,
+                &spaces,
+                &space_ids,
+                settings,
+                active_space.as_deref(),
+            )
+            .map(|(path, _)| path.to_string_lossy().into_owned())
+        });
+        let outcome = if let Some(outcome) = outcomes.get(&tab_entity) {
+            outcome.clone()
+        } else {
+            let outcome = match tabs.get_mut(tab_entity) {
+                Err(_) => Ok(()),
+                Ok((_, mut tab, workspace, metadata, ready, decided)) => {
+                    let has_workspace = workspace.is_some();
+                    let workspace = workspace.cloned().unwrap_or_else(|| {
+                        let project_dir = metadata
+                            .map(|metadata| metadata.repo_root.clone())
+                            .filter(|path| !path.is_empty())
+                            .or_else(|| tab.startup_dir.clone())
+                            .or_else(|| configured_project_dir.clone())
+                            .unwrap_or_default();
+                        vmux_layout::tab::TabWorkspace { project_dir }
+                    });
+                    if workspace.project_dir.is_empty() {
+                        Ok(())
+                    } else if metadata.is_none()
+                        && stored_tab_cwd(tab.startup_dir.as_deref())
+                            .ok()
+                            .flatten()
+                            .is_none()
+                        && stored_tab_cwd(Some(&workspace.project_dir))
+                            .ok()
+                            .flatten()
+                            .is_none()
+                    {
+                        tab.startup_dir = None;
+                        commands
+                            .entity(tab_entity)
+                            .remove::<vmux_layout::tab::TabWorkspace>()
+                            .remove::<vmux_layout::tab::TabDirDecided>()
+                            .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                        Ok(())
+                    } else {
+                        if !has_workspace {
+                            commands.entity(tab_entity).insert(workspace.clone());
+                        }
+                        let result = if let Some(metadata) = metadata {
+                            if ready
+                                .is_some_and(|ready| ready.is_current(&tab, &workspace, metadata))
+                            {
+                                Ok(())
+                            } else {
+                                vmux_layout::worktree::ensure_tab_worktree_available(
+                                    &tab,
+                                    &workspace,
+                                    metadata,
+                                    &managed_root,
+                                )
+                                .map(|activation| {
+                                    tab.startup_dir = Some(
+                                        activation.execution_dir.to_string_lossy().into_owned(),
+                                    );
+                                    let mut entity = commands.entity(tab_entity);
+                                    if metadata != &activation.metadata {
+                                        entity.insert(activation.metadata);
+                                    }
+                                    entity.insert(activation.ready);
+                                })
+                            }
+                        } else if decided.is_some() {
+                            Ok(())
+                        } else {
+                            let current_dir = tab
+                                .startup_dir
+                                .as_deref()
+                                .map(Path::new)
+                                .and_then(|path| path.canonicalize().ok());
+                            if current_dir
+                                .as_deref()
+                                .is_some_and(vmux_git::worktree::is_linked_worktree)
+                            {
+                                Ok(())
+                            } else {
+                                let project_dir = PathBuf::from(&workspace.project_dir);
+                                if vmux_git::worktree::checkout_info(&project_dir).is_err() {
+                                    Ok(())
+                                } else {
+                                    let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(
+                                        &tab.name,
+                                        &project_dir,
+                                    );
+                                    vmux_layout::worktree::create_worktree_blocking(
+                                        &project_dir,
+                                        &slug_hint,
+                                        &managed_root,
+                                    )
+                                    .map(|activation| {
+                                        tab.startup_dir = Some(
+                                            activation.execution_dir.to_string_lossy().into_owned(),
+                                        );
+                                        commands.entity(tab_entity).insert((
+                                            activation.metadata,
+                                            activation.ready,
+                                            vmux_layout::tab::TabDirDecided,
+                                        ));
+                                    })
+                                }
+                            }
+                        };
+                        match result {
+                            Ok(()) => {
+                                commands
+                                    .entity(tab_entity)
+                                    .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
+                                Ok(())
+                            }
+                            Err(message) => {
+                                commands
+                                    .entity(tab_entity)
+                                    .insert(vmux_layout::tab::TabWorktreeUnavailable {
+                                        message: message.clone(),
+                                    })
+                                    .remove::<vmux_layout::worktree::TabWorktreeReady>();
+                                Err(message)
+                            }
+                        }
+                    }
+                }
+            };
+            outcomes.insert(tab_entity, outcome.clone());
+            outcome
+        };
+        if let Err(message) = outcome {
+            commands
+                .entity(task_entity)
+                .insert(PageOpenError { message });
+        }
+    }
+}
+
 fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask), PendingPageOpen>,
@@ -3077,8 +3970,7 @@ fn handle_agent_page_open(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: Res<AppSettings>,
-    active_space: Option<Res<ActiveSpace>>,
-    tabs: Query<&vmux_layout::tab::Tab>,
+    workspace: AgentPageOpenWorkspace,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
@@ -3090,13 +3982,23 @@ fn handle_agent_page_open(
         if !task.url.starts_with("vmux://agent/") {
             continue;
         }
-        let tab_dir = vmux_layout::tab::ancestor_tab_startup_dir(task.stack, &child_of_q, &tabs);
+        let tab = ancestor_agent_tab(task.stack, &child_of_q, &workspace.tabs);
+        let tab_dir = tab
+            .as_ref()
+            .and_then(|(_, startup_dir)| startup_dir.clone());
+        let space_startup_dir = resolved_space_startup_dir(
+            task.stack,
+            &child_of_q,
+            &workspace.spaces,
+            &workspace.space_ids,
+            &settings,
+            workspace.active_space.as_deref(),
+        );
         let default_cwd = match stored_tab_cwd(tab_dir.as_deref()) {
             Ok(Some(path)) => path,
-            Ok(None) => active_space
-                .as_deref()
-                .map(|s| vmux_setting::resolve_startup_dir(&settings, &s.record.id))
-                .unwrap_or_else(default_space_dir),
+            Ok(None) => space_startup_dir
+                .map(|(path, _)| path)
+                .unwrap_or_else(process_cwd),
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
                 continue;
@@ -3881,6 +4783,231 @@ fn handle_restart_agent_pty(
 mod tests {
     use super::*;
 
+    fn init_worktree_test_repo() -> tempfile::TempDir {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .current_dir(repo.path())
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.path().join("seed.txt"), "seed\n").unwrap();
+        git(&["add", "seed.txt"]);
+        git(&["commit", "-qm", "init"]);
+        repo
+    }
+
+    #[test]
+    fn create_worktree_precedes_and_gates_sibling_self_commands() {
+        let anchor = ProcessId::new();
+        let create = ServiceAgentCommand::CreateWorktreeOnBranch {
+            anchor,
+            branch: "feature/test".into(),
+        };
+        let sibling = ServiceAgentCommand::OpenBeside {
+            anchor,
+            direction: None,
+            url: "https://example.com".into(),
+            focus: false,
+        };
+        assert!(self_command_priority(&create) < self_command_priority(&sibling));
+        let failed = std::collections::HashSet::from([anchor]);
+        assert!(!self_command_blocked_by_worktree_failure(&create, &failed));
+        assert!(self_command_blocked_by_worktree_failure(&sibling, &failed));
+    }
+
+    #[test]
+    fn workspace_selection_continuations_resume_original_request() {
+        let git = git_workspace_continuation(Path::new("/repo/dashboard"), "main");
+        let directory = directory_workspace_continuation(Path::new("/tmp/project"));
+        let cancelled = failed_workspace_continuation("The user cancelled workspace selection");
+
+        assert!(git.contains("same conversation"));
+        assert!(git.contains("ask the user which new branch"));
+        assert!(git.contains("create_worktree"));
+        assert!(directory.contains("same conversation"));
+        assert!(directory.contains("/tmp/project"));
+        assert!(cancelled.contains("Do not retry automatically"));
+    }
+
+    #[test]
+    fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, send_pending_agent_continuations);
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Codex,
+                },
+                PendingAgentContinuation("continue original request".to_string()),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<PendingAgentContinuation>(entity)
+                .is_none()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_terminal::BufferedAgentPrompt>(entity)
+                .unwrap(),
+            &vmux_terminal::BufferedAgentPrompt {
+                text: "continue original request".to_string(),
+                submit: true,
+            }
+        );
+    }
+
+    #[test]
+    fn chat_workspace_continuation_is_private_same_session_input() {
+        assert!(matches!(
+            chat_agent_continuation_message("sid-1", "continue original request"),
+            ClientMessage::AgentInput { sid, text, context }
+                if sid == "sid-1"
+                    && text.is_empty()
+                    && context.as_deref() == Some("continue original request")
+        ));
+    }
+
+    #[test]
+    fn worktree_activation_rebinds_existing_acp_session_without_replacing_view() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let repo = init_worktree_test_repo();
+        let project_dir = repo.path().canonicalize().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let activation = vmux_layout::worktree::create_worktree_for_branch_blocking(
+            &project_dir,
+            "feature/fun-terminal",
+            managed_root.path(),
+        )
+        .unwrap();
+        let execution_dir = activation.execution_dir.clone();
+        let anchor = ProcessId::new();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Tab 1".into(),
+                    startup_dir: None,
+                },
+                PendingAgentProject(project_dir.clone()),
+            ))
+            .id();
+        let pane = app.world_mut().spawn(ChildOf(tab)).id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                crate::client::acp::AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "routing-session".into(),
+                    cwd: process_cwd(),
+                    anchor,
+                    resume: None,
+                },
+                vmux_core::AgentWorkingDir(process_cwd().to_string_lossy().into_owned()),
+                ChildOf(pane),
+            ))
+            .id();
+        let view = app
+            .world_mut()
+            .spawn((crate::chat_page::AgentChatView, anchor, ChildOf(stack)))
+            .id();
+
+        let project_for_system = project_dir.clone();
+        let rebind = app
+            .world_mut()
+            .run_system_once(
+                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
+                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      child_of: Query<&ChildOf>,
+                      mut commands: Commands| {
+                    activate_agent_worktree(
+                        tab,
+                        view,
+                        &project_for_system,
+                        activation.clone(),
+                        &mut tabs,
+                        &mut sessions,
+                        &child_of,
+                        &mut commands,
+                    )
+                },
+            )
+            .unwrap()
+            .unwrap()
+            .1
+            .unwrap();
+
+        let tab_state = app.world().get::<vmux_layout::tab::Tab>(tab).unwrap();
+        assert_eq!(
+            tab_state.startup_dir.as_deref(),
+            Some(execution_dir.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .unwrap()
+                .project_dir,
+            project_dir.to_string_lossy()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .unwrap()
+                .branch,
+            "feature/fun-terminal"
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::worktree::TabWorktreeReady>(tab)
+                .is_some()
+        );
+        assert!(app.world().get::<PendingAgentProject>(tab).is_none());
+        let session = app
+            .world()
+            .get::<crate::client::acp::AcpSession>(stack)
+            .unwrap();
+        assert_eq!(session.sid, "routing-session");
+        assert_eq!(session.anchor, anchor);
+        assert_eq!(session.cwd, execution_dir);
+        assert_eq!(
+            app.world()
+                .get::<vmux_core::AgentWorkingDir>(stack)
+                .unwrap()
+                .0,
+            execution_dir.to_string_lossy()
+        );
+        assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
+        assert!(
+            app.world()
+                .get::<crate::chat_page::AgentChatView>(view)
+                .is_some()
+        );
+        assert!(matches!(
+            rebind,
+            ClientMessage::RebindAcpWorkspace { sid, cwd }
+                if sid == "routing-session" && cwd == execution_dir.to_string_lossy()
+        ));
+    }
+
     fn swap_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -4552,7 +5679,7 @@ mod tests {
             for request in reader.read() {
                 if matches!(request.command, ServiceAgentCommand::Run { .. }) {
                     let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None, None).ok();
+                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None).ok();
                 }
             }
         }
@@ -5386,6 +6513,454 @@ mod tests {
     }
 
     #[test]
+    fn first_local_agent_open_creates_and_reuses_one_tab_worktree() {
+        let repo = init_worktree_test_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let project_dir = repo.path().canonicalize().unwrap();
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Feature".into(),
+                startup_dir: Some(project_dir.to_string_lossy().into_owned()),
+            })
+            .id();
+        let first_stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack: first_stack,
+            url: "vmux://agent/claude/cli".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let first_dir = PathBuf::from(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir
+                .as_deref()
+                .unwrap(),
+        );
+        assert!(first_dir.starts_with(managed_root.path().canonicalize().unwrap()));
+        let canonical_first_dir = first_dir.canonicalize().unwrap();
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .is_some()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .unwrap()
+                .project_dir,
+            project_dir.to_string_lossy()
+        );
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            2
+        );
+        let first_spawns: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(first_spawns.len(), 1);
+        assert_eq!(first_spawns[0].cwd, canonical_first_dir);
+
+        let second_stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack: second_stack,
+            url: "vmux://agent/codex/cli".to_string(),
+            request_id: None,
+        });
+        app.update();
+
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            2
+        );
+        let second_dir = Path::new(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir
+                .as_deref()
+                .unwrap(),
+        )
+        .canonicalize()
+        .unwrap();
+        assert_eq!(second_dir, canonical_first_dir);
+    }
+
+    #[test]
+    fn explicit_work_here_decision_skips_managed_worktree() {
+        let repo = init_worktree_test_repo();
+        let project_dir = repo.path().canonicalize().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Dashboard".into(),
+                    startup_dir: Some(project_dir.to_string_lossy().into_owned()),
+                },
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: project_dir.to_string_lossy().into_owned(),
+                },
+                vmux_layout::tab::TabDirDecided,
+            ))
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/cli".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .is_none()
+        );
+        let spawns: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, project_dir);
+    }
+
+    #[test]
+    fn local_agent_open_preserves_existing_linked_worktree() {
+        let repo = init_worktree_test_repo();
+        let linked = repo.path().join(".worktrees/existing");
+        vmux_git::worktree::worktree_add(repo.path(), &linked, "existing", "main").unwrap();
+        let linked = linked.canonicalize().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Existing".into(),
+                startup_dir: Some(linked.to_string_lossy().into_owned()),
+            })
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/cli".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .is_none()
+        );
+        let spawns: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, linked);
+    }
+
+    #[test]
+    fn browser_only_tab_creates_no_worktree() {
+        let repo = init_worktree_test_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .add_systems(Update, prepare_agent_tab_worktrees);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Browser".into(),
+                startup_dir: Some(repo.path().to_string_lossy().into_owned()),
+            })
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "https://example.com".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn agent_tab_without_workspace_starts_in_home_without_binding_tab() {
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Tab 1".into(),
+                startup_dir: None,
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                PendingAgentPrompt("Show me something fun in terminal".into()),
+                ChildOf(tab),
+            ))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://agent/codex/cli".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let spawns: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, process_cwd());
+        assert_eq!(
+            spawns[0].initial_prompt.as_deref(),
+            Some("Show me something fun in terminal")
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn acp_tab_without_workspace_attaches_once_without_setup_page() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Tab 1".into(),
+                startup_dir: None,
+            })
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                PendingAgentPrompt("Show me something fun in terminal".into()),
+                ChildOf(tab),
+            ))
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let session = app
+            .world()
+            .get::<crate::client::acp::AcpSession>(stack)
+            .unwrap();
+        assert_eq!(session.cwd, process_cwd());
+        assert_eq!(
+            app.world()
+                .get::<crate::components::PromptQueue>(stack)
+                .unwrap()
+                .items
+                .front()
+                .map(|item| item.text.as_str()),
+            Some("Show me something fun in terminal")
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .is_none()
+        );
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<&ChildOf, With<crate::chat_page::AgentChatView>>()
+                .iter(app.world())
+                .filter(|child_of| child_of.parent() == stack)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn acp_open_discards_missing_restored_tab_workspace() {
+        let missing = std::env::temp_dir().join(format!(
+            "vmux-missing-restored-workspace-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let stale = missing.to_string_lossy().into_owned();
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Tab 1".into(),
+                    startup_dir: Some(stale.clone()),
+                },
+                vmux_layout::tab::TabWorkspace { project_dir: stale },
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: vmux_core::PageOpenId::new(),
+                stack,
+                url: "vmux://agent/codex".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        assert!(app.world().get::<PageOpenError>(task).is_none());
+        assert_eq!(
+            app.world()
+                .get::<crate::client::acp::AcpSession>(stack)
+                .unwrap()
+                .cwd,
+            process_cwd()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::Tab>(tab)
+                .unwrap()
+                .startup_dir,
+            None
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn fresh_claude_page_uses_space_startup_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-startup-dir-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -5441,6 +7016,79 @@ mod tests {
             spawns[0].cwd, dir,
             "claude page cwd resolves to space startup_dir"
         );
+    }
+
+    #[test]
+    fn restored_agent_tab_uses_ancestor_space_startup_dir() {
+        let active_dir = tempfile::tempdir().unwrap();
+        let restored_dir = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        settings.spaces.insert(
+            "active".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(active_dir.path().to_string_lossy().into()),
+            },
+        );
+        settings.spaces.insert(
+            "restored".into(),
+            vmux_setting::SpaceOverrides {
+                startup_url: None,
+                startup_dir: Some(restored_dir.path().to_string_lossy().into()),
+            },
+        );
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_space::spaces::ActiveSpace {
+                record: vmux_space::model::SpaceRecord {
+                    id: "active".into(),
+                    name: "Active".into(),
+                    profile: "Personal".into(),
+                },
+            })
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let space = app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId("restored".into()),
+            ))
+            .id();
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Legacy".into(),
+                    startup_dir: None,
+                },
+                ChildOf(space),
+            ))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(tab)))
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/cli".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let spawns: Vec<SpawnAgentInStackRequest> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, restored_dir.path());
     }
 
     #[test]
@@ -5721,7 +7369,6 @@ mod tests {
             run_terminal_cwd(
                 Some(tab_dir.to_string_lossy().as_ref()),
                 Some(agent_dir.to_string_lossy().as_ref()),
-                None,
             )
             .unwrap(),
             canonical_tab_dir
@@ -5752,40 +7399,27 @@ mod tests {
     fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy()), None).unwrap();
+        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy())).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
-    fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
-        assert_eq!(
-            run_terminal_cwd(None, Some(""), None).unwrap(),
-            default_space_dir()
-        );
-        assert_eq!(
-            run_terminal_cwd(None, None, None).unwrap(),
-            default_space_dir()
-        );
+    fn run_terminal_cwd_requires_tab_or_agent_workspace() {
+        assert!(run_terminal_cwd(None, Some("")).is_err());
+        assert!(run_terminal_cwd(None, None).is_err());
     }
 
     #[test]
     fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
         let agent_dir = std::env::temp_dir();
 
-        assert!(
-            run_terminal_cwd(
-                Some("/no/such/vmux-tab-workspace"),
-                agent_dir.to_str(),
-                None,
-            )
-            .is_err()
-        );
+        assert!(run_terminal_cwd(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err());
     }
 
     #[test]
     fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(run_terminal_cwd(Some("."), None, None).is_err());
+        assert!(run_terminal_cwd(Some("."), None).is_err());
     }
 
     #[test]
@@ -6077,6 +7711,43 @@ mod tests {
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
         );
+    }
+
+    #[test]
+    fn workspace_picker_waits_for_inline_user_action_without_blocking() {
+        let source = include_str!("plugin.rs");
+        let start = source
+            .find("fn handle_agent_self_commands(")
+            .expect("agent command handler");
+        let end = source[start..]
+            .find("fn drain_workspace_picker_tasks(")
+            .expect("picker drain");
+        let handler = &source[start..start + end];
+        let task_start = source
+            .find("fn workspace_picker_task(")
+            .expect("picker task");
+        let task_end = source[task_start..]
+            .find("fn start_workspace_picker(")
+            .expect("picker start observer");
+        let task = &source[task_start..task_start + task_end];
+        let selection_start = source
+            .find("struct PendingWorkspaceSelection")
+            .expect("pending workspace selection");
+        let selection_end = source[selection_start..]
+            .find("struct PendingWorkspacePicker")
+            .expect("pending workspace picker");
+        let selection = &source[selection_start..selection_start + selection_end];
+
+        assert!(!handler.contains("rfd::FileDialog::new().pick_folder()"));
+        assert!(handler.contains("PendingWorkspaceSelection"));
+        assert!(handler.contains("workspace_picker.chat_views.contains(agent_entity)"));
+        assert!(handler.contains("WORKSPACE_SELECTION_REQUESTED"));
+        assert!(!selection.contains("request_id"));
+        assert!(selection.contains("session_entity"));
+        assert!(selection.contains("picker_started"));
+        assert!(task.contains("rfd::AsyncFileDialog::new()"));
+        assert!(task.contains("IoTaskPool::get().spawn"));
+        assert!(task.contains("WinitUserEvent::WakeUp"));
     }
 
     #[test]

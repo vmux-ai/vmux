@@ -221,14 +221,11 @@ pub fn store_dir() -> PathBuf {
     dir
 }
 
-pub fn default_space_dir() -> PathBuf {
-    space_dir("space-1")
-}
-
 fn spaces_root_for(home: &std::path::Path, _profile: &str) -> PathBuf {
     home.join(".vmux").join("spaces")
 }
 
+#[cfg(test)]
 fn space_dir_path(home: &std::path::Path, profile: &str, space_id: &str) -> PathBuf {
     spaces_root_for(home, profile).join(space_id)
 }
@@ -245,96 +242,37 @@ fn is_empty_dir(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Remove `dir` and its now-empty ancestors, stopping at (and never removing)
-/// `root`.
-fn prune_empty_dirs_up(mut dir: PathBuf, root: &std::path::Path) {
-    while dir.as_path() != root && dir.starts_with(root) {
-        if !is_empty_dir(&dir) || std::fs::remove_dir(&dir).is_err() {
-            break;
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => break,
-        }
-    }
-}
-
-pub fn space_dir(space_id: &str) -> PathBuf {
-    let dir = space_dir_path(&home_dir(), &active_profile_name(), space_id);
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
-
-fn rename_space_dir_in(home: &std::path::Path, profile: &str, old_id: &str, new_id: &str) {
-    if old_id == new_id {
-        return;
-    }
-    let old = space_dir_path(home, profile, old_id);
-    let new = space_dir_path(home, profile, new_id);
-    if old == new {
-        return;
-    }
-    if let Some(parent) = new.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if old.exists() {
-        if is_empty_dir(&new) {
-            let _ = std::fs::remove_dir(&new);
-        }
-        if std::fs::rename(&old, &new).is_ok()
-            && let Some(parent) = old.parent()
-        {
-            prune_empty_dirs_up(parent.to_path_buf(), &spaces_root_for(home, profile));
-        }
-    } else if !new.exists() {
-        let _ = std::fs::create_dir_all(&new);
-    }
-}
-
-pub fn rename_space_dir(old_id: &str, new_id: &str) {
-    rename_space_dir_in(&home_dir(), &active_profile_name(), old_id, new_id);
-}
-
 fn collect_subdirs(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
             collect_subdirs(&path, out);
             out.push(path);
         }
     }
 }
 
-/// Remove directories under `~/.vmux/spaces/` that no longer match a live space
-/// id and are empty. Folders that contain files (or back a live space) are kept.
-fn prune_orphan_space_dirs_in(
-    home: &std::path::Path,
-    profile: &str,
-    live: &std::collections::HashSet<String>,
-) {
-    let root = spaces_root_for(home, profile);
+fn prune_empty_legacy_space_dirs_in(home: &std::path::Path) {
+    let root = spaces_root_for(home, "personal");
+    if root
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return;
+    }
     let mut dirs = Vec::new();
     collect_subdirs(&root, &mut dirs);
-    dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     for dir in dirs {
-        let Ok(rel) = dir.strip_prefix(&root) else {
-            continue;
-        };
-        let rel_id = rel.to_string_lossy().replace('\\', "/");
-        if live.contains(&rel_id) {
-            continue;
-        }
         if is_empty_dir(&dir) {
             let _ = std::fs::remove_dir(&dir);
         }
     }
-}
-
-pub fn prune_orphan_space_dirs(live: &std::collections::HashSet<String>) {
-    prune_orphan_space_dirs_in(&home_dir(), &active_profile_name(), live);
+    if is_empty_dir(&root) {
+        let _ = std::fs::remove_dir(root);
+    }
 }
 
 fn migrate_dir(legacy: &std::path::Path, target: &std::path::Path) {
@@ -359,13 +297,15 @@ fn migrate_legacy_personal_layout_in(home: &std::path::Path) {
     );
 }
 
-/// Relocate the default profile's layout to the profile-agnostic dirs and undo
-/// #145's per-profile spaces nesting. Skipped for test sessions.
+/// Relocate legacy profile data and remove empty directories from the retired
+/// filesystem-backed spaces layout. Skipped for test sessions.
 pub fn migrate_legacy_personal_layout() {
     if is_test_session() {
         return;
     }
-    migrate_legacy_personal_layout_in(&home_dir());
+    let home = home_dir();
+    migrate_legacy_personal_layout_in(&home);
+    prune_empty_legacy_space_dirs_in(&home);
 }
 
 #[cfg(test)]
@@ -578,54 +518,10 @@ mod tests {
     }
 
     #[test]
-    fn rename_space_dir_moves_existing_folder() {
-        let home = std::env::temp_dir().join(format!("vmux-rndir-mv-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "old")).unwrap();
-        rename_space_dir_in(&home, "personal", "old", "new");
-        assert!(!space_dir_path(&home, "personal", "old").exists());
-        assert!(space_dir_path(&home, "personal", "new").exists());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn rename_space_dir_creates_folder_when_absent() {
-        let home = std::env::temp_dir().join(format!("vmux-rndir-new-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        rename_space_dir_in(&home, "personal", "old", "new");
-        assert!(space_dir_path(&home, "personal", "new").exists());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn rename_space_dir_creates_nested_path() {
-        let home = std::env::temp_dir().join(format!("vmux-rndir-nest-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "old")).unwrap();
-        rename_space_dir_in(&home, "personal", "old", "org/new");
-        assert!(!space_dir_path(&home, "personal", "old").exists());
-        assert!(space_dir_path(&home, "personal", "org/new").exists());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn rename_prunes_empty_old_parent() {
-        let home = std::env::temp_dir().join(format!("vmux-rndir-prune-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "org/old")).unwrap();
-        rename_space_dir_in(&home, "personal", "org/old", "elsewhere");
-        assert!(space_dir_path(&home, "personal", "elsewhere").is_dir());
-        assert!(!space_dir_path(&home, "personal", "org/old").exists());
-        assert!(!space_dir_path(&home, "personal", "org").exists());
-        let _ = std::fs::remove_dir_all(&home);
-    }
-
-    #[test]
-    fn prune_removes_empty_orphans_keeps_live_and_files() {
+    fn cleanup_removes_empty_legacy_space_dirs_and_preserves_files() {
         let home = std::env::temp_dir().join(format!("vmux-prune-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "org/live")).unwrap();
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "org/orphan")).unwrap();
+        std::fs::create_dir_all(space_dir_path(&home, "personal", "org/empty")).unwrap();
         std::fs::create_dir_all(space_dir_path(&home, "personal", "solo")).unwrap();
         std::fs::create_dir_all(space_dir_path(&home, "personal", "keep")).unwrap();
         std::fs::write(
@@ -634,13 +530,10 @@ mod tests {
         )
         .unwrap();
 
-        let live: std::collections::HashSet<String> =
-            ["org/live".to_string()].into_iter().collect();
-        prune_orphan_space_dirs_in(&home, "personal", &live);
+        prune_empty_legacy_space_dirs_in(&home);
 
-        assert!(space_dir_path(&home, "personal", "org/live").is_dir());
-        assert!(space_dir_path(&home, "personal", "org").is_dir());
-        assert!(!space_dir_path(&home, "personal", "org/orphan").exists());
+        assert!(!space_dir_path(&home, "personal", "org/empty").exists());
+        assert!(!space_dir_path(&home, "personal", "org").exists());
         assert!(!space_dir_path(&home, "personal", "solo").exists());
         assert!(space_dir_path(&home, "personal", "keep").is_dir());
         let _ = std::fs::remove_dir_all(&home);

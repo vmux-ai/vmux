@@ -353,7 +353,7 @@ pub(crate) fn handle_close_tab_requests(
                     space,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
-                    startup_dir,
+                    startup_dir: startup_dir.clone(),
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -1613,7 +1613,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            PathBuf::from("/tmp"),
+            Some(PathBuf::from("/tmp")),
         ))));
         let first = app
             .world_mut()

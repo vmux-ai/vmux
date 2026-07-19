@@ -107,6 +107,14 @@ impl AcpSessionManager {
         self.sessions.contains_key(sid)
     }
 
+    pub fn rebind_cwd(&self, sid: &str, cwd: PathBuf) -> Result<(), String> {
+        self.sessions
+            .get(sid)
+            .ok_or_else(|| "ACP session not found".to_string())?
+            .shared
+            .rebind_cwd(cwd)
+    }
+
     /// Ask the session's driver to shut down: it observes `Close`, sends the ACP cancel
     /// notification, and kills its child on the way out. Dropping the handle (no `abort`) lets the
     /// task finish that cleanup instead of being killed mid-flight.

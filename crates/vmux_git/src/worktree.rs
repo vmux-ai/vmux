@@ -2,7 +2,11 @@
 //! its dirty/ahead status. Root/path-based (unlike [`crate::runner`], which is file-centric),
 //! because a worktree is created at a path that does not exist yet.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    os::fd::AsRawFd,
+    path::{Path, PathBuf},
+};
 
 use crate::runner::{GitError, git, git_err};
 
@@ -29,6 +33,56 @@ pub struct CheckoutInfo {
     pub common_dir: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeRegistration {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    pub prunable: bool,
+}
+
+struct RepositoryWorktreeLock(File);
+
+impl Drop for RepositoryWorktreeLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+fn lock_repository_worktrees(root: &Path) -> Result<RepositoryWorktreeLock, GitError> {
+    let path = common_dir_of(root)?.join("vmux-worktrees.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| GitError(format!("failed to open worktree lock: {error}")))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(GitError(format!(
+            "failed to acquire worktree lock: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(RepositoryWorktreeLock(file))
+}
+
+fn normalize_worktree_path(path: &Path) -> Result<PathBuf, GitError> {
+    if path.is_dir() {
+        return path
+            .canonicalize()
+            .map_err(|error| GitError(format!("invalid worktree path: {error}")));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| GitError("worktree path has no parent".to_string()))?
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid worktree parent: {error}")))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| GitError("worktree path has no file name".to_string()))?;
+    Ok(parent.join(name))
+}
+
 fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitError> {
     let (stdout, stderr, ok) = git(dir, &["rev-parse", "--path-format=absolute", flag])?;
     if !ok {
@@ -44,6 +98,22 @@ fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitErr
     Ok(PathBuf::from(value))
 }
 
+fn is_bare_repository(dir: &Path) -> bool {
+    git(dir, &["rev-parse", "--is-bare-repository"])
+        .ok()
+        .is_some_and(|(stdout, _, ok)| ok && stdout.trim() == "true")
+}
+
+fn bare_checkout_root(input_dir: &Path, common_dir: &Path) -> PathBuf {
+    common_dir
+        .file_name()
+        .filter(|name| *name == ".git")
+        .and_then(|_| common_dir.parent())
+        .filter(|root| input_dir != common_dir && input_dir.starts_with(root))
+        .unwrap_or(common_dir)
+        .to_path_buf()
+}
+
 /// Resolve checkout root and shared Git directory.
 pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     let input_dir = dir
@@ -52,8 +122,15 @@ pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     if !input_dir.is_dir() {
         return Err(GitError("checkout path is not a directory".to_string()));
     }
-    let root = rev_parse_path(&input_dir, "--show-toplevel", "git checkout root")?;
     let common_dir = rev_parse_path(&input_dir, "--git-common-dir", "git common dir")?;
+    let common_dir = common_dir
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
+    let root = match rev_parse_path(&input_dir, "--show-toplevel", "git checkout root") {
+        Ok(root) => root,
+        Err(_) if is_bare_repository(&input_dir) => bare_checkout_root(&input_dir, &common_dir),
+        Err(error) => return Err(error),
+    };
     let root = root
         .canonicalize()
         .map_err(|error| GitError(format!("invalid checkout root: {error}")))?;
@@ -62,9 +139,6 @@ pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
             "git checkout root does not contain the input directory".to_string(),
         ));
     }
-    let common_dir = common_dir
-        .canonicalize()
-        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
     Ok(CheckoutInfo { root, common_dir })
 }
 
@@ -100,6 +174,7 @@ pub fn worktree_add(
     branch: &str,
     base: &str,
 ) -> Result<WorktreeInfo, GitError> {
+    let _lock = lock_repository_worktrees(root)?;
     let path_str = path.to_string_lossy();
     let (stdout, stderr, ok) = git(
         root,
@@ -116,6 +191,70 @@ pub fn worktree_add(
     })
 }
 
+/// Recreate a worktree at `path` from an existing local `branch`.
+pub fn worktree_add_existing(
+    root: &Path,
+    path: &Path,
+    branch: &str,
+    base_ref: &str,
+) -> Result<WorktreeInfo, GitError> {
+    let _lock = lock_repository_worktrees(root)?;
+    if path.symlink_metadata().is_ok() {
+        return Err(GitError(format!(
+            "worktree recovery path already exists: {}",
+            path.display()
+        )));
+    }
+    let normalized_path = normalize_worktree_path(path)?;
+    let registrations = worktree_registrations(root)?;
+    let target_registration = registrations
+        .iter()
+        .find(|registration| registration.path == normalized_path);
+    if let Some(registration) = target_registration
+        && registration.branch.as_deref() != Some(branch)
+    {
+        return Err(GitError(format!(
+            "worktree path is registered to a different branch: {}",
+            normalized_path.display()
+        )));
+    }
+    if let Some(registration) = registrations.iter().find(|registration| {
+        registration.branch.as_deref() == Some(branch) && registration.path != normalized_path
+    }) {
+        return Err(GitError(format!(
+            "branch {branch} is registered to another worktree: {}",
+            registration.path.display()
+        )));
+    }
+    if target_registration.is_some() {
+        let path_str = normalized_path.to_string_lossy();
+        let (stdout, stderr, ok) =
+            git(root, &["worktree", "remove", "--force", path_str.as_ref()])?;
+        if !ok {
+            return Err(git_err(&stdout, &stderr));
+        }
+        if let Some(registration) = worktree_registrations(root)?.iter().find(|registration| {
+            registration.branch.as_deref() == Some(branch) && registration.path != normalized_path
+        }) {
+            return Err(GitError(format!(
+                "branch {branch} is registered to another worktree: {}",
+                registration.path.display()
+            )));
+        }
+    }
+    let path_str = normalized_path.to_string_lossy();
+    let (stdout, stderr, ok) = git(root, &["worktree", "add", path_str.as_ref(), branch])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(WorktreeInfo {
+        path: normalized_path,
+        branch: branch.to_string(),
+        base_ref: base_ref.to_string(),
+        repo_root: root.to_path_buf(),
+    })
+}
+
 /// Remove the worktree at `path` and delete its `branch` (best-effort branch cleanup).
 pub fn worktree_remove(
     root: &Path,
@@ -123,6 +262,7 @@ pub fn worktree_remove(
     branch: &str,
     force: bool,
 ) -> Result<(), GitError> {
+    let _lock = lock_repository_worktrees(root)?;
     let path_str = path.to_string_lossy();
     let mut args = vec!["worktree", "remove"];
     if force {
@@ -154,15 +294,41 @@ pub fn worktree_status(path: &Path) -> Result<WorktreeStatus, GitError> {
 
 /// Registered worktree checkout paths for the repo at `root` (`git worktree list`).
 pub fn worktree_list(root: &Path) -> Result<Vec<PathBuf>, GitError> {
+    Ok(worktree_registrations(root)?
+        .into_iter()
+        .map(|registration| registration.path)
+        .collect())
+}
+
+pub fn worktree_registrations(root: &Path) -> Result<Vec<WorktreeRegistration>, GitError> {
     let (stdout, stderr, ok) = git(root, &["worktree", "list", "--porcelain"])?;
     if !ok {
         return Err(git_err(&stdout, &stderr));
     }
-    Ok(stdout
-        .lines()
-        .filter_map(|l| l.strip_prefix("worktree "))
-        .map(PathBuf::from)
-        .collect())
+    let mut registrations = Vec::new();
+    let mut path = None;
+    let mut branch = None;
+    let mut prunable = false;
+    for line in stdout.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(path) = path.take() {
+                registrations.push(WorktreeRegistration {
+                    path,
+                    branch: branch.take(),
+                    prunable,
+                });
+            }
+            prunable = false;
+        } else if let Some(value) = line.strip_prefix("worktree ") {
+            let value = PathBuf::from(value);
+            path = Some(normalize_worktree_path(&value).unwrap_or(value));
+        } else if let Some(value) = line.strip_prefix("branch refs/heads/") {
+            branch = Some(value.to_string());
+        } else if line == "prunable" || line.starts_with("prunable ") {
+            prunable = true;
+        }
+    }
+    Ok(registrations)
 }
 
 /// Local branch names (`git branch --format=%(refname:short)`).
@@ -176,6 +342,20 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty())
         .collect())
+}
+
+/// Validate a local branch name using Git's own ref-format rules.
+pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
+    if branch.is_empty() || branch.trim() != branch {
+        return Err(GitError(
+            "branch name is empty or has surrounding whitespace".to_string(),
+        ));
+    }
+    let (stdout, stderr, ok) = git(root, &["check-ref-format", "--branch", branch])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(())
 }
 
 /// Absolute path to the repo's `info/exclude` (the local, untracked ignore list). Resolved via
@@ -317,6 +497,56 @@ mod tests {
     }
 
     #[test]
+    fn resolves_repository_marked_bare_with_dot_git_directory() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(repo.path(), &["config", "core.bare", "true"]);
+
+        let info = checkout_info(repo.path()).unwrap();
+
+        assert_eq!(info.root, repo.path().canonicalize().unwrap());
+        assert_eq!(
+            info.common_dir,
+            repo.path().join(".git").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn bare_repository_named_dot_git_remains_its_own_root() {
+        let path = Path::new("/tmp/example/.git");
+        assert_eq!(bare_checkout_root(path, path), path);
+    }
+
+    #[test]
+    fn add_existing_recovers_only_the_same_stale_registration() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        std::fs::remove_dir_all(&wt).unwrap();
+
+        let recovered = worktree_add_existing(repo.path(), &wt, "vmux/feat", "main").unwrap();
+
+        assert!(recovered.path.is_dir());
+        assert_eq!(head_ref(&recovered.path).unwrap(), "vmux/feat");
+    }
+
+    #[test]
+    fn add_existing_rejects_branch_registered_elsewhere() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let first = repo.path().join(".worktrees/first");
+        let second = repo.path().join(".worktrees/second");
+        worktree_add(repo.path(), &first, "vmux/feat", "main").unwrap();
+        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+
+        let error = worktree_add_existing(repo.path(), &second, "vmux/feat", "main").unwrap_err();
+
+        assert!(error.0.contains("registered to another worktree"));
+        assert!(!second.exists());
+    }
+
+    #[test]
     fn repo_info_reports_branch_and_dirtiness() {
         let not_repo = tempfile::tempdir().unwrap();
         assert!(repo_info(not_repo.path()).is_none(), "non-repo dir");
@@ -387,6 +617,32 @@ mod tests {
         assert_eq!(common_dir_of(&wt).unwrap(), main_common);
         assert_ne!(common_dir_of(other.path()).unwrap(), main_common);
         assert!(common_dir_of(not_repo.path()).is_err());
+    }
+
+    #[test]
+    fn worktree_mutation_lock_is_shared_across_checkouts() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        let lock = lock_repository_worktrees(repo.path()).unwrap();
+        let competing = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(common_dir_of(&wt).unwrap().join("vmux-worktrees.lock"))
+            .unwrap();
+
+        assert_ne!(
+            unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        drop(lock);
+        assert_eq!(
+            unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
     }
 
     #[test]
