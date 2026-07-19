@@ -14,10 +14,10 @@ use crate::chat_page::event::{
     ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
     ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest,
     ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
-    ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SelectWorkspace,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    ChatTurn, ConfigureWorkspace, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SelectWorkspace, SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -189,8 +189,15 @@ fn dispatch_keyboard_event(
     }
 }
 
-fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<SlashCommandEntry>>) {
+fn install_global_prompt_input(
+    draft: Signal<String>,
+    slash_cmds: Signal<Vec<SlashCommandEntry>>,
+    workspace_stage: Signal<String>,
+) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
+        if !workspace_stage.peek().is_empty() {
+            return;
+        }
         let Some(textarea) = prompt_textarea() else {
             return;
         };
@@ -282,7 +289,9 @@ pub fn Page() -> Element {
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
-    let mut workspace_required = use_signal(|| false);
+    let mut workspace_stage = use_signal(String::new);
+    let mut workspace_path = use_signal(String::new);
+    let mut workspace_branch = use_signal(String::new);
     let mut workspace_error = use_signal(String::new);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
@@ -311,7 +320,7 @@ pub fn Page() -> Element {
     let mut resume_loading = use_signal(|| false);
     let mut verb = use_signal(|| "Working".to_string());
 
-    use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(move || install_global_prompt_input(draft, slash_cmds, workspace_stage));
     use_effect(move || {
         let _ = draft.read();
         resize_prompt_textarea();
@@ -393,7 +402,9 @@ pub fn Page() -> Element {
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
-        workspace_required.set(snap.workspace_required);
+        workspace_stage.set(snap.workspace_stage.clone());
+        workspace_path.set(snap.workspace_path.clone());
+        workspace_branch.set(snap.workspace_branch.clone());
         workspace_error.set(snap.workspace_error.clone());
         if snap.status == "awaiting" {
             approval.set(Some((
@@ -512,7 +523,8 @@ pub fn Page() -> Element {
     };
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
-    let installing_splash = installing && items.read().is_empty() && !workspace_required();
+    let installing_splash = installing && items.read().is_empty();
+    let workspace_setup = !workspace_stage().is_empty();
     let show_capability_examples =
         items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
     let install_detail = {
@@ -619,43 +631,7 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            if workspace_required() {
-                div { class: "relative z-10 flex flex-1 items-center justify-center px-6 py-10",
-                    div { class: "flex w-full max-w-md flex-col items-center gap-5 rounded-2xl bg-foreground/[0.035] px-8 py-9 text-center ring-1 ring-inset ring-foreground/10",
-                        div { class: "flex h-14 w-14 items-center justify-center rounded-2xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
-                            svg {
-                                class: "h-7 w-7 text-foreground/70",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "1.8",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }
-                            }
-                        }
-                        div { class: "flex flex-col gap-2",
-                            h2 { class: "text-xl font-semibold tracking-tight", "Choose a workspace" }
-                            p { class: "text-sm leading-relaxed text-muted-foreground",
-                                "Select a project folder before starting {header_name}. Git projects open in a dedicated worktree."
-                            }
-                        }
-                        button {
-                            class: "rounded-xl bg-foreground px-4 py-2.5 text-sm font-medium text-background transition hover:opacity-90 active:scale-[0.98]",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&SelectWorkspace);
-                            },
-                            "Choose folder"
-                        }
-                        if !workspace_error().is_empty() {
-                            div { class: "w-full rounded-xl bg-red-500/10 px-4 py-3 text-left text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
-                                "{workspace_error}"
-                            }
-                        }
-                    }
-                }
-            } else {
-                div {
+            div {
                 id: "chat-scroll",
                 class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 onscroll: move |_| {
@@ -713,6 +689,73 @@ pub fn Page() -> Element {
                             }
                         }
                     }
+                    if workspace_stage() == "workspace" {
+                        div { class: "flex max-w-[85%] items-start gap-2.5 self-start",
+                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-7 w-7 shrink-0 text-[10px]")}
+                            div { class: "flex min-w-0 flex-col gap-3 rounded-2xl bg-foreground/[0.055] px-4 py-3 text-sm ring-1 ring-inset ring-foreground/10",
+                                div { class: "font-medium text-foreground", "Where should I work?" }
+                                p { class: "leading-relaxed text-muted-foreground",
+                                    "Choose the project folder for this conversation."
+                                }
+                                button {
+                                    class: "w-fit rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-background transition hover:opacity-90 active:scale-[0.98]",
+                                    onclick: move |_| {
+                                        let _ = try_cef_bin_emit_rkyv(&SelectWorkspace);
+                                    },
+                                    "Choose folder"
+                                }
+                                if !workspace_error().is_empty() {
+                                    div { class: "rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                                        "{workspace_error}"
+                                    }
+                                }
+                            }
+                        }
+                    } else if workspace_stage() == "branch" {
+                        div { class: "flex max-w-[85%] items-start gap-2.5 self-start",
+                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-7 w-7 shrink-0 text-[10px]")}
+                            div { class: "flex min-w-0 flex-1 flex-col gap-3 rounded-2xl bg-foreground/[0.055] px-4 py-3 text-sm ring-1 ring-inset ring-foreground/10",
+                                div { class: "font-medium text-foreground", "How should I work here?" }
+                                div { class: "truncate font-mono text-[11px] text-muted-foreground", "{workspace_path}" }
+                                label { class: "flex flex-col gap-1.5",
+                                    span { class: "text-xs text-muted-foreground", "New branch" }
+                                    input {
+                                        class: "w-full rounded-lg bg-background/70 px-3 py-2 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/15 focus:ring-foreground/30",
+                                        value: "{workspace_branch}",
+                                        oninput: move |event| workspace_branch.set(event.value()),
+                                    }
+                                }
+                                if !workspace_error().is_empty() {
+                                    div { class: "rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                                        "{workspace_error}"
+                                    }
+                                }
+                                div { class: "flex flex-wrap justify-end gap-2",
+                                    button {
+                                        class: "rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ConfigureWorkspace {
+                                                branch: workspace_branch.peek().clone(),
+                                                create_worktree: false,
+                                            });
+                                        },
+                                        "Work here"
+                                    }
+                                    button {
+                                        class: "rounded-lg bg-foreground px-3 py-2 text-xs font-medium text-background transition hover:opacity-90 active:scale-[0.98]",
+                                        disabled: workspace_branch.read().trim().is_empty(),
+                                        onclick: move |_| {
+                                            let _ = try_cef_bin_emit_rkyv(&ConfigureWorkspace {
+                                                branch: workspace_branch.peek().clone(),
+                                                create_worktree: true,
+                                            });
+                                        },
+                                        "Create worktree"
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if status() == "errored" {
                         div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
                             "{error}"
@@ -725,7 +768,6 @@ pub fn Page() -> Element {
                             span { class: "h-px flex-1 bg-foreground/10" }
                         }
                     }
-                }
                 }
             }
 
@@ -786,8 +828,7 @@ pub fn Page() -> Element {
                 }
             }
 
-            if !workspace_required() {
-                div {
+            div {
                     class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                     div {
                     class: "relative mx-auto flex max-w-3xl flex-col gap-2",
@@ -1007,7 +1048,8 @@ pub fn Page() -> Element {
                         div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
                         div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
                         button {
-                            class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                            class: if workspace_setup { "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg text-foreground/25" } else { "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground" },
+                            disabled: workspace_setup,
                             title: "Attach files (/upload)",
                             onclick: move |_| {
                                 let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
@@ -1065,7 +1107,9 @@ pub fn Page() -> Element {
                             div { class: "relative min-w-32 flex-1 overflow-hidden",
                                 if draft.read().is_empty() {
                                     div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
-                                        if show_capability_examples {
+                                        if workspace_setup {
+                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Finish workspace setup above" }
+                                        } else if show_capability_examples {
                                             PromptGhost {
                                                 accent_bg: agent_accent.accent_bg.to_string(),
                                                 terminal: false,
@@ -1089,7 +1133,8 @@ pub fn Page() -> Element {
                                 id: PROMPT_ID,
                                 class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
                                 rows: "1",
-                                placeholder: "Message the agent…",
+                                placeholder: if workspace_setup { "Finish workspace setup…" } else { "Message the agent…" },
+                                disabled: workspace_setup,
                                 value: "{draft}",
                                 oninput: move |e| {
                                     draft.set(e.value());
@@ -1271,6 +1316,7 @@ pub fn Page() -> Element {
                                             history_cursor,
                                             history_scratch,
                                             at_bottom,
+                                            workspace_setup,
                                         );
                                     } else if e.key() == Key::Escape {
                                         e.prevent_default();
@@ -1330,8 +1376,8 @@ pub fn Page() -> Element {
                             }
                         } else {
                             button {
-                                class: if draft.read().trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
-                                disabled: draft.read().trim().is_empty() && attachments.read().is_empty(),
+                                class: if workspace_setup || draft.read().trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
+                                disabled: workspace_setup || draft.read().trim().is_empty() && attachments.read().is_empty(),
                                 title: "Send (Enter)",
                                 onclick: move |_| {
                                     do_submit(
@@ -1340,6 +1386,7 @@ pub fn Page() -> Element {
                                         history_cursor,
                                         history_scratch,
                                         at_bottom,
+                                        workspace_setup,
                                     )
                                 },
                                 svg {
@@ -1357,7 +1404,6 @@ pub fn Page() -> Element {
                         }
                     }
                     }
-                }
             }
         }
     }
@@ -1416,7 +1462,11 @@ fn do_submit(
     mut history_cursor: Signal<Option<usize>>,
     mut history_scratch: Signal<String>,
     mut at_bottom: Signal<bool>,
+    blocked: bool,
 ) {
+    if blocked {
+        return;
+    }
     let text = draft.peek().trim().to_string();
     let selected = attachments.peek().clone();
     if text.is_empty() && selected.is_empty() {

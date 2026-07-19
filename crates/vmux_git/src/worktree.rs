@@ -291,6 +291,20 @@ pub fn local_branches(root: &Path) -> Result<Vec<String>, GitError> {
         .collect())
 }
 
+/// Validate a local branch name using Git's own ref-format rules.
+pub fn validate_branch_name(root: &Path, branch: &str) -> Result<(), GitError> {
+    if branch.is_empty() || branch.trim() != branch {
+        return Err(GitError(
+            "branch name is empty or has surrounding whitespace".to_string(),
+        ));
+    }
+    let (stdout, stderr, ok) = git(root, &["check-ref-format", "--branch", branch])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(())
+}
+
 /// Absolute path to the repo's `info/exclude` (the local, untracked ignore list). Resolved via
 /// git so it works for both the main worktree and a linked worktree, where `.git` is a file
 /// pointer rather than a directory and the exclude lives in the shared common dir.

@@ -279,6 +279,53 @@ fn plan_worktree(
     (path, branch)
 }
 
+fn activate_added_worktree(
+    base_dir: &Path,
+    checkout: &CheckoutInfo,
+    relative_dir: &Path,
+    info: &worktree::WorktreeInfo,
+) -> Result<TabWorktreeActivation, String> {
+    let managed_checkout = worktree::checkout_info(&info.path).map_err(|error| error.0)?;
+    if managed_checkout.common_dir != checkout.common_dir {
+        return Err("managed worktree belongs to a different repository".to_string());
+    }
+    let execution_dir = canonical_execution_dir(&managed_checkout.root, relative_dir)?;
+    let metadata = TabWorktree {
+        repo_root: checkout.root.to_string_lossy().into_owned(),
+        checkout_dir: managed_checkout.root.to_string_lossy().into_owned(),
+        branch: info.branch.clone(),
+        base_ref: info.base_ref.clone(),
+    };
+    let ready = TabWorktreeReady::new(
+        &execution_dir,
+        &base_dir.to_string_lossy(),
+        &metadata,
+        &managed_checkout,
+    )?;
+    Ok(TabWorktreeActivation {
+        execution_dir,
+        metadata,
+        ready,
+    })
+}
+
+fn add_managed_worktree(
+    base_dir: &Path,
+    checkout: &CheckoutInfo,
+    relative_dir: &Path,
+    checkout_dir: &Path,
+    branch: &str,
+    base_ref: &str,
+) -> Result<TabWorktreeActivation, String> {
+    let info = worktree::worktree_add(&checkout.root, checkout_dir, branch, base_ref)
+        .map_err(|error| error.0)?;
+    let activation = activate_added_worktree(base_dir, checkout, relative_dir, &info);
+    if activation.is_err() {
+        let _ = worktree::worktree_remove(&checkout.root, &info.path, &info.branch, false);
+    }
+    activation
+}
+
 /// Create a globally stored managed worktree while preserving `base_dir`'s repository-relative
 /// directory.
 pub fn create_worktree_blocking(
@@ -296,36 +343,59 @@ pub fn create_worktree_blocking(
     let base_ref = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
     let (checkout_dir, branch) = plan_worktree(&checkout, managed_root, slug_hint);
     let checkout_dir = prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
-    let info = worktree::worktree_add(&checkout.root, &checkout_dir, &branch, &base_ref)
-        .map_err(|error| error.0)?;
-    let activation = (|| {
-        let managed_checkout = worktree::checkout_info(&info.path).map_err(|error| error.0)?;
-        if managed_checkout.common_dir != checkout.common_dir {
-            return Err("managed worktree belongs to a different repository".to_string());
-        }
-        let execution_dir = canonical_execution_dir(&managed_checkout.root, relative_dir)?;
-        let metadata = TabWorktree {
-            repo_root: checkout.root.to_string_lossy().into_owned(),
-            checkout_dir: managed_checkout.root.to_string_lossy().into_owned(),
-            branch: info.branch.clone(),
-            base_ref: info.base_ref.clone(),
-        };
-        let ready = TabWorktreeReady::new(
-            &execution_dir,
-            &base_dir.to_string_lossy(),
-            &metadata,
-            &managed_checkout,
-        )?;
-        Ok(TabWorktreeActivation {
-            execution_dir,
-            metadata,
-            ready,
-        })
-    })();
-    if activation.is_err() {
-        let _ = worktree::worktree_remove(&checkout.root, &info.path, &info.branch, false);
+    add_managed_worktree(
+        &base_dir,
+        &checkout,
+        relative_dir,
+        &checkout_dir,
+        &branch,
+        &base_ref,
+    )
+}
+
+/// Create a globally stored managed worktree on an exact user-selected branch name.
+pub fn create_worktree_for_branch_blocking(
+    base_dir: &Path,
+    branch: &str,
+    managed_root: &Path,
+) -> Result<TabWorktreeActivation, String> {
+    let base_dir = base_dir
+        .canonicalize()
+        .map_err(|error| format!("invalid project directory: {error}"))?;
+    let checkout = worktree::checkout_info(&base_dir).map_err(|error| error.0)?;
+    worktree::validate_branch_name(&checkout.root, branch).map_err(|error| error.0)?;
+    if let Some(registration) = worktree::worktree_registrations(&checkout.root)
+        .map_err(|error| error.0)?
+        .into_iter()
+        .find(|registration| registration.branch.as_deref() == Some(branch))
+    {
+        return Err(format!(
+            "Branch {branch} is already checked out at {}",
+            registration.path.display()
+        ));
     }
-    activation
+    if worktree::local_branches(&checkout.root)
+        .map_err(|error| error.0)?
+        .iter()
+        .any(|existing| existing == branch)
+    {
+        return Err(format!("Branch {branch} already exists"));
+    }
+    let relative_dir = base_dir
+        .strip_prefix(&checkout.root)
+        .map_err(|_| "project directory is outside its checkout".to_string())?;
+    let base_ref = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
+    let slug = sanitize_slug(branch.strip_prefix("vmux/").unwrap_or(branch));
+    let checkout_dir = repository_storage_dir(managed_root, &checkout).join(slug);
+    let checkout_dir = prepare_managed_destination(managed_root, &checkout, &checkout_dir)?;
+    add_managed_worktree(
+        &base_dir,
+        &checkout,
+        relative_dir,
+        &checkout_dir,
+        branch,
+        &base_ref,
+    )
 }
 
 pub fn ensure_tab_worktree_available(
@@ -842,6 +912,43 @@ mod tests {
             "path is <managed-root>/<repo-hash>/auth-refactor: {checkout_dir:?}"
         );
         assert_eq!(activation.execution_dir, checkout_dir);
+    }
+
+    #[test]
+    fn create_worktree_for_branch_uses_exact_valid_branch() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let activation = create_worktree_for_branch_blocking(
+            repo.path(),
+            "vmux/fix-dashboard-tests",
+            managed_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(activation.metadata.branch, "vmux/fix-dashboard-tests");
+        assert!(activation.execution_dir.ends_with("fix-dashboard-tests"));
+        assert_eq!(
+            worktree::head_ref(&activation.execution_dir).unwrap(),
+            "vmux/fix-dashboard-tests"
+        );
+    }
+
+    #[test]
+    fn create_worktree_for_branch_rejects_existing_or_invalid_branch() {
+        let repo = init_repo();
+        let managed_root = tempfile::tempdir().unwrap();
+        git(repo.path(), &["branch", "vmux/existing"]);
+
+        let existing =
+            create_worktree_for_branch_blocking(repo.path(), "vmux/existing", managed_root.path())
+                .unwrap_err();
+        let invalid =
+            create_worktree_for_branch_blocking(repo.path(), "bad branch", managed_root.path())
+                .unwrap_err();
+
+        assert!(existing.contains("already exists"));
+        assert!(!invalid.is_empty());
     }
 
     #[test]

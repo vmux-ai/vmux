@@ -3204,6 +3204,7 @@ fn ancestor_tab_entity(
         Option<&vmux_layout::tab::TabWorkspace>,
         Option<&vmux_layout::tab::TabWorktree>,
         Option<&vmux_layout::worktree::TabWorktreeReady>,
+        Option<&vmux_layout::tab::TabDirDecided>,
     )>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -3253,6 +3254,7 @@ fn prepare_agent_tab_worktrees(
         Option<&vmux_layout::tab::TabWorkspace>,
         Option<&vmux_layout::tab::TabWorktree>,
         Option<&vmux_layout::worktree::TabWorktreeReady>,
+        Option<&vmux_layout::tab::TabDirDecided>,
     )>,
     settings: Option<Res<AppSettings>>,
     active_space: Option<Res<ActiveSpace>>,
@@ -3285,7 +3287,7 @@ fn prepare_agent_tab_worktrees(
         } else {
             let outcome = match tabs.get_mut(tab_entity) {
                 Err(_) => Ok(()),
-                Ok((_, mut tab, workspace, metadata, ready)) => {
+                Ok((_, mut tab, workspace, metadata, ready, decided)) => {
                     let has_workspace = workspace.is_some();
                     let workspace = workspace.cloned().unwrap_or_else(|| {
                         let project_dir = metadata
@@ -3325,6 +3327,8 @@ fn prepare_agent_tab_worktrees(
                                     entity.insert(activation.ready);
                                 })
                             }
+                        } else if decided.is_some() {
+                            Ok(())
                         } else {
                             let current_dir = tab
                                 .startup_dir
@@ -3398,6 +3402,7 @@ fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask), PendingPageOpen>,
         Query<&PendingAgentPrompt>,
+        Query<&crate::chat_page::PendingWorkspaceAgentPrompt>,
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
@@ -3440,7 +3445,7 @@ fn handle_agent_page_open(
             && tab_dir.is_none()
             && space_startup_dir.is_none()
         {
-            attach_workspace_gate_to_stack(
+            attach_workspace_setup_to_stack(
                 &task,
                 &children_q,
                 &mut commands,
@@ -3461,10 +3466,18 @@ fn handle_agent_page_open(
             }
         };
         let initial_prompt = open_q
-            .p1()
+            .p2()
             .get(task.stack)
             .ok()
-            .map(|prompt| prompt.0.clone());
+            .map(|prompt| prompt.0.clone())
+            .or_else(|| {
+                open_q.p1().get(task.stack).ok().map(|prompt| {
+                    crate::chat_page::PendingWorkspacePrompt {
+                        text: prompt.0.clone(),
+                        attachments: Vec::new(),
+                    }
+                })
+            });
         match handle_agent_page_open_task(
             &task,
             initial_prompt,
@@ -3493,7 +3506,7 @@ fn handle_agent_page_open(
     }
 }
 
-fn attach_workspace_gate_to_stack(
+fn attach_workspace_setup_to_stack(
     task: &PageOpenTask,
     children_q: &Query<&Children>,
     commands: &mut Commands,
@@ -3504,12 +3517,16 @@ fn attach_workspace_gate_to_stack(
     commands.entity(task.stack).insert((
         PageMetadata {
             url: task.url.clone(),
-            title: "Choose workspace".to_string(),
+            title: "Agent".to_string(),
             bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
             ..default()
         },
         crate::chat_page::PendingAgentWorkspace {
             target_url: task.url.clone(),
+            stage: crate::chat_page::PendingWorkspaceStage::Ready,
+            prompt: None,
+            project_dir: None,
+            branch: String::new(),
             error: String::new(),
         },
     ));
@@ -3639,7 +3656,7 @@ fn handle_swap_stack_session(
 
 fn handle_agent_page_open_task(
     task: &PageOpenTask,
-    initial_prompt: Option<String>,
+    initial_prompt: Option<crate::chat_page::PendingWorkspacePrompt>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
     acp_sessions: &Query<&crate::client::acp::AcpSession>,
@@ -3713,7 +3730,7 @@ fn handle_agent_page_open_task(
                         cwd: default_cwd.to_path_buf(),
                         session_id: None,
                         stack: task.stack,
-                        initial_prompt,
+                        initial_prompt: initial_prompt.map(|prompt| prompt.text),
                     });
                 }
                 return Ok(());
@@ -3729,7 +3746,7 @@ fn handle_agent_page_open_task(
                 cwd: default_cwd.to_path_buf(),
                 session_id: Some(sid),
                 stack: task.stack,
-                initial_prompt,
+                initial_prompt: initial_prompt.map(|prompt| prompt.text),
             });
             Ok(())
         }
@@ -3750,7 +3767,7 @@ fn handle_agent_page_open_task(
                             cwd: default_cwd.to_path_buf(),
                             session_id: None,
                             stack: task.stack,
-                            initial_prompt,
+                            initial_prompt: initial_prompt.map(|prompt| prompt.text),
                         });
                     }
                     return Ok(());
@@ -3792,18 +3809,21 @@ fn handle_agent_page_open_task(
 
 fn insert_initial_prompt_queue(
     stack: Entity,
-    initial_prompt: Option<String>,
+    initial_prompt: Option<crate::chat_page::PendingWorkspacePrompt>,
     commands: &mut Commands,
 ) {
-    let Some(prompt) = initial_prompt.filter(|prompt| !prompt.trim().is_empty()) else {
+    let Some(prompt) = initial_prompt
+        .filter(|prompt| !prompt.text.trim().is_empty() || !prompt.attachments.is_empty())
+    else {
         return;
     };
     let mut queue = crate::components::PromptQueue::default();
-    queue.enqueue(prompt);
+    queue.enqueue_with_attachments(prompt.text, prompt.attachments);
     commands
         .entity(stack)
         .insert(queue)
-        .remove::<PendingAgentPrompt>();
+        .remove::<PendingAgentPrompt>()
+        .remove::<crate::chat_page::PendingWorkspaceAgentPrompt>();
 }
 
 fn stack_has_agent_of_kind(
@@ -4006,7 +4026,10 @@ fn handle_spawn_agent_requests(
                             skipped: false,
                         });
                 }
-                commands.entity(req.stack).remove::<PendingAgentPrompt>();
+                commands
+                    .entity(req.stack)
+                    .remove::<PendingAgentPrompt>()
+                    .remove::<crate::chat_page::PendingWorkspaceAgentPrompt>();
             }
             Err(e) => {
                 bevy::log::warn!("agent spawn ({:?}) failed: {e}", req.kind);
@@ -5912,6 +5935,69 @@ mod tests {
     }
 
     #[test]
+    fn explicit_work_here_decision_skips_managed_worktree() {
+        let repo = init_worktree_test_repo();
+        let project_dir = repo.path().canonicalize().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut settings = test_settings();
+        settings.agent.acp.clear();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(settings)
+            .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
+                managed_root.path().to_path_buf(),
+            ))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(
+                Update,
+                (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
+            );
+        let tab = app
+            .world_mut()
+            .spawn((
+                vmux_layout::tab::Tab {
+                    name: "Dashboard".into(),
+                    startup_dir: Some(project_dir.to_string_lossy().into_owned()),
+                },
+                vmux_layout::tab::TabWorkspace {
+                    project_dir: project_dir.to_string_lossy().into_owned(),
+                },
+                vmux_layout::tab::TabDirDecided,
+            ))
+            .id();
+        let stack = app.world_mut().spawn(ChildOf(tab)).id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude/cli".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        assert_eq!(
+            vmux_git::worktree::worktree_list(repo.path())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorktree>(tab)
+                .is_none()
+        );
+        let spawns: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SpawnAgentInStackRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(spawns.len(), 1);
+        assert_eq!(spawns[0].cwd, project_dir);
+    }
+
+    #[test]
     fn local_agent_open_preserves_existing_linked_worktree() {
         let repo = init_worktree_test_repo();
         let linked = repo.path().join(".worktrees/existing");
@@ -6011,7 +6097,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_tab_without_workspace_opens_picker_without_spawning() {
+    fn agent_tab_without_workspace_opens_chat_without_spawning() {
         let mut settings = test_settings();
         settings.agent.acp.clear();
         let mut app = App::new();
@@ -6045,10 +6131,18 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        assert!(
-            app.world()
-                .get::<crate::chat_page::PendingAgentWorkspace>(stack)
-                .is_some()
+        let pending = app
+            .world()
+            .get::<crate::chat_page::PendingAgentWorkspace>(stack)
+            .unwrap();
+        assert_eq!(
+            pending.stage,
+            crate::chat_page::PendingWorkspaceStage::Ready
+        );
+        assert!(pending.prompt.is_none());
+        assert_eq!(
+            app.world().get::<PageMetadata>(stack).unwrap().title,
+            "Agent"
         );
         assert!(
             app.world_mut()
@@ -6321,6 +6415,55 @@ mod tests {
             Some("ship it")
         );
         assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
+    }
+
+    #[test]
+    fn workspace_prompt_is_delivered_once_with_attachments() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<SpawnAgentInStackRequest>()
+            .insert_resource(test_settings())
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_agent_page_open);
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                crate::chat_page::PendingWorkspaceAgentPrompt(
+                    crate::chat_page::PendingWorkspacePrompt {
+                        text: "Fix the screenshot bug".into(),
+                        attachments: vec![vmux_service::protocol::AgentAttachment {
+                            path: "/tmp/screenshot.png".into(),
+                            name: "screenshot.png".into(),
+                            mime_type: "image/png".into(),
+                            size: 42,
+                        }],
+                    },
+                ),
+            ))
+            .id();
+        app.world_mut().spawn(PageOpenTask {
+            id: vmux_core::PageOpenId::new(),
+            stack,
+            url: "vmux://agent/claude".to_string(),
+            request_id: None,
+        });
+
+        app.update();
+
+        let queue = app
+            .world()
+            .get::<crate::components::PromptQueue>(stack)
+            .unwrap();
+        assert_eq!(queue.items.len(), 1);
+        assert_eq!(queue.items[0].text, "Fix the screenshot bug");
+        assert_eq!(queue.items[0].attachments[0].name, "screenshot.png");
+        assert!(
+            app.world()
+                .get::<crate::chat_page::PendingWorkspaceAgentPrompt>(stack)
+                .is_none()
+        );
     }
 
     #[test]

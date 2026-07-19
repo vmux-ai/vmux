@@ -154,6 +154,9 @@ pub struct ChatSnapshot {
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
     pub workspace_required: bool,
+    pub workspace_stage: String,
+    pub workspace_path: String,
+    pub workspace_branch: String,
     pub workspace_error: String,
 }
 
@@ -169,6 +172,22 @@ pub struct ChatSnapshot {
     rkyv::Deserialize,
 )]
 pub struct SelectWorkspace;
+
+/// Page → native: choose whether a selected Git workspace gets a managed worktree.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ConfigureWorkspace {
+    pub branch: String,
+    pub create_worktree: bool,
+}
 
 /// Page → native: the user submitted a prompt.
 #[derive(
