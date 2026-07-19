@@ -998,8 +998,20 @@ fn compact_knowledge_path(path: &str) -> String {
 #[component]
 fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> Element {
     let root = knowledge.root.clone();
+    let landing_path = knowledge
+        .entries
+        .iter()
+        .find(|entry| {
+            !entry.is_directory
+                && entry.parent == knowledge.root
+                && entry.name.eq_ignore_ascii_case("welcome.md")
+        })
+        .map(|entry| entry.path.clone())
+        .unwrap_or_else(|| root.clone());
     let root_title = compact_knowledge_path(&root);
-    let root_action_title = if root.is_empty() {
+    let root_action_title = if landing_path != root {
+        "Open Welcome to Knowledge".to_string()
+    } else if root.is_empty() {
         "Knowledge".to_string()
     } else {
         format!("Open {root}")
@@ -1011,7 +1023,7 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                 disabled: !loaded || root.is_empty(),
                 title: "{root_action_title}",
                 class: "group flex items-center gap-2 px-2.5 py-2 text-left transition-colors enabled:cursor-pointer enabled:hover:bg-glass-hover disabled:cursor-default",
-                onclick: move |_| open_knowledge_path(pane_id, root.clone()),
+                onclick: move |_| open_knowledge_path(pane_id, landing_path.clone()),
                 div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                     Icon { class: "h-3.5 w-3.5",
                         path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }

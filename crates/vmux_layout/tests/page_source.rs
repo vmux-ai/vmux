@@ -101,6 +101,8 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("KNOWLEDGE_TREE_EVENT"));
     assert!(source.contains("KnowledgeEntryRow"));
     assert!(source.contains("open_knowledge_path"));
+    assert!(source.contains("entry.name.eq_ignore_ascii_case(\"welcome.md\")"));
+    assert!(source.contains("open_knowledge_path(pane_id, landing_path.clone())"));
     assert!(source.contains("if entry.title.is_empty()"));
     assert!(source.contains("\"Empty folder\""));
     assert!(source.contains("if expanded() {"));

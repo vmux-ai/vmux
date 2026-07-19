@@ -75,11 +75,23 @@ fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
     else {
         return 0;
     };
-    let rect = target.get_bounding_client_rect();
+    let text_target = target
+        .query_selector("[data-note-line-text]")
+        .ok()
+        .flatten()
+        .unwrap_or(target);
+    let rect = text_target.get_bounding_client_rect();
     if rect.width() <= 0.0 {
         return 0;
     }
-    let ratio = ((raw.client_x() as f64 - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    let x = raw.client_x() as f64 - rect.left();
+    if x <= 0.0 {
+        return 0;
+    }
+    if x >= rect.width() {
+        return text.chars().count() as u32;
+    }
+    let ratio = x / rect.width();
     (ratio * text.chars().count() as f64).round() as u32
 }
 
@@ -926,8 +938,11 @@ pub fn Page() -> Element {
                         if file_view_mode() == FileViewMode::Note
                             && is_markdown_file(&git_path())
                         {
-                            note_editing.set(false);
-                            focus_container();
+                            if note_editing() {
+                                focus_file_input();
+                            } else {
+                                focus_container();
+                            }
                         } else {
                             focus_file_input();
                         }
@@ -1089,10 +1104,13 @@ pub fn Page() -> Element {
                                 class: file_mode_class(file_view_mode() == FileViewMode::Note),
                                 title: "Rendered Markdown with live editing",
                                 onclick: move |_| {
-                                    note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Note);
                                     let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
-                                    focus_container();
+                                    if note_editing() {
+                                        focus_file_input();
+                                    } else {
+                                        focus_container();
+                                    }
                                 },
                                 "Note"
                             }
@@ -1325,7 +1343,7 @@ pub fn Page() -> Element {
                                                     rsx! {
                                                         div {
                                                             key: "active-{index}",
-                                                            class: "relative cursor-text",
+                                                            class: "relative w-full cursor-text",
                                                             for (line_offset, raw) in source_lines.iter().enumerate() {
                                                                 {
                                                                     let line = start + line_offset as u32;
@@ -1342,7 +1360,7 @@ pub fn Page() -> Element {
                                                                         rsx! {
                                                                             div {
                                                                                 key: "{line}",
-                                                                                class: "min-h-7 min-w-[1ch] w-fit max-w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
+                                                                                class: "min-h-7 w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
                                                                                 onmousedown: move |event| {
                                                                                     event.stop_propagation();
                                                                                     event.prevent_default();
@@ -1350,16 +1368,18 @@ pub fn Page() -> Element {
                                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
                                                                                     focus_file_input();
                                                                                 },
-                                                                                span { "{before}" }
-                                                                                span { class: "inline-block w-px animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
-                                                                                span { "{after}" }
+                                                                                span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]",
+                                                                                    span { "{before}" }
+                                                                                    span { class: "inline-block w-px animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
+                                                                                    span { "{after}" }
+                                                                                }
                                                                             }
                                                                         }
                                                                     } else {
                                                                         rsx! {
                                                                             div {
                                                                                 key: "{line}",
-                                                                                class: "min-h-7 min-w-[1ch] w-fit max-w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
+                                                                                class: "min-h-7 w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
                                                                                 onmousedown: move |event| {
                                                                                     event.stop_propagation();
                                                                                     event.prevent_default();
@@ -1367,7 +1387,7 @@ pub fn Page() -> Element {
                                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
                                                                                     focus_file_input();
                                                                                 },
-                                                                                "{raw}"
+                                                                                span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]", "{raw}" }
                                                                             }
                                                                         }
                                                                     }
@@ -1434,7 +1454,7 @@ pub fn Page() -> Element {
                                                     rsx! {
                                                         div {
                                                             key: "block-{index}",
-                                                            class: "cursor-text",
+                                                            class: "flow-root w-full cursor-text",
                                                             onmousedown: move |event| {
                                                                 event.stop_propagation();
                                                                 event.prevent_default();

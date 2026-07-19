@@ -38,12 +38,14 @@ Markdown has an editable Note mode beside Editor and Diff.
 
 ## UI
 
-The side sheet is the primary Knowledge surface. Its header opens the vault directory through
-`file://`. The body mirrors folders and Markdown links, using the same collapsible tree interaction
-as bookmarks. Top-level folders provide useful organization without a separate “Build with” list.
+The side sheet is the primary Knowledge surface. Its header opens `welcome.md` through `file://`
+when present and falls back to the vault directory. The body mirrors folders and Markdown links,
+using the same collapsible tree interaction as bookmarks. Empty expanded folders show an explicit
+empty state. Top-level folders provide useful organization without a separate “Build with” list.
 
 The `file://` Note mode is the reading and writing surface. It stays editable, uses the shared
-buffer and save path, and supports standard bindings by default with optional Vim bindings.
+buffer and save path, and supports standard bindings by default with optional Vim bindings. The
+entire rendered block activates editing, and clicks within the active block keep editing active.
 
 ## Storage
 
