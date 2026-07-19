@@ -206,13 +206,17 @@ pub fn Page() -> Element {
         state.window_pad_bottom,
         crate::event::url_bar_top(),
     );
+    let header_progress = (state.header_height / crate::event::HEADER_HEIGHT_PX).clamp(0.0, 1.0);
+    let header_translate = -6.0 * (1.0 - header_progress);
     let header_vars = format!(
-        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;",
+        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;opacity:{};transform:translateY({}px);",
         state.header_top(),
         state.header_left(),
         state.header_right(),
         state.header_height,
         state.tab_row_pad_left(),
+        header_progress,
+        header_translate,
     );
 
     rsx! {
@@ -244,7 +248,7 @@ pub fn Page() -> Element {
             }
             if overlay_ready && state.header_visible() {
                 div {
-                    class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)]",
+                    class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
                     style: "{header_vars}",
                     HeaderView {
                         stacks_state: stacks,
@@ -633,7 +637,10 @@ fn Tab(tab: TabRow) -> Element {
     let drag_item = LayoutDragItem::Tab {
         tab_id: tab.id.clone(),
     };
-    let tab_class = if layout_tab_drop_targeted(layout_drag_state, &tab.id) {
+    let drop_after = layout_tab_drop_after(layout_drag_state, &tab.id);
+    let dragged = layout_tab_is_dragged(layout_drag_state, &tab.id);
+    let tab_style = tab_drag_style(&tab_style, dragged, drop_after);
+    let tab_class = if drop_after.is_some() {
         format!("{tab_class} ring-2 ring-ring")
     } else {
         tab_class
@@ -994,6 +1001,9 @@ fn begin_layout_drag(
     if event.trigger_button() != Some(MouseButton::Primary) {
         return;
     }
+    event.prevent_default();
+    event.stop_propagation();
+    set_bookmark_context_menu_active(true);
     set_layout_pointer_capture(event, true);
     let coordinates = event.client_coordinates();
     let rect = layout_drag_source(event).map(|source| source.get_bounding_client_rect());
@@ -1049,6 +1059,7 @@ fn end_layout_drag(mut state: Signal<Option<LayoutDragState>>, event: &Event<Poi
     let dx = coordinates.x - drag.start_x;
     let dy = coordinates.y - drag.start_y;
     if !drag.active && dx * dx + dy * dy < 16.0 {
+        set_bookmark_context_menu_active(false);
         state.set(None);
         return;
     }
@@ -1273,7 +1284,10 @@ fn clear_layout_drag_after_click(mut state: Signal<Option<LayoutDragState>>) {
         return;
     };
     let callback = Closure::once(move || state.set(None));
-    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
+    match window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        callback.as_ref().unchecked_ref(),
+        180,
+    ) {
         Ok(_) => callback.forget(),
         Err(_) => state.set(None),
     }
@@ -1283,17 +1297,49 @@ fn layout_drag_blocks_click(state: Signal<Option<LayoutDragState>>) -> bool {
     state().is_some_and(|drag| drag.active)
 }
 
-fn layout_tab_drop_targeted(state: Signal<Option<LayoutDragState>>, tab_id: &str) -> bool {
-    state().is_some_and(|drag| {
-        drag.active
-            && matches!(
-                drag.target,
-                Some(LayoutDropTarget::Tab { tab_id: ref target, .. }) if target == tab_id
-            )
+fn layout_tab_drop_after(state: Signal<Option<LayoutDragState>>, tab_id: &str) -> Option<bool> {
+    state().and_then(|drag| match drag {
+        LayoutDragState {
+            active: true,
+            target:
+                Some(LayoutDropTarget::Tab {
+                    tab_id: target,
+                    after,
+                }),
+            ..
+        } if target == tab_id => Some(after),
+        _ => None,
     })
 }
 
-fn layout_stack_drop_targeted(
+fn layout_tab_is_dragged(state: Signal<Option<LayoutDragState>>, tab_id: &str) -> bool {
+    state().is_some_and(|drag| {
+        drag.active
+            && matches!(drag.item, LayoutDragItem::Tab { tab_id: ref source } if source == tab_id)
+    })
+}
+
+fn layout_stack_drop_after(
+    state: Signal<Option<LayoutDragState>>,
+    pane_id: u64,
+    stack_index: u32,
+) -> Option<bool> {
+    state().and_then(|drag| match drag {
+        LayoutDragState {
+            active: true,
+            target:
+                Some(LayoutDropTarget::Stack {
+                    pane_id: target_pane,
+                    stack_index: target_stack,
+                    after,
+                }),
+            ..
+        } if target_pane == pane_id && target_stack == stack_index => Some(after),
+        _ => None,
+    })
+}
+
+fn layout_stack_is_dragged(
     state: Signal<Option<LayoutDragState>>,
     pane_id: u64,
     stack_index: u32,
@@ -1301,19 +1347,52 @@ fn layout_stack_drop_targeted(
     state().is_some_and(|drag| {
         drag.active
             && matches!(
-                drag.target,
-                Some(LayoutDropTarget::Stack {
-                    pane_id: target_pane,
-                    stack_index: target_stack,
+                drag.item,
+                LayoutDragItem::Stack {
+                    pane_id: source_pane,
+                    stack_index: source_stack,
                     ..
-                }) if target_pane == pane_id && target_stack == stack_index
+                } if source_pane == pane_id && source_stack == stack_index
             )
     })
+}
+
+fn tab_drag_style(base: &str, dragged: bool, drop_after: Option<bool>) -> String {
+    let mut style = format!(
+        "{base}transition:width 180ms cubic-bezier(.2,.8,.2,1),min-width 180ms cubic-bezier(.2,.8,.2,1),max-width 180ms cubic-bezier(.2,.8,.2,1),flex-basis 180ms cubic-bezier(.2,.8,.2,1),margin 180ms cubic-bezier(.2,.8,.2,1),padding 180ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease-out;"
+    );
+    if dragged {
+        style.push_str(
+            "width:0;min-width:0;max-width:0;flex-basis:0;padding-left:0;padding-right:0;opacity:0;overflow:hidden;",
+        );
+    }
+    match drop_after {
+        Some(true) => style.push_str("margin-right:208px;"),
+        Some(false) => style.push_str("margin-left:208px;"),
+        None => {}
+    }
+    style
+}
+
+fn stack_drag_style(dragged: bool, drop_after: Option<bool>) -> String {
+    let mut style = String::from(
+        "transition:height 180ms cubic-bezier(.2,.8,.2,1),min-height 180ms cubic-bezier(.2,.8,.2,1),margin 180ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease-out;overflow:hidden;",
+    );
+    if dragged {
+        style.push_str("height:0;min-height:0;opacity:0;");
+    }
+    match drop_after {
+        Some(true) => style.push_str("margin-bottom:36px;"),
+        Some(false) => style.push_str("margin-top:36px;"),
+        None => {}
+    }
+    style
 }
 
 fn layout_pane_drop_targeted(state: Signal<Option<LayoutDragState>>, pane_id: u64) -> bool {
     state().is_some_and(|drag| {
         drag.active
+            && matches!(drag.item, LayoutDragItem::Stack { .. })
             && matches!(
                 drag.target,
                 Some(LayoutDropTarget::Pane { pane_id: target }) if target == pane_id
@@ -2787,6 +2866,15 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     {
                         SideSheetStackRow { stack: stack.clone(), pane_id }
                     }
+                    div {
+                        aria_hidden: "true",
+                        class: "rounded-md bg-foreground/10 ring-1 ring-ring/60",
+                        style: if pane_targeted {
+                            "height:36px;min-height:36px;margin-bottom:0;opacity:1;transition:height 180ms cubic-bezier(.2,.8,.2,1),min-height 180ms cubic-bezier(.2,.8,.2,1),margin 180ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease-out;"
+                        } else {
+                            "height:0;min-height:0;margin-bottom:-4px;opacity:0;transition:height 180ms cubic-bezier(.2,.8,.2,1),min-height 180ms cubic-bezier(.2,.8,.2,1),margin 180ms cubic-bezier(.2,.8,.2,1),opacity 120ms ease-out;"
+                        },
+                    }
                     NewStackRow { pane_id }
                 }
             }
@@ -2840,7 +2928,9 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let bookmark_metadata = metadata.clone();
     let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
-    let drop_targeted = layout_stack_drop_targeted(layout_drag_state, pane_id, stack_index);
+    let drop_after = layout_stack_drop_after(layout_drag_state, pane_id, stack_index);
+    let dragged = layout_stack_is_dragged(layout_drag_state, pane_id, stack_index);
+    let drag_style = stack_drag_style(dragged, drop_after);
 
     let title_class = if is_active {
         format!(
@@ -2866,7 +2956,8 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         move |event| begin_layout_drag(layout_drag_state, &event, item.clone())
                     },
                     id: "sidesheet-stack-{pane_id}-{stack_index}",
-                    class: if drop_targeted {
+                    style: "{drag_style}",
+                    class: if drop_after.is_some() {
                         "glass flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 ring-2 ring-ring"
                     } else if is_active {
                         "glass flex h-9 cursor-default items-center gap-2 rounded-md px-2"

@@ -387,6 +387,11 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
+        if event_type == NSEventType::LeftMouseDragged
+            && vmux_layout::native_pointer::layout_drag_active()
+        {
+            return std::ptr::null_mut();
+        }
         event.as_ptr()
     });
     let global_wake = wake.clone();
@@ -1000,6 +1005,20 @@ mod tests {
 
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
+    }
+
+    #[test]
+    fn native_tab_drag_does_not_move_window() {
+        let source = include_str!("background_lifecycle.rs");
+        let monitor = source
+            .split("fn install_native_mouse_wake_monitor")
+            .nth(1)
+            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
+            .unwrap_or_default();
+
+        assert!(monitor.contains("event_type == NSEventType::LeftMouseDragged"));
+        assert!(monitor.contains("vmux_layout::native_pointer::layout_drag_active()"));
+        assert!(monitor.contains("return std::ptr::null_mut();"));
     }
 
     #[test]

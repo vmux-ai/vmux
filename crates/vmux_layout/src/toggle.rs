@@ -27,10 +27,16 @@ impl Default for LayoutTransition {
     }
 }
 
+impl LayoutTransition {
+    pub fn is_animating(&self) -> bool {
+        self.hidden_fraction != if self.target_hidden { 1.0 } else { 0.0 }
+    }
+}
+
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LayoutChromeTransitionSet;
 
-const LAYOUT_TRANSITION_SECONDS: f32 = 0.2;
+const LAYOUT_TRANSITION_SECONDS: f32 = 0.28;
 
 pub struct TogglePlugin;
 
@@ -53,7 +59,10 @@ fn animate_layout_transition(
     mut transition: ResMut<LayoutTransition>,
     settings: Res<LayoutSettings>,
     mut window_q: Query<&mut Node, With<VmuxWindow>>,
-    mut header_q: Query<&mut Node, (With<Header>, Without<VmuxWindow>, Without<SideSheet>)>,
+    mut header_q: Query<
+        (Entity, Has<Open>, &mut Node),
+        (With<Header>, Without<VmuxWindow>, Without<SideSheet>),
+    >,
     mut side_sheet_q: Query<
         (Entity, &SideSheetPosition, Has<Open>, &mut Node),
         (With<SideSheet>, Without<VmuxWindow>, Without<Header>),
@@ -69,15 +78,18 @@ fn animate_layout_transition(
         target,
         time.delta_secs() / LAYOUT_TRANSITION_SECONDS,
     );
-    let hidden = smoothstep(transition.hidden_fraction);
+    let hidden = smootherstep(transition.hidden_fraction);
     let visible = 1.0 - hidden;
 
     for mut node in &mut window_q {
         node.padding.top = Val::Px(settings.window.pad_top() * hidden);
         node.padding.left = Val::Px(settings.window.pad_left() * hidden);
     }
-    for mut node in &mut header_q {
+    for (entity, open, mut node) in &mut header_q {
         node.height = Val::Px(crate::event::CEF_RESERVED_HEIGHT_PX * visible);
+        if transition.target_hidden && transition.hidden_fraction >= 1.0 && open {
+            commands.entity(entity).remove::<Open>();
+        }
     }
     for (entity, position, open, mut node) in &mut side_sheet_q {
         if *position != SideSheetPosition::Left {
@@ -102,8 +114,8 @@ fn advance_transition(current: f32, target: f32, step: f32) -> f32 {
     }
 }
 
-fn smoothstep(value: f32) -> f32 {
-    value * value * (3.0 - 2.0 * value)
+fn smootherstep(value: f32) -> f32 {
+    value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
 }
 
 fn handle_toggle(
@@ -159,9 +171,9 @@ mod tests {
     }
 
     #[test]
-    fn smoothstep_keeps_transition_endpoints() {
-        assert_eq!(smoothstep(0.0), 0.0);
-        assert_eq!(smoothstep(1.0), 1.0);
-        assert_eq!(smoothstep(0.5), 0.5);
+    fn smootherstep_keeps_transition_endpoints() {
+        assert_eq!(smootherstep(0.0), 0.0);
+        assert_eq!(smootherstep(1.0), 1.0);
+        assert_eq!(smootherstep(0.5), 0.5);
     }
 }

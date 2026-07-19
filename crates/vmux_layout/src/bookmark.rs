@@ -103,6 +103,7 @@ fn on_bookmark_context_menu_emit(
     trigger: On<BinReceive<BookmarkContextMenuEvent>>,
     mut commands: Commands,
 ) {
+    crate::native_pointer::set_layout_drag_active(trigger.event().payload.active);
     let Ok(mut webview) = commands.get_entity(trigger.event().webview) else {
         return;
     };

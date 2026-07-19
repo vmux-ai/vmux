@@ -48,12 +48,33 @@ fn tabs_and_side_sheet_stacks_use_pointer_drag_reordering() {
     assert!(source.contains("fn update_layout_drag"));
     assert!(source.contains("fn end_layout_drag"));
     assert!(source.contains("set_layout_pointer_capture"));
+    assert!(source.contains("event.prevent_default();"));
+    assert!(source.contains("event.stop_propagation();"));
+    assert!(source.contains("set_bookmark_context_menu_active(true);"));
     assert!(tab.contains("data-layout-drag-source"));
     assert!(tab.contains("data-layout-drop-tab"));
     assert!(stack.contains("data-layout-drag-source"));
     assert!(stack.contains("data-layout-drop-stack"));
     assert!(source.contains("command: \"move_stack\".to_string()"));
     assert!(source.contains("command: \"move\".to_string()"));
+}
+
+#[test]
+fn layout_drag_collapses_source_and_opens_animated_drop_gap() {
+    let source = include_str!("../src/page.rs");
+    let tab = tab_component_source();
+    let stack = side_sheet_stack_row_component_source();
+
+    assert!(source.contains("fn tab_drag_style"));
+    assert!(source.contains("fn stack_drag_style"));
+    assert!(source.contains("width:0;min-width:0;max-width:0;flex-basis:0"));
+    assert!(source.contains("height:0;min-height:0;opacity:0"));
+    assert!(source.contains("margin-right:208px"));
+    assert!(source.contains("margin-bottom:36px"));
+    assert!(source.contains("cubic-bezier(.2,.8,.2,1)"));
+    assert!(source.contains("set_timeout_with_callback_and_timeout_and_arguments_0"));
+    assert!(tab.contains("tab_drag_style"));
+    assert!(stack.contains("stack_drag_style"));
 }
 
 #[test]
@@ -225,6 +246,7 @@ fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
     assert!(source.contains("let overlay_ready = layout_overlay_ready"));
     assert!(source.contains("if overlay_ready && state.side_sheet_open"));
     assert!(source.contains("if overlay_ready && state.header_visible()"));
+    assert!(source.contains("h-[var(--vmux-header-height)] overflow-hidden"));
 }
 
 #[test]

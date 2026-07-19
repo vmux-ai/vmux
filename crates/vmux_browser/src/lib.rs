@@ -2085,6 +2085,7 @@ fn sync_layout_cef_frame_rate(
     mut button_events: MessageReader<MouseButtonInput>,
     mut wheel_events: MessageReader<MouseWheel>,
     buttons: Res<ButtonInput<MouseButton>>,
+    transition: Option<Res<vmux_layout::toggle::LayoutTransition>>,
     mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
     mut state: Local<LayoutFrameRateState>,
 ) {
@@ -2114,7 +2115,15 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
-    let desired = layout_frame_rate(now, state.last_input, inside, state.dragging_layout);
+    let desired = layout_frame_rate(
+        now,
+        state.last_input,
+        inside,
+        state.dragging_layout
+            || transition
+                .as_deref()
+                .is_some_and(vmux_layout::toggle::LayoutTransition::is_animating),
+    );
     let Ok(mut cap) = layout_q.single_mut() else {
         return;
     };
@@ -3043,6 +3052,11 @@ fn push_layout_state_emit(
         .ok()
         .map(|window| window.resolution.physical_width() as f32)
         .unwrap_or(0.0);
+    let header_height = header_q
+        .iter()
+        .find_map(|(_, computed, _)| computed)
+        .map(|computed| computed.size.y * computed.inverse_scale_factor.max(1.0e-6))
+        .unwrap_or(if header_open { HEADER_HEIGHT_PX } else { 0.0 });
     let header_offsets = header_q.iter().find_map(|(_, computed, transform)| {
         let computed = computed?;
         let transform = transform?;
@@ -3060,9 +3074,7 @@ fn push_layout_state_emit(
     let payload = LayoutStateEvent {
         header_open,
         side_sheet_open,
-        header_height: header_offsets
-            .map(|offsets| offsets.height)
-            .unwrap_or(HEADER_HEIGHT_PX),
+        header_height,
         side_sheet_width: visible_side_sheet_width,
         pane_gap: vmux_layout::event::PANE_GAP_PX,
         radius: settings.layout.radius,
