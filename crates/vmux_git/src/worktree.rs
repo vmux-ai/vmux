@@ -68,6 +68,22 @@ fn rev_parse_path(dir: &Path, flag: &str, label: &str) -> Result<PathBuf, GitErr
     Ok(PathBuf::from(value))
 }
 
+fn is_bare_repository(dir: &Path) -> bool {
+    git(dir, &["rev-parse", "--is-bare-repository"])
+        .ok()
+        .is_some_and(|(stdout, _, ok)| ok && stdout.trim() == "true")
+}
+
+fn bare_checkout_root(input_dir: &Path, common_dir: &Path) -> PathBuf {
+    common_dir
+        .file_name()
+        .filter(|name| *name == ".git")
+        .and_then(|_| common_dir.parent())
+        .filter(|root| input_dir != common_dir && input_dir.starts_with(root))
+        .unwrap_or(common_dir)
+        .to_path_buf()
+}
+
 /// Resolve checkout root and shared Git directory.
 pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     let input_dir = dir
@@ -76,8 +92,15 @@ pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
     if !input_dir.is_dir() {
         return Err(GitError("checkout path is not a directory".to_string()));
     }
-    let root = rev_parse_path(&input_dir, "--show-toplevel", "git checkout root")?;
     let common_dir = rev_parse_path(&input_dir, "--git-common-dir", "git common dir")?;
+    let common_dir = common_dir
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
+    let root = match rev_parse_path(&input_dir, "--show-toplevel", "git checkout root") {
+        Ok(root) => root,
+        Err(_) if is_bare_repository(&input_dir) => bare_checkout_root(&input_dir, &common_dir),
+        Err(error) => return Err(error),
+    };
     let root = root
         .canonicalize()
         .map_err(|error| GitError(format!("invalid checkout root: {error}")))?;
@@ -86,9 +109,6 @@ pub fn checkout_info(dir: &Path) -> Result<CheckoutInfo, GitError> {
             "git checkout root does not contain the input directory".to_string(),
         ));
     }
-    let common_dir = common_dir
-        .canonicalize()
-        .map_err(|error| GitError(format!("invalid git common directory: {error}")))?;
     Ok(CheckoutInfo { root, common_dir })
 }
 
@@ -441,6 +461,27 @@ mod tests {
         let wt = repo.path().join(".worktrees/feat");
         worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
         assert!(is_linked_worktree(&wt), "linked worktree");
+    }
+
+    #[test]
+    fn resolves_repository_marked_bare_with_dot_git_directory() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        test_repo::run(repo.path(), &["config", "core.bare", "true"]);
+
+        let info = checkout_info(repo.path()).unwrap();
+
+        assert_eq!(info.root, repo.path().canonicalize().unwrap());
+        assert_eq!(
+            info.common_dir,
+            repo.path().join(".git").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn bare_repository_named_dot_git_remains_its_own_root() {
+        let path = Path::new("/tmp/example/.git");
+        assert_eq!(bare_checkout_root(path, path), path);
     }
 
     #[test]

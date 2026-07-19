@@ -935,6 +935,26 @@ mod tests {
     }
 
     #[test]
+    fn create_worktree_from_repository_marked_bare() {
+        let repo = init_repo();
+        git(repo.path(), &["config", "core.bare", "true"]);
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let activation = create_worktree_for_branch_blocking(
+            repo.path(),
+            "vmux/bare-source",
+            managed_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(activation.metadata.branch, "vmux/bare-source");
+        assert_eq!(
+            worktree::head_ref(&activation.execution_dir).unwrap(),
+            "vmux/bare-source"
+        );
+    }
+
+    #[test]
     fn create_worktree_for_branch_rejects_existing_or_invalid_branch() {
         let repo = init_repo();
         let managed_root = tempfile::tempdir().unwrap();
