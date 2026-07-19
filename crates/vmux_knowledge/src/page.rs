@@ -82,7 +82,7 @@ fn schedule_query(
     mut latest_request: Signal<u64>,
     mut query_error: Signal<String>,
 ) {
-    let current = generation().wrapping_add(1);
+    let current = generation.peek().wrapping_add(1);
     generation.set(current);
     let Some(window) = web_sys::window() else {
         let next = *latest_request.peek() + 1;
@@ -93,7 +93,7 @@ fn schedule_query(
         return;
     };
     let closure = Closure::once(move || {
-        if generation() != current {
+        if *generation.peek() != current {
             return;
         }
         let next = *latest_request.peek() + 1;
@@ -238,12 +238,6 @@ pub fn Page() -> Element {
             document.set_title("Knowledge");
         }
         let _ = emit_query("", 1, 0);
-        schedule_query(
-            String::new(),
-            search_generation,
-            latest_request,
-            query_error,
-        );
     });
 
     rsx! {
