@@ -470,7 +470,7 @@ fn install_acp_session_when_focused(
             .agent
             .acp
             .iter()
-            .find(|c| c.id == session.agent_id)
+            .find(|config| crate::acp_install::agent_ids_match(&config.id, &session.agent_id))
             .cloned();
 
         *state = AgentRunState::Installing {

@@ -352,6 +352,16 @@ pub fn registry_id_alias(id: &str) -> &str {
     }
 }
 
+pub(crate) fn agent_url_id(id: &str) -> &str {
+    id.strip_suffix("-acp").unwrap_or(id)
+}
+
+pub(crate) fn agent_ids_match(left: &str, right: &str) -> bool {
+    let left = registry_id_alias(left);
+    let right = registry_id_alias(right);
+    left == right || agent_url_id(left) == agent_url_id(right)
+}
+
 /// Resolve an agent by launcher id against the registry (cached, else fetched) and ensure it is
 /// installed, returning how to launch it. Runs on a background thread (blocking I/O).
 pub fn resolve_from_registry(
@@ -359,13 +369,17 @@ pub fn resolve_from_registry(
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let reg_id = registry_id_alias(agent_id);
-    let find = |reg: acp_registry::Registry| reg.agents.into_iter().find(|a| a.id == reg_id);
+    let find = |reg: acp_registry::Registry| {
+        reg.agents
+            .into_iter()
+            .find(|agent| agent_ids_match(&agent.id, agent_id))
+    };
     let agent = match acp_registry::load_cached().and_then(find) {
         Some(a) => a,
         None => acp_registry::fetch_blocking()?
             .agents
             .into_iter()
-            .find(|a| a.id == reg_id)
+            .find(|agent| agent_ids_match(&agent.id, agent_id))
             .ok_or_else(|| format!("agent not in ACP registry: {agent_id} ({reg_id})"))?,
     };
     ensure_installed(&agent, emit)
@@ -477,6 +491,21 @@ mod tests {
             "vibe-darwin-arm64.tar.gz"
         );
         assert_eq!(archive_filename("https://x/y/bin.zip?token=1"), "bin.zip");
+    }
+
+    #[test]
+    fn acp_registry_suffix_is_omitted_from_agent_urls() {
+        assert_eq!(agent_url_id("codex-acp"), "codex");
+        assert_eq!(agent_url_id("custom-acp"), "custom");
+        assert_eq!(agent_url_id("mistral-vibe"), "mistral-vibe");
+    }
+
+    #[test]
+    fn agent_ids_match_url_and_registry_forms() {
+        assert!(agent_ids_match("codex", "codex-acp"));
+        assert!(agent_ids_match("custom", "custom-acp"));
+        assert!(agent_ids_match("vibe", "mistral-vibe"));
+        assert!(!agent_ids_match("codex", "custom-acp"));
     }
 
     #[test]

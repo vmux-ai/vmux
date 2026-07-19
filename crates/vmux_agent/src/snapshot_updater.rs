@@ -91,7 +91,10 @@ fn acp_agent_summaries(
         .map(|agent| AgentProviderSummary {
             id: agent.id.clone(),
             name: agent.name.clone(),
-            url: format!("vmux://agent/{}", agent.id),
+            url: format!(
+                "vmux://agent/{}",
+                crate::acp_install::agent_url_id(&agent.id)
+            ),
             icon: agent.icon.clone().unwrap_or_default(),
         })
         .collect();
@@ -120,7 +123,10 @@ pub(crate) fn update_recent_agents(
         consider(
             timestamp.map(|timestamp| timestamp.0).unwrap_or(i64::MIN),
             AgentPromptTarget::Acp {
-                id: crate::acp_install::registry_id_alias(&session.agent_id).to_string(),
+                id: crate::acp_install::agent_url_id(crate::acp_install::registry_id_alias(
+                    &session.agent_id,
+                ))
+                .to_string(),
             },
         );
     }
@@ -137,7 +143,8 @@ pub(crate) fn update_recent_agents(
         let target = match crate::url::AgentUrl::parse(&page.url) {
             Some(crate::url::AgentUrl::Cli { kind, .. }) => AgentPromptTarget::Cli(kind),
             Some(crate::url::AgentUrl::Acp { id, .. }) => AgentPromptTarget::Acp {
-                id: crate::acp_install::registry_id_alias(&id).to_string(),
+                id: crate::acp_install::agent_url_id(crate::acp_install::registry_id_alias(&id))
+                    .to_string(),
             },
             _ => continue,
         };
@@ -245,12 +252,12 @@ mod tests {
 
     #[test]
     fn installed_unconfigured_acp_is_in_snapshot() {
-        let catalog = vec![registry_agent("new-agent", "New Agent")];
+        let catalog = vec![registry_agent("new-agent-acp", "New Agent")];
 
         let agents = acp_agent_summaries(&catalog, |_| true);
 
         assert_eq!(agents.len(), 1);
-        assert_eq!(agents[0].id, "new-agent");
+        assert_eq!(agents[0].id, "new-agent-acp");
         assert_eq!(agents[0].url, "vmux://agent/new-agent");
     }
 
@@ -306,7 +313,7 @@ mod tests {
             app.world().resource::<CommandBarAgentsSnapshot>().recent,
             vec![
                 AgentPromptTarget::Acp {
-                    id: "claude-acp".to_string(),
+                    id: "claude".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
             ]
@@ -325,7 +332,7 @@ mod tests {
             app.world().resource::<CommandBarAgentsSnapshot>().recent,
             vec![
                 AgentPromptTarget::Acp {
-                    id: "claude-acp".to_string(),
+                    id: "claude".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
             ]
@@ -356,7 +363,7 @@ mod tests {
             app.world().resource::<CommandBarAgentsSnapshot>().recent,
             vec![
                 AgentPromptTarget::Acp {
-                    id: "codex-acp".to_string(),
+                    id: "codex".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Claude),
             ]
@@ -392,7 +399,7 @@ mod tests {
             app.world().resource::<CommandBarAgentsSnapshot>().recent,
             vec![
                 AgentPromptTarget::Acp {
-                    id: "claude-acp".to_string(),
+                    id: "claude".to_string(),
                 },
                 AgentPromptTarget::Cli(vmux_core::agent::AgentKind::Codex),
             ]

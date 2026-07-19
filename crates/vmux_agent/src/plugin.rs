@@ -396,6 +396,7 @@ pub fn attach_acp_agent_to_stack(
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
+    let agent_id = crate::acp_install::agent_url_id(agent_id);
     // A resume carries the agent-assigned session id in the url; a fresh open is bare and gets
     // redirected to `vmux://agent/<id>/<acp-session-id>` once the agent returns its id.
     let url = match resume {
@@ -446,8 +447,10 @@ fn acp_registry_agent_for_id<'a>(
     catalog: Option<&'a crate::client::acp::AcpCatalog>,
     id: &str,
 ) -> Option<&'a crate::acp_registry::RegistryAgent> {
-    let registry_id = crate::acp_install::registry_id_alias(id);
-    catalog?.agents.iter().find(|agent| agent.id == registry_id)
+    catalog?
+        .agents
+        .iter()
+        .find(|agent| crate::acp_install::agent_ids_match(&agent.id, id))
 }
 
 fn acp_icon_for_id(catalog: Option<&crate::client::acp::AcpCatalog>, id: &str) -> Option<String> {
@@ -4190,7 +4193,11 @@ fn handle_swap_stack_session(
             }
         };
         if let crate::AgentUrl::Acp { id, .. } = &target
-            && !settings.agent.acp.iter().any(|cfg| cfg.id == *id)
+            && !settings
+                .agent
+                .acp
+                .iter()
+                .any(|cfg| crate::acp_install::agent_ids_match(&cfg.id, id))
             && acp_registry_agent_for_id(catalog.as_deref(), id).is_none()
         {
             bevy::log::warn!("swap: ACP agent unavailable for '{id}'");
@@ -4257,7 +4264,11 @@ fn handle_swap_stack_session(
                 });
             }
             crate::AgentUrl::Acp { id, sid } => {
-                let cfg = settings.agent.acp.iter().find(|cfg| cfg.id == id);
+                let cfg = settings
+                    .agent
+                    .acp
+                    .iter()
+                    .find(|cfg| crate::acp_install::agent_ids_match(&cfg.id, &id));
                 let routing_sid = uuid::Uuid::new_v4().to_string();
                 let icon = acp_icon_for_id(catalog.as_deref(), &id);
                 let name = acp_profile_name_for_id(&id, cfg, catalog.as_deref());
@@ -4381,7 +4392,9 @@ fn handle_agent_page_open_task(
         Some(crate::AgentUrl::Acp { id, sid }) => {
             // ACP agents own the canonical single-segment names (claude/codex/…) plus the
             // two-segment `<id>/<acp-session-id>` session form.
-            let cfg = acp_configs.iter().find(|config| config.id == id);
+            let cfg = acp_configs
+                .iter()
+                .find(|config| crate::acp_install::agent_ids_match(&config.id, &id));
             if cfg.is_none() && acp_registry_agent_for_id(catalog, &id).is_none() {
                 // Not an ACP agent. A bare `vmux://agent/<kind>` for a built-in CLI kind falls
                 // back to a fresh CLI session (CLI's own url is `<kind>/cli`); this keeps the
@@ -4406,7 +4419,7 @@ fn handle_agent_page_open_task(
             // redirect) is a no-op instead of re-spawning the session.
             if acp_sessions
                 .get(task.stack)
-                .is_ok_and(|session| session.agent_id == id)
+                .is_ok_and(|session| crate::acp_install::agent_ids_match(&session.agent_id, &id))
             {
                 return Ok(());
             }
@@ -6592,7 +6605,7 @@ mod tests {
             .spawn(PageOpenTask {
                 id: vmux_core::PageOpenId::new(),
                 stack,
-                url: "vmux://agent/custom-acp".to_string(),
+                url: "vmux://agent/custom".to_string(),
                 request_id: None,
             })
             .id();
@@ -6604,8 +6617,9 @@ mod tests {
             .world()
             .get::<crate::client::acp::AcpSession>(stack)
             .unwrap();
-        assert_eq!(session.agent_id, "custom-acp");
+        assert_eq!(session.agent_id, "custom");
         let meta = app.world().get::<PageMetadata>(stack).unwrap();
+        assert_eq!(meta.url, "vmux://agent/custom");
         assert_eq!(meta.title, "Custom ACP");
         assert_eq!(meta.icon.favicon_url(), "https://cdn.example/custom.svg");
     }

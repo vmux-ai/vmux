@@ -2928,7 +2928,7 @@ mod tests {
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
                 id: "claude-acp".to_string(),
                 name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude-acp".to_string(),
+                url: "vmux://agent/claude".to_string(),
                 icon: String::new(),
             }],
             ..Default::default()
@@ -2946,7 +2946,7 @@ mod tests {
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
                 id: "claude-acp".to_string(),
                 name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude-acp".to_string(),
+                url: "vmux://agent/claude".to_string(),
                 icon: String::new(),
             }],
             ..Default::default()
@@ -2954,7 +2954,7 @@ mod tests {
 
         assert_eq!(
             prompt_agent_url(&snapshot, None).as_deref(),
-            Some("vmux://agent/claude-acp")
+            Some("vmux://agent/claude")
         );
         assert_eq!(
             prompt_agent_url(&CommandBarAgentsSnapshot::default(), None),
@@ -2974,7 +2974,7 @@ mod tests {
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
                 id: "claude-acp".to_string(),
                 name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude-acp".to_string(),
+                url: "vmux://agent/claude".to_string(),
                 icon: String::new(),
             }],
             recent: vec![AgentPromptTarget::Cli(AgentKind::Codex)],
@@ -2982,8 +2982,8 @@ mod tests {
         };
 
         assert_eq!(
-            prompt_agent_url(&snapshot, Some("vmux://agent/claude-acp")).as_deref(),
-            Some("vmux://agent/claude-acp")
+            prompt_agent_url(&snapshot, Some("vmux://agent/claude")).as_deref(),
+            Some("vmux://agent/claude")
         );
         assert_eq!(
             prompt_agent_url(&snapshot, Some("vmux://agent/uninstalled")).as_deref(),
@@ -3023,13 +3023,13 @@ mod tests {
             acp: vec![vmux_command::snapshot::AgentProviderSummary {
                 id: "claude-acp".to_string(),
                 name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude-acp".to_string(),
+                url: "vmux://agent/claude".to_string(),
                 icon: "https://cdn.example/claude-acp.svg".to_string(),
             }],
             recent: vec![
                 AgentPromptTarget::Cli(AgentKind::Codex),
                 AgentPromptTarget::Acp {
-                    id: "claude-acp".to_string(),
+                    id: "claude".to_string(),
                 },
             ],
             ..Default::default()
