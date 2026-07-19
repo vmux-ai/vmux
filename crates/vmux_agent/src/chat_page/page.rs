@@ -2279,9 +2279,9 @@ const MD_CSS: &str = r#"
 .agent-chat-prompt{caret-color:transparent}
 .agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite;background:var(--agent-accent)}
 @keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
-.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,color-mix(in srgb,var(--agent-accent) 18%,transparent),transparent 72%);filter:blur(16px);pointer-events:none}
-.agent-chat-prompt-box{border-color:color-mix(in srgb,var(--agent-accent) 20%,transparent);box-shadow:0 22px 70px -28px color-mix(in srgb,var(--agent-accent) 42%,rgba(0,0,0,0.72)),inset 0 1px 0 rgba(255,255,255,0.16),inset 0 -1px 0 rgba(255,255,255,0.04)}
-.agent-chat-prompt-box:focus-within{border-color:color-mix(in srgb,var(--agent-accent) 36%,transparent);box-shadow:0 26px 78px -26px color-mix(in srgb,var(--agent-accent) 56%,rgba(0,0,0,0.74)),inset 0 1px 0 rgba(255,255,255,0.2)}
+.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);filter:blur(16px);pointer-events:none}
+.agent-chat-prompt-box{border-color:rgba(255,255,255,0.18);box-shadow:0 22px 70px -28px rgba(255,255,255,0.2),inset 0 1px 0 rgba(255,255,255,0.16),inset 0 -1px 0 rgba(255,255,255,0.04)}
+.agent-chat-prompt-box:focus-within{border-color:rgba(255,255,255,0.28);box-shadow:0 26px 78px -26px rgba(255,255,255,0.28),inset 0 1px 0 rgba(255,255,255,0.2)}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
 .agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}
