@@ -4,6 +4,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+#[cfg(all(unix, test))]
+use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
@@ -34,7 +36,12 @@ pub fn vault_dir() -> PathBuf {
 pub fn ensure_vault(root: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     #[cfg(unix)]
-    std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+    {
+        let permissions = std::fs::metadata(root)?.permissions();
+        if permissions.mode() & 0o777 != 0o700 {
+            std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
     Ok(())
 }
 
@@ -588,6 +595,24 @@ mod tests {
                 .mode()
                 & 0o777,
             0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensuring_an_existing_private_vault_does_not_mutate_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("vault");
+        ensure_vault(&root).unwrap();
+        let before = std::fs::metadata(&root).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        ensure_vault(&root).unwrap();
+
+        let after = std::fs::metadata(&root).unwrap();
+        assert_eq!(
+            (before.ctime(), before.ctime_nsec()),
+            (after.ctime(), after.ctime_nsec())
         );
     }
 
