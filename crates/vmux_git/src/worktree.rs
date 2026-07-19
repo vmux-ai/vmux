@@ -2,7 +2,11 @@
 //! its dirty/ahead status. Root/path-based (unlike [`crate::runner`], which is file-centric),
 //! because a worktree is created at a path that does not exist yet.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::{File, OpenOptions},
+    os::fd::AsRawFd,
+    path::{Path, PathBuf},
+};
 
 use crate::runner::{GitError, git, git_err};
 
@@ -34,6 +38,32 @@ pub struct WorktreeRegistration {
     pub path: PathBuf,
     pub branch: Option<String>,
     pub prunable: bool,
+}
+
+struct RepositoryWorktreeLock(File);
+
+impl Drop for RepositoryWorktreeLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+fn lock_repository_worktrees(root: &Path) -> Result<RepositoryWorktreeLock, GitError> {
+    let path = common_dir_of(root)?.join("vmux-worktrees.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| GitError(format!("failed to open worktree lock: {error}")))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+        return Err(GitError(format!(
+            "failed to acquire worktree lock: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(RepositoryWorktreeLock(file))
 }
 
 fn normalize_worktree_path(path: &Path) -> Result<PathBuf, GitError> {
@@ -144,6 +174,7 @@ pub fn worktree_add(
     branch: &str,
     base: &str,
 ) -> Result<WorktreeInfo, GitError> {
+    let _lock = lock_repository_worktrees(root)?;
     let path_str = path.to_string_lossy();
     let (stdout, stderr, ok) = git(
         root,
@@ -167,6 +198,7 @@ pub fn worktree_add_existing(
     branch: &str,
     base_ref: &str,
 ) -> Result<WorktreeInfo, GitError> {
+    let _lock = lock_repository_worktrees(root)?;
     if path.symlink_metadata().is_ok() {
         return Err(GitError(format!(
             "worktree recovery path already exists: {}",
@@ -230,6 +262,7 @@ pub fn worktree_remove(
     branch: &str,
     force: bool,
 ) -> Result<(), GitError> {
+    let _lock = lock_repository_worktrees(root)?;
     let path_str = path.to_string_lossy();
     let mut args = vec!["worktree", "remove"];
     if force {
@@ -584,6 +617,32 @@ mod tests {
         assert_eq!(common_dir_of(&wt).unwrap(), main_common);
         assert_ne!(common_dir_of(other.path()).unwrap(), main_common);
         assert!(common_dir_of(not_repo.path()).is_err());
+    }
+
+    #[test]
+    fn worktree_mutation_lock_is_shared_across_checkouts() {
+        let repo = test_repo::init();
+        commit_initial(repo.path());
+        let wt = repo.path().join(".worktrees/feat");
+        worktree_add(repo.path(), &wt, "vmux/feat", "main").unwrap();
+        let lock = lock_repository_worktrees(repo.path()).unwrap();
+        let competing = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(common_dir_of(&wt).unwrap().join("vmux-worktrees.lock"))
+            .unwrap();
+
+        assert_ne!(
+            unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        drop(lock);
+        assert_eq!(
+            unsafe { libc::flock(competing.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
     }
 
     #[test]

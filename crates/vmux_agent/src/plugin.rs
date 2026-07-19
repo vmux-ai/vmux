@@ -3060,9 +3060,13 @@ fn handle_agent_self_commands(
                                                     },
                                                 );
                                             }
+                                            let slug_hint =
+                                                vmux_layout::worktree::tab_worktree_slug_hint(
+                                                    &name, &base_dir,
+                                                );
                                             match vmux_layout::worktree::create_worktree_blocking(
                                                 &base_dir,
-                                                &name,
+                                                &slug_hint,
                                                 &managed_root,
                                             ) {
                                                 Ok(activation) => {
@@ -3106,6 +3110,7 @@ fn handle_agent_self_commands(
                         let Some(tab_entity) =
                             ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
                         else {
+                            failed_worktree_anchors.insert(*anchor);
                             service.0.send(ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
                                 result: AgentCommandResult::Error("no tab for agent".to_string()),
@@ -3152,6 +3157,7 @@ fn handle_agent_self_commands(
                                     )
                                 });
                             let Some(base_dir) = base_dir else {
+                                failed_worktree_anchors.insert(*anchor);
                                 service.0.send(ClientMessage::AgentCommandResponse {
                                     request_id: request.request_id,
                                     result: AgentCommandResult::Error(

@@ -265,7 +265,6 @@ fn prune_empty_legacy_space_dirs_in(home: &std::path::Path) {
     }
     let mut dirs = Vec::new();
     collect_subdirs(&root, &mut dirs);
-    dirs.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
     for dir in dirs {
         if is_empty_dir(&dir) {
             let _ = std::fs::remove_dir(&dir);

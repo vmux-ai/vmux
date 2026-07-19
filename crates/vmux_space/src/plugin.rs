@@ -136,7 +136,7 @@ fn update_effective_startup_dir(
         && effective
             .0
             .as_ref()
-            .is_some_and(|(_, current)| current.as_ref().is_some_and(|path| path.is_dir()))
+            .is_some_and(|(_, current)| current.as_ref().is_none_or(|path| path.is_dir()))
     {
         return;
     }
@@ -857,6 +857,44 @@ mod tests {
                 .0,
             Some((space, None))
         );
+    }
+
+    #[test]
+    fn unset_startup_dir_is_unchanged_without_relevant_updates() {
+        #[derive(Resource, Default)]
+        struct ChangeCount(u32);
+
+        fn count_changes(
+            effective: Res<vmux_layout::settings::EffectiveStartupDir>,
+            mut count: ResMut<ChangeCount>,
+        ) {
+            if effective.is_changed() {
+                count.0 += 1;
+            }
+        }
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(test_settings())
+            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+            .init_resource::<ChangeCount>()
+            .add_systems(
+                Update,
+                (
+                    update_effective_startup_dir,
+                    count_changes.after(update_effective_startup_dir),
+                ),
+            );
+        app.world_mut().spawn((
+            vmux_layout::space::Space,
+            vmux_layout::space::SpaceId("work".into()),
+            vmux_core::Active,
+        ));
+
+        app.update();
+        app.update();
+
+        assert_eq!(app.world().resource::<ChangeCount>().0, 1);
     }
 
     #[test]

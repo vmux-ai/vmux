@@ -10,7 +10,7 @@ Worktrees are also created inside the repository, which requires mutating Git's 
 ## Goals
 
 - Give each Git-backed agent tab at most one managed worktree.
-- Create the worktree before project file or terminal work begins.
+- Create the worktree before project file or project-scoped terminal work begins.
 - Reuse the same worktree for later agents, terminals, restarts, and MCP calls in the tab.
 - Preserve the original project directory separately from the mutable execution directory.
 - Recover a missing managed checkout from its persisted branch when possible.
