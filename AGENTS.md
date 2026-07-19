@@ -8,7 +8,7 @@ Use caveman mode. Terse, direct, no filler. Execute first, talk second. No meta-
 
 CI runs fmt, clippy, and tests for PRs.
 
-Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run broader local checks only when the user asks.
+Run targeted tests during the edit loop when they clarify non-trivial behavior, reproduce a regression, or verify a risky change. TDD is useful but not mandatory; do not add tests mechanically for every edit. Run workspace-wide local checks manually only when the user asks; the pre-push hook remains the required final fmt, clippy, and test gate.
 
 If a change affects an excluded patched CEF crate, run the appropriate package checks too.
 
@@ -16,7 +16,7 @@ If any check fails, fix the issue before committing. Do not push broken code.
 
 ## Test Quality
 
-Keep the suite lean. Every test must have an independent behavioral oracle and catch a plausible regression.
+Keep the suite lean. Every test must have an independent oracle and catch a plausible behavioral regression or explicit repository-policy violation.
 
 Do not add tests that only:
 
@@ -29,7 +29,7 @@ Do not add tests that only:
 
 Prefer tests for observable behavior: pure decision logic, parser and serialization contracts, persistence, typed ECS message/system integration, and packaging/runtime invariants. For important UI behavior, test rendered DOM, computed state, interaction output, or a visual regression; otherwise leave styling untested.
 
-Source scans are allowed only for explicit repository-wide policies or packaging invariants that cannot reasonably be tested through behavior. Keep them narrow and state the protected invariant in the test name.
+Source scans are allowed only for explicit repository-wide policies or packaging invariants that cannot reasonably be tested through behavior. For these tests, the protected invariant is the independent oracle. Keep them narrow and state that invariant in the test name.
 
 Before adding a test, verify that it would fail under a realistic bug and remain valid after a behavior-preserving refactor. If not, do not add it.
 
