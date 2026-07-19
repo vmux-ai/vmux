@@ -672,8 +672,21 @@ pub fn Page() -> Element {
         });
 
     let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
-        note_blocks.set(event.blocks);
-        note_active.set(event.active);
+        let FileNoteEvent {
+            title,
+            blocks,
+            active,
+        } = event;
+        let title = if title.is_empty() {
+            path().rsplit('/').next().unwrap_or_default().to_string()
+        } else {
+            title
+        };
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            document.set_title(&title);
+        }
+        note_blocks.set(blocks);
+        note_active.set(active);
     });
 
     let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {

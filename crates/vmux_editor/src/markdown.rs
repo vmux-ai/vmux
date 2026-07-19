@@ -4,6 +4,7 @@ use std::path::Path;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign, NoteBlock};
+use vmux_core::knowledge::markdown_metadata;
 
 use crate::highlight::highlight_snippet;
 
@@ -39,6 +40,11 @@ enum Frame {
     Row(Vec<Vec<MdInline>>),
     Cell(Vec<MdInline>),
     Sink(Vec<MdBlock>),
+}
+
+pub struct ParsedNote {
+    pub title: String,
+    pub blocks: Vec<NoteBlock>,
 }
 
 fn push_inline(stack: &mut [Frame], inline: MdInline) {
@@ -110,6 +116,12 @@ fn offset_to_line(line_starts: &[usize], byte: usize) -> u32 {
 }
 
 pub fn parse_note(text: &str) -> Vec<NoteBlock> {
+    parse_note_document(text).blocks
+}
+
+pub fn parse_note_document(text: &str) -> ParsedNote {
+    let metadata = markdown_metadata(text);
+    let body = &text[metadata.body_offset..];
     let line_starts = line_start_offsets(text);
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
@@ -121,8 +133,11 @@ pub fn parse_note(text: &str) -> Vec<NoteBlock> {
     let mut ranges = Vec::new();
     let mut top_start = None;
 
-    for (event, range) in Parser::new_ext(text, options).into_offset_iter() {
-        let (range_start, range_end) = (range.start, range.end);
+    for (event, range) in Parser::new_ext(body, options).into_offset_iter() {
+        let (range_start, range_end) = (
+            metadata.body_offset + range.start,
+            metadata.body_offset + range.end,
+        );
         if stack.len() == 1 && matches!(&event, Event::Start(_)) {
             top_start = Some(range_start);
         }
@@ -321,7 +336,7 @@ pub fn parse_note(text: &str) -> Vec<NoteBlock> {
         Some(Frame::Doc(blocks)) => blocks,
         _ => Vec::new(),
     };
-    let parsed = blocks
+    let mut parsed = blocks
         .into_iter()
         .zip(ranges)
         .map(|(block, (start, end))| NoteBlock {
@@ -331,17 +346,41 @@ pub fn parse_note(text: &str) -> Vec<NoteBlock> {
             block,
         })
         .collect::<Vec<_>>();
+    if !metadata.title.is_empty()
+        && let Some(title_line) = metadata.title_line
+    {
+        let source = text
+            .lines()
+            .nth(title_line as usize)
+            .unwrap_or_default()
+            .to_string();
+        parsed.insert(
+            0,
+            NoteBlock {
+                start_line: title_line,
+                end_line: title_line + 1,
+                source,
+                block: MdBlock::Heading {
+                    level: 1,
+                    inlines: vec![MdInline::Text(metadata.title.clone())],
+                },
+            },
+        );
+    }
     if parsed.is_empty() {
-        vec![NoteBlock {
-            start_line: 0,
-            end_line: 1,
-            source: text.to_string(),
+        let body_line = offset_to_line(&line_starts, metadata.body_offset);
+        parsed.push(NoteBlock {
+            start_line: body_line,
+            end_line: body_line + 1,
+            source: body.to_string(),
             block: MdBlock::Paragraph {
                 inlines: Vec::new(),
             },
-        }]
-    } else {
-        parsed
+        });
+    }
+    ParsedNote {
+        title: metadata.title,
+        blocks: parsed,
     }
 }
 
@@ -364,5 +403,19 @@ mod tests {
         assert_eq!(blocks[0].start_line, 0);
         assert_eq!(blocks[1].start_line, 2);
         assert_eq!(blocks[2].start_line, 4);
+    }
+
+    #[test]
+    fn frontmatter_title_renders_as_heading_without_metadata_delimiters() {
+        let note = parse_note_document("---\ntitle: Welcome Home\n---\n\nBody\n");
+        assert_eq!(note.title, "Welcome Home");
+        assert_eq!(note.blocks.len(), 2);
+        assert_eq!(note.blocks[0].start_line, 1);
+        assert_eq!(note.blocks[0].source, "title: Welcome Home");
+        assert!(matches!(
+            &note.blocks[0].block,
+            MdBlock::Heading { level: 1, .. }
+        ));
+        assert_eq!(note.blocks[1].start_line, 4);
     }
 }

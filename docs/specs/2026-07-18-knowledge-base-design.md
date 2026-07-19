@@ -13,6 +13,9 @@ Markdown has an editable Note mode beside Editor and Diff.
 
 - Default vault: `~/.vmux/knowledge/`.
 - Note files are the source of truth. No proprietary document format.
+- Note filenames use kebab-case. Reserved integration filenames such as `SKILL.md` keep their
+  required spelling.
+- Page titles live in YAML frontmatter instead of being derived from filenames.
 - Browser/runtime profiles do not own notes.
 - Standard editor bindings remain the default. Vim remains a global editor opt-in.
 - `file://` Note mode uses the existing editor buffer, saving, undo, standard keymap, optional Vim
@@ -46,7 +49,7 @@ buffer and save path, and supports standard bindings by default with optional Vi
 
 ```text
 ~/.vmux/knowledge/
-  Welcome.md
+  welcome.md
   projects/
   skills/<slug>/SKILL.md
   decisions/
@@ -56,6 +59,15 @@ buffer and save path, and supports standard bindings by default with optional Vi
   research/
   templates/
 ```
+
+```markdown
+---
+title: Welcome to Knowledge
+---
+```
+
+The tree shows the frontmatter title while `file://` keeps the kebab-case path as the source of
+truth. Note mode hides frontmatter delimiters and renders `title` as the page heading.
 
 The vault is profile-agnostic because profiles isolate cookies, browser state, recordings, and test
 sessions. User knowledge must survive profile changes. A configurable external vault path is a

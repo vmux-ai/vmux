@@ -89,6 +89,7 @@ fn page_wires_shared_note_editor_diff_toggle() {
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
     assert!(s.contains("render_block(&note_block.block, index)"));
+    assert!(s.contains("document.set_title(&title)"));
     assert!(s.contains("let mut note_editing = use_signal(|| false)"));
     assert!(s.contains("if note_editing() && Some(index as u32) == active"));
     assert!(s.contains("note_pointer_line(&event, start, end)"));

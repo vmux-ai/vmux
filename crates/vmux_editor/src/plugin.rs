@@ -622,12 +622,16 @@ fn send_note(
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
-        let blocks = crate::markdown::parse_note(&edit.core.buffer.text());
-        let active = active_note_block(&blocks, edit.core.cursor_pos().line);
+        let note = crate::markdown::parse_note_document(&edit.core.buffer.text());
+        let active = active_note_block(&note.blocks, edit.core.cursor_pos().line);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_NOTE_EVENT,
-            &FileNoteEvent { blocks, active },
+            &FileNoteEvent {
+                title: note.title,
+                blocks: note.blocks,
+                active,
+            },
         ));
         commands.entity(entity).insert(NoteSent);
     }

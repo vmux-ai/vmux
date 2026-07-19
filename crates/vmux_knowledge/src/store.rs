@@ -1,10 +1,11 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[cfg(all(unix, test))]
 use std::os::unix::fs::MetadataExt;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use vmux_core::knowledge::{KnowledgeEntry, KnowledgeTreeEvent};
+use vmux_core::knowledge::{KnowledgeEntry, KnowledgeTreeEvent, markdown_metadata};
 
 const DIRECTORIES: [&str; 8] = [
     "skills",
@@ -18,6 +19,7 @@ const DIRECTORIES: [&str; 8] = [
 ];
 const MAX_DEPTH: usize = 16;
 const MAX_ENTRIES: usize = 2_048;
+const MAX_METADATA_BYTES: u64 = 64 * 1024;
 
 pub fn vault_dir() -> PathBuf {
     vmux_core::knowledge::knowledge_dir()
@@ -80,6 +82,7 @@ fn scan_directory(
         if file_type.is_dir() {
             entries.push(KnowledgeEntry {
                 name,
+                title: String::new(),
                 path: path.to_string_lossy().into_owned(),
                 parent: directory.to_string_lossy().into_owned(),
                 is_directory: true,
@@ -87,6 +90,7 @@ fn scan_directory(
         } else if file_type.is_file() && is_markdown(&path) {
             entries.push(KnowledgeEntry {
                 name,
+                title: markdown_title(&path),
                 path: path.to_string_lossy().into_owned(),
                 parent: directory.to_string_lossy().into_owned(),
                 is_directory: false,
@@ -116,6 +120,21 @@ fn scan_directory(
     Ok(())
 }
 
+fn markdown_title(path: &Path) -> String {
+    let Ok(file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let mut source = String::new();
+    if file
+        .take(MAX_METADATA_BYTES)
+        .read_to_string(&mut source)
+        .is_err()
+    {
+        return String::new();
+    }
+    markdown_metadata(&source).title
+}
+
 fn is_markdown(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -143,12 +162,20 @@ mod tests {
     fn builds_sorted_markdown_tree() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("Projects/Nested")).unwrap();
-        std::fs::write(temp.path().join("z.md"), "# Z").unwrap();
+        std::fs::write(temp.path().join("z.md"), "---\ntitle: Zed\n---\n").unwrap();
         std::fs::write(temp.path().join("a.txt"), "ignored").unwrap();
         std::fs::write(temp.path().join("Projects/Nested/Brief.MDX"), "# Brief").unwrap();
         let tree = build_tree(temp.path()).unwrap();
         assert!(tree.entries.first().unwrap().is_directory);
         assert!(tree.entries.iter().any(|entry| entry.name == "z.md"));
+        assert_eq!(
+            tree.entries
+                .iter()
+                .find(|entry| entry.name == "z.md")
+                .unwrap()
+                .title,
+            "Zed"
+        );
         assert!(!tree.entries.iter().any(|entry| entry.name == "a.txt"));
         let projects = tree
             .entries

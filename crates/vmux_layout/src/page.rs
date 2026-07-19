@@ -1063,7 +1063,7 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                     title: "{entry.path}",
                     class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                     onclick: move |_| expanded.set(!expanded()),
-                    Icon { class: if has_children { "h-3 w-3 shrink-0" } else { "h-3 w-3 shrink-0 opacity-0" },
+                    Icon { class: "h-3 w-3 shrink-0",
                         path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                     }
                     Icon { class: "h-3.5 w-3.5 shrink-0",
@@ -1071,15 +1071,19 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                     }
                     span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
                 }
-                if expanded() && has_children {
+                if expanded() {
                     div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
-                        for child in entries.iter().filter(|child| child.parent == entry.path) {
-                            KnowledgeEntryRow {
-                                key: "{child.path}",
-                                entry: child.clone(),
-                                entries: entries.clone(),
-                                pane_id,
+                        if has_children {
+                            for child in entries.iter().filter(|child| child.parent == entry.path) {
+                                KnowledgeEntryRow {
+                                    key: "{child.path}",
+                                    entry: child.clone(),
+                                    entries: entries.clone(),
+                                    pane_id,
+                                }
                             }
+                        } else {
+                            div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", "Empty folder" }
                         }
                     }
                 }
@@ -1087,6 +1091,11 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
         }
     } else {
         let path = entry.path.clone();
+        let title = if entry.title.is_empty() {
+            entry.name.clone()
+        } else {
+            entry.title.clone()
+        };
         rsx! {
             button {
                 r#type: "button",
@@ -1097,7 +1106,7 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                     path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }
                     path { d: "M14 2v6h6" }
                 }
-                span { class: "min-w-0 flex-1 truncate text-ui", "{entry.name}" }
+                span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
             }
         }
     }

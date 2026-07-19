@@ -34,9 +34,60 @@ pub struct KnowledgeTreeEvent {
 )]
 pub struct KnowledgeEntry {
     pub name: String,
+    pub title: String,
     pub path: String,
     pub parent: String,
     pub is_directory: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkdownMetadata {
+    pub title: String,
+    pub title_line: Option<u32>,
+    pub body_offset: usize,
+}
+
+pub fn markdown_metadata(text: &str) -> MarkdownMetadata {
+    let mut lines = text.split_inclusive('\n');
+    let Some(first) = lines.next() else {
+        return MarkdownMetadata::default();
+    };
+    if first.trim_end_matches(['\r', '\n']) != "---" {
+        return MarkdownMetadata::default();
+    }
+
+    let mut offset = first.len();
+    let mut title = String::new();
+    let mut title_line = None;
+    for (index, line) in lines.enumerate() {
+        let value = line.trim_end_matches(['\r', '\n']);
+        if value == "---" {
+            return MarkdownMetadata {
+                title,
+                title_line,
+                body_offset: offset + line.len(),
+            };
+        }
+        if title.is_empty()
+            && let Some((key, value)) = value.split_once(':')
+            && key.trim().eq_ignore_ascii_case("title")
+        {
+            let value = value.trim();
+            title = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .or_else(|| {
+                    value
+                        .strip_prefix('\'')
+                        .and_then(|value| value.strip_suffix('\''))
+                })
+                .unwrap_or(value)
+                .to_string();
+            title_line = Some(index as u32 + 1);
+        }
+        offset += line.len();
+    }
+    MarkdownMetadata::default()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -152,6 +203,24 @@ pub fn append_agent_skills(base: &str) -> String {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_markdown_frontmatter_title_and_body() {
+        let text = "---\ntitle: \"Page title\"\ntags: [one]\n---\n\nBody\n";
+        let metadata = markdown_metadata(text);
+        assert_eq!(metadata.title, "Page title");
+        assert_eq!(metadata.title_line, Some(1));
+        assert_eq!(&text[metadata.body_offset..], "\nBody\n");
+    }
+
+    #[test]
+    fn ignores_incomplete_or_non_frontmatter_metadata() {
+        assert_eq!(markdown_metadata("# Title\n"), MarkdownMetadata::default());
+        assert_eq!(
+            markdown_metadata("---\ntitle: Missing close\n"),
+            MarkdownMetadata::default()
+        );
+    }
 
     #[test]
     fn loads_sorted_skill_catalog_and_bodies() {

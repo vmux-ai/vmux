@@ -318,6 +318,7 @@ pub struct NoteBlock {
     rkyv::Deserialize,
 )]
 pub struct FileNoteEvent {
+    pub title: String,
     pub blocks: Vec<NoteBlock>,
     pub active: Option<u32>,
 }
@@ -2132,6 +2133,7 @@ mod tests {
     #[test]
     fn file_note_event_roundtrips() {
         let event = FileNoteEvent {
+            title: "Title".into(),
             blocks: vec![NoteBlock {
                 start_line: 0,
                 end_line: 1,
