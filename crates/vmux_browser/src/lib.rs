@@ -1529,7 +1529,6 @@ fn sync_windowed_frames(
             header_frame,
             layout_hidden.0,
             visible_pane_count,
-            settings.layout.radius * scale * 0.25,
         );
         let became_visible = !last_visible_pages.contains(&entity);
         if became_visible {
@@ -1648,7 +1647,6 @@ fn windowed_page_frame_rect(
     header: Option<WindowedFrameRect>,
     layout_hidden: bool,
     visible_pane_count: usize,
-    straight_edge_inset: f32,
 ) -> WindowedFrameRect {
     let Some(header) = header else {
         return pane;
@@ -1656,13 +1654,8 @@ fn windowed_page_frame_rect(
     if layout_hidden || visible_pane_count != 1 {
         return pane;
     }
-    let inset = if straight_edge_inset.is_finite() {
-        straight_edge_inset.max(0.0).ceil()
-    } else {
-        0.0
-    };
-    let left = header.left.ceil() + inset;
-    let right = header.right().floor() - inset;
+    let left = header.left.ceil();
+    let right = header.right().floor();
     let top = header.bottom().ceil().max(pane.top.ceil());
     let bottom = pane.bottom().floor();
     if right <= left || bottom <= top {
@@ -5337,11 +5330,10 @@ mod tests {
 
         assert!(sync_fn.contains("header_rect"));
         assert!(sync_fn.contains("windowed_page_frame_rect("));
-        assert!(sync_fn.contains("settings.layout.radius * scale * 0.25"));
     }
 
     #[test]
-    fn single_pane_windowed_frame_uses_header_width_and_bottom_edge() {
+    fn single_pane_windowed_frame_matches_header_edges_without_side_gaps() {
         let pane = WindowedFrameRect {
             left: 60.2,
             top: 84.0,
@@ -5355,7 +5347,7 @@ mod tests {
             height: 84.2,
         };
 
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 0.0);
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 1);
 
         assert_eq!(
             frame,
@@ -5363,34 +5355,6 @@ mod tests {
                 left: 73.0,
                 top: 85.0,
                 width: 129.0,
-                height: 299.0,
-            }
-        );
-    }
-
-    #[test]
-    fn single_pane_windowed_frame_insets_quarter_radius_to_header_visible_edge() {
-        let pane = WindowedFrameRect {
-            left: 60.2,
-            top: 84.0,
-            width: 150.6,
-            height: 300.0,
-        };
-        let header = WindowedFrameRect {
-            left: 72.1,
-            top: 0.0,
-            width: 130.8,
-            height: 84.2,
-        };
-
-        let frame = windowed_page_frame_rect(pane, Some(header), false, 1, 4.0);
-
-        assert_eq!(
-            frame,
-            WindowedFrameRect {
-                left: 77.0,
-                top: 85.0,
-                width: 121.0,
                 height: 299.0,
             }
         );
