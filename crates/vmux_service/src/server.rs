@@ -848,6 +848,18 @@ async fn handle_client(
                 .await;
             }
 
+            ClientMessage::RebindAcpWorkspace { sid, cwd } => {
+                if let Err(message) = acp_manager
+                    .lock()
+                    .await
+                    .rebind_cwd(&sid, std::path::PathBuf::from(cwd))
+                {
+                    let resp = ServiceMessage::Error { message };
+                    let mut w = writer.lock().await;
+                    write_message!(&mut *w, &resp)?;
+                }
+            }
+
             ClientMessage::AcpSetModel {
                 sid,
                 request_id,

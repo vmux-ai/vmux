@@ -444,12 +444,24 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description:
-            "Before making changes, isolate this task in its own git worktree so your work lands on \
-a dedicated branch and never disturbs the user's main checkout. Call this once at the start when \
-the working directory is a git repository. Creates (or reuses) a worktree for this tab and returns \
-its absolute path — do your work there. No-op-safe: returns the existing path if already isolated."
-                .into(),
+        description: "Create an isolated worktree for the project selected with choose_workspace. The branch must come from the user; if they did not specify one, ask them in chat before calling this tool. Returns the absolute worktree path."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["branch"],
+            "additionalProperties": false,
+            "properties": {
+                "branch": {"type": "string"}
+            }
+        }),
+    }
+}
+
+fn choose_workspace_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "choose_workspace".into(),
+        description: "Open the native folder picker when the user's request requires project files and this conversation has no project yet. Do not call for general questions or tasks that can run without a repository. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
+            .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "additionalProperties": false,
@@ -635,6 +647,7 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
     if !acp_terminals {
         defs.push(run_definition());
     }
+    defs.push(choose_workspace_definition());
     defs.push(create_worktree_definition());
     if !acp_terminals {
         defs.push(read_terminal_definition());
@@ -797,7 +810,23 @@ pub fn dispatch_with_anchor(
     if name == "create_worktree" {
         let anchor = anchor
             .ok_or("create_worktree requires an agent anchor (not available to this client)")?;
-        return Ok(DispatchTarget::Command(AgentCommand::CreateWorktree {
+        let branch = arguments
+            .get("branch")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|branch| !branch.is_empty())
+            .ok_or("create_worktree.branch is empty")?;
+        return Ok(DispatchTarget::Command(
+            AgentCommand::CreateWorktreeOnBranch {
+                anchor,
+                branch: branch.to_string(),
+            },
+        ));
+    }
+    if name == "choose_workspace" {
+        let anchor = anchor
+            .ok_or("choose_workspace requires an agent anchor (not available to this client)")?;
+        return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
             anchor,
         }));
     }
@@ -1189,7 +1218,14 @@ mod tests {
     fn list_tools_includes_auto_generated_and_handwritten() {
         let names = tool_names();
 
-        for hand in ["open_command_bar", "open_page", "run", "read_terminal"] {
+        for hand in [
+            "open_command_bar",
+            "open_page",
+            "run",
+            "read_terminal",
+            "choose_workspace",
+            "create_worktree",
+        ] {
             assert!(
                 names.contains(&hand.to_string()),
                 "missing hand-written {hand}"
@@ -1358,6 +1394,43 @@ mod tests {
             DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor: got }) if got == anchor
         ));
         assert!(dispatch_from_tool_call("resume_in_acp", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn workspace_tools_dispatch_with_anchor_and_branch() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let choose_definition = choose_workspace_definition();
+        assert!(
+            choose_definition
+                .description
+                .contains("Do not call for general questions")
+        );
+        assert!(
+            choose_definition
+                .description
+                .contains("if none was specified")
+        );
+        let choose =
+            dispatch_with_anchor("choose_workspace", serde_json::json!({}), Some(anchor)).unwrap();
+        let create = dispatch_with_anchor(
+            "create_worktree",
+            serde_json::json!({"branch": "feature/fun-terminal"}),
+            Some(anchor),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            choose,
+            DispatchTarget::Command(AgentCommand::ChooseWorkspace { anchor: got }) if got == anchor
+        ));
+        assert!(matches!(
+            create,
+            DispatchTarget::Command(AgentCommand::CreateWorktreeOnBranch { anchor: got, branch })
+                if got == anchor && branch == "feature/fun-terminal"
+        ));
+        assert!(
+            dispatch_with_anchor("create_worktree", serde_json::json!({}), Some(anchor)).is_err()
+        );
     }
 
     #[test]

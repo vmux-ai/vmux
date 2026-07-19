@@ -181,6 +181,17 @@ impl AcpShared {
         self.cwd.lock().unwrap().clone()
     }
 
+    pub fn rebind_cwd(&self, cwd: PathBuf) -> Result<(), String> {
+        let cwd = cwd
+            .canonicalize()
+            .map_err(|error| format!("invalid workspace directory: {error}"))?;
+        if !cwd.is_dir() {
+            return Err("workspace path is not a directory".to_string());
+        }
+        *self.cwd.lock().unwrap() = cwd;
+        Ok(())
+    }
+
     fn publish_workspace_change(&self, name: &str, branch: &str, cwd: &str, workspace_cwd: &str) {
         let Ok(validated) = vmux_layout::worktree::validate_linked_workspace(
             Path::new(cwd),
@@ -2222,6 +2233,16 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
+    }
+
+    #[test]
+    fn explicit_workspace_rebind_updates_host_file_scope() {
+        let target = tempfile::tempdir().unwrap();
+        let (shared, _) = test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+
+        shared.rebind_cwd(target.path().to_path_buf()).unwrap();
+
+        assert_eq!(shared.cwd(), target.path().canonicalize().unwrap());
     }
 
     #[test]

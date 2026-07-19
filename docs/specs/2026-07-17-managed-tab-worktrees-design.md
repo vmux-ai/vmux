@@ -10,18 +10,20 @@ Worktrees are also created inside the repository, which requires mutating Git's 
 ## Goals
 
 - Give each Git-backed agent tab at most one managed worktree.
-- Create the worktree before launching the first agent in that tab.
+- Create the worktree before project file or terminal work begins.
 - Reuse the same worktree for later agents, terminals, restarts, and MCP calls in the tab.
 - Preserve the original project directory separately from the mutable execution directory.
 - Recover a missing managed checkout from its persisted branch when possible.
 - Accept ACP workspace-change metadata from agents that create or restore their own worktree.
-- Allow tabs to exist without a startup directory and request a workspace inside the chat UI.
+- Allow agents to start immediately without a startup directory.
+- Let the agent request a workspace only when the task needs project files.
+- Preserve the same chat session and webview while selecting and activating a workspace.
 - Never silently delete dirty or committed work.
 
 ## Lifecycle
 
-Tabs remain cheap until an agent page opens. Before the agent page-open handler runs, vmux checks
-the tab directory:
+Tabs remain cheap until an agent page opens. Tabs with a configured directory are prepared before
+the agent page-open handler runs:
 
 1. A tab already carrying `TabWorktree` keeps that checkout.
 2. A tab already rooted in an external linked worktree keeps that checkout and records its project
@@ -29,20 +31,28 @@ the tab directory:
 3. A tab rooted in a normal Git checkout gets one vmux-managed worktree.
 4. A non-Git tab continues in its existing directory.
 
+A tab without a configured directory starts the agent in the user's home directory without
+binding that directory to the tab. General questions and terminal tasks can proceed immediately.
+
 The original directory is persisted in `TabWorkspace`. `Tab.startup_dir` remains the execution
 directory used by new agents and terminals. `TabWorktree` remains the attached checkout metadata.
 
 ## Workspace Selection
 
 When neither the active space nor global settings define a startup directory, a new tab keeps
-`Tab.startup_dir` empty. Browser-only tabs still open normally. Opening an agent page attaches the
-chat UI in a workspace-required state and does not start an agent process.
+`Tab.startup_dir` empty and starts its agent immediately with the user's home directory as a
+temporary runtime cwd. The home directory is not persisted as the tab workspace.
 
-The chat page asks the user to choose a folder. Canceling leaves the picker state intact. A valid
-selection becomes `TabWorkspace`; Git-backed folders create the managed worktree before the
-original agent URL is reopened, while non-Git folders run directly from the selected directory.
-Generated names such as `Tab 2` are replaced by the folder name, producing branches such as
-`vmux/dashboard` and collision suffixes such as `vmux/dashboard-2`.
+The agent calls `choose_workspace` only when the request requires project files. The native folder
+picker opens without replacing the chat page. Non-Git selections become `TabWorkspace` directly.
+Git selections remain pending while the agent asks the user which branch to create. The agent then
+calls `create_worktree` with the exact user-selected branch. Generated names such as `Tab 2` are
+replaced by the selected folder name, and the branch name is sanitized only for the managed
+checkout directory slug.
+
+Workspace activation mutates the existing tab and ACP session in place. The chat entity, webview,
+transcript, routing session id, and agent process remain unchanged. Tab cwd and host-side ACP file
+scope move to the selected directory or managed worktree.
 
 ## Storage
 
@@ -56,8 +66,9 @@ The shared Git common directory provides stable repository identity across linke
 global root avoids repository pollution and local `.git/info/exclude` mutations. Existing
 repository-local worktrees remain valid and are not moved.
 
-Managed worktrees keep dedicated `vmux/<slug>[-N]` branches. Branch ownership stays one worktree at
-a time. The persisted tab checkout path and branch make creation idempotent.
+Automatically prepared managed worktrees keep dedicated `vmux/<slug>[-N]` branches. Conversational
+workspace setup uses the exact branch name supplied by the user. Branch ownership stays one
+worktree at a time. The persisted tab checkout path and branch make creation idempotent.
 
 ## Recovery
 
@@ -73,9 +84,10 @@ avoids repeating Git subprocesses for every later agent open.
 
 ## Ordering
 
-Host-side creation occurs before agent page opening, so the agent process starts in the isolated
-directory. Agent command batches process `create_worktree` before sibling commands; commands are
-skipped when activation fails rather than running in the project checkout.
+Configured Git tabs still activate before agent page opening. Empty tabs start immediately and
+activate later through agent tools. Agent command batches process `choose_workspace` and
+`create_worktree` before sibling commands; commands are skipped when worktree activation fails
+rather than running in the project checkout.
 
 ## ACP Workspace Updates
 
@@ -107,11 +119,14 @@ model. Existing orphaned worktrees are left untouched.
 
 - Managed roots are global, repository-specific, and collision-safe.
 - Nested project directories preserve their relative path in the new checkout.
-- Opening the first agent page creates and uses one worktree; later agent pages reuse it.
-- An agent tab without a configured startup directory shows the workspace picker and emits no
-  agent spawn before selection.
-- Selecting a Git workspace creates a slugged worktree, updates the tab, and resumes the original
-  agent page open.
+- Opening the first agent page for a configured Git tab creates and uses one worktree; later agent
+  pages reuse it.
+- An agent tab without a configured startup directory starts immediately in the user's home
+  directory and dispatches its first prompt.
+- General prompts do not open the workspace picker.
+- Selecting a Git workspace asks for a branch, creates a slugged checkout on that exact branch,
+  and updates the existing tab and ACP session.
+- Workspace activation preserves the original chat view, transcript, and routing session.
 - Non-Git tabs do not create worktrees.
 - Missing managed checkouts recover from their branch; invalid external checkouts remain marked.
 - `create_worktree` is idempotent and ordered before sibling run commands.
