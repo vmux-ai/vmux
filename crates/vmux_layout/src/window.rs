@@ -461,7 +461,6 @@ fn request_default_layout(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     space_file: Option<Res<SpaceFilePresent>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
-    startup_dir_configured: Option<Res<crate::settings::EffectiveStartupDirConfigured>>,
     mut requests: MessageWriter<TabLayoutSpawnRequest>,
 ) {
     if !tab_q.is_empty() || space_file.as_deref().is_some_and(|s| s.0) {
@@ -478,11 +477,7 @@ fn request_default_layout(
         space,
         primary_window: *primary_window,
         name: None,
-        startup_dir: startup_dir_configured
-            .as_deref()
-            .map_or(Some(startup_dir.clone()), |configured| {
-                configured.0.then_some(startup_dir.clone())
-            }),
+        startup_dir: startup_dir.clone(),
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
@@ -1309,7 +1304,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            startup_dir.path().to_path_buf(),
+            Some(startup_dir.path().to_path_buf()),
         ))));
 
         app.update();
@@ -1343,7 +1338,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            startup_dir.path().to_path_buf(),
+            Some(startup_dir.path().to_path_buf()),
         ))));
 
         app.update();
@@ -1358,7 +1353,6 @@ mod tests {
     #[test]
     fn default_tab_without_configured_startup_dir_has_no_workspace() {
         let _home = HomeEnvGuard::use_temp_home("default-tab-no-workspace");
-        let fallback_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<crate::NewStackContext>()
@@ -1366,7 +1360,6 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .insert_resource(test_settings(0.0))
-            .insert_resource(crate::settings::EffectiveStartupDirConfigured(false))
             .add_systems(
                 Update,
                 (request_default_layout, spawn_requested_tab_layouts).chain(),
@@ -1378,10 +1371,7 @@ mod tests {
             .world_mut()
             .spawn((crate::space::Space, ChildOf(main)))
             .id();
-        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
-            space,
-            fallback_dir.path().to_path_buf(),
-        ))));
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
 
         app.update();
 
@@ -1482,7 +1472,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            startup_dir.path().to_path_buf(),
+            Some(startup_dir.path().to_path_buf()),
         ))));
 
         app.update();
@@ -1529,7 +1519,7 @@ mod tests {
         let space = app.world_mut().spawn(crate::space::Space).id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            startup_dir.path().to_path_buf(),
+            Some(startup_dir.path().to_path_buf()),
         ))));
 
         app.update();

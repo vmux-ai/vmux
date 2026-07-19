@@ -307,7 +307,6 @@ pub(crate) fn handle_close_tab_requests(
     layout: TabArchiveLayout,
     primary_window: Single<Entity, With<PrimaryWindow>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
-    startup_dir_configured: Option<Res<crate::settings::EffectiveStartupDirConfigured>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
@@ -354,11 +353,7 @@ pub(crate) fn handle_close_tab_requests(
                     space,
                     primary_window: *primary_window,
                     name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
-                    startup_dir: startup_dir_configured
-                        .as_deref()
-                        .map_or(Some(startup_dir.clone()), |configured| {
-                            configured.0.then_some(startup_dir.clone())
-                        }),
+                    startup_dir: startup_dir.clone(),
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
                     focus: true,
@@ -1618,7 +1613,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            PathBuf::from("/tmp"),
+            Some(PathBuf::from("/tmp")),
         ))));
         let first = app
             .world_mut()

@@ -274,7 +274,7 @@ pub fn resolve_startup_url(settings: &AppSettings, space_id: &str) -> String {
     }
 }
 
-pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> std::path::PathBuf {
+pub fn resolve_startup_dir(settings: &AppSettings, space_id: &str) -> Option<std::path::PathBuf> {
     resolve_startup_dir_for_tab(settings, space_id, None)
 }
 
@@ -306,32 +306,31 @@ pub fn resolve_tab_workspace_dir(
     settings: &AppSettings,
     space_id: &str,
     tab_dir: Option<&str>,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<Option<std::path::PathBuf>, String> {
     match tab_dir {
-        Some(tab_dir) => validate_tab_workspace_dir(tab_dir),
+        Some(tab_dir) => validate_tab_workspace_dir(tab_dir).map(Some),
         None => Ok(resolve_startup_dir(settings, space_id)),
     }
 }
 
-/// Which level of the `tab → space → global → builtin` chain supplied a resolved startup dir.
+/// Which configured level supplied a resolved startup directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DirSource {
     Tab,
     Space,
     Global,
-    Default,
 }
 
-/// Resolve the working directory for a tab: `tab_dir → per-space override → global → builtin`.
+/// Resolve the working directory for a tab: `tab_dir → per-space override → global`.
 ///
 /// Each candidate is trimmed and skipped unless it names an existing directory, so an invalid
-/// value cascades to the next level.
+/// value cascades to the next level. No configured directory resolves to `None`.
 pub fn resolve_startup_dir_for_tab(
     settings: &AppSettings,
     space_id: &str,
     tab_dir: Option<&str>,
-) -> std::path::PathBuf {
-    resolve_startup_dir_for_tab_with_source(settings, space_id, tab_dir).0
+) -> Option<std::path::PathBuf> {
+    resolve_startup_dir_for_tab_with_source(settings, space_id, tab_dir).map(|(path, _)| path)
 }
 
 /// Like [`resolve_startup_dir_for_tab`], but also reports which level supplied the value.
@@ -339,7 +338,7 @@ pub fn resolve_startup_dir_for_tab_with_source(
     settings: &AppSettings,
     space_id: &str,
     tab_dir: Option<&str>,
-) -> (std::path::PathBuf, DirSource) {
+) -> Option<(std::path::PathBuf, DirSource)> {
     let pick = |opt: Option<&str>| -> Option<std::path::PathBuf> {
         opt.map(str::trim)
             .filter(|s| !s.is_empty())
@@ -347,11 +346,11 @@ pub fn resolve_startup_dir_for_tab_with_source(
             .filter(|p| p.is_dir())
     };
     if let Some(p) = pick(tab_dir) {
-        return (p, DirSource::Tab);
+        return Some((p, DirSource::Tab));
     }
     if let Some(p) = pick(space_override(settings, space_id).and_then(|o| o.startup_dir.as_deref()))
     {
-        return (p, DirSource::Space);
+        return Some((p, DirSource::Space));
     }
     if let Some(p) = pick(
         settings
@@ -359,9 +358,9 @@ pub fn resolve_startup_dir_for_tab_with_source(
             .as_ref()
             .and_then(|t| t.startup_dir.as_deref()),
     ) {
-        return (p, DirSource::Global);
+        return Some((p, DirSource::Global));
     }
-    (vmux_core::profile::space_dir(space_id), DirSource::Default)
+    None
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1384,7 +1383,7 @@ mod tests {
                 startup_dir: Some(dir.to_string_lossy().to_string()),
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "mistralai/dashboard"), dir);
+        assert_eq!(resolve_startup_dir(&s, "mistralai/dashboard"), Some(dir));
     }
 
     #[test]
@@ -1586,7 +1585,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_dir_prefers_per_space_then_global_then_builtin() {
+    fn resolve_startup_dir_prefers_per_space_then_global() {
         let per = tempfile::tempdir().unwrap();
         let glob = tempfile::tempdir().unwrap();
         let mut s = base_settings();
@@ -1601,13 +1600,13 @@ mod tests {
                 startup_dir: Some(per.path().to_string_lossy().into()),
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "work"), per.path());
-        assert_eq!(resolve_startup_dir(&s, "other"), glob.path());
-        s.terminal = None;
+        assert_eq!(resolve_startup_dir(&s, "work").as_deref(), Some(per.path()));
         assert_eq!(
-            resolve_startup_dir(&s, "space-1"),
-            vmux_core::profile::space_dir("space-1")
+            resolve_startup_dir(&s, "other").as_deref(),
+            Some(glob.path())
         );
+        s.terminal = None;
+        assert_eq!(resolve_startup_dir(&s, "space-1"), None);
     }
 
     #[test]
@@ -1625,11 +1624,14 @@ mod tests {
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
             },
         );
-        assert_eq!(resolve_startup_dir(&s, "work"), glob.path());
+        assert_eq!(
+            resolve_startup_dir(&s, "work").as_deref(),
+            Some(glob.path())
+        );
     }
 
     #[test]
-    fn resolve_startup_dir_all_invalid_falls_through_to_builtin() {
+    fn resolve_startup_dir_all_invalid_returns_none() {
         let mut s = base_settings();
         s.terminal = Some(TerminalSettings {
             startup_dir: Some("/no/such/global/xyz-vmux".into()),
@@ -1642,10 +1644,7 @@ mod tests {
                 startup_dir: Some("/no/such/dir/xyz-vmux".into()),
             },
         );
-        assert_eq!(
-            resolve_startup_dir(&s, "work"),
-            vmux_core::profile::space_dir("work")
-        );
+        assert_eq!(resolve_startup_dir(&s, "work"), None);
     }
 
     #[test]
@@ -1668,9 +1667,12 @@ mod tests {
         let tab_dir = tab.path().to_string_lossy().into_owned();
         assert_eq!(
             resolve_startup_dir_for_tab(&s, "work", Some(&tab_dir)),
-            tab.path()
+            Some(tab.path().to_path_buf())
         );
-        assert_eq!(resolve_startup_dir_for_tab(&s, "work", None), per.path());
+        assert_eq!(
+            resolve_startup_dir_for_tab(&s, "work", None),
+            Some(per.path().to_path_buf())
+        );
     }
 
     #[test]
@@ -1686,7 +1688,7 @@ mod tests {
         );
         assert_eq!(
             resolve_startup_dir_for_tab(&s, "work", Some("/no/such/tab/xyz-vmux")),
-            per.path()
+            Some(per.path().to_path_buf())
         );
     }
 
@@ -1705,7 +1707,7 @@ mod tests {
         assert!(resolve_tab_workspace_dir(&s, "work", Some("/no/such/tab/xyz-vmux")).is_err());
         assert_eq!(
             resolve_tab_workspace_dir(&s, "work", None).unwrap(),
-            per.path()
+            Some(per.path().to_path_buf())
         );
     }
 
@@ -1733,21 +1735,27 @@ mod tests {
         );
         let tab_dir = tab.path().to_string_lossy().into_owned();
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "work", Some(&tab_dir)).1,
+            resolve_startup_dir_for_tab_with_source(&s, "work", Some(&tab_dir))
+                .unwrap()
+                .1,
             DirSource::Tab
         );
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "work", None).1,
+            resolve_startup_dir_for_tab_with_source(&s, "work", None)
+                .unwrap()
+                .1,
             DirSource::Space
         );
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "other", None).1,
+            resolve_startup_dir_for_tab_with_source(&s, "other", None)
+                .unwrap()
+                .1,
             DirSource::Global
         );
         s.terminal = None;
         assert_eq!(
-            resolve_startup_dir_for_tab_with_source(&s, "nospace", None).1,
-            DirSource::Default
+            resolve_startup_dir_for_tab_with_source(&s, "nospace", None),
+            None
         );
     }
 

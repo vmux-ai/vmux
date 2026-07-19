@@ -26,10 +26,7 @@ pub struct ConfirmCloseSettings {
 pub struct EffectiveStartupUrl(pub String);
 
 #[derive(Resource, Clone, Debug, Default)]
-pub struct EffectiveStartupDir(pub Option<(Entity, std::path::PathBuf)>);
-
-#[derive(Resource, Clone, Copy, Debug, Default)]
-pub struct EffectiveStartupDirConfigured(pub bool);
+pub struct EffectiveStartupDir(pub Option<(Entity, Option<std::path::PathBuf>)>);
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EffectiveStartupDirSet;

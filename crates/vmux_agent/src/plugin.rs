@@ -45,7 +45,7 @@ use crate::session::{
 };
 use crate::strategy::AgentStrategies;
 
-pub use vmux_space::cwd::{default_space_dir, space_dir, valid_cwd};
+pub use vmux_space::cwd::valid_cwd;
 
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
@@ -1642,25 +1642,23 @@ fn handle_agent_commands(
                     Err(message) => AgentCommandResult::Error(message),
                     Ok(cwd_opt) => {
                         let activate = !origin_is_agent(&request.origin);
-                        let cwd_path = cwd_opt.unwrap_or_else(|| {
-                            active_space
-                                .as_ref()
-                                .map(|s| {
-                                    vmux_setting::resolve_startup_dir(&sp.settings, &s.record.id)
-                                })
-                                .unwrap_or_else(default_space_dir)
+                        let cwd_path = cwd_opt.or_else(|| {
+                            active_space.as_ref().and_then(|space| {
+                                vmux_setting::resolve_startup_dir(&sp.settings, &space.record.id)
+                            })
                         });
                         if command.trim().is_empty() {
                             terminal_stack_spawn_writer.write(TerminalStackSpawnRequest {
                                 pane,
-                                cwd: Some(cwd_path),
+                                cwd: cwd_path,
                                 shell: None,
                                 agent_run: false,
                                 pending_input: None,
                                 process_id: None,
                                 activate,
                             });
-                        } else {
+                            AgentCommandResult::Ok
+                        } else if let Some(cwd_path) = cwd_path {
                             process_stack_spawn_writer.write(ProcessStackSpawnRequest {
                                 pane,
                                 command: command.clone(),
@@ -1669,8 +1667,12 @@ fn handle_agent_commands(
                                 env: env.clone(),
                                 activate,
                             });
+                            AgentCommandResult::Ok
+                        } else {
+                            AgentCommandResult::Error(
+                                "workspace directory is required to run a command".to_string(),
+                            )
                         }
-                        AgentCommandResult::Ok
                     }
                 },
             },
@@ -2286,10 +2288,18 @@ fn stored_tab_cwd(tab_cwd: Option<&str>) -> Result<Option<PathBuf>, String> {
     vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
 }
 
+fn process_cwd() -> PathBuf {
+    std::env::current_dir()
+        .ok()
+        .filter(|path| path.is_dir())
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
 fn run_terminal_cwd(
     tab_cwd: Option<&str>,
     agent_launch_cwd: Option<&str>,
-    active_space: Option<&ActiveSpace>,
 ) -> Result<PathBuf, String> {
     if let Some(path) = stored_tab_cwd(tab_cwd)? {
         return Ok(path);
@@ -2297,9 +2307,7 @@ fn run_terminal_cwd(
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return Ok(path);
     }
-    Ok(active_space
-        .map(|s| space_dir(&s.record.id))
-        .unwrap_or_else(default_space_dir))
+    Err("tab and agent workspace directories are missing".to_string())
 }
 
 #[cfg(test)]
@@ -2476,11 +2484,7 @@ fn handle_agent_self_commands(
                             }
                         };
                         let agent_cwd = launch_q.get(agent_term).ok().map(|l| l.cwd.clone());
-                        let cwd = match run_terminal_cwd(
-                            tab_cwd.as_deref(),
-                            agent_cwd.as_deref(),
-                            active_space.as_deref(),
-                        ) {
+                        let cwd = match run_terminal_cwd(tab_cwd.as_deref(), agent_cwd.as_deref()) {
                             Ok(cwd) => cwd,
                             Err(message) => break 'spawn AgentCommandResult::Error(message),
                         };
@@ -2706,30 +2710,38 @@ fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .map(|t| t.name.clone())
                                     .unwrap_or_default();
-                                let space_id = active_space
-                                    .as_deref()
-                                    .map(|s| s.record.id.clone())
-                                    .unwrap_or_default();
                                 match stored_tab_cwd(tab_dir.as_deref()) {
                                     Err(message) => AgentCommandResult::Error(message),
-                                    Ok(stored) => {
-                                        let current_dir = stored.unwrap_or_else(|| {
-                                            vmux_setting::resolve_startup_dir(&settings, &space_id)
-                                        });
+                                    Ok(stored) => 'create_worktree: {
+                                        let configured_dir =
+                                            active_space.as_deref().and_then(|space| {
+                                                vmux_setting::resolve_startup_dir(
+                                                    &settings,
+                                                    &space.record.id,
+                                                )
+                                            });
+                                        let workspace_dir =
+                                            tab_worktree.workspaces.get(tab_e).ok().and_then(
+                                                |workspace| {
+                                                    stored_tab_cwd(Some(&workspace.project_dir))
+                                                        .ok()
+                                                        .flatten()
+                                                },
+                                            );
+                                        let Some(current_dir) = stored
+                                            .or(configured_dir)
+                                            .or_else(|| workspace_dir.clone())
+                                        else {
+                                            break 'create_worktree AgentCommandResult::Error(
+                                                "tab workspace directory is missing".to_string(),
+                                            );
+                                        };
                                         if vmux_git::worktree::is_linked_worktree(&current_dir) {
                                             AgentCommandResult::Text(
                                                 current_dir.to_string_lossy().into_owned(),
                                             )
                                         } else {
-                                            let base_dir = tab_worktree
-                                                .workspaces
-                                                .get(tab_e)
-                                                .ok()
-                                                .and_then(|workspace| {
-                                                    stored_tab_cwd(Some(&workspace.project_dir))
-                                                        .ok()
-                                                        .flatten()
-                                                })
+                                            let base_dir = workspace_dir
                                                 .unwrap_or_else(|| current_dir.clone());
                                             if tab_worktree.workspaces.get(tab_e).is_err() {
                                                 commands.entity(tab_e).insert(
@@ -3227,9 +3239,7 @@ fn resolved_space_startup_dir(
 ) -> Option<(PathBuf, vmux_setting::DirSource)> {
     let space_id = vmux_layout::space::space_id_of(entity, child_of, spaces, space_ids)
         .or_else(|| active_space.map(|space| space.record.id.clone()))?;
-    Some(vmux_setting::resolve_startup_dir_for_tab_with_source(
-        settings, &space_id, None,
-    ))
+    vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &space_id, None)
 }
 
 fn prepare_agent_tab_worktrees(
@@ -3268,10 +3278,7 @@ fn prepare_agent_tab_worktrees(
                 settings,
                 active_space.as_deref(),
             )
-            .and_then(|(path, source)| {
-                (source != vmux_setting::DirSource::Default)
-                    .then(|| path.to_string_lossy().into_owned())
-            })
+            .map(|(path, _)| path.to_string_lossy().into_owned())
         });
         let outcome = if let Some(outcome) = outcomes.get(&tab_entity) {
             outcome.clone()
@@ -3431,9 +3438,7 @@ fn handle_agent_page_open(
         if agent_url_uses_local_workspace(&task.url)
             && tab.is_some()
             && tab_dir.is_none()
-            && space_startup_dir
-                .as_ref()
-                .is_none_or(|(_, source)| *source == vmux_setting::DirSource::Default)
+            && space_startup_dir.is_none()
         {
             attach_workspace_gate_to_stack(
                 &task,
@@ -3449,7 +3454,7 @@ fn handle_agent_page_open(
             Ok(Some(path)) => path,
             Ok(None) => space_startup_dir
                 .map(|(path, _)| path)
-                .unwrap_or_else(default_space_dir),
+                .unwrap_or_else(process_cwd),
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
                 continue;
@@ -4972,7 +4977,7 @@ mod tests {
             for request in reader.read() {
                 if matches!(request.command, ServiceAgentCommand::Run { .. }) {
                     let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None, None).ok();
+                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None).ok();
                 }
             }
         }
@@ -6481,7 +6486,6 @@ mod tests {
             run_terminal_cwd(
                 Some(tab_dir.to_string_lossy().as_ref()),
                 Some(agent_dir.to_string_lossy().as_ref()),
-                None,
             )
             .unwrap(),
             canonical_tab_dir
@@ -6512,40 +6516,27 @@ mod tests {
     fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy()), None).unwrap();
+        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy())).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
-    fn run_terminal_cwd_falls_back_when_agent_cwd_missing() {
-        assert_eq!(
-            run_terminal_cwd(None, Some(""), None).unwrap(),
-            default_space_dir()
-        );
-        assert_eq!(
-            run_terminal_cwd(None, None, None).unwrap(),
-            default_space_dir()
-        );
+    fn run_terminal_cwd_requires_tab_or_agent_workspace() {
+        assert!(run_terminal_cwd(None, Some("")).is_err());
+        assert!(run_terminal_cwd(None, None).is_err());
     }
 
     #[test]
     fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
         let agent_dir = std::env::temp_dir();
 
-        assert!(
-            run_terminal_cwd(
-                Some("/no/such/vmux-tab-workspace"),
-                agent_dir.to_str(),
-                None,
-            )
-            .is_err()
-        );
+        assert!(run_terminal_cwd(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err());
     }
 
     #[test]
     fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(run_terminal_cwd(Some("."), None, None).is_err());
+        assert!(run_terminal_cwd(Some("."), None).is_err());
     }
 
     #[test]

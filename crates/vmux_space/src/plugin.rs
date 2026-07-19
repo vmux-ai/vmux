@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use vmux_core::page::PageReady;
-use vmux_core::profile;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::stack::Stack;
 use vmux_layout::warm_page::WarmPagePlugin;
@@ -28,8 +27,8 @@ pub struct SpaceCommandRequest {
     pub name: Option<String>,
 }
 
-/// Wires the spaces domain: space commands, active-space syncing, orphan pruning,
-/// startup-URL resolution, and the spaces list webview.
+/// Wires the spaces domain: space commands, active-space syncing, configured startup
+/// resolution, and the spaces list webview.
 pub struct SpacePlugin;
 
 impl Plugin for SpacePlugin {
@@ -38,7 +37,6 @@ impl Plugin for SpacePlugin {
         vmux_core::register_host_spawn(app, "spaces");
         app.init_resource::<ActiveSpace>()
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
@@ -53,7 +51,6 @@ impl Plugin for SpacePlugin {
                     .before(vmux_command::ReadAppCommands),
             )
             .add_systems(Update, sync_space_name_to_id)
-            .add_systems(Update, prune_orphan_space_dirs)
             .add_systems(
                 Startup,
                 update_effective_startup_url
@@ -115,17 +112,7 @@ fn update_effective_startup_dir(
         With<vmux_layout::space::Space>,
     >,
     mut effective: ResMut<vmux_layout::settings::EffectiveStartupDir>,
-    mut configured: ResMut<vmux_layout::settings::EffectiveStartupDirConfigured>,
 ) {
-    let Some(settings) = settings else {
-        if effective.0.is_some() {
-            effective.0 = None;
-        }
-        if configured.0 {
-            configured.0 = false;
-        }
-        return;
-    };
     let mut fallback = None;
     let mut selected = None;
     for (entity, id, is_active) in &spaces {
@@ -139,30 +126,26 @@ fn update_effective_startup_dir(
         if effective.0.is_some() {
             effective.0 = None;
         }
-        if configured.0 {
-            configured.0 = false;
-        }
         return;
     };
-    if !settings.is_changed()
+    if !settings
+        .as_ref()
+        .is_some_and(|settings| settings.is_changed())
         && !id.is_changed()
         && effective.0.as_ref().map(|(current, _)| *current) == Some(entity)
         && effective
             .0
             .as_ref()
-            .is_some_and(|(_, current)| current.is_dir())
+            .is_some_and(|(_, current)| current.as_ref().is_some_and(|path| path.is_dir()))
     {
         return;
     }
-    let (path, source) =
-        vmux_setting::resolve_startup_dir_for_tab_with_source(&settings, &id.0, None);
+    let path = settings
+        .as_deref()
+        .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id.0));
     let next = (entity, path);
     if effective.0.as_ref() != Some(&next) {
         effective.0 = Some(next);
-    }
-    let next_configured = source != vmux_setting::DirSource::Default;
-    if configured.0 != next_configured {
-        configured.0 = next_configured;
     }
 }
 
@@ -231,7 +214,8 @@ fn space_rows_from_world(
                 .map(|c| c.iter().filter(|e| tab_q.contains(*e)).count())
                 .unwrap_or(0) as u32;
             let startup_dir = settings
-                .map(|s| display_dir(&vmux_setting::resolve_startup_dir(s, &sid.0)))
+                .and_then(|s| vmux_setting::resolve_startup_dir(s, &sid.0))
+                .map(|path| display_dir(&path))
                 .unwrap_or_default();
             (
                 order.map(|o| o.0).unwrap_or(u32::MAX),
@@ -387,25 +371,6 @@ fn sync_space_name_to_id(
     }
 }
 
-fn prune_orphan_space_dirs(
-    spaces: Query<&vmux_layout::space::SpaceId, With<vmux_layout::space::Space>>,
-    changed: Query<
-        (),
-        (
-            With<vmux_layout::space::Space>,
-            Changed<vmux_layout::space::SpaceId>,
-        ),
-    >,
-    mut removed: RemovedComponents<vmux_layout::space::Space>,
-) {
-    let any_removed = removed.read().count() > 0;
-    if changed.is_empty() && !any_removed {
-        return;
-    }
-    let live: std::collections::HashSet<String> = spaces.iter().map(|id| id.0.clone()).collect();
-    profile::prune_orphan_space_dirs(&live);
-}
-
 #[allow(clippy::too_many_arguments)]
 fn on_space_command(
     trigger: On<BinReceive<SpaceCommandEvent>>,
@@ -482,7 +447,6 @@ fn on_space_command(
                         .insert(vmux_layout::space::SpaceId(new_id.clone()));
                 }
             }
-            profile::rename_space_dir(id, &new_id);
             if is_active {
                 active_id.0 = Some(new_id.clone());
             }
@@ -573,11 +537,9 @@ fn on_space_command(
                 ))
                 .id();
             active_id.0 = Some(id.clone());
-            let startup_dir = settings.as_deref().and_then(|settings| {
-                let (path, source) =
-                    vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &id, None);
-                (source != vmux_setting::DirSource::Default).then_some(path)
-            });
+            let startup_dir = settings
+                .as_deref()
+                .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
             layout_requests.write(TabLayoutSpawnRequest {
                 space,
                 primary_window: *primary_window,
@@ -638,11 +600,9 @@ fn handle_open_in_new_space(
             ))
             .id();
         active_id.0 = Some(id.clone());
-        let startup_dir = settings.as_deref().and_then(|settings| {
-            let (path, source) =
-                vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &id, None);
-            (source != vmux_setting::DirSource::Default).then_some(path)
-        });
+        let startup_dir = settings
+            .as_deref()
+            .and_then(|settings| vmux_setting::resolve_startup_dir(settings, &id));
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
@@ -688,46 +648,6 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct HomeEnvGuard {
-        _guard: std::sync::MutexGuard<'static, ()>,
-        old_home: Option<std::ffi::OsString>,
-        home: std::path::PathBuf,
-    }
-
-    impl HomeEnvGuard {
-        fn use_temp_home(name: &str) -> Self {
-            let guard = ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner());
-            let old_home = std::env::var_os("HOME");
-            let home =
-                std::env::temp_dir().join(format!("vmux-test-{name}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&home);
-            std::fs::create_dir_all(&home).expect("create temp home");
-            unsafe {
-                std::env::set_var("HOME", &home);
-            }
-            Self {
-                _guard: guard,
-                old_home,
-                home,
-            }
-        }
-    }
-
-    impl Drop for HomeEnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(home) = &self.old_home {
-                    std::env::set_var("HOME", home);
-                } else {
-                    std::env::remove_var("HOME");
-                }
-            }
-            let _ = std::fs::remove_dir_all(&self.home);
-        }
-    }
 
     fn test_settings() -> AppSettings {
         AppSettings {
@@ -889,7 +809,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_systems(Update, update_effective_startup_dir);
         app.world_mut().spawn((
             vmux_layout::space::Space,
@@ -910,35 +829,33 @@ mod tests {
             app.world()
                 .resource::<vmux_layout::settings::EffectiveStartupDir>()
                 .0,
-            Some((active, active_dir.path().to_path_buf()))
-        );
-        assert!(
-            app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
-                .0
+            Some((active, Some(active_dir.path().to_path_buf())))
         );
     }
 
     #[test]
-    fn builtin_startup_dir_is_not_marked_configured() {
+    fn missing_startup_dir_remains_unset() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_systems(Update, update_effective_startup_dir);
-        app.world_mut().spawn((
-            vmux_layout::space::Space,
-            vmux_layout::space::SpaceId("work".into()),
-            vmux_core::Active,
-        ));
+        let space = app
+            .world_mut()
+            .spawn((
+                vmux_layout::space::Space,
+                vmux_layout::space::SpaceId("work".into()),
+                vmux_core::Active,
+            ))
+            .id();
 
         app.update();
 
-        assert!(
-            !app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
-                .0
+        assert_eq!(
+            app.world()
+                .resource::<vmux_layout::settings::EffectiveStartupDir>()
+                .0,
+            Some((space, None))
         );
     }
 
@@ -969,7 +886,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .init_resource::<ChangeCount>()
             .add_systems(
                 Update,
@@ -1011,7 +927,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDirConfigured>()
             .add_systems(Update, update_effective_startup_dir);
         let space = app
             .world_mut()
@@ -1027,7 +942,7 @@ mod tests {
             app.world()
                 .resource::<vmux_layout::settings::EffectiveStartupDir>()
                 .0,
-            Some((space, primary_path))
+            Some((space, Some(primary_path)))
         );
 
         primary.close().unwrap();
@@ -1037,13 +952,12 @@ mod tests {
             app.world()
                 .resource::<vmux_layout::settings::EffectiveStartupDir>()
                 .0,
-            Some((space, fallback.path().to_path_buf()))
+            Some((space, Some(fallback.path().to_path_buf())))
         );
     }
 
     #[test]
-    fn rename_reslugs_space_id_retags_tabs_and_nests_folder() {
-        let home = HomeEnvGuard::use_temp_home("rename-slash");
+    fn rename_reslugs_space_id_and_retags_tabs() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<TabLayoutSpawnRequest>()
@@ -1101,6 +1015,5 @@ mod tests {
                 .as_deref(),
             Some("vmux-ai/vmux")
         );
-        assert!(home.home.join(".vmux/spaces/vmux-ai/vmux").is_dir());
     }
 }

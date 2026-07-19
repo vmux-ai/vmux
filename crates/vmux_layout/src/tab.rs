@@ -155,7 +155,6 @@ fn handle_tab_commands(
     all_children: Query<&Children>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
-    startup_dir_configured: Option<Res<crate::settings::EffectiveStartupDirConfigured>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
@@ -189,11 +188,7 @@ fn handle_tab_commands(
                     space,
                     primary_window: *primary_window,
                     name: Some(name),
-                    startup_dir: startup_dir_configured
-                        .as_deref()
-                        .map_or(Some(startup_dir.clone()), |configured| {
-                            configured.0.then_some(startup_dir.clone())
-                        }),
+                    startup_dir: startup_dir.clone(),
                     content,
                     clear_pending_stack: true,
                     focus: true,
@@ -216,11 +211,7 @@ fn handle_tab_commands(
                         space,
                         primary_window: *primary_window,
                         name: Some(name),
-                        startup_dir: startup_dir_configured
-                            .as_deref()
-                            .map_or(Some(startup_dir.clone()), |configured| {
-                                configured.0.then_some(startup_dir.clone())
-                            }),
+                        startup_dir: startup_dir.clone(),
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
@@ -710,7 +701,7 @@ mod tests {
             .id();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            std::env::current_dir().unwrap(),
+            Some(std::env::current_dir().unwrap()),
         ))));
         app.world_mut().spawn((
             Tab {
@@ -791,8 +782,13 @@ mod tests {
     #[test]
     fn new_tab_without_configured_startup_dir_skips_folder_dialog() {
         let mut app = build_app();
-        build_main_and_tab(&mut app);
-        app.insert_resource(crate::settings::EffectiveStartupDirConfigured(false));
+        let main = build_main_and_tab(&mut app);
+        let space = app
+            .world()
+            .get::<Children>(main)
+            .and_then(|children| children.iter().next())
+            .unwrap();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()

@@ -64,10 +64,8 @@ pub fn update_work_dirs_snapshot(
     mut snapshot: ResMut<CommandBarWorkSnapshot>,
 ) {
     let mut by_cwd: Vec<(String, i64)> = Vec::new();
-    // Skip empty cwds and vmux's own data dir (e.g. ~/.vmux/spaces/<id>) — those
-    // are internal defaults, not user work dirs.
     let merge = |cwd: &str, ts: i64, acc: &mut Vec<(String, i64)>| {
-        if cwd.is_empty() || cwd.contains("/.vmux/") {
+        if cwd.is_empty() {
             return;
         }
         if let Some(existing) = acc.iter_mut().find(|(p, _)| p == cwd) {
@@ -196,17 +194,27 @@ mod tests {
     }
 
     #[test]
-    fn work_dirs_skip_vmux_data_dir() {
+    fn work_dirs_include_vmux_managed_worktree() {
+        let base = std::env::temp_dir().join(format!("vmux-worktree-{}", std::process::id()));
+        let root = base.join(".vmux/worktrees/repo/task");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("changed.rs"), "").unwrap();
         let mut app = App::new();
         app.init_resource::<CommandBarWorkSnapshot>()
             .add_systems(Update, update_work_dirs_snapshot);
         app.world_mut().spawn((
             Terminal,
-            launch("/Users/x/.vmux/spaces/space-1", TerminalKind::Plain),
+            launch(&root.to_string_lossy(), TerminalKind::Plain),
         ));
         app.update();
         let snap = app.world().resource::<CommandBarWorkSnapshot>();
-        assert!(snap.work_dirs.is_empty(), "excludes ~/.vmux internal dirs");
+        assert!(
+            snap.work_dirs
+                .iter()
+                .any(|entry| entry.path.ends_with("/changed.rs")),
+            "includes files from vmux-managed worktrees"
+        );
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
