@@ -38,9 +38,9 @@ fn is_markdown_file(path: &str) -> bool {
 
 fn file_mode_class(active: bool) -> &'static str {
     if active {
-        "rounded bg-primary/15 px-1.5 py-0.5 text-primary"
+        "rounded bg-primary/15 px-1.5 py-0.5 text-primary transition-[background-color,color,box-shadow] duration-200 ease-out"
     } else {
-        "rounded px-1.5 py-0.5 text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+        "rounded px-1.5 py-0.5 text-foreground/45 transition-[background-color,color,box-shadow] duration-200 ease-out hover:bg-foreground/[0.06] hover:text-foreground"
     }
 }
 
@@ -1328,7 +1328,7 @@ pub fn Page() -> Element {
                             rsx! {
                                 div {
                                     id: "file-scroll",
-                                    class: "min-h-0 flex-1 overflow-auto px-8 py-8",
+                                    class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         for (index, note_block) in note_blocks().iter().enumerate() {
@@ -1488,7 +1488,7 @@ pub fn Page() -> Element {
                             rsx! {
                                 div {
                                     id: "file-scroll",
-                                    class: "relative min-h-0 flex-1 overflow-auto",
+                                    class: "file-mode-editor-enter relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);

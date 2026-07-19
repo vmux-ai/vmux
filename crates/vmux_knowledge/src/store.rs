@@ -7,16 +7,8 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use vmux_core::knowledge::{KnowledgeEntry, KnowledgeTreeEvent, markdown_metadata};
 
-const DIRECTORIES: [&str; 8] = [
-    "skills",
-    "decisions",
-    "projects",
-    "meetings",
-    "runbooks",
-    "handbook",
-    "research",
-    "templates",
-];
+const DIRECTORIES: [&str; 4] = ["skills", "projects", "meetings", "handbook"];
+const LEGACY_DIRECTORIES: [&str; 4] = ["decisions", "runbooks", "research", "templates"];
 const MAX_DEPTH: usize = 16;
 const MAX_ENTRIES: usize = 2_048;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
@@ -29,6 +21,9 @@ pub fn ensure_vault(root: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     for directory in DIRECTORIES {
         std::fs::create_dir_all(root.join(directory))?;
+    }
+    for directory in LEGACY_DIRECTORIES {
+        let _ = std::fs::remove_dir(root.join(directory));
     }
     #[cfg(unix)]
     for directory in std::iter::once(root.to_path_buf()).chain(
@@ -156,6 +151,17 @@ mod tests {
         for directory in DIRECTORIES {
             assert!(temp.path().join(directory).is_dir());
         }
+    }
+
+    #[test]
+    fn removes_empty_legacy_folders_and_preserves_content() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("decisions")).unwrap();
+        std::fs::create_dir_all(temp.path().join("runbooks")).unwrap();
+        std::fs::write(temp.path().join("runbooks/keep.md"), "# Keep").unwrap();
+        ensure_vault(temp.path()).unwrap();
+        assert!(!temp.path().join("decisions").exists());
+        assert!(temp.path().join("runbooks/keep.md").is_file());
     }
 
     #[test]

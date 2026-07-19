@@ -54,12 +54,8 @@ entire rendered block activates editing, and clicks within the active block keep
   welcome.md
   projects/
   skills/<slug>/SKILL.md
-  decisions/
   meetings/
-  runbooks/
   handbook/
-  research/
-  templates/
 ```
 
 ```markdown

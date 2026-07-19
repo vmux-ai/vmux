@@ -107,7 +107,13 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("\"Empty folder\""));
     assert!(source.contains("if expanded() {"));
     assert!(!source.contains("if expanded() && has_children"));
-    assert!(source.contains("overflow-y-auto overscroll-contain"));
+    assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
+    assert!(knowledge_card.contains("\"Unfold knowledge\""));
+    assert!(knowledge_card.contains("\"Fold knowledge\""));
+    assert!(knowledge_card.contains("grid-rows-[0fr]"));
+    assert!(knowledge_card.contains("grid-rows-[1fr]"));
+    assert!(source.contains("overflow-x-hidden overflow-y-auto"));
+    assert!(source.contains("scrollbar-gutter:stable"));
     assert!(!knowledge_card.contains("overflow-y-auto"));
     assert!(!knowledge_card.contains("max-h-64"));
     assert!(!source.contains("KnowledgeUse"));
@@ -123,6 +129,7 @@ fn folded_pane_shows_its_active_stack() {
     assert!(pane.contains("if folded()"));
     assert!(pane.contains("if let Some(stack) = folded_stack"));
     assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
+    assert!(pane.contains("flex shrink-0 flex-col"));
 }
 
 #[test]

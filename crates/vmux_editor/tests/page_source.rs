@@ -74,6 +74,8 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("Rendered Markdown with live editing"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Editor)"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Diff)"));
+    assert!(s.contains("file-mode-note-enter"));
+    assert!(s.contains("file-mode-editor-enter"));
     assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
     assert!(s.contains("markers: git_line_markers"));
     assert!(s.contains("diff_marker_sign(marker)"));
