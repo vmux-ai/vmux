@@ -780,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn new_tab_without_configured_startup_dir_skips_folder_dialog() {
+    fn new_tab_without_configured_startup_dir_does_not_inherit_active_tab_workspace() {
         let mut app = build_app();
         let main = build_main_and_tab(&mut app);
         let space = app
@@ -789,6 +789,55 @@ mod tests {
             .and_then(|children| children.iter().next())
             .unwrap();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((space, None))));
+        let existing_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        let existing_dir = std::env::current_dir().unwrap();
+        app.world_mut().entity_mut(existing_tab).insert((
+            Tab {
+                name: "vmux".into(),
+                startup_dir: Some(existing_dir.to_string_lossy().into_owned()),
+            },
+            TabWorkspace {
+                project_dir: existing_dir.to_string_lossy().into_owned(),
+            },
+            TabDirDecided,
+        ));
+
+        app.world_mut()
+            .resource_mut::<Messages<AppCommand>>()
+            .write(AppCommand::Layout(LayoutCommand::Tab(TabCommand::New)));
+
+        app.update();
+
+        let tabs: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &Tab)>()
+            .iter(app.world())
+            .collect();
+        assert_eq!(tabs.len(), 2);
+        let (new_tab_entity, new_tab) = tabs.iter().find(|(_, tab)| tab.name == "Tab 2").unwrap();
+        assert_eq!(new_tab.startup_dir, None);
+        assert!(app.world().get::<TabWorkspace>(*new_tab_entity).is_none());
+        assert!(app.world().get::<TabDirDecided>(*new_tab_entity).is_none());
+    }
+
+    #[test]
+    fn new_tab_uses_only_configured_startup_dir() {
+        let mut app = build_app();
+        let main = build_main_and_tab(&mut app);
+        let space = app
+            .world()
+            .get::<Children>(main)
+            .and_then(|children| children.iter().next())
+            .unwrap();
+        let configured = tempfile::tempdir().unwrap();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            Some(configured.path().to_path_buf()),
+        ))));
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -797,9 +846,18 @@ mod tests {
         app.update();
 
         let tabs: Vec<_> = app.world_mut().query::<&Tab>().iter(app.world()).collect();
-        assert_eq!(tabs.len(), 2);
         let new_tab = tabs.iter().find(|tab| tab.name == "Tab 2").unwrap();
-        assert_eq!(new_tab.startup_dir, None);
+        assert_eq!(
+            new_tab.startup_dir.as_deref(),
+            Some(
+                configured
+                    .path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
     }
 
     #[test]
