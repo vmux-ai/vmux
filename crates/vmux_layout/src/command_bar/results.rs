@@ -155,6 +155,20 @@ pub fn agent_page_url(item: &CommandBarResultItem) -> Option<&str> {
     }
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
+    let CommandBarResultItem::Page { url, title, .. } = item else {
+        return false;
+    };
+    if !url.starts_with("vmux://agent/") {
+        return false;
+    }
+    let search_lower = query.trim().to_lowercase();
+    !search_lower.is_empty()
+        && (title.to_lowercase().contains(&search_lower)
+            || url.to_lowercase().contains(&search_lower))
+}
+
 pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
     let mut results = agent_page_results(pages, query);
@@ -710,6 +724,26 @@ mod tests {
             &results[0],
             CommandBarResultItem::Page { url, .. } if url == "vmux://agent/vibe/"
         ));
+    }
+
+    #[test]
+    fn start_agent_name_match_is_not_a_prompt() {
+        let mut pages = sample_pages();
+        pages.push(CommandBarPage {
+            host: "agent".into(),
+            url: "vmux://agent/codex-acp".into(),
+            title: "Codex (ACP)".into(),
+            keywords: vec!["codex-acp".into(), "acp".into(), "agent".into()],
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        });
+        let codex = agent_page_results(&pages, "cod").remove(0);
+
+        assert!(agent_page_matches_query(&codex, "cod"));
+        assert!(agent_page_matches_query(&codex, "codex"));
+        assert!(agent_page_matches_query(&codex, "Codex (ACP)"));
+        assert!(agent_page_matches_query(&codex, "codex-acp"));
+        assert!(!agent_page_matches_query(&codex, "fix the failing test"));
     }
 
     #[test]
