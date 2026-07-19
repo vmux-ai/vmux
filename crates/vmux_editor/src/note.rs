@@ -63,11 +63,7 @@ fn render_list(ordered: bool, start: u64, items: &[MdListItem], key: usize) -> E
                     }
                 }
                 for (block_index, block) in item.blocks.iter().enumerate() {
-                    if let MdBlock::Paragraph { inlines } = block {
-                        {render_inlines(inlines)}
-                    } else {
-                        {render_block(block, block_index)}
-                    }
+                    {render_block(block, block_index)}
                 }
             }
         }

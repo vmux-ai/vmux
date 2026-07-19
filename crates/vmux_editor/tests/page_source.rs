@@ -6,6 +6,10 @@ fn page_source() -> &'static str {
     include_str!("../src/page.rs")
 }
 
+fn note_source() -> &'static str {
+    include_str!("../src/note.rs")
+}
+
 #[test]
 fn explorer_panel_renders_three_sections() {
     let s = explorer_source();
@@ -104,4 +108,11 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("class: \"relative w-full cursor-text\""));
     assert!(!s.contains("rounded-lg bg-primary/[0.04]"));
     assert!(s.contains("if git_path() != m.abs_path"));
+}
+
+#[test]
+fn note_lists_render_every_block_with_stable_keys() {
+    let s = note_source();
+    assert!(s.contains("render_block(block, block_index)"));
+    assert!(!s.contains("if let MdBlock::Paragraph { inlines } = block"));
 }
