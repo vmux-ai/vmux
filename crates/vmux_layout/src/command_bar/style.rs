@@ -293,28 +293,46 @@ mod tests {
         assert!(source.contains("is_start_prompt_query("));
         assert!(source.contains("emit_prompt_action("));
         assert!(source.contains("agent_url: (!agent_url.is_empty())"));
+        let emit = source
+            .find("emit_prompt_action(prompt.trim(), open_target, agent_url)")
+            .unwrap();
+        let transition = source[emit..].find("handler.call(next)").unwrap();
+        assert!(transition > 0);
     }
 
     #[test]
-    fn start_shows_agents_as_result_rows() {
+    fn start_hides_agents_until_the_user_types() {
         let source = include_str!("palette.rs");
 
+        assert!(source.contains("is_start && q.trim().is_empty()"));
+        assert!(source.contains("else if start_prompt_mode"));
         assert!(source.contains("start_page_results(&pages, &q)"));
         assert!(source.contains("agent_page_url(item)"));
         assert!(!source.contains("start-agent-select"));
     }
 
     #[test]
-    fn start_uses_the_shared_center_prompt_and_upward_popup() {
+    fn start_uses_the_shared_center_prompt_and_downward_popup() {
         let palette = include_str!("palette.rs");
         let page = include_str!("../start/page.rs");
 
         assert!(palette.contains("PromptBox {"));
         assert!(palette.contains("PromptPopup {"));
-        assert!(palette.contains("upward: is_start"));
+        assert!(palette.contains("PromptPopupPlacement::Downward"));
         assert!(page.contains("max-w-3xl"));
         assert!(page.contains("items-center justify-center"));
         assert!(page.contains("relative w-full"));
+    }
+
+    #[test]
+    fn start_tracks_the_selected_agent_accent() {
+        let palette = include_str!("palette.rs");
+
+        assert!(palette.contains("map(agent_accent)"));
+        assert!(palette.contains("accent.glow_top"));
+        assert!(palette.contains("accent.glow_bottom"));
+        assert!(palette.contains("onmouseenter: move |_|"));
+        assert!(palette.contains("selected.set(i)"));
     }
 
     #[test]

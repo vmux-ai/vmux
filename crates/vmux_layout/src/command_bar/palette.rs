@@ -23,8 +23,9 @@ use vmux_command::event::{
     is_start_prompt_query, looks_like_url, should_open_typed_query_on_enter,
 };
 use vmux_command::open_target::OpenTarget;
+use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
@@ -178,10 +179,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let q = query();
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
-    let start_agent_mode = is_start && (q.trim().is_empty() || start_prompt_mode);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
-    } else if start_agent_mode {
+    } else if is_start && q.trim().is_empty() {
+        Vec::new()
+    } else if start_prompt_mode {
         start_page_results(&pages, &q)
     } else {
         let history = history_suggestions();
@@ -231,6 +233,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
+    let active_agent_accent = active_item
+        .as_ref()
+        .and_then(agent_page_url)
+        .and_then(|url| url.strip_prefix("vmux://agent/"))
+        .and_then(|path| path.split('/').next())
+        .filter(|agent| !agent.is_empty())
+        .map(agent_accent);
     let nav = nav_mode();
     let display_text = if nav && !start_prompt_mode {
         match &active_item {
@@ -298,16 +307,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let execute = move |item: &ResultItem| {
         let prompt = query();
-        if is_start
+        let transition = if is_start
             && let Some(agent_url) = agent_page_url(item)
             && crate::start::supports_inline_agent_transition(agent_url)
             && let Some(handler) = on_start_agent_transition
         {
-            handler.call(StartAgentTransition {
-                agent_url: agent_url.to_string(),
-                prompt: prompt.trim().to_string(),
-            });
-        }
+            Some((
+                handler,
+                StartAgentTransition {
+                    agent_url: agent_url.to_string(),
+                    prompt: prompt.trim().to_string(),
+                },
+            ))
+        } else {
+            None
+        };
         if matches!(variant, PaletteVariant::Start)
             && is_start_prompt_query(&prompt)
             && let Some(agent_url) = agent_page_url(item)
@@ -317,6 +331,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 emit_action_with_target("open", agent_url, open_target);
             } else {
                 emit_prompt_action(prompt.trim(), open_target, agent_url);
+            }
+            if let Some((handler, next)) = transition {
+                handler.call(next);
             }
             return;
         }
@@ -361,6 +378,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 emit_action_with_target("open", url, open_target);
             }
         }
+        if let Some((handler, next)) = transition {
+            handler.call(next);
+        }
     };
 
     let placeholder = if space_switch {
@@ -380,6 +400,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     rsx! {
         div { class: "relative",
+            if is_start {
+                if let Some(accent) = active_agent_accent {
+                    div { class: "{accent.glow_top} transition-all duration-500 ease-out" }
+                    div { class: "{accent.glow_bottom} transition-all duration-500 ease-out" }
+                }
+            }
             PromptBox {
                 glass: is_start,
                 class: if is_start { "" } else { "p-2" },
@@ -599,7 +625,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
             if !results.is_empty() {
                 PromptPopup {
-                    upward: is_start,
+                    placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
                     class: if is_start { "" } else { result_list_class() },
                 for (i, item) in results.iter().enumerate() {
@@ -610,6 +636,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         onclick: {
                             let item = item.clone();
                             move |_| { execute(&item); }
+                        },
+                        onmouseenter: move |_| {
+                            if is_start {
+                                selected.set(i);
+                            }
                         },
                         match item {
                             ResultItem::Terminal { path } => rsx! {

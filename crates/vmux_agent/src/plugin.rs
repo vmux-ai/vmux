@@ -7328,7 +7328,10 @@ mod tests {
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
+            .spawn((
+                vmux_layout::stack::stack_bundle(),
+                PendingAgentPrompt("keep this prompt".to_string()),
+            ))
             .id();
         let webview = app
             .world_mut()
@@ -7374,6 +7377,15 @@ mod tests {
             app.world().get::<PageMetadata>(webview).unwrap().url,
             "vmux://agent/claude"
         );
+        let queue = app
+            .world()
+            .get::<crate::components::PromptQueue>(stack)
+            .unwrap();
+        assert_eq!(
+            queue.items.front().map(|item| item.text.as_str()),
+            Some("keep this prompt")
+        );
+        assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
         assert!(
             app.world()
                 .get::<vmux_layout::start::StartAgentTransition>(stack)

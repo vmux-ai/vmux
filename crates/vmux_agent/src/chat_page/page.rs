@@ -342,14 +342,6 @@ pub fn Page(
     let mut resume_loading = use_signal(|| false);
     let mut verb = use_signal(|| "Working".to_string());
 
-    use_future(move || async move {
-        if transition_preview.peek().is_empty() {
-            return;
-        }
-        gloo_timers::future::TimeoutFuture::new(340).await;
-        transition_preview.set(String::new());
-    });
-
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
     use_effect(move || {
         let _ = draft.read();
@@ -425,6 +417,7 @@ pub fn Page(
         status.set(snap.status.clone());
         error.set(snap.error.clone());
         queued.set(snap.queued.clone());
+        transition_preview.set(String::new());
         paused.set(snap.paused);
         agent_name.set(snap.agent_name.clone());
         agent_icon.set(snap.agent_icon.clone());
