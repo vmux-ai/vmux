@@ -809,6 +809,11 @@ fn SideSheetView(
         remove_bookmark_drag_ghost();
         set_bookmark_context_menu_active(false);
     });
+    let active_pane_id = panes
+        .iter()
+        .find(|pane| pane.is_active)
+        .or_else(|| panes.first())
+        .map(|pane| pane.id);
     rsx! {
         div {
             class: "flex min-h-0 flex-1 flex-col px-2 pb-3 pt-2 text-foreground",
@@ -836,6 +841,9 @@ fn SideSheetView(
                 }
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
+            if let Some(pane_id) = active_pane_id {
+                KnowledgeCard { pane_id }
+            }
             div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
                 if let Some(err) = pane_tree_error {
                     div { class: "flex items-center px-2 py-1",
@@ -957,6 +965,54 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
         &mut output,
     );
     output
+}
+
+#[component]
+fn KnowledgeCard(pane_id: u64) -> Element {
+    rsx! {
+        button {
+            r#type: "button",
+            class: "glass group mb-2 flex shrink-0 cursor-pointer flex-col overflow-hidden rounded-lg text-left transition-colors hover:bg-glass-hover",
+            onclick: move |_| {
+                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                    command: "open_knowledge".to_string(),
+                    pane_id: pane_id.to_string(),
+                    stack_index: 0,
+                });
+            },
+            div { class: "flex items-center gap-2 px-2.5 py-2",
+                div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary ring-1 ring-inset ring-primary/20",
+                    Icon { class: "h-3.5 w-3.5",
+                        path { d: "M2 4a2 2 0 0 1 2-2h6a4 4 0 0 1 4 4v16a4 4 0 0 0-4-4H2Z" }
+                        path { d: "M22 4a2 2 0 0 0-2-2h-6a4 4 0 0 0-4 4v16a4 4 0 0 1 4-4h8Z" }
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "text-ui font-semibold text-foreground", "Knowledge" }
+                    div { class: "text-[10px] text-muted-foreground", "Shared context for people and agents" }
+                }
+                Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5",
+                    path { d: "m9 18 6-6-6-6" }
+                }
+            }
+            div { class: "grid grid-cols-2 gap-x-2 gap-y-1 border-t border-foreground/10 px-2.5 py-2 text-[10px] text-muted-foreground",
+                KnowledgeUse { label: "Skills", path: "M12 2v4" }
+                KnowledgeUse { label: "Decisions", path: "m9 11 3 3L22 4" }
+                KnowledgeUse { label: "Runbooks", path: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20" }
+                KnowledgeUse { label: "Projects", path: "M4 20h16" }
+            }
+        }
+    }
+}
+
+#[component]
+fn KnowledgeUse(label: &'static str, path: &'static str) -> Element {
+    rsx! {
+        span { class: "flex min-w-0 items-center gap-1.5",
+            Icon { class: "h-3 w-3 shrink-0 text-primary/80", path { d: path } }
+            span { class: "truncate", "{label}" }
+        }
+    }
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the

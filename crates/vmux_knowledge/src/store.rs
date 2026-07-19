@@ -35,11 +35,38 @@ pub fn vault_dir() -> PathBuf {
 
 pub fn ensure_vault(root: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
+    for directory in [
+        "skills",
+        "decisions",
+        "projects",
+        "meetings",
+        "runbooks",
+        "handbook",
+        "research",
+        "templates",
+    ] {
+        std::fs::create_dir_all(root.join(directory))?;
+    }
     #[cfg(unix)]
     {
-        let permissions = std::fs::metadata(root)?.permissions();
-        if permissions.mode() & 0o777 != 0o700 {
-            std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))?;
+        for directory in std::iter::once(root.to_path_buf()).chain(
+            [
+                "skills",
+                "decisions",
+                "projects",
+                "meetings",
+                "runbooks",
+                "handbook",
+                "research",
+                "templates",
+            ]
+            .into_iter()
+            .map(|directory| root.join(directory)),
+        ) {
+            let permissions = std::fs::metadata(&directory)?.permissions();
+            if permissions.mode() & 0o777 != 0o700 {
+                std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
+            }
         }
     }
     Ok(())
@@ -144,10 +171,42 @@ pub fn read_response(document: &NoteDocument, root: &Path, request_id: u64) -> N
         path: document.summary.path.clone(),
         relative_path: document.summary.relative_path.clone(),
         title: document.summary.title.clone(),
+        source: document.content.clone(),
         html: render_markdown(body, Path::new(&document.summary.path), root),
         modified_at: document.summary.modified_at,
         word_count: markdown_word_count(body),
     }
+}
+
+pub fn write_note(root: &Path, requested: &Path, source: &str) -> Result<NoteDocument, String> {
+    if source.len() as u64 > NOTE_MAX_BYTES {
+        return Err("note exceeds size limit".to_string());
+    }
+    let root = canonical_vault(root).map_err(|error| error.to_string())?;
+    let path = resolve_note_path_in(&root, requested)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "note has no parent directory".to_string())?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| "note has no file name".to_string())?
+        .to_string_lossy();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temporary = parent.join(format!(".{file_name}.vmux-{nonce}"));
+    let result = (|| -> std::io::Result<()> {
+        let mut file = secure_create(&temporary)?;
+        file.write_all(source.as_bytes())?;
+        file.sync_data()?;
+        std::fs::rename(&temporary, &path)
+    })();
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.to_string());
+    }
+    read_document(&root, &path).map_err(|error| error.to_string())
 }
 
 pub fn create_note(root: &Path, title: &str) -> std::io::Result<NoteDocument> {
@@ -576,6 +635,23 @@ mod tests {
         assert_eq!(first.summary.relative_path, "Project idea.md");
         assert_eq!(second.summary.relative_path, "Project idea 2.md");
         assert_eq!(first.content, "# Project / idea\n\n");
+    }
+
+    #[test]
+    fn writes_and_renders_existing_note() {
+        let temp = tempfile::tempdir().unwrap();
+        let created = create_note(temp.path(), "Editable").unwrap();
+        let updated = write_note(
+            temp.path(),
+            Path::new(&created.summary.path),
+            "# Editable\n\nChanged **now**.\n",
+        )
+        .unwrap();
+        assert_eq!(updated.content, "# Editable\n\nChanged **now**.\n");
+        let response = read_response(&updated, temp.path(), 7);
+        assert_eq!(response.request_id, 7);
+        assert_eq!(response.source, updated.content);
+        assert!(response.html.contains("<strong>now</strong>"));
     }
 
     #[cfg(unix)]

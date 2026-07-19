@@ -8,14 +8,14 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::{CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
 use crate::event::{
-    NOTE_CREATED_EVENT, NOTE_ERROR_EVENT, NOTE_READ_RESPONSE_EVENT, NOTES_PAGE_URL,
-    NOTES_QUERY_RESPONSE_EVENT, NoteCreateRequest, NoteCreatedEvent, NoteErrorEvent,
-    NoteOpenRequest, NoteOperation, NoteReadRequest, NoteReadResponse, NoteSummary,
-    NotesQueryRequest, NotesQueryResponse,
+    NOTE_CREATED_EVENT, NOTE_ERROR_EVENT, NOTE_READ_RESPONSE_EVENT, NOTE_WRITTEN_EVENT,
+    NOTES_PAGE_URL, NOTES_QUERY_RESPONSE_EVENT, NoteCreateRequest, NoteCreatedEvent,
+    NoteErrorEvent, NoteOpenRequest, NoteOperation, NoteReadRequest, NoteReadResponse, NoteSummary,
+    NoteWriteRequest, NoteWrittenEvent, NotesQueryRequest, NotesQueryResponse,
 };
 use crate::store::{
     NoteIndexEntry, build_index, create_note, query_index, read_note, read_response,
-    resolve_note_path, vault_dir,
+    resolve_note_path, vault_dir, write_note,
 };
 
 pub struct KnowledgePlugin;
@@ -76,6 +76,14 @@ struct NoteCreateTask {
     task: Task<Result<crate::store::NoteDocument, String>>,
 }
 
+#[derive(Component)]
+struct NoteWriteTask {
+    webview: Entity,
+    request_id: u64,
+    path: String,
+    task: Task<Result<NoteReadResponse, String>>,
+}
+
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
@@ -108,6 +116,7 @@ impl Plugin for KnowledgePlugin {
                     drain_notes_query_tasks,
                     drain_note_read_tasks,
                     drain_note_create_tasks,
+                    drain_note_write_tasks,
                 ),
             )
             .add_plugins(BinEventEmitterPlugin::<(
@@ -115,13 +124,75 @@ impl Plugin for KnowledgePlugin {
                 NoteReadRequest,
                 NoteCreateRequest,
                 NoteOpenRequest,
+                NoteWriteRequest,
             )>::for_hosts(&["notes"]))
             .add_observer(on_notes_query)
             .add_observer(on_note_read)
             .add_observer(on_note_create)
+            .add_observer(on_note_write)
             .add_observer(on_note_open)
             .add_message::<CefPageAttachRequest>()
             .add_message::<vmux_layout::OpenInNewStackRequest>();
+    }
+}
+
+fn on_note_write(
+    trigger: On<BinReceive<NoteWriteRequest>>,
+    pending: Query<(Entity, &NoteWriteTask)>,
+    mut commands: Commands,
+) {
+    for (entity, task) in &pending {
+        if task.webview == trigger.event().webview {
+            commands.entity(entity).despawn();
+        }
+    }
+    let request = trigger.event().payload.clone();
+    let path = request.path.clone();
+    let task = IoTaskPool::get().spawn(async move {
+        let vault = vault_dir();
+        let document = write_note(&vault, PathBuf::from(&path).as_path(), &request.source)?;
+        Ok(read_response(&document, &vault, request.request_id))
+    });
+    commands.spawn(NoteWriteTask {
+        webview: trigger.event().webview,
+        request_id: trigger.event().payload.request_id,
+        path: trigger.event().payload.path.clone(),
+        task,
+    });
+}
+
+fn drain_note_write_tasks(
+    mut tasks: Query<(Entity, &mut NoteWriteTask)>,
+    mut index: ResMut<KnowledgeIndex>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        match result {
+            Ok(note) => {
+                index.dirty = true;
+                index.generation = index.generation.wrapping_add(1);
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    task.webview,
+                    NOTE_WRITTEN_EVENT,
+                    &NoteWrittenEvent {
+                        request_id: task.request_id,
+                        note,
+                    },
+                ));
+            }
+            Err(error) => emit_error(
+                task.webview,
+                NoteOperation::Write,
+                task.request_id,
+                task.path.clone(),
+                error,
+                &mut commands,
+            ),
+        }
     }
 }
 

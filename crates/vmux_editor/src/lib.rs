@@ -14,6 +14,8 @@ pub mod fold;
 pub mod fold_store;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod keymap;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod markdown;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod dir;
@@ -41,5 +43,7 @@ pub mod page_model;
 pub mod explorer;
 #[cfg(target_arch = "wasm32")]
 pub mod lsp_page;
+#[cfg(target_arch = "wasm32")]
+mod note;
 #[cfg(target_arch = "wasm32")]
 pub mod page;

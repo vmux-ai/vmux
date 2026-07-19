@@ -9693,6 +9693,7 @@ dependencies = [
  "lsp-types",
  "notify 6.1.1",
  "percent-encoding",
+ "pulldown-cmark",
  "reqwest",
  "rkyv",
  "ron 0.8.1",

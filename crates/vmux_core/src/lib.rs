@@ -15,6 +15,8 @@ pub use process_id::ProcessId;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod host_spawn;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod knowledge;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod page_open;

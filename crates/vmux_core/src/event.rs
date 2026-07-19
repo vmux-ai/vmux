@@ -45,6 +45,7 @@ pub const FILE_KEY_EVENT: &str = "file_key";
 pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
 pub const FILE_DIRTY_EVENT: &str = "file_dirty";
+pub const FILE_NOTE_EVENT: &str = "file_note";
 pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
 /// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
@@ -172,6 +173,153 @@ pub struct FileViewportPatch {
     pub total_rows: u32,
     pub total_lines: u32,
     pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum MdTableAlign {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+pub enum MdInline {
+    Text(String),
+    Code(String),
+    Strong(#[rkyv(omit_bounds)] Vec<MdInline>),
+    Emph(#[rkyv(omit_bounds)] Vec<MdInline>),
+    Strike(#[rkyv(omit_bounds)] Vec<MdInline>),
+    Link {
+        href: String,
+        #[rkyv(omit_bounds)]
+        inlines: Vec<MdInline>,
+    },
+    Image {
+        src: String,
+        alt: String,
+    },
+    SoftBreak,
+    HardBreak,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+pub struct MdListItem {
+    pub task: Option<bool>,
+    #[rkyv(omit_bounds)]
+    pub blocks: Vec<MdBlock>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, __S::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
+pub enum MdBlock {
+    Heading {
+        level: u8,
+        inlines: Vec<MdInline>,
+    },
+    Paragraph {
+        inlines: Vec<MdInline>,
+    },
+    List {
+        ordered: bool,
+        start: u64,
+        #[rkyv(omit_bounds)]
+        items: Vec<MdListItem>,
+    },
+    CodeBlock {
+        lang: String,
+        lines: Vec<FileLine>,
+    },
+    BlockQuote {
+        #[rkyv(omit_bounds)]
+        blocks: Vec<MdBlock>,
+    },
+    Table {
+        aligns: Vec<MdTableAlign>,
+        header: Vec<Vec<MdInline>>,
+        rows: Vec<Vec<Vec<MdInline>>>,
+    },
+    ThematicBreak,
+    Html {
+        raw: String,
+    },
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct NoteBlock {
+    pub start_line: u32,
+    pub end_line: u32,
+    pub source: String,
+    pub block: MdBlock,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileNoteEvent {
+    pub blocks: Vec<NoteBlock>,
+    pub active: Option<u32>,
 }
 
 #[derive(
@@ -1620,6 +1768,7 @@ pub struct FileDirtyEvent {
 pub enum FileViewMode {
     #[default]
     Editor,
+    Note,
     Diff,
 }
 
@@ -1977,6 +2126,25 @@ mod tests {
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let back = rkyv::from_bytes::<FileViewModeEvent, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, event);
+    }
+
+    #[test]
+    fn file_note_event_roundtrips() {
+        let event = FileNoteEvent {
+            blocks: vec![NoteBlock {
+                start_line: 0,
+                end_line: 1,
+                source: "# Title".into(),
+                block: MdBlock::Heading {
+                    level: 1,
+                    inlines: vec![MdInline::Text("Title".into())],
+                },
+            }],
+            active: Some(0),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
+        let back = rkyv::from_bytes::<FileNoteEvent, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back, event);
     }
 

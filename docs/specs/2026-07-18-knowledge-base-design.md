@@ -1,13 +1,13 @@
 # Knowledge Base Design
 
 Date: 2026-07-18
-Status: Implemented first slice
+Status: Implemented
 
 ## Summary
 
 Add a local-first Markdown knowledge base at `vmux://notes/`. Notes remain ordinary files in a
-profile-agnostic vault. The Notes page provides discovery, search, reading, and creation. Editing
-opens the existing file editor, inheriting its standard default keymap and optional Vim keymap.
+profile-agnostic vault. The Notes page provides discovery, search, reading, creation, and immediate
+editing. Markdown files also gain an editable Note mode beside Editor and Diff.
 
 ## Decisions
 
@@ -15,7 +15,9 @@ opens the existing file editor, inheriting its standard default keymap and optio
 - Note files are the source of truth. No proprietary document format.
 - Browser/runtime profiles do not own notes.
 - Standard editor bindings remain the default. Vim remains a global editor opt-in.
-- Notes page owns library UX. `vmux_editor` owns buffers, saving, undo, keymaps, and file watching.
+- `file://` Note mode uses the existing editor buffer, saving, undo, standard keymap, optional Vim
+  keymap, and file watching.
+- The Notes reading pane is click-to-edit and autosaves without an Edit-button handoff.
 - The abandoned `feat/markdown-note-mode` branch is reference material only.
 - Derived indexes may later live in Application Support; never inside note files.
 
@@ -28,10 +30,12 @@ opens the existing file editor, inheriting its standard default keymap and optio
 - Title, excerpt, modified-time, and full-text filtering.
 - Mtime/size-aware in-memory index, filesystem invalidation, and paginated results.
 - Safe note creation with human-readable unique filenames.
-- Rich read-only Markdown preview with raw HTML removed.
+- Rich Markdown preview with immediate source editing and autosave.
 - Local vault links and images with remote images blocked by default.
-- Open-in-editor action using a normal `file://` page.
+- A `Note | Editor | Diff` control for Markdown `file://` pages.
 - Dedicated Knowledge page icon and command-bar entry.
+- Dedicated Knowledge card between Space and Stack cards.
+- Semantic theme tokens shared with other `vmux://` pages.
 
 ## UI
 
@@ -39,10 +43,11 @@ Three surfaces:
 
 1. Library rail: product identity, note count, vault location, create action.
 2. Searchable note list: title, excerpt, relative path, modified time.
-3. Reading canvas: centered typography, note metadata, edit action.
+3. Reading canvas: centered typography, note metadata, click-to-edit source, autosave state.
 
-The page is useful without modal editing. Keyboard and pointer access are first-class. Editing is
-delegated to the existing editor so keymap behavior cannot diverge.
+The page is useful without modal editing. Keyboard and pointer access are first-class. The side
+rail suggests organizational uses: skills, decisions, runbooks, project briefs, meetings,
+handbook pages, research, and templates.
 
 ## Storage
 
@@ -50,13 +55,25 @@ delegated to the existing editor so keymap behavior cannot diverge.
 ~/.vmux/knowledge/
   Welcome.md
   projects/
-  daily/
-  attachments/
+  skills/<slug>/SKILL.md
+  decisions/
+  meetings/
+  runbooks/
+  handbook/
+  research/
+  templates/
 ```
 
 The vault is profile-agnostic because profiles isolate cookies, browser state, recordings, and test
 sessions. User knowledge must survive profile changes. A configurable external vault path is a
 follow-up.
+
+## Agent Skills
+
+`skills/<slug>/SKILL.md` is the Knowledge convention for user-owned agent skills. At agent startup,
+vmux injects a deterministic skill catalog and up to 24 KiB of skill bodies into supported CLI and
+ACP instruction surfaces. Additional skills remain discoverable by path. vmux never writes a
+managed `AGENTS.md` into user projects.
 
 ## Safety
 
@@ -75,6 +92,5 @@ follow-up.
 - Persisted full-text index for very large vaults.
 - Wikilinks, backlinks, tags, and active-Space filters.
 - Daily notes and quick capture.
-- Inline live-preview editing.
 - Agent tools for search, read, create, and append with file/line citations.
 - Semantic search as an optional layer over full-text search.

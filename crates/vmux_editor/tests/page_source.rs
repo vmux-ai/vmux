@@ -65,13 +65,14 @@ fn page_mounts_panel_and_wires_toggle() {
 }
 
 #[test]
-fn page_wires_shared_editor_diff_toggle() {
+fn page_wires_shared_note_editor_diff_toggle() {
     let s = page_source();
     assert!(s.contains("FileViewModeEvent"));
     assert!(s.contains("FileViewModeSet"));
-    assert!(s.contains("Show diffs in all open files"));
-    assert!(s.contains("file_view_mode.set(next)"));
-    assert!(s.contains("if next == FileViewMode::Diff"));
+    assert!(s.contains("FileViewMode::Note"));
+    assert!(s.contains("Rendered Markdown with live editing"));
+    assert!(s.contains("file_view_mode.set(FileViewMode::Editor)"));
+    assert!(s.contains("file_view_mode.set(FileViewMode::Diff)"));
     assert!(s.contains("visible: file_view_mode() == FileViewMode::Diff"));
     assert!(s.contains("markers: git_line_markers"));
     assert!(s.contains("diff_marker_sign(marker)"));
@@ -86,6 +87,6 @@ fn page_wires_shared_editor_diff_toggle() {
     let line_number = s.find("\"{ln + 1}\"").unwrap();
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
-    assert!(s.contains("transition-transform duration-150"));
+    assert!(s.contains("render_block(&note_block.block, index)"));
     assert!(s.contains("if git_path() != m.abs_path"));
 }

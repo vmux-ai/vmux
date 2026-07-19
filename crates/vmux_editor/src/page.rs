@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
+use crate::note::render_block;
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, image_mime, line_severity,
     severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
@@ -24,6 +25,24 @@ const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
+
+fn is_markdown_file(path: &str) -> bool {
+    path.rsplit_once('.')
+        .map(|(_, extension)| {
+            extension.eq_ignore_ascii_case("md")
+                || extension.eq_ignore_ascii_case("markdown")
+                || extension.eq_ignore_ascii_case("mdx")
+        })
+        .unwrap_or(false)
+}
+
+fn file_mode_class(active: bool) -> &'static str {
+    if active {
+        "rounded bg-primary/15 px-1.5 py-0.5 text-primary"
+    } else {
+        "rounded px-1.5 py-0.5 text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -495,6 +514,8 @@ pub fn Page() -> Element {
     let mut git_has_diff = use_signal(|| false);
     let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
     let mut file_view_mode = use_signal(|| FileViewMode::Editor);
+    let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
+    let mut note_active = use_signal(|| Option::<u32>::None);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
@@ -568,6 +589,8 @@ pub fn Page() -> Element {
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
+        note_blocks.set(Vec::new());
+        note_active.set(None);
         git_nonce.set(git_nonce() + 1);
     });
 
@@ -603,6 +626,11 @@ pub fn Page() -> Element {
         use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
             file_view_mode.set(event.mode);
         });
+
+    let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
+        note_blocks.set(event.blocks);
+        note_active.set(event.active);
+    });
 
     let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
         lsp_hover.set(Some(h));
@@ -985,36 +1013,46 @@ pub fn Page() -> Element {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: "unsaved" }
                 }
                 div { class: "flex-1" }
-                if mode() == Mode::Text && git_has_diff() {
-                    button {
-                        class: "relative grid shrink-0 grid-cols-2 overflow-hidden rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
-                        title: if file_view_mode() == FileViewMode::Diff { "Show editor in all open files" } else { "Show diffs in all open files" },
-                        aria_pressed: file_view_mode() == FileViewMode::Diff,
-                        onclick: move |_| {
-                            let next = if file_view_mode() == FileViewMode::Diff {
-                                FileViewMode::Editor
-                            } else {
-                                FileViewMode::Diff
-                            };
-                            file_view_mode.set(next);
-                            if next == FileViewMode::Diff {
-                                git_nonce.set(git_nonce().wrapping_add(1));
-                            } else {
-                                reveal_git_change(git_line_markers, cell_dims);
+                if mode() == Mode::Text && (is_markdown_file(&git_path()) || git_has_diff()) {
+                    div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
+                        if is_markdown_file(&git_path()) {
+                            button {
+                                class: file_mode_class(file_view_mode() == FileViewMode::Note),
+                                title: "Rendered Markdown with live editing",
+                                onclick: move |_| {
+                                    file_view_mode.set(FileViewMode::Note);
+                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
+                                    focus_file_input();
+                                },
+                                "Note"
                             }
-                            let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: next });
-                        },
-                        span {
-                            class: if file_view_mode() == FileViewMode::Diff { "pointer-events-none absolute inset-y-0.5 left-0.5 translate-x-full rounded bg-cyan-400/15 shadow-sm transition-transform duration-150 ease-out" } else { "pointer-events-none absolute inset-y-0.5 left-0.5 translate-x-0 rounded bg-background/80 shadow-sm transition-transform duration-150 ease-out" },
-                            style: "width:calc(50% - 0.125rem);",
                         }
-                        span {
-                            class: if file_view_mode() == FileViewMode::Editor { "relative z-[1] rounded px-1.5 py-0.5 text-foreground transition-colors duration-150" } else { "relative z-[1] rounded px-1.5 py-0.5 text-foreground/45 transition-colors duration-150" },
+                        button {
+                            class: file_mode_class(
+                                file_view_mode() == FileViewMode::Editor
+                                    || (file_view_mode() == FileViewMode::Note
+                                        && !is_markdown_file(&git_path())),
+                            ),
+                            title: "Source editor",
+                            onclick: move |_| {
+                                file_view_mode.set(FileViewMode::Editor);
+                                reveal_git_change(git_line_markers, cell_dims);
+                                let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
+                                focus_file_input();
+                            },
                             "Editor"
                         }
-                        span {
-                            class: if file_view_mode() == FileViewMode::Diff { "relative z-[1] rounded px-1.5 py-0.5 text-cyan-700 transition-colors duration-150 dark:text-cyan-200" } else { "relative z-[1] rounded px-1.5 py-0.5 text-foreground/45 transition-colors duration-150" },
-                            "Diff"
+                        if git_has_diff() {
+                            button {
+                                class: file_mode_class(file_view_mode() == FileViewMode::Diff),
+                                title: "Git diff",
+                                onclick: move |_| {
+                                    file_view_mode.set(FileViewMode::Diff);
+                                    git_nonce.set(git_nonce().wrapping_add(1));
+                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
+                                },
+                                "Diff"
+                            }
                         }
                     }
                 }
@@ -1194,7 +1232,127 @@ pub fn Page() -> Element {
                             markers: git_line_markers,
                         }
                     }
-                    if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
+                    if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
+                        {
+                            let active = note_active();
+                            let current = cursor();
+                            let txtcol = if composing() { "inherit" } else { "transparent" };
+                            rsx! {
+                                div {
+                                    id: "file-scroll",
+                                    class: "min-h-0 flex-1 overflow-auto px-8 py-8",
+                                    div {
+                                        class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
+                                        for (index, note_block) in note_blocks().iter().enumerate() {
+                                            if Some(index as u32) == active {
+                                                {
+                                                    let start = note_block.start_line;
+                                                    let source_lines = if note_block.source.is_empty() {
+                                                        vec![String::new()]
+                                                    } else {
+                                                        note_block.source.lines().map(str::to_string).collect::<Vec<_>>()
+                                                    };
+                                                    rsx! {
+                                                        div {
+                                                            key: "active-{index}",
+                                                            class: "relative -mx-2 my-0.5 min-h-7 rounded-lg bg-primary/[0.04] px-2 py-1 ring-1 ring-inset ring-primary/10",
+                                                            onmousedown: move |_| focus_file_input(),
+                                                            for (line_offset, raw) in source_lines.iter().enumerate() {
+                                                                {
+                                                                    let line = start + line_offset as u32;
+                                                                    if line == current.line {
+                                                                        let column = current.col as usize;
+                                                                        let byte = raw
+                                                                            .char_indices()
+                                                                            .nth(column)
+                                                                            .map(|(byte, _)| byte)
+                                                                            .unwrap_or(raw.len());
+                                                                        let before = raw[..byte].to_string();
+                                                                        let after = raw[byte..].to_string();
+                                                                        rsx! {
+                                                                            div { key: "{line}", class: "min-h-7 whitespace-pre-wrap break-words font-mono text-sm leading-7",
+                                                                                span { "{before}" }
+                                                                                span { class: "inline-block w-[2px] animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
+                                                                                span { "{after}" }
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        rsx! {
+                                                                            div { key: "{line}", class: "min-h-7 whitespace-pre-wrap break-words font-mono text-sm leading-7", "{raw}" }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            textarea {
+                                                                id: "file-input",
+                                                                class: "absolute inset-0 z-10 h-full w-full resize-none border-0 bg-transparent p-0 caret-transparent outline-none",
+                                                                style: "color:{txtcol};",
+                                                                autocomplete: "off",
+                                                                autocapitalize: "off",
+                                                                spellcheck: "false",
+                                                                oncompositionstart: move |_| composing.set(true),
+                                                                oncompositionend: move |_| {
+                                                                    composing.set(false);
+                                                                    send_committed_text();
+                                                                },
+                                                                oninput: move |_| {
+                                                                    if !composing() {
+                                                                        send_committed_text();
+                                                                    }
+                                                                },
+                                                                onkeydown: move |event: Event<KeyboardData>| {
+                                                                    let data = event.data();
+                                                                    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+                                                                        return;
+                                                                    };
+                                                                    if raw.is_composing() {
+                                                                        return;
+                                                                    }
+                                                                    let key = raw.key();
+                                                                    let mods = key_mods(raw);
+                                                                    let chord = mods.ctrl || mods.alt || mods.meta;
+                                                                    if ed_mode().accepts_text() && !chord && is_text_key(&key) {
+                                                                        return;
+                                                                    }
+                                                                    event.prevent_default();
+                                                                    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+                                                                        key,
+                                                                        code: raw.code(),
+                                                                        mods,
+                                                                        repeat: raw.repeat(),
+                                                                    });
+                                                                },
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                {
+                                                    let line = note_block.start_line;
+                                                    rsx! {
+                                                        div {
+                                                            key: "block-{index}",
+                                                            class: "cursor-text rounded px-0.5 transition-colors hover:bg-foreground/[0.025]",
+                                                            onmousedown: move |event| {
+                                                                event.prevent_default();
+                                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                    line,
+                                                                    col: 0,
+                                                                    extend: false,
+                                                                });
+                                                                focus_file_input();
+                                                            },
+                                                            {render_block(&note_block.block, index)}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if file_view_mode() != FileViewMode::Diff || !git_has_diff() {
                         {
                             let (cw, ch) = cell_dims();
                             let gutter = gw as f64 * cw + 48.0;

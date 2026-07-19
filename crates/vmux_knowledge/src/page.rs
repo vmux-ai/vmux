@@ -6,12 +6,23 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::event::{
-    NOTE_CREATED_EVENT, NOTE_ERROR_EVENT, NOTE_READ_RESPONSE_EVENT, NOTES_QUERY_RESPONSE_EVENT,
-    NoteCreateRequest, NoteCreatedEvent, NoteErrorEvent, NoteOpenRequest, NoteOperation,
-    NoteReadRequest, NoteReadResponse, NoteSummary, NotesQueryRequest, NotesQueryResponse,
+    NOTE_CREATED_EVENT, NOTE_ERROR_EVENT, NOTE_READ_RESPONSE_EVENT, NOTE_WRITTEN_EVENT,
+    NOTES_QUERY_RESPONSE_EVENT, NoteCreateRequest, NoteCreatedEvent, NoteErrorEvent,
+    NoteOpenRequest, NoteOperation, NoteReadRequest, NoteReadResponse, NoteSummary,
+    NoteWriteRequest, NoteWrittenEvent, NotesQueryRequest, NotesQueryResponse,
 };
 
 const QUERY_PAGE_SIZE: u32 = 100;
+const KNOWLEDGE_USE_CASES: [(&str, &str); 8] = [
+    ("Skills", "New Skill"),
+    ("Decisions", "Decision Record"),
+    ("Runbooks", "Runbook"),
+    ("Projects", "Project Brief"),
+    ("Meetings", "Meeting Notes"),
+    ("Handbook", "Handbook Page"),
+    ("Research", "Research Note"),
+    ("Templates", "Template"),
+];
 
 fn emit_query(
     query: &str,
@@ -76,6 +87,66 @@ fn submit_create(
     }
 }
 
+fn emit_write(
+    path: String,
+    source: String,
+    request_id: u64,
+    mut write_pending: Signal<bool>,
+    mut write_error: Signal<String>,
+) {
+    write_pending.set(true);
+    write_error.set(String::new());
+    if let Err(error) = try_cef_bin_emit_rkyv(&NoteWriteRequest {
+        path,
+        source,
+        request_id,
+    }) {
+        write_pending.set(false);
+        write_error.set(error.to_string());
+    }
+}
+
+fn submit_write(
+    path: String,
+    source: String,
+    mut latest_write: Signal<u64>,
+    write_pending: Signal<bool>,
+    write_error: Signal<String>,
+) {
+    let request_id = latest_write().wrapping_add(1);
+    latest_write.set(request_id);
+    emit_write(path, source, request_id, write_pending, write_error);
+}
+
+fn schedule_write(
+    path: String,
+    source: String,
+    mut generation: Signal<u32>,
+    mut latest_write: Signal<u64>,
+    mut write_pending: Signal<bool>,
+    write_error: Signal<String>,
+) {
+    let current = generation.peek().wrapping_add(1);
+    generation.set(current);
+    let request_id = latest_write().wrapping_add(1);
+    latest_write.set(request_id);
+    write_pending.set(true);
+    let Some(window) = web_sys::window() else {
+        emit_write(path, source, request_id, write_pending, write_error);
+        return;
+    };
+    let closure = Closure::once(move || {
+        if *generation.peek() == current {
+            emit_write(path, source, request_id, write_pending, write_error);
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        450,
+    );
+    closure.forget();
+}
+
 fn schedule_query(
     value: String,
     mut generation: Signal<u32>,
@@ -118,12 +189,19 @@ pub fn Page() -> Element {
     let latest_read = use_signal(|| 0_u64);
     let latest_create = use_signal(|| 0_u64);
     let latest_open = use_signal(|| 0_u64);
+    let latest_write = use_signal(|| 0_u64);
     let search_generation = use_signal(|| 0_u32);
+    let mut write_generation = use_signal(|| 0_u32);
     let mut vault_path = use_signal(String::new);
     let mut selected_path = use_signal(String::new);
     let mut preview = use_signal(|| None::<NoteReadResponse>);
     let mut preview_loading = use_signal(|| false);
     let mut preview_error = use_signal(String::new);
+    let mut draft = use_signal(String::new);
+    let mut editing = use_signal(|| false);
+    let mut write_pending = use_signal(|| false);
+    let mut write_error = use_signal(String::new);
+    let mut edit_after_read = use_signal(|| false);
     let mut total = use_signal(|| 0_u32);
     let mut has_more = use_signal(|| false);
     let mut create_open = use_signal(|| false);
@@ -176,7 +254,29 @@ pub fn Page() -> Element {
             {
                 preview_loading.set(false);
                 preview_error.set(String::new());
+                draft.set(response.source.clone());
+                editing.set(edit_after_read());
+                edit_after_read.set(false);
+                write_pending.set(false);
+                write_error.set(String::new());
                 preview.set(Some(response));
+            }
+        },
+    );
+
+    let _written_listener = use_bin_event_listener::<NoteWrittenEvent, _>(
+        NOTE_WRITTEN_EVENT,
+        move |event: NoteWrittenEvent| {
+            if event.request_id == *latest_write.peek() && event.note.path == *selected_path.peek()
+            {
+                write_pending.set(false);
+                write_error.set(String::new());
+                preview.set(Some(event.note));
+                let next = *latest_request.peek() + 1;
+                latest_request.set(next);
+                if let Err(error) = emit_query(&query.peek(), next, 0) {
+                    query_error.set(error.to_string());
+                }
             }
         },
     );
@@ -192,6 +292,7 @@ pub fn Page() -> Element {
             create_error.set(String::new());
             create_title.set(String::new());
             selected_path.set(created.note.path.clone());
+            edit_after_read.set(true);
             preview.set(None);
             request_read(
                 &created.note.path,
@@ -199,7 +300,6 @@ pub fn Page() -> Element {
                 preview_loading,
                 preview_error,
             );
-            request_open(&created.note.path, latest_open, toast_error);
             let next = *latest_request.peek() + 1;
             latest_request.set(next);
             if let Err(error) = emit_query(&query.peek(), next, 0) {
@@ -226,6 +326,10 @@ pub fn Page() -> Element {
                     create_pending.set(false);
                     create_error.set(event.message);
                 }
+                NoteOperation::Write if event.request_id == *latest_write.peek() => {
+                    write_pending.set(false);
+                    write_error.set(event.message);
+                }
                 NoteOperation::Open if event.request_id == *latest_open.peek() => {
                     toast_error.set(event.message);
                 }
@@ -245,7 +349,7 @@ pub fn Page() -> Element {
         div { class: "flex h-screen min-h-0 bg-background text-foreground",
             aside { class: "flex w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar/80",
                 div { class: "flex items-center gap-2.5 px-4 pb-4 pt-5",
-                    div { class: "grid h-8 w-8 place-items-center rounded-xl bg-cyan-500/15 text-cyan-500 ring-1 ring-inset ring-cyan-500/25",
+                    div { class: "grid h-8 w-8 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/25",
                         Icon { class: "h-4 w-4",
                             path { d: "M2 4a2 2 0 0 1 2-2h6a4 4 0 0 1 4 4v16a4 4 0 0 0-4-4H2Z" }
                             path { d: "M22 4a2 2 0 0 0-2-2h-6a4 4 0 0 0-4 4v16a4 4 0 0 1 4-4h8Z" }
@@ -258,7 +362,7 @@ pub fn Page() -> Element {
                 }
                 div { class: "px-3",
                     button {
-                        class: "flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 shadow-sm transition-colors hover:bg-cyan-400",
+                        class: "flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90",
                         onclick: move |_| {
                             create_error.set(String::new());
                             create_open.set(true);
@@ -273,6 +377,22 @@ pub fn Page() -> Element {
                         Icon { class: "h-3.5 w-3.5", path { d: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20" } path { d: "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" } }
                         span { class: "flex-1 text-left", "All notes" }
                         span { class: "rounded-full bg-foreground/[0.07] px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground", "{total}" }
+                    }
+                    div { class: "px-2 pb-1.5 pt-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/70", "Build with" }
+                    div { class: "grid grid-cols-2 gap-1",
+                        for (label, seed) in KNOWLEDGE_USE_CASES {
+                            button {
+                                key: "{label}",
+                                class: "truncate rounded-md px-2 py-1.5 text-left text-[10px] text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                                title: "Create {label}",
+                                onclick: move |_| {
+                                    create_title.set(seed.to_string());
+                                    create_error.set(String::new());
+                                    create_open.set(true);
+                                },
+                                "{label}"
+                            }
+                        }
                     }
                 }
                 div { class: "mt-auto border-t border-sidebar-border px-4 py-4",
@@ -293,7 +413,7 @@ pub fn Page() -> Element {
                                 path { d: "m21 21-4.3-4.3" }
                             }
                             input {
-                                class: "h-9 w-full rounded-lg border border-border bg-foreground/[0.035] pl-9 pr-3 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-cyan-500/40 focus:bg-background",
+                                class: "h-9 w-full rounded-lg border border-border bg-foreground/[0.035] pl-9 pr-3 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:bg-background focus:ring-1 focus:ring-ring/30",
                                 placeholder: "Search notes and contents…",
                                 value: "{query}",
                                 oninput: move |event| {
@@ -361,7 +481,7 @@ pub fn Page() -> Element {
                                     button {
                                         key: "{note.path}",
                                         class: if selected {
-                                            "mb-1.5 w-full rounded-xl bg-cyan-500/[0.10] px-3 py-3 text-left ring-1 ring-inset ring-cyan-500/20"
+                                            "mb-1.5 w-full rounded-xl bg-accent px-3 py-3 text-left text-accent-foreground ring-1 ring-inset ring-ring/25"
                                         } else {
                                             "mb-1.5 w-full rounded-xl px-3 py-3 text-left transition-colors hover:bg-foreground/[0.045]"
                                         },
@@ -377,7 +497,7 @@ pub fn Page() -> Element {
                                         },
                                         ondoubleclick: move |_| request_open(&open_path, latest_open, toast_error),
                                         div { class: "flex items-start gap-2.5",
-                                            div { class: if selected { "mt-0.5 text-cyan-500" } else { "mt-0.5 text-muted-foreground/70" },
+                                            div { class: if selected { "mt-0.5 text-primary" } else { "mt-0.5 text-muted-foreground/70" },
                                                 Icon { class: "h-3.5 w-3.5", path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" } path { d: "M14 2v6h6" } }
                                             }
                                             div { class: "min-w-0 flex-1",
@@ -416,7 +536,7 @@ pub fn Page() -> Element {
                 }
             }
 
-            main { class: "min-w-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.045),transparent_36%)]",
+            main { class: "min-w-0 flex-1 overflow-y-auto bg-background",
                 if let Some(note) = preview() {
                     div { class: "mx-auto w-full max-w-[820px] px-10 pb-24 pt-9",
                         div { class: "mb-8 flex items-start gap-6 border-b border-border pb-5",
@@ -430,24 +550,109 @@ pub fn Page() -> Element {
                                 }
                                 h1 { class: "truncate text-[28px] font-semibold tracking-[-0.025em]", "{note.title}" }
                             }
-                            button {
-                                class: "mt-1 flex shrink-0 items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium shadow-sm transition-colors hover:border-cyan-500/30 hover:bg-cyan-500/[0.06]",
-                                onclick: {
-                                    let path = note.path.clone();
-                                    move |_| request_open(&path, latest_open, toast_error)
-                                },
-                                Icon { class: "h-3.5 w-3.5", path { d: "M12 20h9" } path { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" } }
-                                "Edit"
+                            div { class: "mt-1 shrink-0 text-[10px] text-muted-foreground",
+                                if write_pending() {
+                                    "Saving…"
+                                } else if !write_error().is_empty() {
+                                    span { class: "text-destructive", "Save failed" }
+                                } else {
+                                    "Saved"
+                                }
                             }
                         }
-                        article {
-                            class: "knowledge-md",
-                            dangerous_inner_html: note.html.clone(),
+                        if editing() {
+                            textarea {
+                                id: "knowledge-note-editor",
+                                class: "min-h-[65vh] w-full resize-none border-0 bg-transparent font-mono text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground",
+                                autofocus: true,
+                                spellcheck: "true",
+                                value: "{draft}",
+                                oninput: {
+                                    let path = note.path.clone();
+                                    move |event| {
+                                        let source = event.value();
+                                        draft.set(source.clone());
+                                        schedule_write(
+                                            path.clone(),
+                                            source,
+                                            write_generation,
+                                            latest_write,
+                                            write_pending,
+                                            write_error,
+                                        );
+                                    }
+                                },
+                                onblur: {
+                                    let path = note.path.clone();
+                                    let saved_source = note.source.clone();
+                                    move |_| {
+                                        if draft() != saved_source {
+                                            write_generation
+                                                .set(write_generation().wrapping_add(1));
+                                            submit_write(
+                                                path.clone(),
+                                                draft(),
+                                                latest_write,
+                                                write_pending,
+                                                write_error,
+                                            );
+                                        }
+                                        editing.set(false);
+                                    }
+                                },
+                                onkeydown: {
+                                    let path = note.path.clone();
+                                    move |event: Event<KeyboardData>| {
+                                        let data = event.data();
+                                        let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+                                            return;
+                                        };
+                                        if raw.key() == "Escape" {
+                                            event.prevent_default();
+                                            editing.set(false);
+                                        } else if raw.key().eq_ignore_ascii_case("s")
+                                            && (raw.meta_key() || raw.ctrl_key())
+                                        {
+                                            event.prevent_default();
+                                            write_generation.set(write_generation().wrapping_add(1));
+                                            submit_write(
+                                                path.clone(),
+                                                draft(),
+                                                latest_write,
+                                                write_pending,
+                                                write_error,
+                                            );
+                                        }
+                                    }
+                                },
+                            }
+                        } else {
+                            article {
+                                class: "knowledge-md min-h-[40vh] cursor-text rounded-xl px-1 outline-none transition-colors hover:bg-foreground/[0.015]",
+                                tabindex: "0",
+                                title: "Click to edit",
+                                onclick: move |_| editing.set(true),
+                                onkeydown: move |event| {
+                                    let activate = match event.key() {
+                                        Key::Enter => true,
+                                        Key::Character(value) => value == " ",
+                                        _ => false,
+                                    };
+                                    if activate {
+                                        event.prevent_default();
+                                        editing.set(true);
+                                    }
+                                },
+                                dangerous_inner_html: note.html.clone(),
+                            }
+                        }
+                        if !write_error().is_empty() {
+                            div { class: "mt-3 rounded-lg border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive", "{write_error}" }
                         }
                     }
                 } else if preview_loading() {
                     div { class: "grid h-full place-items-center",
-                        div { class: "h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-cyan-500" }
+                        div { class: "h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" }
                     }
                 } else if !preview_error().is_empty() {
                     div { class: "grid h-full place-items-center px-8 text-center",
@@ -459,13 +664,13 @@ pub fn Page() -> Element {
                 } else {
                     div { class: "grid h-full place-items-center px-8 text-center",
                         div { class: "max-w-sm",
-                            div { class: "mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[22px] bg-cyan-500/[0.08] text-cyan-500 ring-1 ring-inset ring-cyan-500/15",
+                            div { class: "mx-auto mb-5 grid h-16 w-16 place-items-center rounded-[22px] bg-primary/[0.08] text-primary ring-1 ring-inset ring-primary/15",
                                 Icon { class: "h-7 w-7", path { d: "M2 4a2 2 0 0 1 2-2h6a4 4 0 0 1 4 4v16a4 4 0 0 0-4-4H2Z" } path { d: "M22 4a2 2 0 0 0-2-2h-6a4 4 0 0 0-4 4v16a4 4 0 0 1 4-4h8Z" } }
                             }
                             h2 { class: "text-lg font-semibold tracking-tight", "Build your knowledge base" }
                             p { class: "mt-2 text-xs leading-relaxed text-muted-foreground", "Plain Markdown. Local files. Searchable from one quiet workspace." }
                             button {
-                                class: "mt-5 rounded-lg bg-cyan-500 px-4 py-2 text-xs font-semibold text-slate-950 transition-colors hover:bg-cyan-400",
+                                class: "mt-5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90",
                                 onclick: move |_| {
                                     create_error.set(String::new());
                                     create_open.set(true);
@@ -492,7 +697,7 @@ pub fn Page() -> Element {
                     div { class: "text-sm font-semibold", "New note" }
                     div { class: "mt-1 text-[10px] text-muted-foreground", "A Markdown file will be created in your vault." }
                     input {
-                        class: "mt-4 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-cyan-500/50",
+                        class: "mt-4 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-1 focus:ring-ring/30",
                         autofocus: true,
                         disabled: create_pending(),
                         placeholder: "Note title",
@@ -523,7 +728,7 @@ pub fn Page() -> Element {
                             "Cancel"
                         }
                         button {
-                            class: "rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-wait disabled:opacity-60",
+                            class: "rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:cursor-wait disabled:opacity-60",
                             disabled: create_pending(),
                             onclick: move |_| {
                                 submit_create(
@@ -583,12 +788,12 @@ const KNOWLEDGE_CSS: &str = r#"
 .knowledge-md p{margin:.85em 0;color:color-mix(in oklab,var(--foreground) 88%,transparent)}
 .knowledge-md ul,.knowledge-md ol{margin:.8em 0;padding-left:1.6em}.knowledge-md ul{list-style:disc}.knowledge-md ol{list-style:decimal}.knowledge-md li{margin:.3em 0}.knowledge-md li::marker{color:color-mix(in oklab,var(--foreground) 48%,transparent)}
 .knowledge-md strong{font-weight:650}.knowledge-md em{font-style:italic}
-.knowledge-md a{color:oklch(.72 .15 210);text-decoration:none;border-bottom:1px solid oklch(.72 .15 210/.35)}.knowledge-md a:hover{border-bottom-color:oklch(.72 .15 210)}
+.knowledge-md a{color:var(--primary);text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--primary) 35%,transparent)}.knowledge-md a:hover{border-bottom-color:var(--primary)}
 .knowledge-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:color-mix(in oklab,var(--foreground) 8%,transparent);padding:.16em .38em;border-radius:.35em}
 .knowledge-md pre{margin:1.1em 0;overflow-x:auto;border:1px solid var(--border);border-radius:.8rem;background:color-mix(in oklab,var(--foreground) 5%,transparent);padding:1em 1.1em}.knowledge-md pre code{background:none;padding:0;font-size:.86em}
-.knowledge-md blockquote{margin:1em 0;border-left:3px solid oklch(.72 .15 210/.55);border-radius:0 .6rem .6rem 0;background:oklch(.72 .15 210/.055);padding:.3em 1em;color:var(--muted-foreground)}
+.knowledge-md blockquote{margin:1em 0;border-left:3px solid color-mix(in oklab,var(--primary) 55%,transparent);border-radius:0 .6rem .6rem 0;background:color-mix(in oklab,var(--primary) 6%,transparent);padding:.3em 1em;color:var(--muted-foreground)}
 .knowledge-md hr{border:0;border-top:1px solid var(--border);margin:2em 0}
 .knowledge-md table{width:100%;border-collapse:separate;border-spacing:0;margin:1.2em 0;font-size:.92em;overflow:hidden;border:1px solid var(--border);border-radius:.7rem}.knowledge-md th,.knowledge-md td{padding:.55em .75em;text-align:left;border-bottom:1px solid var(--border)}.knowledge-md th{background:color-mix(in oklab,var(--foreground) 5%,transparent);font-weight:600}.knowledge-md tr:last-child td{border-bottom:0}
 .knowledge-md img{max-width:100%;border-radius:.8rem;border:1px solid var(--border);margin:1.2em auto}
-.knowledge-md input[type=checkbox]{margin-right:.45em;accent-color:oklch(.72 .15 210)}
+.knowledge-md input[type=checkbox]{margin-right:.45em;accent-color:var(--primary)}
 "#;

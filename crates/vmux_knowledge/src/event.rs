@@ -2,6 +2,7 @@ pub const NOTES_PAGE_URL: &str = "vmux://notes/";
 pub const NOTES_QUERY_RESPONSE_EVENT: &str = "notes-query-response";
 pub const NOTE_READ_RESPONSE_EVENT: &str = "note-read-response";
 pub const NOTE_CREATED_EVENT: &str = "note-created";
+pub const NOTE_WRITTEN_EVENT: &str = "note-written";
 pub const NOTE_ERROR_EVENT: &str = "note-error";
 
 #[derive(
@@ -22,6 +23,7 @@ pub enum NoteOperation {
     Query,
     Read,
     Create,
+    Write,
     Open,
 }
 
@@ -109,9 +111,41 @@ pub struct NoteReadResponse {
     pub path: String,
     pub relative_path: String,
     pub title: String,
+    pub source: String,
     pub html: String,
     pub modified_at: i64,
     pub word_count: u32,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct NoteWriteRequest {
+    pub path: String,
+    pub source: String,
+    pub request_id: u64,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct NoteWrittenEvent {
+    pub request_id: u64,
+    pub note: NoteReadResponse,
 }
 
 #[derive(
