@@ -460,7 +460,7 @@ fn create_worktree_definition() -> ToolDefinition {
 fn choose_workspace_definition() -> ToolDefinition {
     ToolDefinition {
         name: "choose_workspace".into(),
-        description: "Open the native folder picker before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
+        description: "Request the native workspace chooser before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. The request returns immediately: stop the current turn and do not call this tool again while selection is pending. vmux resumes this same conversation after the user chooses or cancels. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -1415,6 +1415,12 @@ mod tests {
                 .description
                 .contains("if none was specified")
         );
+        assert!(
+            choose_definition
+                .description
+                .contains("returns immediately")
+        );
+        assert!(choose_definition.description.contains("same conversation"));
         let choose =
             dispatch_with_anchor("choose_workspace", serde_json::json!({}), Some(anchor)).unwrap();
         let create = dispatch_with_anchor(

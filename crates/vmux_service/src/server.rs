@@ -1,6 +1,7 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, validate_agent_command,
+    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, compose_agent_prompt,
+    validate_agent_command,
 };
 use crate::{read_message, write_message};
 use std::collections::HashMap;
@@ -76,13 +77,11 @@ async fn route_agent_input(
         return;
     }
     drop(acp);
-    agent_manager.lock().await.input(
-        &sid,
-        crate::agent::SessionInput::User {
-            text: page_agent_prompt(text, &attachments),
-            attachments,
-        },
-    );
+    let text = compose_agent_prompt(&page_agent_prompt(text, &attachments), context.as_deref());
+    agent_manager
+        .lock()
+        .await
+        .input(&sid, crate::agent::SessionInput::User { text, attachments });
 }
 
 /// Acquire the manager lock and run `f` against the process if it exists.
@@ -1050,6 +1049,14 @@ mod tests {
             page_agent_prompt("review".into(), &attachments),
             "review\n\nAttached files:\n- /tmp/report.txt"
         );
+    }
+
+    #[test]
+    fn page_agent_private_context_keeps_empty_display_prompt() {
+        let prompt = compose_agent_prompt(&page_agent_prompt(String::new(), &[]), Some("resume"));
+
+        assert!(prompt.contains("resume"));
+        assert_eq!(crate::protocol::extract_display_prompt(&prompt), Some(""));
     }
 
     #[test]

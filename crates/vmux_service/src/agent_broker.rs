@@ -21,13 +21,6 @@ fn query_timeout(query: &AgentQuery) -> std::time::Duration {
     }
 }
 
-fn command_timeout(command: &AgentCommand) -> std::time::Duration {
-    match command {
-        AgentCommand::ChooseWorkspace { .. } => AGENT_TOOL_TIMEOUT,
-        _ => AGENT_COMMAND_TIMEOUT,
-    }
-}
-
 #[derive(Clone)]
 pub struct AgentBroker {
     agent_tx: broadcast::Sender<ServiceMessage>,
@@ -62,7 +55,6 @@ impl AgentBroker {
         }
         let (tx, rx) = oneshot::channel::<AgentCommandResult>();
         self.pending_commands.lock().await.insert(request_id, tx);
-        let timeout = command_timeout(&command);
 
         if self
             .agent_tx
@@ -77,7 +69,7 @@ impl AgentBroker {
             return Err(NO_SUBSCRIBER.to_string());
         }
 
-        match tokio::time::timeout(timeout, rx).await {
+        match tokio::time::timeout(AGENT_COMMAND_TIMEOUT, rx).await {
             Ok(Ok(result)) => Ok(result),
             _ => {
                 self.pending_commands.lock().await.remove(&request_id);
@@ -187,21 +179,6 @@ mod tests {
         assert_eq!(query_timeout(&AgentQuery::GetSettings), AGENT_QUERY_TIMEOUT);
     }
 
-    #[test]
-    fn workspace_selection_gets_interactive_timeout() {
-        let anchor = ProcessId::new();
-        assert_eq!(
-            command_timeout(&AgentCommand::ChooseWorkspace { anchor }),
-            AGENT_TOOL_TIMEOUT
-        );
-        assert_eq!(
-            command_timeout(&AgentCommand::OpenInNewStack {
-                url: "https://x".into(),
-            }),
-            AGENT_COMMAND_TIMEOUT
-        );
-    }
-
     #[tokio::test]
     async fn command_errors_when_no_subscriber() {
         let (b, _agent_tx) = broker();
@@ -261,36 +238,6 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err, "agent command timed out");
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn workspace_selection_remains_pending_past_normal_command_timeout() {
-        let (b, agent_tx) = broker();
-        let mut rx = agent_tx.subscribe();
-        let pending = b.pending_commands.clone();
-        let request_id = AgentRequestId::new();
-        let anchor = ProcessId::new();
-
-        let command = tokio::spawn(async move {
-            b.command(request_id, None, AgentCommand::ChooseWorkspace { anchor })
-                .await
-        });
-        let received = rx.recv().await.unwrap();
-        assert!(matches!(
-            received,
-            ServiceMessage::AgentCommand {
-                request_id: received,
-                command: AgentCommand::ChooseWorkspace { anchor: received_anchor },
-                ..
-            } if received == request_id && received_anchor == anchor
-        ));
-
-        tokio::time::advance(AGENT_COMMAND_TIMEOUT + std::time::Duration::from_secs(1)).await;
-        assert!(!command.is_finished());
-
-        let tx = pending.lock().await.remove(&request_id).unwrap();
-        tx.send(AgentCommandResult::Ok).unwrap();
-        assert_eq!(command.await.unwrap().unwrap(), AgentCommandResult::Ok);
     }
 
     #[tokio::test]

@@ -51,6 +51,8 @@ pub use vmux_space::cwd::valid_cwd;
 
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
+const WORKSPACE_SELECTION_REQUESTED: &str = "Workspace selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const WORKSPACE_SELECTION_PENDING: &str = "Workspace selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
 /// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
 /// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
@@ -274,6 +276,7 @@ impl Plugin for AgentPlugin {
                         .after(vmux_layout::worktree::TabDirectoryRebindSet)
                         .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
                     drain_workspace_picker_tasks,
+                    send_pending_agent_continuations,
                     handle_agent_queries,
                     detect_agent_session_process_exit,
                 )
@@ -1905,6 +1908,25 @@ fn ancestor_acp_stack(
     }
 }
 
+fn ancestor_agent_session(
+    entity: Entity,
+    acp_sessions: &Query<&mut crate::client::acp::AcpSession>,
+    page_sessions: &Query<&crate::components::AgentSession>,
+    cli_sessions: &Query<&AgentSession>,
+    child_of: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if acp_sessions.contains(current)
+            || page_sessions.contains(current)
+            || cli_sessions.contains(current)
+        {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
 fn rebind_acp_workspace(
     stack: Entity,
     cwd: &Path,
@@ -2401,18 +2423,22 @@ struct AgentSelfCommandWriters<'w> {
 #[derive(Component, Clone, Debug)]
 pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+struct PendingAgentContinuation(String);
+
 #[derive(Component, Clone, Copy)]
 pub(crate) struct PendingWorkspaceSelection {
-    request_id: AgentRequestId,
     tab_entity: Entity,
     agent_entity: Entity,
+    session_entity: Entity,
+    picker_started: bool,
 }
 
 #[derive(Component)]
 struct PendingWorkspacePicker {
-    request_id: AgentRequestId,
     tab_entity: Entity,
     agent_entity: Entity,
+    session_entity: Entity,
     task: Task<Option<PathBuf>>,
 }
 
@@ -2421,6 +2447,8 @@ struct WorkspacePickerContext<'w, 's> {
     selections: Query<'w, 's, &'static PendingWorkspaceSelection>,
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
+    page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
+    cli_sessions: Query<'w, 's, &'static AgentSession>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
@@ -2442,22 +2470,22 @@ fn workspace_picker_task(
 
 fn start_workspace_picker(
     trigger: On<WorkspacePickerStartRequest>,
-    selections: Query<&PendingWorkspaceSelection>,
-    pickers: Query<&PendingWorkspacePicker>,
+    mut selections: Query<&mut PendingWorkspaceSelection>,
     proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let Ok(selection) = selections.get(webview) else {
+    let Ok(mut selection) = selections.get_mut(webview) else {
         return;
     };
-    if pickers.iter().any(|picker| picker.agent_entity == webview) {
+    if selection.picker_started {
         return;
     }
+    selection.picker_started = true;
     commands.spawn(PendingWorkspacePicker {
-        request_id: selection.request_id,
         tab_entity: selection.tab_entity,
         agent_entity: selection.agent_entity,
+        session_entity: selection.session_entity,
         task: workspace_picker_task(proxy.as_deref()),
     });
 }
@@ -2470,6 +2498,35 @@ fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execu
     {
         tab.name = name.to_string();
     }
+}
+
+fn git_workspace_continuation(path: &Path, branch: &str) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION COMPLETED: The user selected Git project {}. Its current branch is {branch}. Continue the original user request in this same conversation. Do not inspect or modify the project directly yet. If the original request specified a branch, call create_worktree with that exact branch. Otherwise ask the user which new branch to create, then call create_worktree.",
+        path.display()
+    )
+}
+
+fn directory_workspace_continuation(path: &Path) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION COMPLETED: The user selected workspace {}. Continue the original user request in this same conversation using this directory.",
+        path.display()
+    )
+}
+
+fn failed_workspace_continuation(message: &str) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request workspace selection again."
+    )
+}
+
+fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
+    ClientMessage::agent_input(
+        sid.to_string(),
+        String::new(),
+        Some(context.to_string()),
+        Vec::new(),
+    )
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -2875,28 +2932,42 @@ fn handle_agent_self_commands(
                             });
                             continue;
                         };
+                        let Some(session_entity) = ancestor_agent_session(
+                            agent_entity,
+                            &acp_sessions,
+                            &workspace_picker.page_sessions,
+                            &workspace_picker.cli_sessions,
+                            &ctx.child_of_q,
+                        ) else {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "agent session not found".to_string(),
+                                ),
+                            });
+                            continue;
+                        };
                         if !workspace_picker_tabs.insert(tab_entity) {
-                            AgentCommandResult::Error(
-                                "Workspace selection is already open".to_string(),
-                            )
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
                         } else if workspace_picker.chat_views.contains(agent_entity) {
                             commands
                                 .entity(agent_entity)
                                 .insert(PendingWorkspaceSelection {
-                                    request_id: request.request_id,
                                     tab_entity,
                                     agent_entity,
+                                    session_entity,
+                                    picker_started: false,
                                 })
                                 .remove::<crate::chat_page::ChatSynced>();
-                            continue;
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         } else {
                             commands.spawn(PendingWorkspacePicker {
-                                request_id: request.request_id,
                                 tab_entity,
                                 agent_entity,
+                                session_entity,
                                 task: workspace_picker_task(workspace_picker.proxy.as_deref()),
                             });
-                            continue;
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         }
                     }
                 }
@@ -3163,22 +3234,19 @@ fn drain_workspace_picker_tasks(
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
         };
-        let result = match selected {
-            None => AgentCommandResult::Error("Workspace selection was cancelled".to_string()),
+        let continuation = match selected {
+            None => failed_workspace_continuation("The user cancelled workspace selection"),
             Some(selected) => match selected.canonicalize() {
                 Ok(selected) if selected.is_dir() => {
                     if tabs.get(picker.tab_entity).is_err() {
-                        AgentCommandResult::Error("Workspace tab no longer exists".to_string())
+                        failed_workspace_continuation("The workspace tab no longer exists")
                     } else if let Ok(checkout) = vmux_git::worktree::checkout_info(&selected) {
                         let branch = vmux_git::worktree::head_ref(&checkout.root)
                             .unwrap_or_else(|_| "unknown".to_string());
                         commands
                             .entity(picker.tab_entity)
                             .insert(PendingAgentProject(selected.clone()));
-                        AgentCommandResult::Text(format!(
-                            "Selected Git project: {}\nCurrent branch: {branch}\nUse a branch already specified by the user. If none was specified, ask which new branch to create. Then call create_worktree with that exact branch.",
-                            selected.display()
-                        ))
+                        git_workspace_continuation(&selected, &branch)
                     } else {
                         if let Ok(mut tab) = tabs.get_mut(picker.tab_entity) {
                             bind_tab_workspace(&mut tab, &selected, &selected);
@@ -3207,23 +3275,18 @@ fn drain_workspace_picker_tasks(
                         {
                             service.0.send(message);
                         }
-                        AgentCommandResult::Text(format!(
-                            "Selected workspace: {path}\nContinue the user's request in this directory."
-                        ))
+                        directory_workspace_continuation(Path::new(&path))
                     }
                 }
-                Ok(_) => {
-                    AgentCommandResult::Error("Selected workspace is not a directory".to_string())
-                }
-                Err(error) => {
-                    AgentCommandResult::Error(format!("Invalid workspace directory: {error}"))
-                }
+                Ok(_) => failed_workspace_continuation("The selected workspace is not a directory"),
+                Err(error) => failed_workspace_continuation(&format!(
+                    "The selected workspace directory is invalid: {error}"
+                )),
             },
         };
-        service.0.send(ClientMessage::AgentCommandResponse {
-            request_id: picker.request_id,
-            result,
-        });
+        commands
+            .entity(picker.session_entity)
+            .insert(PendingAgentContinuation(continuation));
         if workspace_selections.contains(picker.agent_entity) {
             commands
                 .entity(picker.agent_entity)
@@ -3231,6 +3294,52 @@ fn drain_workspace_picker_tasks(
                 .remove::<crate::chat_page::ChatSynced>();
         }
         commands.entity(picker_entity).despawn();
+    }
+}
+
+fn send_pending_agent_continuations(
+    mut sessions: Query<(
+        Entity,
+        &PendingAgentContinuation,
+        Option<&crate::client::acp::AcpSession>,
+        Option<&crate::components::AgentSession>,
+        Option<&AgentSession>,
+        Option<&mut crate::run_state::AgentRunState>,
+    )>,
+    service: Option<Res<ServiceClient>>,
+    mut commands: Commands,
+) {
+    for (entity, continuation, acp, page, cli, state) in &mut sessions {
+        if cli.is_some() {
+            commands
+                .entity(entity)
+                .insert(vmux_terminal::BufferedAgentPrompt {
+                    text: continuation.0.clone(),
+                    submit: true,
+                })
+                .remove::<PendingAgentContinuation>();
+            continue;
+        }
+        let Some(service) = service.as_deref() else {
+            continue;
+        };
+        let sid = acp
+            .map(|session| session.sid.as_str())
+            .or_else(|| page.map(|session| session.sid.as_str()));
+        let (Some(sid), Some(mut state)) = (sid, state) else {
+            continue;
+        };
+        if !matches!(
+            *state,
+            crate::run_state::AgentRunState::Idle | crate::run_state::AgentRunState::Errored(_)
+        ) {
+            continue;
+        }
+        service
+            .0
+            .send(chat_agent_continuation_message(sid, &continuation.0));
+        *state = crate::run_state::AgentRunState::Streaming;
+        commands.entity(entity).remove::<PendingAgentContinuation>();
     }
 }
 
@@ -4692,6 +4801,64 @@ mod tests {
         let failed = std::collections::HashSet::from([anchor]);
         assert!(!self_command_blocked_by_worktree_failure(&create, &failed));
         assert!(self_command_blocked_by_worktree_failure(&sibling, &failed));
+    }
+
+    #[test]
+    fn workspace_selection_continuations_resume_original_request() {
+        let git = git_workspace_continuation(Path::new("/repo/dashboard"), "main");
+        let directory = directory_workspace_continuation(Path::new("/tmp/project"));
+        let cancelled = failed_workspace_continuation("The user cancelled workspace selection");
+
+        assert!(git.contains("same conversation"));
+        assert!(git.contains("ask the user which new branch"));
+        assert!(git.contains("create_worktree"));
+        assert!(directory.contains("same conversation"));
+        assert!(directory.contains("/tmp/project"));
+        assert!(cancelled.contains("Do not retry automatically"));
+    }
+
+    #[test]
+    fn cli_workspace_continuation_queues_terminal_prompt_without_service_wait() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, send_pending_agent_continuations);
+        let entity = app
+            .world_mut()
+            .spawn((
+                AgentSession {
+                    kind: AgentKind::Codex,
+                },
+                PendingAgentContinuation("continue original request".to_string()),
+            ))
+            .id();
+
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<PendingAgentContinuation>(entity)
+                .is_none()
+        );
+        assert_eq!(
+            app.world()
+                .get::<vmux_terminal::BufferedAgentPrompt>(entity)
+                .unwrap(),
+            &vmux_terminal::BufferedAgentPrompt {
+                text: "continue original request".to_string(),
+                submit: true,
+            }
+        );
+    }
+
+    #[test]
+    fn chat_workspace_continuation_is_private_same_session_input() {
+        assert!(matches!(
+            chat_agent_continuation_message("sid-1", "continue original request"),
+            ClientMessage::AgentInput { sid, text, context }
+                if sid == "sid-1"
+                    && text.is_empty()
+                    && context.as_deref() == Some("continue original request")
+        ));
     }
 
     #[test]
@@ -7474,10 +7641,21 @@ mod tests {
             .find("fn start_workspace_picker(")
             .expect("picker start observer");
         let task = &source[task_start..task_start + task_end];
+        let selection_start = source
+            .find("struct PendingWorkspaceSelection")
+            .expect("pending workspace selection");
+        let selection_end = source[selection_start..]
+            .find("struct PendingWorkspacePicker")
+            .expect("pending workspace picker");
+        let selection = &source[selection_start..selection_start + selection_end];
 
         assert!(!handler.contains("rfd::FileDialog::new().pick_folder()"));
         assert!(handler.contains("PendingWorkspaceSelection"));
         assert!(handler.contains("workspace_picker.chat_views.contains(agent_entity)"));
+        assert!(handler.contains("WORKSPACE_SELECTION_REQUESTED"));
+        assert!(!selection.contains("request_id"));
+        assert!(selection.contains("session_entity"));
+        assert!(selection.contains("picker_started"));
         assert!(task.contains("rfd::AsyncFileDialog::new()"));
         assert!(task.contains("IoTaskPool::get().spawn"));
         assert!(task.contains("WinitUserEvent::WakeUp"));
