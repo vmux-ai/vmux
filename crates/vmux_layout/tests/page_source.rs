@@ -90,6 +90,18 @@ fn side_sheet_close_button_tracks_stack_row_hover() {
 }
 
 #[test]
+fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
+    let source = include_str!("../src/page.rs");
+
+    assert!(source.contains("KNOWLEDGE_TREE_EVENT"));
+    assert!(source.contains("KnowledgeEntryRow"));
+    assert!(source.contains("open_knowledge_path"));
+    assert!(!source.contains("KnowledgeUse"));
+    assert!(!source.contains("Build with"));
+    assert!(!source.contains("vmux://notes"));
+}
+
+#[test]
 fn folded_pane_shows_its_active_stack() {
     let pane = pane_section_component_source();
 

@@ -5,6 +5,7 @@ pub mod dom_snapshot;
 pub mod editor;
 pub mod event;
 pub mod icon;
+pub mod knowledge;
 pub mod media;
 pub mod process_id;
 pub mod scroll;
@@ -14,8 +15,6 @@ pub use process_id::ProcessId;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod host_spawn;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod knowledge;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod page;
 #[cfg(not(target_arch = "wasm32"))]

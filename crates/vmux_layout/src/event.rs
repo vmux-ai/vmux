@@ -456,6 +456,8 @@ pub struct SideSheetCommandEvent {
     pub pane_id: String,
     #[serde(default)]
     pub stack_index: u32,
+    #[serde(default)]
+    pub path: String,
 }
 
 /// The active tab's working directory + live git status, auto-detected from git. Rendered as the

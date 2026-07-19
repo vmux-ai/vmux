@@ -16,7 +16,6 @@ fn main() {
             "../vmux_core/src",
             "../vmux_git/src",
             "../vmux_history/src",
-            "../vmux_knowledge/src",
             "../vmux_layout/src",
             "../vmux_profile/src",
             "../vmux_service/src",

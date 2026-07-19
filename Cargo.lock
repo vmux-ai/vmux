@@ -9769,20 +9769,12 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
- "dioxus",
- "js-sys",
- "libc",
  "notify 6.1.1",
- "pulldown-cmark",
  "rkyv",
  "serde",
  "tempfile",
- "url",
  "vmux_core",
  "vmux_layout",
- "vmux_ui",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -9862,7 +9854,6 @@ dependencies = [
  "vmux_core",
  "vmux_editor",
  "vmux_history",
- "vmux_knowledge",
  "vmux_layout",
  "vmux_service",
  "vmux_setting",

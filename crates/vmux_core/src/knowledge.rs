@@ -1,22 +1,68 @@
 //! User-owned Knowledge Base conventions shared by agent launchers.
 
+pub const KNOWLEDGE_TREE_EVENT: &str = "knowledge-tree";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeTreeEvent {
+    pub root: String,
+    pub entries: Vec<KnowledgeEntry>,
+    pub error: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeEntry {
+    pub name: String,
+    pub path: String,
+    pub parent: String,
+    pub is_directory: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_SKILLS: usize = 64;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn knowledge_dir() -> PathBuf {
     crate::profile::config_dir().join("knowledge")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn skills_dir() -> PathBuf {
     knowledge_dir().join("skills")
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn agent_skills_prompt() -> String {
     agent_skills_prompt_from(&skills_dir())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -41,6 +87,7 @@ fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn agent_skills_prompt_from(root: &Path) -> String {
     let mut files = Vec::new();
     collect_skill_files(root, &mut files);
@@ -87,6 +134,7 @@ fn agent_skills_prompt_from(root: &Path) -> String {
     prompt
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn append_agent_skills(base: &str) -> String {
     if base.contains("vmux Knowledge skills are user-owned instructions") {
         return base.to_string();
@@ -101,7 +149,7 @@ pub fn append_agent_skills(base: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

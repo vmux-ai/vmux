@@ -14,6 +14,7 @@ use vmux_core::event::extension::{
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -83,6 +84,14 @@ pub fn Page() -> Element {
         crate::event::TAB_BOUNDARY_EVENT,
         crate::event::TabBoundaryEvent::default,
     );
+
+    let mut knowledge_state = use_signal(KnowledgeTreeEvent::default);
+    let mut knowledge_state_received = use_signal(|| false);
+    let _knowledge_listener =
+        use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
+            knowledge_state_received.set(true);
+            knowledge_state.set(data);
+        });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
@@ -212,6 +221,8 @@ pub fn Page() -> Element {
                             active_space,
                             tab_boundary,
                             bookmarks: bookmarks_state(),
+                            knowledge: knowledge_state(),
+                            knowledge_loaded: knowledge_state_received(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -790,6 +801,8 @@ fn SideSheetView(
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
     bookmarks: BookmarksHostEvent,
+    knowledge: KnowledgeTreeEvent,
+    knowledge_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
     let active_page = panes
@@ -842,7 +855,7 @@ fn SideSheetView(
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
-                KnowledgeCard { pane_id }
+                KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
             }
             div { class: "flex min-h-0 flex-1 flex-col overflow-y-auto",
                 if let Some(err) = pane_tree_error {
@@ -967,50 +980,125 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
     output
 }
 
+fn open_knowledge_path(pane_id: u64, path: String) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_knowledge_path".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path,
+    });
+}
+
+fn compact_knowledge_path(path: &str) -> String {
+    path.rfind("/.vmux/")
+        .map(|index| format!("~{}", &path[index..]))
+        .unwrap_or_else(|| path.to_string())
+}
+
 #[component]
-fn KnowledgeCard(pane_id: u64) -> Element {
+fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> Element {
+    let root = knowledge.root.clone();
+    let root_title = compact_knowledge_path(&root);
+    let root_action_title = if root.is_empty() {
+        "Knowledge".to_string()
+    } else {
+        format!("Open {root}")
+    };
     rsx! {
-        button {
-            r#type: "button",
-            class: "glass group mb-2 flex shrink-0 cursor-pointer flex-col overflow-hidden rounded-lg text-left transition-colors hover:bg-glass-hover",
-            onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
-                    command: "open_knowledge".to_string(),
-                    pane_id: pane_id.to_string(),
-                    stack_index: 0,
-                });
-            },
-            div { class: "flex items-center gap-2 px-2.5 py-2",
-                div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary/15 text-primary ring-1 ring-inset ring-primary/20",
+        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            button {
+                r#type: "button",
+                disabled: !loaded || root.is_empty(),
+                title: "{root_action_title}",
+                class: "group flex items-center gap-2 px-2.5 py-2 text-left transition-colors enabled:cursor-pointer enabled:hover:bg-glass-hover disabled:cursor-default",
+                onclick: move |_| open_knowledge_path(pane_id, root.clone()),
+                div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                     Icon { class: "h-3.5 w-3.5",
-                        path { d: "M2 4a2 2 0 0 1 2-2h6a4 4 0 0 1 4 4v16a4 4 0 0 0-4-4H2Z" }
-                        path { d: "M22 4a2 2 0 0 0-2-2h-6a4 4 0 0 0-4 4v16a4 4 0 0 1 4-4h8Z" }
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                     }
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "text-ui font-semibold text-foreground", "Knowledge" }
-                    div { class: "text-[10px] text-muted-foreground", "Shared context for people and agents" }
+                    div { class: "truncate text-[10px] text-muted-foreground", "{root_title}" }
                 }
                 Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5",
-                    path { d: "m9 18 6-6-6-6" }
+                    path { d: "M14 3h7v7" }
+                    path { d: "M10 14 21 3" }
+                    path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
                 }
             }
-            div { class: "grid grid-cols-2 gap-x-2 gap-y-1 border-t border-foreground/10 px-2.5 py-2 text-[10px] text-muted-foreground",
-                KnowledgeUse { label: "Skills", path: "M12 2v4" }
-                KnowledgeUse { label: "Decisions", path: "m9 11 3 3L22 4" }
-                KnowledgeUse { label: "Runbooks", path: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20" }
-                KnowledgeUse { label: "Projects", path: "M4 20h16" }
+            div { class: "max-h-64 overflow-y-auto border-t border-foreground/10 p-1.5",
+                if !loaded {
+                    div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Loading…" }
+                } else if !knowledge.error.is_empty() {
+                    div { class: "px-2 py-2 text-ui-xs text-destructive", "{knowledge.error}" }
+                } else if knowledge.entries.is_empty() {
+                    div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No Markdown files" }
+                } else {
+                    div { class: "flex flex-col gap-0.5",
+                        for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
+                            KnowledgeEntryRow {
+                                key: "{entry.path}",
+                                entry: entry.clone(),
+                                entries: knowledge.entries.clone(),
+                                pane_id,
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 #[component]
-fn KnowledgeUse(label: &'static str, path: &'static str) -> Element {
-    rsx! {
-        span { class: "flex min-w-0 items-center gap-1.5",
-            Icon { class: "h-3 w-3 shrink-0 text-primary/80", path { d: path } }
-            span { class: "truncate", "{label}" }
+fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_id: u64) -> Element {
+    let mut expanded = use_signal(|| false);
+    if entry.is_directory {
+        let has_children = entries.iter().any(|child| child.parent == entry.path);
+        rsx! {
+            div { class: "flex flex-col gap-0.5",
+                button {
+                    r#type: "button",
+                    title: "{entry.path}",
+                    class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                    onclick: move |_| expanded.set(!expanded()),
+                    Icon { class: if has_children { "h-3 w-3 shrink-0" } else { "h-3 w-3 shrink-0 opacity-0" },
+                        path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    }
+                    Icon { class: "h-3.5 w-3.5 shrink-0",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    }
+                    span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
+                }
+                if expanded() && has_children {
+                    div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
+                        for child in entries.iter().filter(|child| child.parent == entry.path) {
+                            KnowledgeEntryRow {
+                                key: "{child.path}",
+                                entry: child.clone(),
+                                entries: entries.clone(),
+                                pane_id,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        let path = entry.path.clone();
+        rsx! {
+            button {
+                r#type: "button",
+                title: "{entry.path}",
+                class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                onclick: move |_| open_knowledge_path(pane_id, path.clone()),
+                Icon { class: "h-3.5 w-3.5 shrink-0",
+                    path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }
+                    path { d: "M14 2v6h6" }
+                }
+                span { class: "min-w-0 flex-1 truncate text-ui", "{entry.name}" }
+            }
         }
     }
 }
@@ -2218,6 +2306,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
+                    path: String::new(),
                 });
             },
         }
@@ -2286,6 +2375,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_index,
+                            path: String::new(),
                         });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
@@ -2314,6 +2404,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                                 command: "close_stack".to_string(),
                                 pane_id: pane_id.to_string(),
                                 stack_index,
+                                path: String::new(),
                             });
                         },
                         Icon { class: "h-3 w-3 pointer-events-none",
