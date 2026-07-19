@@ -444,7 +444,7 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description: "Create vmux's isolated worktree for the project selected with choose_workspace. Never run git worktree add manually. The branch must come from the user; if they did not specify one, ask them in chat before calling this tool. Returns the absolute worktree path."
+        description: "Create vmux's isolated worktree on an exact user-specified branch for the current project. Use only when the user explicitly asks for that branch; normal workspace selection and automatic isolation are handled by choose_workspace. Never run git worktree add manually. Returns the absolute worktree path."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -460,7 +460,7 @@ fn create_worktree_definition() -> ToolDefinition {
 fn choose_workspace_definition() -> ToolDefinition {
     ToolDefinition {
         name: "choose_workspace".into(),
-        description: "Request the native workspace chooser before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. The request returns immediately: stop the current turn and do not call this tool again while selection is pending. vmux resumes this same conversation after the user chooses or cancels. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations. For Git projects, call create_worktree with a branch already specified by the user; if none was specified, ask the user which branch to create first."
+        description: "Request the native workspace chooser before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. vmux uses a selected linked worktree directly, creates an isolated managed worktree for a normal Git checkout, or binds a non-Git directory. The request returns immediately: stop the current turn and do not call this tool again while selection is pending. vmux resumes this same conversation after the workspace is ready or selection is cancelled. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -1413,8 +1413,10 @@ mod tests {
         assert!(
             choose_definition
                 .description
-                .contains("if none was specified")
+                .contains("linked worktree directly")
         );
+        assert!(choose_definition.description.contains("managed worktree"));
+        assert!(choose_definition.description.contains("workspace is ready"));
         assert!(
             choose_definition
                 .description

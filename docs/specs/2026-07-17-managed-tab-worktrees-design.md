@@ -46,17 +46,17 @@ temporary runtime cwd. The home directory is not persisted as the tab workspace.
 The agent calls `choose_workspace` only when the request requires project files. The chat shows an
 inline workspace-selection card above the composer instead of opening the native folder picker
 immediately. The picker opens only after the user clicks `Choose folder`, keeping the agent's
-request visible and making the system dialog intentional. Non-Git selections become `TabWorkspace`
-directly. Git selections remain pending while the agent asks the user which branch to create. The
-agent then calls `create_worktree` with the exact user-selected branch. Generated names such as
-`Tab 2` are replaced by the selected folder name, and the branch name is sanitized only for the
-managed checkout directory slug.
+request visible and making the system dialog intentional. It starts in the app launch directory so
+a build launched from an existing worktree opens there directly. Non-Git selections become
+`TabWorkspace` directly, selected linked worktrees are reused, and normal Git checkouts receive a
+vmux-managed worktree automatically. Generated names such as `Tab 2` are replaced by the selected
+folder name.
 
 While a tab is unbound, vmux adds private host context to ACP prompts requiring `choose_workspace`
 before any existing-project operation. The context explicitly forbids repository discovery under
 the user's home directory and manual `git worktree add`, while still allowing general questions and
-self-contained terminal demonstrations. A selected Git project receives a pending-worktree policy
-until `create_worktree` completes.
+self-contained terminal demonstrations. Workspace selection resumes the conversation only after
+the selected directory or generated worktree is ready.
 
 Workspace activation mutates the existing tab and ACP session in place. The chat entity, webview,
 transcript, routing session id, and agent process remain unchanged. Tab cwd and host-side ACP file
@@ -75,8 +75,9 @@ global root avoids repository pollution and local `.git/info/exclude` mutations.
 repository-local worktrees remain valid and are not moved.
 
 Automatically prepared managed worktrees keep dedicated `vmux/<slug>[-N]` branches. Conversational
-workspace setup uses the exact branch name supplied by the user. Branch ownership stays one
-worktree at a time. The persisted tab checkout path and branch make creation idempotent.
+workspace selection uses the same generated branch scheme; explicit `create_worktree` requests use
+the exact branch name supplied by the user. Branch ownership stays one worktree at a time. The
+persisted tab checkout path and branch make creation idempotent.
 
 ## Recovery
 
@@ -93,8 +94,7 @@ avoids repeating Git subprocesses for every later agent open.
 ## Ordering
 
 Configured Git tabs still activate before agent page opening. Empty tabs start immediately and
-activate later through agent tools. Agent command batches process `choose_workspace` and
-`create_worktree` before sibling commands; commands are skipped when worktree activation fails
+activate later through `choose_workspace`; commands are skipped when worktree activation fails
 rather than running in the project checkout.
 
 ## ACP Workspace Updates
@@ -132,11 +132,12 @@ model. Existing orphaned worktrees are left untouched.
 - An agent tab without a configured startup directory starts immediately in the user's home
   directory and dispatches its first prompt.
 - General prompts do not open the workspace picker.
-- Selecting a Git workspace asks for a branch, creates a slugged checkout on that exact branch,
-  and updates the existing tab and ACP session.
+- Selecting an existing linked worktree reuses it without nesting another worktree.
+- Selecting a normal Git checkout creates a managed worktree and updates the existing tab and ACP
+  session.
 - Workspace activation preserves the original chat view, transcript, and routing session.
 - Non-Git tabs do not create worktrees.
 - Missing managed checkouts recover from their branch; invalid external checkouts remain marked.
-- `create_worktree` is idempotent and ordered before sibling run commands.
+- Explicit `create_worktree` requests remain idempotent and ordered before sibling run commands.
 - ACP worktree metadata validates, crosses the service protocol, and rebinds only the matching tab.
 - Persistence saves project identity and worktree ownership without resetting existing stores.

@@ -104,6 +104,19 @@ fn file_touch_intents(kind: ToolKind, locations: &[ToolCallLocation]) -> Vec<Int
         .collect()
 }
 
+fn locations_from_diffs(content: &[ToolCallContent]) -> Vec<ToolCallLocation> {
+    let mut paths = HashSet::new();
+    let mut locations = Vec::new();
+    for item in content {
+        if let ToolCallContent::Diff(diff) = item
+            && paths.insert(diff.path.clone())
+        {
+            locations.push(ToolCallLocation::new(diff.path.clone()));
+        }
+    }
+    locations
+}
+
 fn edit_tool_kind(kind: ToolKind) -> bool {
     matches!(kind, ToolKind::Edit | ToolKind::Delete | ToolKind::Move)
 }
@@ -382,11 +395,16 @@ impl AcpProjector {
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
         let call_id = tc.tool_call_id.to_string();
         self.upsert_tool_use(&call_id, &tc.title, &raw_input_json(tc.raw_input.as_ref()));
+        let diff_locations = tc
+            .locations
+            .is_empty()
+            .then(|| locations_from_diffs(&tc.content));
+        let locations = diff_locations.as_deref().unwrap_or(&tc.locations);
         let mut intents = vec![Intent::Snapshot];
         intents.extend(self.project_tool_file_touches(
             &call_id,
             Some(tc.kind),
-            Some(&tc.locations),
+            Some(locations),
             Some(tc.status),
             true,
         ));
@@ -406,11 +424,25 @@ impl AcpProjector {
             &title,
             &raw_input_json(update.fields.raw_input.as_ref()),
         );
+        let diff_locations = update
+            .fields
+            .content
+            .as_deref()
+            .map(locations_from_diffs)
+            .unwrap_or_default();
+        let locations = update.fields.locations.as_deref();
+        let locations = if locations.is_none_or(|locations| locations.is_empty())
+            && !diff_locations.is_empty()
+        {
+            Some(diff_locations.as_slice())
+        } else {
+            locations
+        };
         let mut intents = vec![Intent::Snapshot];
         intents.extend(self.project_tool_file_touches(
             &call_id,
             update.fields.kind,
-            update.fields.locations.as_deref(),
+            locations,
             update.fields.status,
             false,
         ));
@@ -716,6 +748,34 @@ mod tests {
                 Some(AssistantBlock::ToolUse { call_id, .. }) if call_id == "c1"
             )),
             other => panic!("expected assistant message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_diff_without_locations_emits_and_retries_file_touch() {
+        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
+
+        let mut p = AcpProjector::new();
+        let started = p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("c1", "Editing files")
+                .kind(ToolKind::Edit)
+                .content(vec![ToolCallContent::Diff(Diff::new(
+                    "/repo/src/main.rs",
+                    "new",
+                ))]),
+        ));
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "c1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        for intents in [started, completed] {
+            assert!(intents.iter().any(|intent| matches!(
+                intent,
+                Intent::FileTouched { path, line: None, kind }
+                    if path == "/repo/src/main.rs"
+                        && *kind == crate::protocol::FileTouchKind::Edit
+            )));
         }
     }
 

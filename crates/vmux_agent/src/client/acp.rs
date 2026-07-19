@@ -20,8 +20,8 @@ use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. If the user's request requires inspecting, searching, editing, testing, or running an existing project, your first project action must be to call the vmux choose_workspace tool. Do not search the user's home directory for repositories, do not access project paths directly, and never run git worktree add yourself. General questions and self-contained terminal demonstrations may run in the temporary current directory. After a Git folder is selected, use a branch already named by the user; if none was named, ask the user which branch to create, then call the vmux create_worktree tool with that exact branch before touching project files.";
-const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The user selected a Git project, but this tab has no worktree yet. Do not access the project path directly and never run git worktree add yourself. Use a branch already named by the user; if none was named, ask which branch to create. Then call the vmux create_worktree tool with that exact branch before inspecting, editing, testing, or running the project.";
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. If the user's request requires inspecting, searching, editing, testing, or running an existing project, your first project action must be to call the vmux choose_workspace tool. Do not search the user's home directory for repositories, do not access project paths directly, and never run git worktree add yourself. General questions and self-contained terminal demonstrations may run in the temporary current directory. vmux uses a selected linked worktree directly and creates an isolated managed worktree when the user selects a normal Git checkout.";
+const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpWorkspaceState {
@@ -1000,11 +1000,12 @@ mod tests {
         assert!(context.contains("choose_workspace"));
         assert!(context.contains("Do not search the user's home directory"));
         assert!(context.contains("never run git worktree add"));
-        assert!(context.contains("create_worktree"));
+        assert!(context.contains("selected linked worktree directly"));
+        assert!(context.contains("creates an isolated managed worktree"));
     }
 
     #[test]
-    fn pending_worktree_context_requires_branch_and_managed_creation() {
+    fn pending_worktree_context_requires_waiting_for_activation() {
         let context = acp_prompt_context(
             Some("prior conversation".into()),
             Some(AcpWorkspaceState::PendingWorktree),
@@ -1012,8 +1013,8 @@ mod tests {
         .unwrap();
 
         assert!(context.starts_with("prior conversation\n\n"));
-        assert!(context.contains("ask which branch to create"));
-        assert!(context.contains("create_worktree"));
+        assert!(context.contains("activation is pending"));
+        assert!(context.contains("Wait for vmux"));
         assert!(context.contains("before inspecting"));
     }
 
