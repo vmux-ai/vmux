@@ -244,9 +244,12 @@ fn layout_page_gates_header_and_side_sheet_until_host_state_arrives() {
 
     assert!(source.contains("layout_overlay_ready"));
     assert!(source.contains("let overlay_ready = layout_overlay_ready"));
-    assert!(source.contains("if overlay_ready && state.side_sheet_open"));
-    assert!(source.contains("if overlay_ready && state.header_visible()"));
+    assert!(source.contains("if overlay_ready && side_sheet_ready"));
+    assert!(source.contains("if overlay_ready && header_ready"));
     assert!(source.contains("h-[var(--vmux-header-height)] overflow-hidden"));
+    assert!(source.contains("state.layout_hidden"));
+    assert!(source.contains("translate3d"));
+    assert!(source.contains("transition:transform 240ms"));
 }
 
 #[test]

@@ -41,6 +41,8 @@ pub const TAB_BOUNDARY_EVENT: &str = "tab-boundary";
 )]
 pub struct LayoutStateEvent {
     #[serde(default)]
+    pub layout_hidden: bool,
+    #[serde(default)]
     pub header_open: bool,
     #[serde(default)]
     pub side_sheet_open: bool,

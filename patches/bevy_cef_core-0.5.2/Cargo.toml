@@ -144,6 +144,8 @@ features = [
     "NSView",
     "NSResponder",
     "NSGraphics",
+    "NSAnimation",
+    "NSAnimationContext",
     "NSGlassEffectView",
     "NSColor",
     "NSWindow",

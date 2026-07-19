@@ -1,14 +1,13 @@
 use bevy::prelude::Vec2;
 use bevy_cef_core::prelude::NativeMouseButtons;
 use std::hint::spin_loop;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering, fence};
 
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static X_BITS: AtomicU32 = AtomicU32::new(0);
 static Y_BITS: AtomicU32 = AtomicU32::new(0);
 static BUTTONS: AtomicU8 = AtomicU8::new(0);
 static MOTION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-static LAYOUT_DRAG_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NativePointerSnapshot {
@@ -51,14 +50,6 @@ pub fn publish_buttons(buttons: NativeMouseButtons) {
     if let Some(pointer) = snapshot() {
         publish(pointer.position_px, buttons, false);
     }
-}
-
-pub fn set_layout_drag_active(active: bool) {
-    LAYOUT_DRAG_ACTIVE.store(active, Ordering::Relaxed);
-}
-
-pub fn layout_drag_active() -> bool {
-    LAYOUT_DRAG_ACTIVE.load(Ordering::Relaxed)
 }
 
 pub fn snapshot() -> Option<NativePointerSnapshot> {

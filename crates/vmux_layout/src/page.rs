@@ -157,6 +157,10 @@ pub fn Page() -> Element {
         listener_ready(pane_tree_state_received(), &pane_tree_error),
         listener_ready(spaces_state_received(), &spaces_error),
     );
+    let header_ready = listener_ready(stacks_state_received(), &stacks_error)
+        && listener_ready(tabs_state_received(), &tabs_error);
+    let side_sheet_ready = listener_ready(pane_tree_state_received(), &pane_tree_error)
+        && listener_ready(spaces_state_received(), &spaces_error);
     let radius_px = state.radius;
     use_effect(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document())
@@ -199,24 +203,28 @@ pub fn Page() -> Element {
         }
     });
     let side_sheet_vars = format!(
-        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;",
+        "--vmux-side-sheet-width:{}px;--vmux-side-sheet-left:{}px;--vmux-side-sheet-top:{}px;--vmux-side-sheet-bottom:{}px;--vmux-side-sheet-pad-top:{}px;opacity:{};transform:translate3d({}px,0,0);transition:transform 240ms cubic-bezier(.2,.8,.2,1),opacity 140ms ease-out;will-change:transform,opacity;",
         state.side_sheet_width,
         state.window_pad_left,
         state.window_pad_top,
         state.window_pad_bottom,
         crate::event::url_bar_top(),
+        if state.layout_hidden { 0.0 } else { 1.0 },
+        if state.layout_hidden {
+            -(state.side_sheet_width + state.window_pad_left + state.pane_gap)
+        } else {
+            0.0
+        },
     );
-    let header_progress = (state.header_height / crate::event::HEADER_HEIGHT_PX).clamp(0.0, 1.0);
-    let header_translate = -6.0 * (1.0 - header_progress);
     let header_vars = format!(
-        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;opacity:{};transform:translateY({}px);",
+        "--vmux-header-top:{}px;--vmux-header-left:{}px;--vmux-header-right:{}px;--vmux-header-height:{}px;--vmux-tab-row-pad-left:{}px;opacity:{};transform:translate3d(0,{}px,0);transition:left 240ms cubic-bezier(.2,.8,.2,1),right 240ms cubic-bezier(.2,.8,.2,1),transform 240ms cubic-bezier(.2,.8,.2,1),opacity 140ms ease-out;will-change:left,right,transform,opacity;",
         state.header_top(),
         state.header_left(),
         state.header_right(),
         state.header_height,
         state.tab_row_pad_left(),
-        header_progress,
-        header_translate,
+        if state.layout_hidden { 0.0 } else { 1.0 },
+        if state.layout_hidden { -12.0 } else { 0.0 },
     );
 
     rsx! {
@@ -225,10 +233,14 @@ pub fn Page() -> Element {
             onpointermove: move |event| update_layout_drag(layout_drag_state, &event),
             onpointerup: move |event| end_layout_drag(layout_drag_state, &event),
             onpointercancel: move |event| cancel_layout_drag(layout_drag_state, &event),
-            if overlay_ready && state.side_sheet_open {
+            if overlay_ready && side_sheet_ready {
                 aside {
                     id: "vmux-side-sheet",
-                    class: "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]",
+                    class: if state.layout_hidden {
+                        "pointer-events-none fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]"
+                    } else {
+                        "pointer-events-auto fixed left-[var(--vmux-side-sheet-left)] top-[var(--vmux-side-sheet-top)] bottom-[var(--vmux-side-sheet-bottom)] min-h-0 overflow-visible w-[var(--vmux-side-sheet-width)] pt-[var(--vmux-side-sheet-pad-top)]"
+                    },
                     style: "{side_sheet_vars}",
                     div { class: "flex h-full min-h-0 flex-col",
                         SideSheetView {
@@ -246,9 +258,13 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            if overlay_ready && state.header_visible() {
+            if overlay_ready && header_ready {
                 div {
-                    class: "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden",
+                    class: if state.layout_hidden {
+                        "pointer-events-none fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden"
+                    } else {
+                        "pointer-events-auto fixed top-[var(--vmux-header-top)] left-[var(--vmux-header-left)] right-[var(--vmux-header-right)] h-[var(--vmux-header-height)] overflow-hidden"
+                    },
                     style: "{header_vars}",
                     HeaderView {
                         stacks_state: stacks,

@@ -1306,6 +1306,80 @@ impl Browsers {
         browser.host.was_resized();
     }
 
+    #[cfg(target_os = "macos")]
+    pub fn animate_windowed_frame(
+        &self,
+        webview: &Entity,
+        left_px: f32,
+        top_px: f32,
+        w_px: f32,
+        h_px: f32,
+        scale: f32,
+        duration_secs: f64,
+    ) {
+        use objc2::ClassType;
+        use objc2_app_kit::{NSAnimatablePropertyContainer, NSAnimationContext, NSView};
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        let Some(browser) = self.browsers.get(webview) else {
+            return;
+        };
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return;
+        }
+        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let s = (scale as f64).max(1.0e-6);
+        let w = w_px as f64 / s;
+        let h = h_px as f64 / s;
+        let x = left_px as f64 / s;
+        let glass_view = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super());
+        let parent = glass_view
+            .and_then(|glass_view| unsafe { glass_view.superview() })
+            .or_else(|| unsafe { view.superview() });
+        let flipped = parent.as_ref().is_some_and(|parent| parent.isFlipped());
+        let y = if flipped {
+            top_px as f64 / s
+        } else {
+            let parent_h = parent
+                .as_ref()
+                .map(|parent| parent.bounds().size.height)
+                .unwrap_or(0.0);
+            (parent_h - top_px as f64 / s - h).max(0.0)
+        };
+        let frame = (x, y, w, h);
+        browser.last_frame.set(Some(frame));
+        let rect = NSRect::new(NSPoint::new(x, y), NSSize::new(w, h));
+        NSAnimationContext::beginGrouping();
+        let context = NSAnimationContext::currentContext();
+        context.setDuration(duration_secs.max(0.0));
+        context.setAllowsImplicitAnimation(true);
+        if let Some(glass_view) = glass_view {
+            glass_view.animator().setFrame(rect);
+            view.setFrame(glass_view.bounds());
+        } else {
+            view.animator().setFrame(rect);
+        }
+        NSAnimationContext::endGrouping();
+        Self::refresh_windowed_transparency(browser, view);
+        browser.host.was_resized();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn animate_windowed_frame(
+        &self,
+        _: &Entity,
+        _: f32,
+        _: f32,
+        _: f32,
+        _: f32,
+        _: f32,
+        _: f64,
+    ) {
+    }
+
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_frame(&self, _: &Entity, _: f32, _: f32, _: f32, _: f32, _: f32) {}
 
