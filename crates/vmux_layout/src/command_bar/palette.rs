@@ -5,8 +5,8 @@ use crate::command_bar::keyboard::{
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, agent_page_url, filter_results,
-    space_switch_results, start_page_results,
+    CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
+    agent_page_url, filter_results, space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -293,7 +293,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             && let Some(agent_url) = agent_page_url(item)
         {
             on_close.call(());
-            emit_prompt_action(prompt.trim(), open_target, agent_url);
+            if agent_page_matches_query(item, &prompt) {
+                emit_action_with_target("open", agent_url, open_target);
+            } else {
+                emit_prompt_action(prompt.trim(), open_target, agent_url);
+            }
             return;
         }
         on_close.call(());
@@ -638,7 +642,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     }
                                 }
                                 span { class: result_trailing_slot_class(),
-                                    if start_prompt_mode && agent_page_url(item).is_some() {
+                                    if start_prompt_mode
+                                        && agent_page_url(item).is_some()
+                                        && !agent_page_matches_query(item, &q)
+                                    {
                                         "Prompt"
                                     } else if shortcut.is_empty() {
                                         "New tab"
