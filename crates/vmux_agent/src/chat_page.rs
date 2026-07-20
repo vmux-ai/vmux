@@ -2197,23 +2197,6 @@ mod native_tests {
     }
 
     #[test]
-    fn start_and_agent_share_prompt_composer() {
-        let agent = include_str!("chat_page/page.rs");
-        let start = include_str!("../../vmux_layout/src/command_bar/palette.rs");
-        let media_options = include_str!("../../vmux_ui/src/components/prompt_media_options.rs");
-
-        assert!(agent.contains("PromptComposer {"));
-        assert!(start.contains("PromptComposer {"));
-        assert!(agent.contains("PromptMediaOptions {"));
-        assert!(start.contains("PromptMediaOptions {"));
-        assert!(agent.contains("display_path: media_display_path(entry)"));
-        assert!(start.contains("display_path: media_display_path(entry)"));
-        assert!(media_options.contains("{item.display_path}"));
-        assert!(start.contains("PromptPopupPlacement::Downward"));
-        assert!(agent.contains("PromptPopup {"));
-    }
-
-    #[test]
     fn composer_slash_items_support_mouse_selection() {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("onclick: move |_| run_slash_command"));

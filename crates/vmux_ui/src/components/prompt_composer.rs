@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -30,6 +33,23 @@ pub enum PromptComposerAction {
     #[default]
     Send,
     Stop,
+}
+
+struct PromptFocusTracking {
+    window: web_sys::Window,
+    focus: Closure<dyn FnMut()>,
+    blur: Closure<dyn FnMut()>,
+}
+
+impl Drop for PromptFocusTracking {
+    fn drop(&mut self) {
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("focus", self.focus.as_ref().unchecked_ref());
+        let _ = self
+            .window
+            .remove_event_listener_with_callback("blur", self.blur.as_ref().unchecked_ref());
+    }
 }
 
 #[component]
@@ -66,16 +86,22 @@ pub fn PromptComposer(
             caret.set(None);
         }) as Box<dyn FnMut(())>)
     });
+    let focus_tracking = use_hook(|| Rc::new(RefCell::new(None::<PromptFocusTracking>)));
     use_effect({
         let focus_listener = focus_listener.clone();
         let blur_listener = blur_listener.clone();
-        move || install_prompt_focus_tracking(focus_listener.clone(), blur_listener.clone())
+        let focus_tracking = focus_tracking.clone();
+        move || {
+            *focus_tracking.borrow_mut() =
+                install_prompt_focus_tracking(focus_listener.clone(), blur_listener.clone());
+        }
     });
     let focus_guard = focus_listener.guard();
     let blur_guard = blur_listener.guard();
     use_drop(move || {
         focus_guard.deactivate();
         blur_guard.deactivate();
+        focus_tracking.borrow_mut().take();
     });
 
     use_effect(use_reactive((&value,), move |_| {
@@ -309,21 +335,23 @@ fn sync_prompt_caret(input_id: &str, mut caret: Signal<Option<u32>>, mut scroll_
 fn install_prompt_focus_tracking(
     focus_listener: GuardedListener<Box<dyn FnMut(())>>,
     blur_listener: GuardedListener<Box<dyn FnMut(())>>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
+) -> Option<PromptFocusTracking> {
+    let window = web_sys::window()?;
     let focus = Closure::wrap(Box::new(move || {
         focus_listener.call(());
     }) as Box<dyn FnMut()>);
     let _ = window.add_event_listener_with_callback("focus", focus.as_ref().unchecked_ref());
-    focus.forget();
 
     let blur = Closure::wrap(Box::new(move || {
         blur_listener.call(());
     }) as Box<dyn FnMut()>);
     let _ = window.add_event_listener_with_callback("blur", blur.as_ref().unchecked_ref());
-    blur.forget();
+
+    Some(PromptFocusTracking {
+        window,
+        focus,
+        blur,
+    })
 }
 
 fn prompt_prefix_at_utf16(value: &str, offset: u32) -> &str {
