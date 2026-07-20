@@ -1553,6 +1553,7 @@ fn sync_windowed_frames(
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
     mut last_visible_pages: Local<Vec<Entity>>,
     mut last_windowed_pages: Local<Vec<Entity>>,
+    mut visible_frames: Local<Vec<WindowedFrameRect>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
@@ -1562,6 +1563,7 @@ fn sync_windowed_frames(
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
+    visible_frames.clear();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
@@ -1633,6 +1635,7 @@ fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browsers.has_browser(entity) {
+            visible_frames.push(frame);
             let key = (
                 frame.left.round() as i32,
                 frame.top.round() as i32,
@@ -1658,6 +1661,7 @@ fn sync_windowed_frames(
     }
     *last_visible_pages = visible;
     *last_windowed_pages = current_windowed;
+    *visible_frames = set_native_windowed_page_frames(std::mem::take(&mut *visible_frames));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1676,6 +1680,52 @@ impl WindowedFrameRect {
     fn bottom(self) -> f32 {
         self.top + self.height
     }
+}
+
+#[cfg(target_os = "macos")]
+static NATIVE_WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(any(target_os = "macos", test))]
+fn windowed_frame_contains(frame: WindowedFrameRect, point: Vec2) -> bool {
+    point.x >= frame.left
+        && point.x <= frame.right()
+        && point.y >= frame.top
+        && point.y <= frame.bottom()
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    let mut published = NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::mem::swap(&mut *published, &mut frames);
+    frames.clear();
+    frames
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    frames.clear();
+    frames
+}
+
+/// Returns whether a physical window coordinate is inside a visible native page.
+#[cfg(target_os = "macos")]
+pub fn native_windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
+    let point = Vec2::new(x_px, y_px);
+    NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .copied()
+        .any(|frame| windowed_frame_contains(frame, point))
+}
+
+/// Returns whether a physical window coordinate is inside a visible native page.
+#[cfg(not(target_os = "macos"))]
+pub fn native_windowed_page_contains_point(_: f32, _: f32) -> bool {
+    false
 }
 
 fn windowed_frame_rect_from_computed(
@@ -5634,6 +5684,21 @@ mod tests {
                 height: 299.0,
             }
         );
+    }
+
+    #[test]
+    fn windowed_frame_hit_test_uses_physical_page_bounds() {
+        let frame = WindowedFrameRect {
+            left: 100.0,
+            top: 50.0,
+            width: 400.0,
+            height: 300.0,
+        };
+
+        assert!(windowed_frame_contains(frame, Vec2::new(100.0, 50.0)));
+        assert!(windowed_frame_contains(frame, Vec2::new(500.0, 350.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(99.0, 200.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(300.0, 351.0)));
     }
 
     #[test]

@@ -4,6 +4,10 @@
 
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
+pub const CHAT_HISTORY_PAGE_EVENT: &str = "chat_history_page";
+pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
+pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
+pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
 pub use vmux_command::prompt_media::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
@@ -27,7 +31,7 @@ pub struct QueuedPromptSnapshot {
     pub attachment_names: Vec<String>,
 }
 
-/// Native → page: the full conversation plus run-state, pushed on every change.
+/// Native → page: the recent conversation page plus run-state, pushed on every change.
 #[derive(
     Clone,
     Debug,
@@ -39,8 +43,10 @@ pub struct QueuedPromptSnapshot {
     rkyv::Deserialize,
 )]
 pub struct ChatSnapshot {
-    /// `serde_json` of `Vec<ChatItem>` (user bubbles + grouped assistant turns).
+    /// `serde_json` of the recent `Vec<ChatItem>` page.
     pub messages_json: String,
+    pub messages_start: u32,
+    pub messages_total: u32,
     /// `idle` | `streaming` | `awaiting` | `errored`.
     pub status: String,
     /// Populated when `status == "errored"`.
@@ -66,6 +72,38 @@ pub struct ChatSnapshot {
     pub workspace_selection_pending: bool,
     pub choice_question: String,
     pub choice_options: Vec<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatHistoryRequest {
+    pub before: u32,
+    pub limit: u32,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatHistoryPage {
+    pub items_json: String,
+    pub start: u32,
+    pub end: u32,
+    pub total: u32,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -565,6 +603,8 @@ mod tests {
     fn chat_snapshot_rkyv_roundtrip() {
         let v = ChatSnapshot {
             messages_json: "[]".to_string(),
+            messages_start: 12,
+            messages_total: 60,
             status: "streaming".to_string(),
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
@@ -590,6 +630,8 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
+        assert_eq!(back.messages_start, 12);
+        assert_eq!(back.messages_total, 60);
         assert_eq!(back.queued.len(), 2);
         assert_eq!(back.queued[0].id, 4);
         assert_eq!(back.queued[0].text, "a");
@@ -602,6 +644,19 @@ mod tests {
         assert!(back.workspace_selection_pending);
         assert_eq!(back.choice_question, "Repository?");
         assert_eq!(back.choice_options.len(), 3);
+    }
+
+    #[test]
+    fn chat_history_page_rkyv_roundtrip() {
+        let value = ChatHistoryPage {
+            items_json: "[]".into(),
+            start: 4,
+            end: 44,
+            total: 92,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
+        let back = rkyv::from_bytes::<ChatHistoryPage, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!((back.start, back.end, back.total), (4, 44, 92));
     }
 
     #[test]
