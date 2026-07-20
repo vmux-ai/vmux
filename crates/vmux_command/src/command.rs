@@ -34,6 +34,23 @@ pub enum AppCommand {
     #[menu(label = "Bookmark")]
     #[mcp(skip)]
     Bookmark(BookmarkCommand),
+
+    #[menu(label = "Agent")]
+    #[mcp(skip)]
+    Agent(AgentCommand),
+}
+
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentCommand {
+    #[default]
+    #[menu(
+        id = "agent_add_selection",
+        label = "Add Selection to Agent",
+        accel = "super+shift+l"
+    )]
+    #[shortcut(direct = "Super+Shift+L")]
+    AddSelection,
 }
 
 #[derive(OsSubMenuGroup, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq)]
@@ -628,6 +645,30 @@ mod tests {
             shortcuts
                 .iter()
                 .any(|(shortcut, id)| shortcut == &hard_reload && id == "browser_hard_reload")
+        );
+    }
+
+    #[test]
+    fn add_selection_uses_cursor_shortcut() {
+        let add_selection = Shortcut::Direct(KeyCombo {
+            key: KeyCode::KeyL,
+            modifiers: Modifiers {
+                shift: true,
+                super_key: true,
+                ..Default::default()
+            },
+        });
+
+        assert!(
+            AppCommand::default_shortcuts()
+                .iter()
+                .any(|(shortcut, id)| {
+                    shortcut == &add_selection && id == "agent_add_selection"
+                })
+        );
+        assert_eq!(
+            AppCommand::from_menu_id("agent_add_selection"),
+            Some(AppCommand::Agent(AgentCommand::AddSelection))
         );
     }
 

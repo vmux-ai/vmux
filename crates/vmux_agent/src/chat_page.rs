@@ -24,14 +24,14 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands,
+    CHAT_SELECTION_CONTEXTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths,
+    ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel,
+    ChatCancelQueuedPrompt, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatMediaEntries,
+    ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume,
+    ChatSelectionContexts, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
+    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::group_turns;
@@ -140,6 +140,13 @@ fn approval_detail_label(path: &str) -> String {
 pub struct AgentChatPagePlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Component, Clone, Debug, Default)]
+pub(crate) struct PendingAgentSelectionContexts {
+    pub contexts: Vec<vmux_core::AgentSelectionContext>,
+    pub focus: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Message)]
 struct AcpSetModelRequest {
     sid: String,
@@ -217,8 +224,41 @@ impl Plugin for AgentChatPagePlugin {
                     drain_chat_media_list_tasks,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
+                    push_pending_selection_contexts_to_page,
                 ),
             );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_pending_selection_contexts_to_page(
+    pending: Query<(Entity, &PendingAgentSelectionContexts)>,
+    children: Query<&Children>,
+    is_browser: Query<(), With<vmux_layout::Browser>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (stack, pending) in &pending {
+        let Ok(children) = children.get(stack) else {
+            continue;
+        };
+        let Some(webview) = children.iter().find(|&child| is_browser.contains(child)) else {
+            continue;
+        };
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            CHAT_SELECTION_CONTEXTS_EVENT,
+            &ChatSelectionContexts {
+                contexts: pending.contexts.clone(),
+                focus: pending.focus,
+            },
+        ));
+        commands
+            .entity(stack)
+            .remove::<PendingAgentSelectionContexts>();
     }
 }
 
@@ -1042,6 +1082,7 @@ fn on_chat_submit(
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
     let text = payload.text.clone();
+    let context = vmux_core::selection::render_selection_contexts(&payload.contexts);
     let attachments = payload
         .attachments
         .iter()
@@ -1053,14 +1094,14 @@ fn on_chat_submit(
             size: attachment.size,
         })
         .collect::<Vec<_>>();
-    if text.trim().is_empty() && attachments.is_empty() {
+    if text.trim().is_empty() && attachments.is_empty() && context.is_none() {
         return;
     }
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
     if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
-        enqueue_prompt(&mut queue, &mut state, text, attachments);
+        enqueue_prompt(&mut queue, &mut state, text, context, attachments);
     }
 }
 
@@ -1069,9 +1110,10 @@ fn enqueue_prompt(
     queue: &mut PromptQueue,
     state: &mut AgentRunState,
     text: String,
+    context: Option<String>,
     attachments: Vec<AgentAttachment>,
 ) {
-    queue.enqueue_with_attachments(text, attachments);
+    queue.enqueue_with_context(text, context, attachments);
     if matches!(state, AgentRunState::Errored(_)) {
         *state = AgentRunState::Idle;
     }
@@ -1919,7 +1961,7 @@ mod native_tests {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());
 
-        enqueue_prompt(&mut queue, &mut state, "retry".into(), Vec::new());
+        enqueue_prompt(&mut queue, &mut state, "retry".into(), None, Vec::new());
 
         assert!(matches!(state, AgentRunState::Idle));
         assert_eq!(
@@ -1927,6 +1969,27 @@ mod native_tests {
             Some("retry")
         );
         assert!(!queue.paused);
+    }
+
+    #[test]
+    fn selection_context_stays_out_of_visible_prompt_text() {
+        let mut queue = PromptQueue::default();
+        let mut state = AgentRunState::Idle;
+
+        enqueue_prompt(
+            &mut queue,
+            &mut state,
+            "explain this".into(),
+            Some("Selected file context: main.rs\n\nlet x = 1;".into()),
+            Vec::new(),
+        );
+
+        let prompt = queue.items.front().unwrap();
+        assert_eq!(prompt.text, "explain this");
+        assert_eq!(
+            prompt.context.as_deref(),
+            Some("Selected file context: main.rs\n\nlet x = 1;")
+        );
     }
 
     #[test]

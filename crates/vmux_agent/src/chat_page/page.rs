@@ -10,14 +10,15 @@ use crate::chat_page::composer::{
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    CHAT_SELECTION_CONTEXTS_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths,
+    ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel,
+    ChatCancelQueuedPrompt, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSelectionContexts, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
+    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -122,6 +123,15 @@ fn file_extension_label(name: &str) -> String {
 
 fn attachment_label(attachment: &ChatAttachment) -> String {
     file_extension_label(&attachment.name)
+}
+
+fn selection_context_title(context: &vmux_core::AgentSelectionContext) -> String {
+    let preview = context.text.chars().take(500).collect::<String>();
+    if context.source.is_empty() {
+        preview
+    } else {
+        format!("{}\n\n{preview}", context.source)
+    }
 }
 
 fn media_reference(entry: &ChatMediaEntry) -> String {
@@ -286,6 +296,7 @@ pub fn Page() -> Element {
     let mut workspace_picker_open = use_signal(|| false);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
+    let mut selection_contexts = use_signal(Vec::<vmux_core::AgentSelectionContext>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
     let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
@@ -421,6 +432,21 @@ pub fn Page() -> Element {
             attachments.set(next);
             focus_prompt_end();
         });
+    let _selection_contexts = use_bin_event_listener::<ChatSelectionContexts, _>(
+        CHAT_SELECTION_CONTEXTS_EVENT,
+        move |incoming| {
+            let mut next = selection_contexts.peek().clone();
+            for context in &incoming.contexts {
+                if !next.contains(context) {
+                    next.push(context.clone());
+                }
+            }
+            selection_contexts.set(next);
+            if incoming.focus {
+                focus_prompt_end();
+            }
+        },
+    );
     let _attachment_previews = use_bin_event_listener::<ChatAttachments, _>(
         CHAT_ATTACHMENT_PREVIEWS_EVENT,
         move |loaded| {
@@ -515,8 +541,10 @@ pub fn Page() -> Element {
     let agent_accent = agent_accent(&agent);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
-    let show_capability_examples =
-        items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
+    let show_capability_examples = items.read().is_empty()
+        && queued.read().is_empty()
+        && attachments.read().is_empty()
+        && selection_contexts.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -1036,6 +1064,37 @@ pub fn Page() -> Element {
                             }
                         }
                         div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
+                            for (i, context) in selection_contexts.read().iter().cloned().enumerate() {
+                                div {
+                                    key: "selection-context-{i}-{context.source}",
+                                    class: "group flex h-7 max-w-64 shrink-0 items-center gap-1.5 rounded-full bg-cyan-500/[0.10] pl-1 pr-1.5 text-xs text-foreground/80 ring-1 ring-inset ring-cyan-500/20",
+                                    title: selection_context_title(&context),
+                                    span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-cyan-500/[0.12] px-1 font-mono text-[8px] font-semibold uppercase text-cyan-700 dark:text-cyan-300",
+                                        "{context.kind}"
+                                    }
+                                    span { class: "min-w-0 max-w-44 truncate", "{context.label}" }
+                                    button {
+                                        class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                                        title: "Remove context",
+                                        onclick: move |_| {
+                                            let mut next = selection_contexts.peek().clone();
+                                            if i < next.len() {
+                                                next.remove(i);
+                                                selection_contexts.set(next);
+                                            }
+                                        },
+                                        svg {
+                                            class: "h-3 w-3",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2.5",
+                                            stroke_linecap: "round",
+                                            path { d: "M6 6l12 12M18 6L6 18" }
+                                        }
+                                    }
+                                }
+                            }
                             for (i , attachment) in attachments.read().iter().cloned().enumerate() {
                                 div {
                                     key: "attachment-pill-{attachment.path}",
@@ -1280,6 +1339,7 @@ pub fn Page() -> Element {
                                         do_submit(
                                             draft,
                                             attachments,
+                                            selection_contexts,
                                             history_cursor,
                                             history_scratch,
                                             at_bottom,
@@ -1342,13 +1402,14 @@ pub fn Page() -> Element {
                             }
                         } else {
                             button {
-                                class: if draft.read().trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
-                                disabled: draft.read().trim().is_empty() && attachments.read().is_empty(),
+                                class: if draft.read().trim().is_empty() && attachments.read().is_empty() && selection_contexts.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
+                                disabled: draft.read().trim().is_empty() && attachments.read().is_empty() && selection_contexts.read().is_empty(),
                                 title: "Send (Enter)",
                                 onclick: move |_| {
                                     do_submit(
                                         draft,
                                         attachments,
+                                        selection_contexts,
                                         history_cursor,
                                         history_scratch,
                                         at_bottom,
@@ -1424,13 +1485,15 @@ fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<Stri
 fn do_submit(
     mut draft: Signal<String>,
     mut attachments: Signal<Vec<ChatAttachment>>,
+    mut selection_contexts: Signal<Vec<vmux_core::AgentSelectionContext>>,
     mut history_cursor: Signal<Option<usize>>,
     mut history_scratch: Signal<String>,
     mut at_bottom: Signal<bool>,
 ) {
     let text = draft.peek().trim().to_string();
     let selected = attachments.peek().clone();
-    if text.is_empty() && selected.is_empty() {
+    let contexts = selection_contexts.peek().clone();
+    if text.is_empty() && selected.is_empty() && contexts.is_empty() {
         return;
     }
     let attachments_to_submit = selected
@@ -1445,6 +1508,7 @@ fn do_submit(
     if try_cef_bin_emit_rkyv(&ChatSubmit {
         text,
         attachments: attachments_to_submit,
+        contexts,
     })
     .is_err()
     {
@@ -1453,6 +1517,7 @@ fn do_submit(
     at_bottom.set(true);
     draft.set(String::new());
     attachments.set(Vec::new());
+    selection_contexts.set(Vec::new());
     history_cursor.set(None);
     history_scratch.set(String::new());
 }

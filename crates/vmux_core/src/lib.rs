@@ -8,9 +8,11 @@ pub mod icon;
 pub mod media;
 pub mod process_id;
 pub mod scroll;
+pub mod selection;
 pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
+pub use selection::AgentSelectionContext;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod host_spawn;

@@ -42,6 +42,7 @@ pub struct PromptQueue {
 pub struct QueuedPrompt {
     pub id: u64,
     pub text: String,
+    pub context: Option<String>,
     pub attachments: Vec<AgentAttachment>,
 }
 
@@ -63,11 +64,21 @@ impl PromptQueue {
 
     /// Append one prompt with local file attachments and allow dispatch to continue.
     pub fn enqueue_with_attachments(&mut self, text: String, attachments: Vec<AgentAttachment>) {
+        self.enqueue_with_context(text, None, attachments);
+    }
+
+    pub fn enqueue_with_context(
+        &mut self,
+        text: String,
+        context: Option<String>,
+        attachments: Vec<AgentAttachment>,
+    ) {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
         self.items.push_back(QueuedPrompt {
             id,
             text,
+            context,
             attachments,
         });
         self.paused = false;
@@ -129,6 +140,15 @@ impl PromptQueue {
                 prompt.text.push_str("\n\n");
             }
             prompt.text.push_str(&item.text);
+            prompt.context = match (prompt.context.take(), item.context) {
+                (Some(mut existing), Some(next)) => {
+                    existing.push_str("\n\n");
+                    existing.push_str(&next);
+                    Some(existing)
+                }
+                (Some(existing), None) => Some(existing),
+                (None, next) => next,
+            };
             prompt.attachments.extend(item.attachments);
         }
         Some(prompt)
@@ -227,6 +247,21 @@ mod tests {
         assert_eq!(
             q.take_next().map(|prompt| prompt.text),
             Some("first\n\nsecond".to_string())
+        );
+    }
+
+    #[test]
+    fn take_next_merges_private_context() {
+        let mut q = PromptQueue::default();
+        q.enqueue_with_context("first".into(), Some("context one".into()), Vec::new());
+        q.enqueue_with_context("second".into(), Some("context two".into()), Vec::new());
+
+        assert!(q.request_flush());
+        let prompt = q.take_next().unwrap();
+        assert_eq!(prompt.text, "first\n\nsecond");
+        assert_eq!(
+            prompt.context.as_deref(),
+            Some("context one\n\ncontext two")
         );
     }
 

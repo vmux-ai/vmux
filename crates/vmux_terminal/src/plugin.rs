@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -88,6 +89,15 @@ struct ServiceWakeCallback(Option<ServiceWake>);
 pub struct TerminalModeMap {
     pub modes: std::collections::HashMap<ProcessId, TerminalModeFlags>,
 }
+
+struct PendingTerminalSelection {
+    capture: vmux_core::selection::CaptureSelectionRequest,
+    label: String,
+    source: String,
+}
+
+#[derive(Resource, Default)]
+struct PendingTerminalSelections(HashMap<ProcessId, PendingTerminalSelection>);
 
 /// Optimistic copy-mode state owned by the desktop. The service confirms
 /// asynchronously via `TerminalMode`, but keyboard routing must switch on
@@ -344,6 +354,9 @@ impl Plugin for TerminalPlugin {
             .init_resource::<TerminalModeMap>()
             .init_resource::<LocalCopyModeState>()
             .init_resource::<TerminalWebShortcutState>()
+            .init_resource::<PendingTerminalSelections>()
+            .add_message::<vmux_core::selection::CaptureSelectionRequest>()
+            .add_message::<vmux_core::selection::SelectionCaptured>()
             .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
             .add_plugins(BinEventEmitterPlugin::<(
                 TermResizeEvent,
@@ -376,6 +389,12 @@ impl Plugin for TerminalPlugin {
             .add_systems(
                 Update,
                 handle_terminal_font_size.after(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
+                Update,
+                capture_terminal_selection
+                    .in_set(vmux_core::selection::CaptureSelectionSet)
+                    .after(vmux_command::ReadAppCommands),
             )
             .add_observer(on_term_ready)
             .add_observer(on_term_resize)
@@ -1184,6 +1203,62 @@ struct PollServiceWriters<'w> {
     command_lifecycle: MessageWriter<'w, CommandLifecycleEvent>,
     osc_title: MessageWriter<'w, OscTitleChanged>,
     bell: MessageWriter<'w, vmux_core::notify::BellReceived>,
+    selection_captured: MessageWriter<'w, vmux_core::selection::SelectionCaptured>,
+    pending_selections: ResMut<'w, PendingTerminalSelections>,
+}
+
+fn capture_terminal_selection(
+    mut requests: MessageReader<vmux_core::selection::CaptureSelectionRequest>,
+    terminals: Query<
+        (
+            &ProcessId,
+            &PageMetadata,
+            Option<&crate::launch::TerminalLaunch>,
+        ),
+        With<Terminal>,
+    >,
+    service: Option<Res<ServiceClient>>,
+    mut pending: ResMut<PendingTerminalSelections>,
+    mut captured: MessageWriter<vmux_core::selection::SelectionCaptured>,
+) {
+    for request in requests.read() {
+        let Some(webview) = request.webview else {
+            continue;
+        };
+        let Ok((process_id, metadata, launch)) = terminals.get(webview) else {
+            continue;
+        };
+        let label = if metadata.title.trim().is_empty() {
+            "Terminal".to_string()
+        } else {
+            metadata.title.clone()
+        };
+        let source = launch
+            .map(|launch| launch.cwd.clone())
+            .filter(|cwd| !cwd.is_empty())
+            .unwrap_or_else(|| metadata.url.clone());
+        let Some(service) = service.as_deref() else {
+            captured.write(vmux_core::selection::SelectionCaptured {
+                request_id: request.request_id,
+                source_tab: request.source_tab,
+                source_pane: request.source_pane,
+                source_stack: request.source_stack,
+                context: None,
+            });
+            continue;
+        };
+        pending.0.insert(
+            *process_id,
+            PendingTerminalSelection {
+                capture: request.clone(),
+                label,
+                source,
+            },
+        );
+        service.0.send(ClientMessage::GetSelectionText {
+            process_id: *process_id,
+        });
+    }
 }
 
 /// True when a rendered line carries any non-whitespace text. Used to decide
@@ -1598,11 +1673,27 @@ fn poll_service_messages(
                 );
                 set_local_copy_mode(&mut local_copy_mode, process_id, copy_mode);
             }
-            ServiceMessage::SelectionText {
-                process_id: _,
-                text,
-            } if !text.is_empty() => {
-                crate::clipboard::write(text);
+            ServiceMessage::SelectionText { process_id, text } => {
+                if let Some(pending) = writers.pending_selections.0.remove(&process_id) {
+                    writers
+                        .selection_captured
+                        .write(vmux_core::selection::SelectionCaptured {
+                            request_id: pending.capture.request_id,
+                            source_tab: pending.capture.source_tab,
+                            source_pane: pending.capture.source_pane,
+                            source_stack: pending.capture.source_stack,
+                            context: (!text.trim().is_empty()).then(|| {
+                                vmux_core::AgentSelectionContext::new(
+                                    "terminal",
+                                    pending.label,
+                                    pending.source,
+                                    text,
+                                )
+                            }),
+                        });
+                } else if !text.is_empty() {
+                    crate::clipboard::write(text);
+                }
             }
             ServiceMessage::AgentCommand {
                 request_id,

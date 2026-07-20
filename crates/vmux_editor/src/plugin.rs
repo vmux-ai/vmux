@@ -2764,6 +2764,9 @@ impl Plugin for EditorPlugin {
             .init_resource::<ExplorerChromeSynced>()
             .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
+            .add_message::<vmux_core::selection::CaptureSelectionRequest>()
+            .add_message::<vmux_core::selection::DomSelectionRequest>()
+            .add_message::<vmux_core::selection::SelectionCaptured>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -2802,6 +2805,12 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 handle_file_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
+            .add_systems(
+                Update,
+                capture_file_selection
+                    .in_set(vmux_core::selection::CaptureSelectionSet)
+                    .after(vmux_command::ReadAppCommands),
             )
             .add_systems(
                 Update,
@@ -2872,6 +2881,89 @@ impl Plugin for EditorPlugin {
             .add_observer(on_explorer_close_editor)
             .add_observer(on_explorer_goto);
     }
+}
+
+fn capture_file_selection(
+    mut requests: MessageReader<vmux_core::selection::CaptureSelectionRequest>,
+    views: Query<(&FileView, Option<&EditState>, Option<&FileDir>)>,
+    mode: Res<SharedFileViewMode>,
+    mut dom_requests: MessageWriter<vmux_core::selection::DomSelectionRequest>,
+    mut captured: MessageWriter<vmux_core::selection::SelectionCaptured>,
+) {
+    for request in requests.read() {
+        let Some(webview) = request.webview else {
+            continue;
+        };
+        let Ok((view, edit, directory)) = views.get(webview) else {
+            continue;
+        };
+        let source = view.path.to_string_lossy().into_owned();
+        if let Some(edit) = edit
+            && mode.0 == FileViewMode::Editor
+        {
+            captured.write(vmux_core::selection::SelectionCaptured {
+                request_id: request.request_id,
+                source_tab: request.source_tab,
+                source_pane: request.source_pane,
+                source_stack: request.source_stack,
+                context: native_file_selection(&view.path, edit),
+            });
+            continue;
+        }
+        let kind = if edit.is_some() && mode.0 == FileViewMode::Diff {
+            "diff"
+        } else if directory.is_some() {
+            "directory"
+        } else {
+            "file"
+        };
+        dom_requests.write(vmux_core::selection::DomSelectionRequest {
+            capture: request.clone(),
+            fallback: None,
+            kind: kind.to_string(),
+            label: file_name(&view.path),
+            source,
+        });
+    }
+}
+
+fn native_file_selection(
+    path: &Path,
+    edit: &EditState,
+) -> Option<vmux_core::AgentSelectionContext> {
+    let selection = edit.core.primary();
+    if selection.is_empty() {
+        return None;
+    }
+    let range = selection.range();
+    let text = edit.core.buffer.rope.slice(range.clone()).to_string();
+    if text.trim().is_empty() {
+        return None;
+    }
+    let start_line = edit.core.buffer.char_to_line(range.start) + 1;
+    let end_line = edit.core.buffer.char_to_line(range.end.saturating_sub(1)) + 1;
+    let name = file_name(path);
+    let label = if start_line == end_line {
+        format!("{name}:{start_line}")
+    } else {
+        format!("{name}:{start_line}-{end_line}")
+    };
+    let kind = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("md" | "markdown") => "note",
+        _ => "file",
+    };
+    Some(vmux_core::AgentSelectionContext::new(
+        kind,
+        label,
+        path.to_string_lossy(),
+        text,
+    ))
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

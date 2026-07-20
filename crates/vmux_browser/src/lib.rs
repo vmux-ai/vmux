@@ -28,6 +28,7 @@ use bevy_cef_core::prelude::{
 use bevy_cef_core::prelude::{NativeMouseButtons, NativeMouseMovePresenter};
 #[cfg(target_os = "macos")]
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
@@ -72,6 +73,19 @@ use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 /// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
 /// the CEF backend, and forwards pointer and cursor input between the layout and pages.
 pub struct BrowserPlugin;
+
+const DOM_SELECTION_CHANNEL: &str = "vmux-selection";
+
+#[derive(Resource, Default)]
+struct PendingDomSelections(HashMap<u64, vmux_core::selection::DomSelectionRequest>);
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DomSelectionResult {
+    channel: String,
+    request_id: u64,
+    text: String,
+}
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum BrowserSystems {
@@ -153,7 +167,11 @@ impl Plugin for BrowserPlugin {
             .init_resource::<crate::extensions::broker::PendingBridgeEvents>()
             .init_resource::<crate::extensions::model::ChromeModel>()
             .init_resource::<crate::extensions::model::ChromeStableIds>()
+            .init_resource::<PendingDomSelections>()
             .add_message::<crate::extensions::model::ChromeModelEvent>()
+            .add_message::<vmux_core::selection::CaptureSelectionRequest>()
+            .add_message::<vmux_core::selection::DomSelectionRequest>()
+            .add_message::<vmux_core::selection::SelectionCaptured>()
             .add_systems(
                 Update,
                 (
@@ -214,6 +232,7 @@ impl Plugin for BrowserPlugin {
                         DebugUpdateClear,
                         DebugSimulateDownload,
                     )>::for_hosts(&["debug"]),
+                    JsEmitEventPlugin::<DomSelectionResult>::default(),
                 ),
             )
             .add_observer(on_webview_ready_send_theme)
@@ -223,6 +242,14 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_hard_reload_notify_header)
             .add_observer(on_debug_update_ready)
             .add_observer(on_debug_update_clear)
+            .add_observer(on_dom_selection_result)
+            .add_systems(
+                Update,
+                (capture_browser_selection, request_dom_selections)
+                    .chain()
+                    .in_set(vmux_core::selection::CaptureSelectionSet)
+                    .after(ReadAppCommands),
+            )
             .add_systems(
                 Update,
                 sync_appearance_to_cef
@@ -332,6 +359,130 @@ impl Plugin for BrowserPlugin {
                     .after(sync_windowed_command_bar),
             );
     }
+}
+
+fn capture_browser_selection(
+    mut requests: MessageReader<vmux_core::selection::CaptureSelectionRequest>,
+    terminals: Query<(), With<Terminal>>,
+    metadata: Query<&PageMetadata, With<Browser>>,
+    mut dom_requests: MessageWriter<vmux_core::selection::DomSelectionRequest>,
+) {
+    for capture in requests.read() {
+        let Some(webview) = capture.webview else {
+            continue;
+        };
+        if terminals.contains(webview) {
+            continue;
+        }
+        let Ok(meta) = metadata.get(webview) else {
+            continue;
+        };
+        if meta.url.starts_with("file:") {
+            continue;
+        }
+        let label = if meta.title.trim().is_empty() {
+            meta.url.clone()
+        } else {
+            meta.title.clone()
+        };
+        let kind = if meta.url.starts_with("http://") || meta.url.starts_with("https://") {
+            "browser"
+        } else {
+            "page"
+        };
+        dom_requests.write(vmux_core::selection::DomSelectionRequest {
+            capture: capture.clone(),
+            fallback: None,
+            kind: kind.to_string(),
+            label,
+            source: meta.url.clone(),
+        });
+    }
+}
+
+fn request_dom_selections(
+    mut requests: MessageReader<vmux_core::selection::DomSelectionRequest>,
+    browsers: NonSend<Browsers>,
+    mut pending: ResMut<PendingDomSelections>,
+    mut captured: MessageWriter<vmux_core::selection::SelectionCaptured>,
+) {
+    for request in requests.read() {
+        let Some(webview) = request.capture.webview else {
+            captured.write(selection_result(request, None));
+            continue;
+        };
+        if !browsers.has_browser(webview) {
+            captured.write(selection_result(request, None));
+            continue;
+        }
+        let script = format!(
+            r#"(function(){{
+                var text = "";
+                var active = document.activeElement;
+                var blocked = active instanceof HTMLInputElement && (active.type || "").toLowerCase() === "password";
+                if (active instanceof HTMLTextAreaElement) {{
+                    var start = active.selectionStart || 0;
+                    var end = active.selectionEnd || 0;
+                    if (end > start) text = active.value.slice(start, end);
+                }} else if (active instanceof HTMLInputElement && (active.type || "").toLowerCase() !== "password") {{
+                    var inputStart = active.selectionStart || 0;
+                    var inputEnd = active.selectionEnd || 0;
+                    if (inputEnd > inputStart) text = active.value.slice(inputStart, inputEnd);
+                }}
+                if (!text && !blocked) {{
+                    var selection = window.getSelection();
+                    if (selection && !selection.isCollapsed) text = selection.toString();
+                }}
+                cef.emit({{ channel: "{DOM_SELECTION_CHANNEL}", requestId: {}, text: text }});
+            }})();"#,
+            request.capture.request_id
+        );
+        pending
+            .0
+            .insert(request.capture.request_id, request.clone());
+        browsers.execute_js(&webview, &script);
+    }
+}
+
+fn selection_result(
+    request: &vmux_core::selection::DomSelectionRequest,
+    text: Option<String>,
+) -> vmux_core::selection::SelectionCaptured {
+    let context = text
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| {
+            vmux_core::AgentSelectionContext::new(
+                request.kind.clone(),
+                request.label.clone(),
+                request.source.clone(),
+                text,
+            )
+        })
+        .or_else(|| request.fallback.clone());
+    vmux_core::selection::SelectionCaptured {
+        request_id: request.capture.request_id,
+        source_tab: request.capture.source_tab,
+        source_pane: request.capture.source_pane,
+        source_stack: request.capture.source_stack,
+        context,
+    }
+}
+
+fn on_dom_selection_result(
+    trigger: On<Receive<DomSelectionResult>>,
+    mut pending: ResMut<PendingDomSelections>,
+    mut captured: MessageWriter<vmux_core::selection::SelectionCaptured>,
+) {
+    if trigger.channel != DOM_SELECTION_CHANNEL {
+        return;
+    }
+    let Some(request) = pending.0.remove(&trigger.request_id) else {
+        return;
+    };
+    if request.capture.webview != Some(trigger.webview) {
+        return;
+    }
+    captured.write(selection_result(&request, Some(trigger.text.clone())));
 }
 
 fn on_webview_ready_send_theme(

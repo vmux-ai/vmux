@@ -71,6 +71,14 @@ fn acp_prompt_context(
     }
 }
 
+fn merge_prompt_context(primary: Option<String>, secondary: Option<String>) -> Option<String> {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) => Some(format!("{primary}\n\n{secondary}")),
+        (Some(primary), None) => Some(primary),
+        (None, secondary) => secondary,
+    }
+}
+
 /// Marks a stack entity as an ACP agent session. vmux is ACP-only, so this is the agent
 /// identity (there is no `AgentVariant`/`AgentKind` for ACP).
 #[derive(Component, Clone, Debug)]
@@ -957,7 +965,8 @@ fn send_acp_input(
         }
         let workspace_state =
             ancestor_acp_workspace_state(entity, &child_of, &tabs, &workspaces, &pending_projects);
-        let context = acp_prompt_context(handoff, workspace_state);
+        let context =
+            merge_prompt_context(prompt.context, acp_prompt_context(handoff, workspace_state));
         service.0.send(ClientMessage::agent_input(
             session.sid.clone(),
             text,

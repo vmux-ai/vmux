@@ -10,6 +10,24 @@ pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
 pub const CHAT_ATTACHMENT_PREVIEWS_EVENT: &str = "chat_attachment_previews";
 /// Bin-event id: native → page media entries matching an inline `@` query.
 pub const CHAT_MEDIA_ENTRIES_EVENT: &str = "chat_media_entries";
+pub const CHAT_SELECTION_CONTEXTS_EVENT: &str = "chat_selection_contexts";
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatSelectionContexts {
+    pub contexts: Vec<vmux_core::AgentSelectionContext>,
+    pub focus: bool,
+}
 
 #[derive(
     Clone,
@@ -170,6 +188,8 @@ pub struct ChatSnapshot {
 pub struct ChatSubmit {
     pub text: String,
     pub attachments: Vec<ChatSubmitAttachment>,
+    #[serde(default)]
+    pub contexts: Vec<vmux_core::AgentSelectionContext>,
 }
 
 /// Page → native: open a multi-select file picker rooted at the user's home directory.
@@ -725,6 +745,23 @@ mod tests {
                 .preview_data_url
                 .starts_with("data:image/png")
         );
+    }
+
+    #[test]
+    fn chat_selection_contexts_rkyv_roundtrip() {
+        let value = ChatSelectionContexts {
+            contexts: vec![vmux_core::AgentSelectionContext::new(
+                "file",
+                "main.rs:2",
+                "/tmp/main.rs",
+                "let x = 1;",
+            )],
+            focus: true,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
+        let back = rkyv::from_bytes::<ChatSelectionContexts, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back.contexts, value.contexts);
+        assert!(back.focus);
     }
 
     #[test]

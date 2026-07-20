@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
-use vmux_command::{AppCommand, WriteAppCommands};
+use vmux_command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use vmux_core::agent::{
     AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest, PageAgentAttachRequest,
     PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, PendingAgentPrompt, RestartAgentPty,
@@ -202,6 +202,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
+            .add_message::<vmux_core::selection::SelectionCaptured>()
             .add_observer(start_workspace_picker)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
@@ -314,6 +315,13 @@ impl Plugin for AgentPlugin {
                     respond_page_agent_spawn_default,
                     respond_page_agent_attach_default,
                 ),
+            )
+            .add_systems(
+                Update,
+                route_selection_to_agent
+                    .in_set(vmux_core::selection::RouteSelectionSet)
+                    .after(vmux_core::selection::CaptureSelectionSet)
+                    .after(ReadAppCommands),
             )
             .add_systems(
                 Update,
@@ -4790,6 +4798,219 @@ fn respond_page_agent_spawn_default(
             );
         }
     }
+}
+
+enum SelectionAgentTarget {
+    Page {
+        stack: Entity,
+        activated_at: i64,
+    },
+    Cli {
+        stack: Entity,
+        terminal: Entity,
+        activated_at: i64,
+    },
+}
+
+impl SelectionAgentTarget {
+    fn activated_at(&self) -> i64 {
+        match self {
+            Self::Page { activated_at, .. } | Self::Cli { activated_at, .. } => *activated_at,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_selection_to_agent(
+    mut selections: MessageReader<vmux_core::selection::SelectionCaptured>,
+    page_agents: Query<
+        (Entity, &LastActivatedAt),
+        (
+            With<vmux_layout::stack::Stack>,
+            Or<(
+                With<crate::components::AgentSession>,
+                With<crate::client::acp::AcpSession>,
+            )>,
+        ),
+    >,
+    cli_agents: Query<(Entity, &ChildOf), With<vmux_core::agent::AgentSession>>,
+    stack_times: Query<&LastActivatedAt, With<vmux_layout::stack::Stack>>,
+    tabs: Query<&vmux_layout::tab::Tab>,
+    child_of: Query<&ChildOf>,
+    mut pending_page: Query<&mut crate::chat_page::PendingAgentSelectionContexts>,
+    mut cli_prompts: Query<(
+        Option<&mut vmux_terminal::PromptCapture>,
+        Option<&mut vmux_terminal::BufferedAgentPrompt>,
+    )>,
+    idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
+    kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    mut commands: Commands,
+) {
+    let mut page_deliveries = std::collections::HashMap::<Entity, Vec<_>>::new();
+    let mut cli_deliveries = std::collections::HashMap::<Entity, Vec<_>>::new();
+    let mut cli_focus = std::collections::HashMap::<Entity, Entity>::new();
+
+    for selection in selections.read() {
+        let mut targets = Vec::new();
+        for (stack, activated_at) in &page_agents {
+            if selection.source_tab.is_none()
+                || ancestor_agent_tab(stack, &child_of, &tabs).map(|(tab, _)| tab)
+                    == selection.source_tab
+            {
+                targets.push(SelectionAgentTarget::Page {
+                    stack,
+                    activated_at: activated_at.0,
+                });
+            }
+        }
+        for (terminal, parent) in &cli_agents {
+            let stack = parent.parent();
+            if selection.source_tab.is_none()
+                || ancestor_agent_tab(stack, &child_of, &tabs).map(|(tab, _)| tab)
+                    == selection.source_tab
+            {
+                targets.push(SelectionAgentTarget::Cli {
+                    stack,
+                    terminal,
+                    activated_at: stack_times
+                        .get(stack)
+                        .map(|time| time.0)
+                        .unwrap_or(i64::MIN),
+                });
+            }
+        }
+        let target = targets
+            .into_iter()
+            .max_by_key(SelectionAgentTarget::activated_at)
+            .or_else(|| {
+                spawn_selection_agent(
+                    selection.source_pane?,
+                    idx.as_deref()?,
+                    &kind_q,
+                    &mut commands,
+                    &mut meshes,
+                    &mut webview_mt,
+                )
+                .map(|stack| SelectionAgentTarget::Page {
+                    stack,
+                    activated_at: i64::MAX,
+                })
+            });
+        match target {
+            Some(SelectionAgentTarget::Page { stack, .. }) => {
+                if let Some(context) = selection.context.clone() {
+                    page_deliveries.entry(stack).or_default().push(context);
+                } else {
+                    page_deliveries.entry(stack).or_default();
+                }
+            }
+            Some(SelectionAgentTarget::Cli {
+                stack, terminal, ..
+            }) => {
+                cli_focus.insert(terminal, stack);
+                if let Some(context) = selection.context.clone() {
+                    cli_deliveries.entry(terminal).or_default().push(context);
+                } else {
+                    cli_deliveries.entry(terminal).or_default();
+                }
+            }
+            None => {}
+        }
+    }
+
+    for (stack, contexts) in page_deliveries {
+        if let Ok(mut pending) = pending_page.get_mut(stack) {
+            for context in contexts {
+                if !pending.contexts.contains(&context) {
+                    pending.contexts.push(context);
+                }
+            }
+            pending.focus = true;
+        } else {
+            commands
+                .entity(stack)
+                .insert(crate::chat_page::PendingAgentSelectionContexts {
+                    contexts,
+                    focus: true,
+                });
+        }
+        if child_of.contains(stack) {
+            vmux_core::focus_pane_entity(stack, &mut commands, &child_of);
+        }
+    }
+
+    for (terminal, contexts) in cli_deliveries {
+        if let Some(text) = vmux_core::selection::render_selection_contexts(&contexts)
+            && let Ok((capture, buffered)) = cli_prompts.get_mut(terminal)
+        {
+            if let Some(mut capture) = capture {
+                append_prompt_text(&mut capture.draft, &text);
+                capture.skipped = false;
+            } else if let Some(mut buffered) = buffered {
+                append_prompt_text(&mut buffered.text, &text);
+                buffered.submit = false;
+            } else {
+                commands
+                    .entity(terminal)
+                    .insert(vmux_terminal::BufferedAgentPrompt {
+                        text,
+                        submit: false,
+                    });
+            }
+        }
+        if let Some(stack) = cli_focus.get(&terminal).copied() {
+            vmux_core::focus_pane_entity(stack, &mut commands, &child_of);
+        }
+    }
+}
+
+fn spawn_selection_agent(
+    pane: Entity,
+    idx: &crate::client::page::strategy_index::PageStrategyIndex,
+    kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
+) -> Option<Entity> {
+    let provider = crate::providers::resolve_default_app_provider()?;
+    let stack = commands
+        .spawn((
+            vmux_layout::stack::stack_bundle(),
+            LastActivatedAt::now(),
+            ChildOf(pane),
+        ))
+        .id();
+    let sid = uuid::Uuid::new_v4().to_string();
+    if attach_page_agent_to_stack(
+        stack,
+        provider.provider,
+        provider.default_model,
+        &sid,
+        commands,
+        meshes,
+        webview_mt,
+        idx,
+        kind_q,
+    )
+    .is_none()
+    {
+        commands.entity(stack).despawn();
+        return None;
+    }
+    Some(stack)
+}
+
+fn append_prompt_text(draft: &mut String, text: &str) {
+    if !draft.is_empty() && !draft.ends_with("\n\n") {
+        if draft.ends_with('\n') {
+            draft.push('\n');
+        } else {
+            draft.push_str("\n\n");
+        }
+    }
+    draft.push_str(text);
 }
 
 fn respond_page_agent_attach_default(

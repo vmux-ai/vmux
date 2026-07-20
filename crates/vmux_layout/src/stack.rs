@@ -12,8 +12,8 @@ use bevy::{
 };
 use moonshine_save::prelude::*;
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
-    StackCommand,
+    AgentCommand, AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands,
+    ServiceCommand, StackCommand,
 };
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
@@ -58,7 +58,10 @@ impl Plugin for StackPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Stack>()
             .init_resource::<FocusedStack>()
+            .init_resource::<vmux_core::selection::SelectionRequestCounter>()
             .add_message::<CloseStackRequest>()
+            .add_message::<vmux_core::selection::CaptureSelectionRequest>()
+            .add_message::<vmux_core::selection::SelectionCaptured>()
             .add_systems(
                 Update,
                 (
@@ -66,6 +69,7 @@ impl Plugin for StackPlugin {
                         .in_set(ReadAppCommands)
                         .in_set(StackCommandSet),
                     handle_close_stack_requests.in_set(ReadAppCommands),
+                    request_selection_for_agent.in_set(ReadAppCommands),
                 ),
             )
             .add_systems(
@@ -78,6 +82,48 @@ impl Plugin for StackPlugin {
                     .after(crate::active::ensure_active_branch),
             )
             .add_systems(PostUpdate, sync_stack_picking);
+    }
+}
+
+fn request_selection_for_agent(
+    mut reader: MessageReader<AppCommand>,
+    focused: Res<FocusedStack>,
+    children: Query<&Children>,
+    browsers: Query<(), With<crate::Browser>>,
+    mut counter: ResMut<vmux_core::selection::SelectionRequestCounter>,
+    mut requests: MessageWriter<vmux_core::selection::CaptureSelectionRequest>,
+    mut captured: MessageWriter<vmux_core::selection::SelectionCaptured>,
+) {
+    for command in reader.read() {
+        if !matches!(command, AppCommand::Agent(AgentCommand::AddSelection)) {
+            continue;
+        }
+        let request_id = counter.next_id();
+        let webview = focused.stack.and_then(|stack| {
+            children
+                .get(stack)
+                .ok()?
+                .iter()
+                .find(|&child| browsers.contains(child))
+        });
+        let request = vmux_core::selection::CaptureSelectionRequest {
+            request_id,
+            source_tab: focused.tab,
+            source_pane: focused.pane,
+            source_stack: focused.stack,
+            webview,
+        };
+        if webview.is_some() {
+            requests.write(request);
+        } else {
+            captured.write(vmux_core::selection::SelectionCaptured {
+                request_id,
+                source_tab: request.source_tab,
+                source_pane: request.source_pane,
+                source_stack: request.source_stack,
+                context: None,
+            });
+        }
     }
 }
 

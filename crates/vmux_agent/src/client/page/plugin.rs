@@ -132,7 +132,7 @@ fn send_page_agent_input(
         service.0.send(ClientMessage::agent_input(
             session.sid.clone(),
             prompt.text,
-            None,
+            prompt.context,
             prompt.attachments,
         ));
         *state = AgentRunState::Streaming;
