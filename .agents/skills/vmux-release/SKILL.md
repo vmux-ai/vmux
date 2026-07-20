@@ -39,44 +39,59 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
    git push -u origin release/vX.Y.Z
    ```
 
-4. **Open PR.**
+4. **Open one release PR.**
    ```bash
    gh pr create --title "chore(release): vX.Y.Z" --body "Release vX.Y.Z"
    ```
 
-5. **Wait for CI green.** Lint + test always run; build-mac runs only if packaging-touching paths changed.
+5. **Wait for draft assets.** The first CI run builds, signs, notarizes, smoke-tests, and uploads four assets to a draft GitHub release. Its final `Require release metadata commit` step is expected to fail until the metadata commit exists.
 
-6. **Squash-merge PR to main.**
+6. **Update metadata on the same PR branch.**
+   ```bash
+   ./scripts/update-release-metadata.sh
+   git diff --check
+   ruby -c Casks/vmux.rb
+   jq empty website/public/updates.json
+   git add Casks/vmux.rb website/public/updates.json
+   git commit -m "chore(release): update vX.Y.Z metadata"
+   git push
+   ```
+   This reads the final draft assets, updates the Homebrew checksum and updater signature, and keeps the release to one PR with two commits. Never merge a version-only release PR.
+
+7. **Wait for the second CI run and review.** The idempotency guard reuses the draft assets instead of rebuilding them. Confirm every required check is green and every review thread is handled.
+
+8. **Squash-merge the single PR to main.**
    ```bash
    gh pr merge --squash --delete-branch
    ```
 
-7. **Watch release pipeline.**
+9. **Watch release pipeline.**
    ```bash
    gh run watch $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
    ```
-   Expected: ~50 min for the macOS sign + notarize + DMG build.
+   The expensive macOS build already ran on the PR. The main release workflow verifies committed metadata, retargets the tag to the merge commit, publishes the draft, and dispatches the website deploy.
 
-8. **Verify GH release.**
+10. **Verify GH release.**
    ```bash
    gh release view vX.Y.Z
    ```
    Assets present: `Vmux_X.Y.Z_aarch64.dmg`, `vmux-vX.Y.Z-aarch64-apple-darwin.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz`, `Vmux-vX.Y.Z-aarch64-apple-darwin.app.tar.gz.sig`.
 
-9. **Verify auto-commit on main.**
+11. **Verify merged metadata on main.**
    ```bash
-   git pull --rebase origin main
-   git log -1 --stat
+   git fetch origin main
+   git show origin/main:Casks/vmux.rb
+   git show origin/main:website/public/updates.json
    ```
-   Expect a commit `chore(release): update cask and update manifest to X.Y.Z` touching `Casks/vmux.rb` and `website/public/updates.json`.
+   Both files must reference `vX.Y.Z`.
 
-10. **Verify website redeploy.** Wait ~5 min for `deploy-website.yml`, then:
+12. **Verify website redeploy.** Wait for `deploy-website.yml`, then:
    ```bash
    curl -fsSL https://vmux.ai/updates.json | jq .version
    ```
    Should print `"vX.Y.Z"`.
 
-11. **Smoke test.** On a clean macOS machine or VM:
+13. **Smoke test.** On a clean macOS machine or VM:
     ```bash
     brew tap vmux-ai/vmux https://github.com/vmux-ai/vmux
     brew install --cask vmux
@@ -86,13 +101,15 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
     ```
     Confirm app launches and `About` shows the new version.
 
-12. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
+14. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
 
 ## If something goes wrong
 
-- **Release pipeline fails partway:** check `gh run view --log-failed`. Common: notarization timeout (Apple side, retry the run), missing secret (re-add).
-- **detect-version says version unchanged after cask + manifest auto-commit:** expected. The auto-commit does not change `Cargo.toml`, so release should skip.
+- **First CI fails only at `Require release metadata commit`:** expected. Run `./scripts/update-release-metadata.sh`, commit both metadata files to the same branch, and push.
+- **Metadata helper says release or assets are missing:** the first macOS CI job has not finished creating the draft release. Wait for it, then retry.
+- **Second CI rebuilds the macOS assets:** the cask URL does not match the draft release. Re-run the metadata helper and inspect the diff.
+- **Release pipeline fails metadata verification:** the release PR was merged without matching cask/updater metadata. Do not publish manually; repair the release process before retrying.
+- **Release pipeline fails partway:** check `gh run view --log-failed`. Common: notarization timeout (Apple side, retry the PR CI run), missing secret (re-add).
 - **detect-version says version unchanged after the release bump merge:** unexpected. The merged release commit did not change `Cargo.toml` version. Confirm the bump landed; check `git show main:Cargo.toml | head -10`.
 - **Tag already exists:** release.yml resumes if the existing `vX.Y.Z` tag points at the release SHA. It aborts if the tag points elsewhere. Fix by bumping version higher and pushing a new commit to main, or only delete the bad tag if you are certain it is safe.
-- **Cask commit conflicts:** rare; another commit landed on main between release start and cask push. The workflow does `git pull --rebase origin main` before push; if that fails, re-run the workflow.
 - **vmux.ai/updates.json shows old version:** `deploy-website.yml` didn't fire. Check workflow runs; manually re-run via `gh workflow run deploy-website.yml`.

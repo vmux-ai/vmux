@@ -51,9 +51,11 @@ jobs:
             exit 0
           fi
           echo "Detected version bump: $PREV_VERSION -> $VERSION"
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo "should_release=true"
+            echo "version=$VERSION"
+            echo "tag=v$VERSION"
+          } >> "$GITHUB_OUTPUT"
 
   publish:
     name: Publish Release
@@ -65,20 +67,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify draft release exists with all assets
+      - name: Verify release assets and committed metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if ! gh release view "$TAG" --json isDraft,assets >/tmp/r.json 2>/dev/null; then
-            echo "::error::No release for $TAG. CI on the release PR should have created a draft. Aborting."
-            exit 1
-          fi
-          asset_count=$(jq '.assets | length' /tmp/r.json)
-          if [ "$asset_count" -lt 4 ]; then
-            echo "::error::Release $TAG has only $asset_count assets; expected 4. Aborting."
-            exit 1
-          fi
+        run: ./scripts/update-release-metadata.sh --check
 
       - name: Re-target tag to current main HEAD
         env:
