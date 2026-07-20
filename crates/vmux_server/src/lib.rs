@@ -20,6 +20,68 @@ struct WebPageManifest {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
+const INLINE_AGENT_WINDOW_PREFIX: &str = "vmux-inline-agent:";
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartAgentTransition> {
+    web_sys::window()
+        .and_then(|window| window.name().ok())
+        .and_then(|name| {
+            name.strip_prefix(INLINE_AGENT_WINDOW_PREFIX)
+                .map(str::to_string)
+        })
+        .map(
+            |agent_url| vmux_layout::command_bar::palette::StartAgentTransition {
+                agent_url,
+                prompt: String::new(),
+                attachments: Vec::new(),
+            },
+        )
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+fn set_inline_agent_url(agent_url: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_name(&format!("{INLINE_AGENT_WINDOW_PREFIX}{agent_url}"));
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+fn inline_agent_id(agent_url: &str) -> String {
+    agent_url
+        .strip_prefix("vmux://agent/")
+        .and_then(|path| path.split('/').next())
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or("agent")
+        .to_string()
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[allow(non_snake_case)]
+#[component]
+fn StartAgentPage() -> Element {
+    let mut transition = use_signal(inline_agent_transition);
+    if let Some(active) = transition() {
+        return rsx! {
+            vmux_agent::chat_page::page::Page {
+                agent_override: Some(inline_agent_id(&active.agent_url)),
+                transition_prompt: Some(active.prompt),
+                transition_attachments: Some(active.attachments),
+            }
+        };
+    }
+    rsx! {
+        vmux_layout::start::page::Page {
+            on_agent_transition: move |next: vmux_layout::command_bar::palette::StartAgentTransition| {
+                vmux_layout::start::page::begin_agent_transition();
+                set_inline_agent_url(&next.agent_url);
+                transition.set(Some(next));
+            },
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
 macro_rules! web_pages {
     ($($render:ident: $host:literal => $page:path),+ $(,)?) => {
         $(
@@ -57,7 +119,7 @@ web_pages! {
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,
-    render_start: "start" => vmux_layout::start::page::Page,
+    render_start: "start" => StartAgentPage,
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]

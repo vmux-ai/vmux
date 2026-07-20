@@ -95,12 +95,15 @@ fn sync_live_start_pages(
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     focused: Res<crate::stack::FocusedStack>,
-    starts: Query<(
-        Entity,
-        &WebviewSource,
-        Has<StartWorkSynced>,
-        Has<CefKeyboardTarget>,
-    )>,
+    starts: Query<
+        (
+            Entity,
+            &WebviewSource,
+            Has<StartWorkSynced>,
+            Has<CefKeyboardTarget>,
+        ),
+        Without<crate::start::StartAgentTransitionView>,
+    >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -418,6 +421,28 @@ mod tests {
         app.add_plugins(StartPlugin);
         let mut q = app.world_mut().query::<&PageManifest>();
         assert!(q.iter(app.world()).any(|m| m.host == "start"));
+    }
+
+    #[test]
+    fn inline_transition_only_supports_page_agents() {
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/codex"
+        ));
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/openai/gpt-5/session"
+        ));
+        assert!(!crate::start::supports_inline_agent_transition(
+            "vmux://agent/codex/cli"
+        ));
+        assert!(!crate::start::supports_inline_agent_transition(
+            "vmux://agent/vibe/setup"
+        ));
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/cliff"
+        ));
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/setupwizard"
+        ));
     }
 
     #[test]

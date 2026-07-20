@@ -179,14 +179,14 @@ impl Plugin for AgentChatPagePlugin {
                 RuntimeSwitchRequest,
                 SelectModel,
                 ChatChooseWorkspace,
-            )>::for_hosts(&["agent"]))
+            )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
                 ChatPasteMedia,
                 ChatMediaListRequest,
                 ChatAttachPaths,
                 ChatAttachmentPreviewRequest,
-            )>::for_hosts(&["agent"]))
+            )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -2130,11 +2130,14 @@ mod native_tests {
     #[test]
     fn composer_auto_grows_and_contains_action_button() {
         let source = include_str!("chat_page/page.rs");
+        let prompt_box = include_str!("../../vmux_ui/src/components/prompt_box.rs");
         assert!(source.contains("fn resize_prompt_textarea()"));
         assert!(source.contains("textarea.scroll_height().clamp(40, 160)"));
         assert!(source.contains("max-h-40 min-h-10"));
-        assert!(source.contains("rounded-2xl"));
-        assert!(source.contains("backdrop-blur-3xl backdrop-saturate-150"));
+        assert!(source.contains("PromptBox {"));
+        assert!(source.contains("PromptPopup {"));
+        assert!(prompt_box.contains("rounded-2xl"));
+        assert!(prompt_box.contains("backdrop-blur-3xl backdrop-saturate-150"));
         assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
         assert!(source.contains("if draft.read().is_empty()"));
         assert!(source.contains("show_capability_examples"));
@@ -2177,9 +2180,7 @@ mod native_tests {
         let card = page
             .find("if workspace_selection_pending()")
             .expect("workspace card");
-        let composer = page
-            .find("relative flex items-center overflow-hidden rounded-2xl")
-            .expect("composer");
+        let composer = page.find("PromptBox {").expect("composer");
 
         assert!(card < composer);
         assert!(page.contains("Choose a workspace"));

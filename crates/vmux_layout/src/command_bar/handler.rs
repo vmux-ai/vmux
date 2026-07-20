@@ -32,7 +32,10 @@ use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt};
+use vmux_core::agent::{
+    PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
+    PendingAgentPromptAttachments,
+};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -1210,6 +1213,33 @@ struct CommandBarActionQueries<'w, 's> {
             Without<Modal>,
         ),
     >,
+    webview_sources: Query<'w, 's, &'static WebviewSource>,
+}
+
+fn start_agent_transition_stack(
+    webview: Entity,
+    queries: &CommandBarActionQueries,
+) -> Option<Entity> {
+    let WebviewSource::Url(url) = queries.webview_sources.get(webview).ok()? else {
+        return None;
+    };
+    if !url.starts_with(crate::start::START_PAGE_URL) {
+        return None;
+    }
+    queries.child_of_q.get(webview).ok().map(|parent| parent.0)
+}
+
+fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
+    commands
+        .entity(stack)
+        .insert(crate::start::StartAgentTransition { webview });
+    commands
+        .entity(webview)
+        .insert(crate::start::StartAgentTransitionView);
+}
+
+fn use_legacy_default_agent_open(url: &str, inline_transition: bool) -> bool {
+    matches!(url, "vmux://agent/" | "vmux://agent") && !inline_transition
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -1294,11 +1324,23 @@ fn on_command_bar_action(
     let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
+    let inline_transition_stack = start_agent_transition_stack(webview, &queries);
 
     match evt.action.as_str() {
         "prompt" => {
             let prompt = evt.value.trim();
-            if !prompt.is_empty() {
+            let attachments = evt
+                .attachments
+                .iter()
+                .filter(|attachment| !attachment.path.is_empty())
+                .map(|attachment| vmux_wire::protocol::AgentAttachment {
+                    path: attachment.path.clone(),
+                    name: attachment.name.clone(),
+                    mime_type: attachment.mime_type.clone(),
+                    size: attachment.size,
+                })
+                .collect::<Vec<_>>();
+            if !prompt.is_empty() || !attachments.is_empty() {
                 let (_, _, focused_stack) = focused_stack(
                     queries.active_tab_param.get(),
                     &queries.all_children,
@@ -1311,9 +1353,23 @@ fn on_command_bar_action(
                     && let Some(url) =
                         prompt_agent_url(&resource_params.p2(), evt.agent_url.as_deref())
                 {
+                    if inline_transition_stack == Some(stack)
+                        && crate::start::supports_inline_agent_transition(&url)
+                    {
+                        mark_start_agent_transition(stack, webview, &mut commands);
+                    }
                     commands
                         .entity(stack)
                         .insert(PendingAgentPrompt(prompt.to_string()));
+                    if !attachments.is_empty() {
+                        commands
+                            .entity(stack)
+                            .insert(PendingAgentPromptAttachments(attachments));
+                    } else {
+                        commands
+                            .entity(stack)
+                            .remove::<PendingAgentPromptAttachments>();
+                    }
                     writer_params.p1().write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack),
                         url,
@@ -1365,7 +1421,16 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(&evt.value);
-                if matches!(url.as_str(), "vmux://agent/" | "vmux://agent") {
+                let inline_transition = if matches!(evt.target, None | Some(OpenTarget::InPlace))
+                    && crate::start::supports_inline_agent_transition(&url)
+                    && let Some(stack) = inline_transition_stack
+                {
+                    mark_start_agent_transition(stack, webview, &mut commands);
+                    true
+                } else {
+                    false
+                };
+                if use_legacy_default_agent_open(&url, inline_transition) {
                     if let Some(stack_e) = empty_stack {
                         page_default_attach_writer.write(
                             vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
@@ -1827,6 +1892,7 @@ fn reveal_command_bar(
                     value: String::new(),
                     target: None,
                     agent_url: None,
+                    attachments: Vec::new(),
                 },
             });
             continue;
@@ -2662,6 +2728,7 @@ mod tests {
                     value: String::new(),
                     target: None,
                     agent_url: None,
+                    attachments: Vec::new(),
                 },
             });
         app.world_mut().flush();
@@ -2960,6 +3027,14 @@ mod tests {
             prompt_agent_url(&CommandBarAgentsSnapshot::default(), None),
             None
         );
+    }
+
+    #[test]
+    fn inline_default_agent_open_uses_standard_page_flow() {
+        assert!(use_legacy_default_agent_open("vmux://agent/", false));
+        assert!(use_legacy_default_agent_open("vmux://agent", false));
+        assert!(!use_legacy_default_agent_open("vmux://agent/", true));
+        assert!(!use_legacy_default_agent_open("vmux://agent/codex", false));
     }
 
     #[test]

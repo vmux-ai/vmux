@@ -6,15 +6,18 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, u
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-use crate::command_bar::palette::{CommandPalette, PaletteVariant};
+use crate::command_bar::palette::{CommandPalette, PaletteVariant, StartAgentTransition};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput};
 
 const START_FOCUS_PENDING: &str = "_startFocusPending";
+const START_TRANSITIONED: &str = "_startTransitioned";
 
 /// The `vmux://start/` launcher page: a cinematic centered hero that requests its
 /// entries on mount and renders [`CommandPalette`] in [`PaletteVariant::Start`].
 #[component]
-pub fn Page() -> Element {
+pub fn Page(
+    #[props(default)] on_agent_transition: Option<EventHandler<StartAgentTransition>>,
+) -> Element {
     use_theme();
     let state =
         use_event::<CommandBarOpenEvent>(COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent::default);
@@ -30,6 +33,7 @@ pub fn Page() -> Element {
             doc.set_title("Start");
         }
         let _ = try_cef_bin_emit_rkyv(&StartDataRequest);
+        set_start_transitioned(false);
         mounted.set(true);
     });
 
@@ -46,7 +50,7 @@ pub fn Page() -> Element {
 
     rsx! {
         main {
-            class: "relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-6 text-foreground",
+            class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-6 text-foreground",
             style: "background-image:radial-gradient(140% 100% at 50% -12%, rgba(129,140,248,0.05), transparent 55%);",
             div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
                 div { class: "absolute left-1/2 top-[16%] h-[36rem] w-[36rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/15" }
@@ -54,21 +58,21 @@ pub fn Page() -> Element {
                 div { class: "absolute right-[12%] top-1/4 h-80 w-80 rounded-full blur-[130px] dark:bg-violet-500/12" }
                 div { class: "absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-transparent to-transparent dark:from-black/40" }
             }
-            div {
-                class: "relative flex w-full max-w-2xl flex-col items-center gap-8 transition-all duration-700 ease-out motion-reduce:transition-none {reveal}",
+            div { class: "relative z-10 flex w-full max-w-3xl flex-col items-center gap-8 transition-all duration-700 ease-out motion-reduce:transition-none {reveal}",
                 div { class: "flex flex-col items-center gap-2",
                     h1 { class: "bg-gradient-to-b from-foreground to-foreground/55 bg-clip-text text-6xl font-semibold leading-none tracking-tight text-transparent",
                         "vmux"
                     }
                     p { class: "text-base text-muted-foreground", "One prompt. Anything, done." }
                 }
-                div { class: "w-full overflow-hidden rounded-2xl bg-foreground/[0.05] ring-1 ring-inset ring-foreground/10 shadow-2xl dark:shadow-[0_40px_120px_-32px_rgba(0,0,0,0.85)] backdrop-blur-2xl",
+                div { class: "relative w-full",
                     CommandPalette {
                         state,
                         variant: PaletteVariant::Start,
                         on_close: move |_| {},
                         on_dismiss: move |_| {},
                         on_activity: move |_| {},
+                        on_start_agent_transition: on_agent_transition,
                     }
                 }
             }
@@ -82,6 +86,9 @@ fn focus_start_input() {
     let Some(window) = web_sys::window() else {
         return;
     };
+    if start_transitioned(&window) {
+        return;
+    }
     if start_focus_pending(&window) {
         return;
     }
@@ -116,6 +123,28 @@ fn set_start_focus_pending(window: &web_sys::Window, pending: bool) {
         &JsValue::from_str(START_FOCUS_PENDING),
         &JsValue::from_bool(pending),
     );
+}
+
+fn start_transitioned(window: &web_sys::Window) -> bool {
+    js_sys::Reflect::get(window, &JsValue::from_str(START_TRANSITIONED))
+        .map(|value| value.is_truthy())
+        .unwrap_or(false)
+}
+
+fn set_start_transitioned(transitioned: bool) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let _ = js_sys::Reflect::set(
+        &window,
+        &JsValue::from_str(START_TRANSITIONED),
+        &JsValue::from_bool(transitioned),
+    );
+}
+
+/// Disable launcher-only focus capture before switching this document to an agent page.
+pub fn begin_agent_transition() {
+    set_start_transitioned(true);
 }
 
 /// Focus the input if it is not already the active element; returns true once the document holds
@@ -196,6 +225,18 @@ fn install_keep_input_focused_on_click() {
     };
 
     let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        if start_transitioned(&window) {
+            return;
+        }
+        let Some(document) = window.document() else {
+            return;
+        };
+        let Some(input) = document.get_element_by_id("command-bar-input") else {
+            return;
+        };
         if let Some(el) = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
@@ -207,13 +248,8 @@ fn install_keep_input_focused_on_click() {
             }
         }
         e.prevent_default();
-        if let Some(input) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("command-bar-input"))
-        {
-            let input: web_sys::HtmlInputElement = input.unchecked_into();
-            let _ = input.focus();
-        }
+        let input: web_sys::HtmlInputElement = input.unchecked_into();
+        let _ = input.focus();
     }) as Box<dyn FnMut(web_sys::Event)>);
     let target: &web_sys::EventTarget = document.as_ref();
     let opts = web_sys::AddEventListenerOptions::new();

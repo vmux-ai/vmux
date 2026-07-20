@@ -595,6 +595,7 @@ pub(crate) fn rebuild_space_views(
                             session_id,
                             stack: entity,
                             initial_prompt: None,
+                            initial_attachments: Vec::new(),
                         });
                     }
                     _ => {

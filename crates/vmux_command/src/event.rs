@@ -172,6 +172,7 @@ pub struct CommandBarActionEvent {
     pub value: String,
     pub target: Option<crate::open_target::OpenTarget>,
     pub agent_url: Option<String>,
+    pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
 }
 
 #[derive(
@@ -455,20 +456,6 @@ mod tests {
     fn explicit_path_rejects_urls() {
         assert!(!looks_like_explicit_path("http://example.com"));
         assert!(!looks_like_explicit_path("https://example.com"));
-    }
-
-    #[test]
-    fn action_event_fields() {
-        let evt = CommandBarActionEvent {
-            action: "open".to_string(),
-            value: "google.com".to_string(),
-            target: None,
-            agent_url: None,
-        };
-        assert_eq!(evt.action, "open");
-        assert_eq!(evt.value, "google.com");
-        assert_eq!(evt.target, None);
-        assert_eq!(evt.agent_url, None);
     }
 
     #[test]

@@ -927,6 +927,7 @@ fn send_acp_input(
         &AcpSession,
         &mut AgentRunState,
         &mut PromptQueue,
+        Has<AcpInstallStarted>,
         Option<&mut PendingHandoff>,
         Option<&mut ImportedConversation>,
     )>,
@@ -939,8 +940,10 @@ fn send_acp_input(
     let Some(service) = service else {
         return;
     };
-    for (entity, session, mut state, mut queue, mut pending, mut imported) in &mut q {
-        if !queue.ready(matches!(*state, AgentRunState::Idle)) {
+    for (entity, session, mut state, mut queue, install_started, mut pending, mut imported) in
+        &mut q
+    {
+        if !acp_prompt_dispatch_ready(&state, &queue, install_started) {
             continue;
         }
         let Some(prompt) = queue.take_next() else {
@@ -969,6 +972,14 @@ fn send_acp_input(
     }
 }
 
+fn acp_prompt_dispatch_ready(
+    state: &AgentRunState,
+    queue: &PromptQueue,
+    install_started: bool,
+) -> bool {
+    install_started && queue.ready(matches!(state, AgentRunState::Idle))
+}
+
 fn close_acp_session_on_remove(
     trigger: On<Remove, AcpSession>,
     sessions: Query<&AcpSession>,
@@ -991,6 +1002,31 @@ mod tests {
 
     fn s(k: &str, v: &str) -> (String, String) {
         (k.to_string(), v.to_string())
+    }
+
+    #[test]
+    fn queued_prompt_waits_for_acp_install_start() {
+        let mut queue = PromptQueue::default();
+        queue.enqueue("hello".to_string());
+
+        assert!(!acp_prompt_dispatch_ready(
+            &AgentRunState::Idle,
+            &queue,
+            false
+        ));
+        assert!(acp_prompt_dispatch_ready(
+            &AgentRunState::Idle,
+            &queue,
+            true
+        ));
+        assert!(!acp_prompt_dispatch_ready(
+            &AgentRunState::Installing {
+                pct: None,
+                message: "Preparing agent…".to_string(),
+            },
+            &queue,
+            true
+        ));
     }
 
     #[test]

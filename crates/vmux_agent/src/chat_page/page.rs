@@ -2,11 +2,10 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, edit_prompt, filter_models, filter_sessions, inline_media_query,
-    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
-    prompt_history_direction, prompt_prefix_at_utf16, replace_inline_media_query,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_expand_thinking,
-    should_fetch_resume, tool_activity,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
+    menu_direction, move_prompt_history, move_selection, prompt_history_direction,
+    prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
+    should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
@@ -22,11 +21,15 @@ use crate::chat_page::event::{
 use dioxus::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use vmux_command::prompt_media::{
+    inline_media_query, media_display_path, media_reference, replace_inline_media_query,
+};
 use vmux_terminal::matrix_rain::MatrixRain;
-use vmux_terminal::page::PromptGhost;
 use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 const PROMPT_ID: &str = "agent-chat-prompt";
@@ -148,19 +151,6 @@ fn file_extension_label(name: &str) -> String {
 
 fn attachment_label(attachment: &ChatAttachment) -> String {
     file_extension_label(&attachment.name)
-}
-
-fn media_reference(entry: &ChatMediaEntry) -> String {
-    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
-    if entry.parent == "~" {
-        format!("~/{name}", name = encode(&entry.name))
-    } else {
-        format!(
-            "{parent}/{name}",
-            parent = encode(&entry.parent),
-            name = encode(&entry.name)
-        )
-    }
 }
 
 fn select_media_entry(
@@ -295,9 +285,15 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
 }
 
 #[component]
-pub fn Page() -> Element {
+pub fn Page(
+    #[props(default)] agent_override: Option<String>,
+    #[props(default)] transition_prompt: Option<String>,
+    #[props(default)] transition_attachments: Option<Vec<ChatAttachment>>,
+) -> Element {
     use_theme();
-    let agent = current_agent();
+    let agent = agent_override.unwrap_or_else(current_agent);
+    let mut transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
+    let mut transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
@@ -316,7 +312,7 @@ pub fn Page() -> Element {
     let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
-    let mut prompt_caret = use_signal(|| None::<u32>);
+    let prompt_caret = use_signal(|| Some(0u32));
     let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -338,6 +334,7 @@ pub fn Page() -> Element {
     let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(focus_prompt_end);
     use_effect(move || {
         let _ = draft.read();
         resize_prompt_textarea();
@@ -412,6 +409,8 @@ pub fn Page() -> Element {
         status.set(snap.status.clone());
         error.set(snap.error.clone());
         queued.set(snap.queued.clone());
+        transition_preview.set(String::new());
+        transition_attachments.set(Vec::new());
         paused.set(snap.paused);
         agent_name.set(snap.agent_name.clone());
         agent_icon.set(snap.agent_icon.clone());
@@ -556,8 +555,10 @@ pub fn Page() -> Element {
     let rain_accent = accent_rgb(&theme_accent, agent_accent.rain_rgb);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
-    let show_capability_examples =
-        items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
+    let show_capability_examples = items.read().is_empty()
+        && queued.read().is_empty()
+        && attachments.read().is_empty()
+        && transition_attachments.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -652,7 +653,7 @@ pub fn Page() -> Element {
                     div { class: "agent-chat-glow agent-chat-glow-tertiary absolute bottom-[-12rem] left-1/3 h-96 w-96 rounded-full blur-[140px]" }
                 }
             }
-            header { class: "agent-chat-header relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
@@ -666,7 +667,7 @@ pub fn Page() -> Element {
             }
             div {
                 id: "chat-scroll",
-                class: "relative z-10 flex-1 overflow-y-auto px-4 py-6",
+                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto px-4 py-6",
                 onscroll: move |_| {
                     if let Some(el) = web_sys::window()
                         .and_then(|w| w.document())
@@ -699,7 +700,7 @@ pub fn Page() -> Element {
                             }
                         }
                     } else if items.read().is_empty() && status() == "idle" {
-                        div { class: "flex flex-col items-center gap-3 py-24 text-center",
+                        div { class: "vmux-agent-ready-enter flex flex-col items-center gap-3 py-24 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"
@@ -797,9 +798,9 @@ pub fn Page() -> Element {
             div {
                 class: "relative z-10 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pb-4 pt-8",
                 div {
-                    class: "relative mx-auto flex max-w-3xl flex-col gap-2",
+                    class: "agent-chat-prompt-shell vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if media_loading() {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
                             } else if media_entries.read().is_empty() {
@@ -808,6 +809,7 @@ pub fn Page() -> Element {
                                 for (i , entry) in media_entries.read().iter().cloned().enumerate() {
                                     {
                                         let entry = entry.clone();
+                                        let display_path = media_display_path(&entry);
                                         rsx! {
                                             div {
                                                 key: "media-{entry.path}",
@@ -838,7 +840,7 @@ pub fn Page() -> Element {
                                                 }
                                                 div { class: "min-w-0 flex-1",
                                                     div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                                    div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
+                                                    div { class: "truncate text-xs text-muted-foreground", "{display_path}" }
                                                 }
                                             }
                                         }
@@ -848,7 +850,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if cmd_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             for (i , command) in filtered_cmds.iter().enumerate() {
                                 {
                                     let command = command.clone();
@@ -867,7 +869,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if session_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if resume_state == Some(ResumeMenuState::Loading) {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading sessions…" }
                             } else if resume_state == Some(ResumeMenuState::Empty) {
@@ -899,7 +901,7 @@ pub fn Page() -> Element {
                         }
                     }
                     if model_menu_open {
-                        div { class: "absolute bottom-full left-0 z-20 mb-2 max-h-80 w-full overflow-y-auto rounded-xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl",
+                        PromptPopup {
                             if filtered_models.is_empty() {
                                 div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching models" }
                             } else {
@@ -977,7 +979,7 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    if !queued.read().is_empty() {
+                    if transition_preview.read().is_empty() && !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for queued_prompt in queued.read().iter().cloned() {
                                 div {
@@ -1058,9 +1060,7 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    div { class: "relative flex items-center overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25",
-                        div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
-                        div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
+                    PromptBox { class: "agent-chat-prompt-box",
                         button {
                             class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
                             title: "Attach files (/upload)",
@@ -1079,6 +1079,24 @@ pub fn Page() -> Element {
                             }
                         }
                         div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
+                            for attachment in transition_attachments.read().iter() {
+                                div {
+                                    key: "transition-attachment-{attachment.path}",
+                                    class: "flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-2 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
+                                    if attachment.preview_data_url.is_empty() {
+                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
+                                            "{attachment_label(attachment)}"
+                                        }
+                                    } else {
+                                        img {
+                                            src: "{attachment.preview_data_url}",
+                                            alt: "{attachment.name}",
+                                            class: "h-5 w-5 rounded-full object-cover",
+                                        }
+                                    }
+                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
+                                }
+                            }
                             for (i , attachment) in attachments.read().iter().cloned().enumerate() {
                                 div {
                                     key: "attachment-pill-{attachment.path}",
@@ -1120,7 +1138,9 @@ pub fn Page() -> Element {
                             div { class: "relative min-w-32 flex-1 overflow-hidden",
                                 if draft.read().is_empty() {
                                     div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
-                                        if show_capability_examples {
+                                        if !transition_preview.read().is_empty() {
+                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{transition_preview}" }
+                                        } else if show_capability_examples {
                                             PromptGhost {
                                                 accent_bg: agent_accent.accent_bg.to_string(),
                                                 terminal: false,
@@ -1136,13 +1156,14 @@ pub fn Page() -> Element {
                                             class: "min-h-10 w-full whitespace-pre-wrap break-words px-1.5 py-2 text-[15px] leading-6 text-transparent",
                                             style: "transform:translateY(-{prompt_scroll_offset}px);",
                                             span { "{prefix}" }
-                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle {agent_accent.accent_bg}" }
+                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle" }
                                         }
                                     }
                                 }
                                 textarea {
                                 id: PROMPT_ID,
                                 class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                                autofocus: true,
                                 rows: "1",
                                 placeholder: "Message the agent…",
                                 value: "{draft}",
@@ -1157,7 +1178,7 @@ pub fn Page() -> Element {
                                     let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
                                 },
                                 onfocus: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onblur: move |_| prompt_caret.set(None),
+                                onblur: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onkeyup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onmouseup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
                                 onscroll: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
@@ -1767,6 +1788,11 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
 }
 
 fn render_activity_icon(kind: ActivityIcon) -> Element {
+    if kind == ActivityIcon::Thinking {
+        return rsx! {
+            span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[17px] leading-none", aria_hidden: "true", "🧠" }
+        };
+    }
     if kind == ActivityIcon::Python {
         return rsx! {
             span { class: "python-activity-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset", aria_hidden: "true",
@@ -2269,8 +2295,11 @@ fn md_to_html(src: &str) -> String {
 /// light and dark.
 const MD_CSS: &str = r#"
 .agent-chat-prompt{caret-color:transparent}
-.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite}
+.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite;background:var(--agent-accent)}
 @keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);filter:blur(16px);pointer-events:none}
+.agent-chat-prompt-box{border-color:rgba(255,255,255,0.18);box-shadow:0 22px 70px -28px rgba(255,255,255,0.2),inset 0 1px 0 rgba(255,255,255,0.16),inset 0 -1px 0 rgba(255,255,255,0.04)}
+.agent-chat-prompt-box:focus-within{border-color:rgba(255,255,255,0.28);box-shadow:0 26px 78px -26px rgba(255,255,255,0.28),inset 0 1px 0 rgba(255,255,255,0.2)}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
 .agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}
