@@ -29,7 +29,7 @@ mod preview;
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
-pub use plugin::{EditorPlugin, FileView, restore_file_view_bundle};
+pub use plugin::{EditorPlugin, FileView, FileViewModeRequest, restore_file_view_bundle};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;

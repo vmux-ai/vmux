@@ -166,6 +166,10 @@ impl Default for SharedFileViewMode {
     }
 }
 
+/// Requests a shared rendering mode for all open file editors.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileViewModeRequest(pub FileViewMode);
+
 #[derive(Component)]
 struct FileViewModeSent;
 
@@ -595,6 +599,15 @@ fn send_file_view_mode(
                 &event,
             ));
         }
+    }
+}
+
+fn apply_file_view_mode_requests(
+    mut reader: MessageReader<FileViewModeRequest>,
+    mut mode: ResMut<SharedFileViewMode>,
+) {
+    if let Some(request) = reader.read().last() {
+        mode.0 = request.0;
     }
 }
 
@@ -2832,6 +2845,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<ExplorerChromeSynced>()
             .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
+            .add_message::<FileViewModeRequest>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -2882,6 +2896,7 @@ impl Plugin for EditorPlugin {
                     send_initial_media.after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
+                    apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
@@ -2979,6 +2994,25 @@ mod edit_flow_tests {
             FileViewMode::Diff
         );
         assert!(app.world().get::<FileView>(second).is_some());
+    }
+
+    #[test]
+    fn file_view_mode_request_updates_shared_mode() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_message::<FileViewModeRequest>()
+            .add_systems(Update, apply_file_view_mode_requests);
+
+        app.world_mut()
+            .resource_mut::<Messages<FileViewModeRequest>>()
+            .write(FileViewModeRequest(FileViewMode::Diff));
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Diff
+        );
     }
 
     #[test]
