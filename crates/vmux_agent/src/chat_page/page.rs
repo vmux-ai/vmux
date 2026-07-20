@@ -1785,6 +1785,11 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
 }
 
 fn render_activity_icon(kind: ActivityIcon) -> Element {
+    if kind == ActivityIcon::Thinking {
+        return rsx! {
+            span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[17px] leading-none", aria_hidden: "true", "🧠" }
+        };
+    }
     if kind == ActivityIcon::Python {
         return rsx! {
             span { class: "python-activity-icon flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset", aria_hidden: "true",
