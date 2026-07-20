@@ -18,6 +18,7 @@ impl From<&AgentRunState> for AgentRunStateKind {
             AgentRunState::Installing { .. } => AgentRunStateKind::Idle,
             AgentRunState::Streaming => AgentRunStateKind::Streaming,
             AgentRunState::AwaitingApproval { .. } => AgentRunStateKind::AwaitingApproval,
+            AgentRunState::AwaitingAuthentication { .. } => AgentRunStateKind::Idle,
             AgentRunState::Errored(_) => AgentRunStateKind::Errored,
         }
     }

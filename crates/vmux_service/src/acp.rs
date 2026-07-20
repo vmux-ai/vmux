@@ -103,6 +103,12 @@ impl AcpSessionManager {
             .and_then(|handle| handle.shared.model_info_message())
     }
 
+    pub fn auth_required(&self, sid: &str) -> Option<ServiceMessage> {
+        self.sessions
+            .get(sid)
+            .and_then(|handle| handle.shared.auth_required_message())
+    }
+
     pub fn contains(&self, sid: &str) -> bool {
         self.sessions.contains_key(sid)
     }

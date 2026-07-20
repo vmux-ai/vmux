@@ -8,15 +8,16 @@ use crate::chat_page::composer::{
     should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    AuthMethodEntry, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
+    CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachments, ChatAuthenticate, ChatBlock, ChatCancel,
+    ChatCancelQueuedPrompt, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT,
+    ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -297,6 +298,8 @@ pub fn Page(
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
+    let mut auth_methods = use_signal(Vec::<AuthMethodEntry>::new);
+    let mut auth_pending_method_id = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
     let mut agent_name = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
@@ -408,6 +411,8 @@ pub fn Page(
         }
         status.set(snap.status.clone());
         error.set(snap.error.clone());
+        auth_methods.set(snap.auth_methods.clone());
+        auth_pending_method_id.set(snap.auth_pending_method_id.clone());
         queued.set(snap.queued.clone());
         transition_preview.set(String::new());
         transition_attachments.set(Vec::new());
@@ -706,6 +711,52 @@ pub fn Page(
                                 "{header_name}"
                             }
                             p { class: "text-sm text-muted-foreground", "Ready when you are." }
+                        }
+                    } else if matches!(status().as_str(), "auth_required" | "authenticating") {
+                        div { class: "my-auto flex justify-center py-16",
+                            div { class: "w-full max-w-lg rounded-2xl bg-background/80 p-5 shadow-xl ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
+                                div { class: "flex items-start gap-3",
+                                    {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-10 w-10 text-base")}
+                                    div { class: "min-w-0 flex-1",
+                                        h2 { class: "text-base font-semibold text-foreground", "Connect {header_name}" }
+                                        p { class: "mt-1 text-sm leading-relaxed text-muted-foreground",
+                                            "Sign in once. The agent keeps the credentials in its normal account storage."
+                                        }
+                                    }
+                                }
+                                if !error().is_empty() {
+                                    div { class: "mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
+                                        "{error}"
+                                    }
+                                }
+                                div { class: "mt-4 flex flex-col gap-2",
+                                    for method in auth_methods.read().iter().cloned() {
+                                        {
+                                            let method_id = method.id.clone();
+                                            let pending = auth_pending_method_id() == method.id;
+                                            rsx! {
+                                                button {
+                                                    key: "auth-{method.id}",
+                                                    class: "flex w-full items-center justify-between gap-3 rounded-xl bg-foreground/[0.06] px-4 py-3 text-left ring-1 ring-inset ring-foreground/10 transition hover:bg-foreground/10 disabled:cursor-wait disabled:opacity-60",
+                                                    disabled: !auth_pending_method_id().is_empty(),
+                                                    onclick: move |_| send_authenticate(method_id.clone()),
+                                                    div { class: "min-w-0",
+                                                        div { class: "text-sm font-medium text-foreground", "{method.name}" }
+                                                        if !method.description.is_empty() {
+                                                            div { class: "mt-0.5 text-xs leading-relaxed text-muted-foreground", "{method.description}" }
+                                                        }
+                                                    }
+                                                    if pending {
+                                                        span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground/70" }
+                                                    } else {
+                                                        span { class: "shrink-0 text-sm text-muted-foreground", "Continue →" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
@@ -1525,6 +1576,10 @@ fn send_approval(call_id: String, decision: u8) {
     let _ = try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision });
 }
 
+fn send_authenticate(method_id: String) {
+    let _ = try_cef_bin_emit_rkyv(&ChatAuthenticate { method_id });
+}
+
 fn render_item(
     key: usize,
     item: &ChatItem,
@@ -1887,7 +1942,8 @@ fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
 
 fn current_activity_icon(items: &[ChatItem], status: &str) -> Option<ActivityIcon> {
     match status {
-        "installing" => Some(ActivityIcon::Installing),
+        "installing" | "authenticating" => Some(ActivityIcon::Installing),
+        "auth_required" => Some(ActivityIcon::Awaiting),
         "awaiting" => Some(ActivityIcon::Awaiting),
         "errored" => Some(ActivityIcon::Error),
         "streaming" => {
@@ -2210,6 +2266,8 @@ fn status_dot_class(status: &str) -> &'static str {
     match status {
         "streaming" => "bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "installing" => "bg-sky-400 animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.65)]",
+        "authenticating" => "bg-sky-400 animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.65)]",
+        "auth_required" => "bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "awaiting" => "bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
         _ => "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]",

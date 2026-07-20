@@ -226,6 +226,7 @@ impl Plugin for AcpAgentPlugin {
             .init_resource::<AcpCatalog>()
             .init_resource::<AcpInstallGeneration>()
             .add_message::<vmux_service::agent_events::PageAgentInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentAuthRequired>()
             .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
             .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
             .add_message::<vmux_service::agent_events::PageAgentModelSelectionResult>()
@@ -240,6 +241,7 @@ impl Plugin for AcpAgentPlugin {
                     drain_acp_installs,
                     receive_catalog,
                     apply_acp_agent_info,
+                    apply_acp_auth_required,
                     apply_acp_workspace_changed,
                     (apply_acp_model_info, apply_acp_model_selection_result).chain(),
                     apply_acp_session_created,
@@ -248,6 +250,23 @@ impl Plugin for AcpAgentPlugin {
             )
             .add_observer(close_acp_session_on_remove)
             .add_observer(auto_allow_acp_approval);
+    }
+}
+
+fn apply_acp_auth_required(
+    mut reader: MessageReader<vmux_service::agent_events::PageAgentAuthRequired>,
+    mut sessions: Query<(&AcpSession, &mut AgentRunState)>,
+) {
+    for event in reader.read() {
+        for (session, mut state) in &mut sessions {
+            if session.sid == event.sid {
+                *state = AgentRunState::AwaitingAuthentication {
+                    methods: event.methods.clone(),
+                    pending_method_id: None,
+                    error: event.error.clone(),
+                };
+            }
+        }
     }
 }
 

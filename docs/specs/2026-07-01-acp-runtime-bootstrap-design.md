@@ -87,9 +87,14 @@ auth, version pin, plus a `System` escape hatch for custom agents not in the reg
 Re-fetch `registry.json` on the TTL; compare installed `Receipt.version` vs registry `version`;
 surface an update in the manager page (and refresh on next launch). No manual version bumps.
 
-### 8. Auth (unchanged, agent-handled)
-Each agent does Agent Auth (OAuth, opens browser) or Terminal Auth on first prompt; vmux passes env
-from settings overrides. Not vmux's concern beyond env plumbing.
+### 8. Auth
+vmux optimistically creates the session so existing CLI credentials and login-shell API keys remain
+zero-click. On ACP `auth_required`, it keeps the adapter alive, shows the advertised Agent Auth
+methods in the chat page, sends `authenticate` after the user chooses one, then retries session
+creation. Authentication errors return to the same card for retry.
+
+Unstable ACP environment-variable and terminal-auth methods remain separate follow-up work. Their
+credentials must be collected securely and applied before restarting the adapter process.
 
 ## Scope / sequencing (this is large — flagged)
 
