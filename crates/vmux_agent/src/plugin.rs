@@ -1351,23 +1351,24 @@ fn handle_agent_file_touch(
         ));
     }
     for previews in previews.into_values() {
-        let mut deduped: Vec<PendingFilePreview> = Vec::new();
-        for preview in previews {
-            if let Some(existing) = deduped.iter_mut().find(|existing| {
-                vmux_layout::placement::reusable_page_match(&preview.url, &existing.url)
-            }) {
-                *existing = preview;
-            } else {
-                deduped.push(preview);
-            }
-        }
-        if deduped
+        let all_reads = previews
             .iter()
-            .all(|preview| preview.kind == vmux_service::protocol::FileTouchKind::Read)
-        {
-            let drop_count = deduped.len().saturating_sub(1);
-            deduped.drain(..drop_count);
-        }
+            .all(|preview| preview.kind == vmux_service::protocol::FileTouchKind::Read);
+        let deduped = if all_reads {
+            previews.into_iter().last().into_iter().collect()
+        } else {
+            let mut deduped: Vec<PendingFilePreview> = Vec::new();
+            for preview in previews {
+                if let Some(existing) = deduped.iter_mut().find(|existing| {
+                    vmux_layout::placement::reusable_page_match(&preview.url, &existing.url)
+                }) {
+                    *existing = preview;
+                } else {
+                    deduped.push(preview);
+                }
+            }
+            deduped
+        };
         let open_as_tabs = deduped.len() > 1;
         for preview in deduped {
             let anchor = preview.anchor;
@@ -5948,11 +5949,12 @@ mod tests {
     }
 
     #[test]
-    fn same_frame_file_reads_replace_once_with_latest() {
+    fn same_frame_file_reads_replace_once_with_last_touch() {
         let mut app = file_touch_test_app();
         let (anchor, file_stack) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
         send_file_read(&mut app, anchor, "/repo/first.rs");
-        send_file_read(&mut app, anchor, "/repo/latest.rs");
+        send_file_read(&mut app, anchor, "/repo/second.rs");
+        send_file_read(&mut app, anchor, "/repo/first.rs");
 
         app.update();
 
@@ -5966,7 +5968,7 @@ mod tests {
             opens[0].target,
             vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
         ));
-        assert_eq!(opens[0].url, "file:///repo/latest.rs");
+        assert_eq!(opens[0].url, "file:///repo/first.rs");
         let view_modes = app
             .world_mut()
             .resource_mut::<Messages<vmux_editor::FileViewModeRequest>>()
