@@ -1122,6 +1122,7 @@ struct PendingFilePreview {
     url: String,
     request_id: [u8; 16],
     user_origin: bool,
+    kind: vmux_service::protocol::FileTouchKind,
 }
 
 impl AgentFileResolve<'_, '_> {
@@ -1279,7 +1280,8 @@ fn handle_agent_file_touch(
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
 ) {
-    let mut previews = std::collections::HashMap::new();
+    let mut previews: std::collections::HashMap<Entity, Vec<PendingFilePreview>> =
+        std::collections::HashMap::new();
     for request in reader.read() {
         let ServiceAgentCommand::FileTouched {
             anchor,
@@ -1328,54 +1330,77 @@ fn handle_agent_file_touch(
         if !settings.agent.follow_files {
             continue;
         }
-        previews.insert(
-            agent_pane,
-            PendingFilePreview {
+        previews
+            .entry(agent_pane)
+            .or_default()
+            .push(PendingFilePreview {
                 anchor: *anchor,
                 agent_pane,
                 url: file_touch_url(path, *line, *col, *end_col),
                 request_id: request.request_id.0,
                 user_origin: !origin_is_agent(&request.origin),
-            },
-        );
+                kind: *kind,
+            });
     }
-    for preview in previews.into_values() {
-        let anchor = preview.anchor;
-        let existing = resolve.file_page_for(preview.agent_pane);
-        let target = resolve.file_page_target(preview.agent_pane, &preview.url);
-        if let Some(target) = target {
-            if target.navigate {
-                resolve.page_open.write(vmux_core::PageOpenRequest {
-                    target: vmux_core::PageOpenTarget::Stack(target.stack),
+    for previews in previews.into_values() {
+        let mut deduped: Vec<PendingFilePreview> = Vec::new();
+        for preview in previews {
+            if let Some(existing) = deduped.iter_mut().find(|existing| {
+                vmux_layout::placement::reusable_page_match(&preview.url, &existing.url)
+            }) {
+                *existing = preview;
+            } else {
+                deduped.push(preview);
+            }
+        }
+        if deduped
+            .iter()
+            .all(|preview| preview.kind == vmux_service::protocol::FileTouchKind::Read)
+        {
+            let drop_count = deduped.len().saturating_sub(1);
+            deduped.drain(..drop_count);
+        }
+        let open_as_tabs = deduped.len() > 1;
+        for preview in deduped {
+            let anchor = preview.anchor;
+            let existing = resolve.file_page_for(preview.agent_pane);
+            let target = (!open_as_tabs)
+                .then(|| resolve.file_page_target(preview.agent_pane, &preview.url))
+                .flatten();
+            if let Some(target) = target {
+                if target.navigate {
+                    resolve.page_open.write(vmux_core::PageOpenRequest {
+                        target: vmux_core::PageOpenTarget::Stack(target.stack),
+                        url: preview.url,
+                        request_id: None,
+                    });
+                }
+            } else {
+                resolve.open_beside.write(vmux_layout::OpenBesideRequest {
+                    pane: preview.agent_pane,
+                    direction: None,
                     url: preview.url,
-                    request_id: None,
+                    request_id: preview.request_id,
+                    focus: preview.user_origin && existing.is_some(),
                 });
             }
-        } else {
-            resolve.open_beside.write(vmux_layout::OpenBesideRequest {
-                pane: preview.agent_pane,
-                direction: None,
-                url: preview.url,
-                request_id: preview.request_id,
-                focus: preview.user_origin && existing.is_some(),
-            });
-        }
-        if let Some(pane) = target
-            .map(|target| target.pane)
-            .or(existing.map(|(_, pane)| pane))
-        {
-            let kind = resolve.agent_kind(anchor);
-            resolve
-                .activate
-                .write(vmux_layout::active_panes::ActivatePane {
-                    profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
-                    active: vmux_layout::active_panes::ActiveStack {
-                        tab: None,
-                        pane: Some(pane),
-                        stack: None,
-                        kind,
-                    },
-                });
+            if let Some(pane) = target
+                .map(|target| target.pane)
+                .or(existing.map(|(_, pane)| pane))
+            {
+                let kind = resolve.agent_kind(anchor);
+                resolve
+                    .activate
+                    .write(vmux_layout::active_panes::ActivatePane {
+                        profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                        active: vmux_layout::active_panes::ActiveStack {
+                            tab: None,
+                            pane: Some(pane),
+                            stack: None,
+                            kind,
+                        },
+                    });
+            }
         }
     }
 }
@@ -5843,7 +5868,12 @@ mod tests {
         (anchor, file_stack)
     }
 
-    fn send_file_read(app: &mut App, anchor: ProcessId, path: &str) {
+    fn send_file_touch(
+        app: &mut App,
+        anchor: ProcessId,
+        path: &str,
+        kind: vmux_service::protocol::FileTouchKind,
+    ) {
         app.world_mut()
             .resource_mut::<Messages<AgentCommandRequest>>()
             .write(AgentCommandRequest {
@@ -5858,9 +5888,27 @@ mod tests {
                     line: None,
                     col: None,
                     end_col: None,
-                    kind: vmux_service::protocol::FileTouchKind::Read,
+                    kind,
                 },
             });
+    }
+
+    fn send_file_read(app: &mut App, anchor: ProcessId, path: &str) {
+        send_file_touch(
+            app,
+            anchor,
+            path,
+            vmux_service::protocol::FileTouchKind::Read,
+        );
+    }
+
+    fn send_file_edit(app: &mut App, anchor: ProcessId, path: &str) {
+        send_file_touch(
+            app,
+            anchor,
+            path,
+            vmux_service::protocol::FileTouchKind::Edit,
+        );
     }
 
     #[test]
@@ -5910,6 +5958,32 @@ mod tests {
             vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
         ));
         assert_eq!(opens[0].url, "file:///repo/latest.rs");
+    }
+
+    #[test]
+    fn same_frame_file_edits_open_each_distinct_file_as_tabs() {
+        let mut app = file_touch_test_app();
+        let (anchor, _) = spawn_file_touch_layout(&mut app, "file:///repo/old.rs", false);
+        send_file_edit(&mut app, anchor, "/repo/first.rs");
+        send_file_edit(&mut app, anchor, "/repo/second.rs");
+        send_file_edit(&mut app, anchor, "/repo/first.rs");
+
+        app.update();
+
+        let opens = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .count();
+        assert_eq!(opens, 0);
+        let beside: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_layout::OpenBesideRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(beside.len(), 2);
+        assert_eq!(beside[0].url, "file:///repo/first.rs");
+        assert_eq!(beside[1].url, "file:///repo/second.rs");
     }
 
     #[test]
