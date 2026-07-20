@@ -664,6 +664,11 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
         bevy::log::warn!("{warning}");
     }
 
+    config.insert(
+        "approvals_reviewer".to_string(),
+        serde_json::Value::String("user".to_string()),
+    );
+
     let features = config
         .entry("features")
         .or_insert_with(|| serde_json::json!({}));
@@ -1580,6 +1585,7 @@ mod tests {
             assert_eq!(config["features"]["shell_tool"], false);
             assert_eq!(config["features"]["unified_exec"], false);
             assert_eq!(config["tools"]["web_search"], false);
+            assert_eq!(config["approvals_reviewer"], "user");
             assert_eq!(
                 config["features"]["code_mode"]["direct_only_tool_namespaces"],
                 serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
