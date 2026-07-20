@@ -68,6 +68,10 @@ pub(crate) fn rebuild_chrome_model(world: &mut World) {
                 top: window.top,
                 width: window.width,
                 height: window.height,
+                incognito: false,
+                window_type: "normal".into(),
+                state: "normal".into(),
+                always_on_top: false,
             })
             .collect::<Vec<_>>();
         let mut indices = HashMap::<i32, u32>::new();
@@ -108,7 +112,9 @@ pub(crate) fn rebuild_chrome_model(world: &mut World) {
         tabs: projected_tabs.into_iter().map(|item| item.tab).collect(),
     };
     emit_model_events(world, &previous, &model);
-    *world.resource_mut::<ChromeModel>() = model;
+    if previous != model {
+        *world.resource_mut::<ChromeModel>() = model;
+    }
 }
 
 fn collect_windows(world: &mut World) -> Vec<WindowCandidate> {
@@ -275,6 +281,16 @@ fn select_active_tabs(
 }
 
 fn emit_model_events(world: &mut World, previous: &ChromeModel, current: &ChromeModel) {
+    let old_windows = previous
+        .windows
+        .iter()
+        .map(|window| (window.id, window))
+        .collect::<HashMap<_, _>>();
+    let new_windows = current
+        .windows
+        .iter()
+        .map(|window| (window.id, window))
+        .collect::<HashMap<_, _>>();
     let old_tabs = previous
         .tabs
         .iter()
@@ -286,6 +302,40 @@ fn emit_model_events(world: &mut World, previous: &ChromeModel, current: &Chrome
         .map(|tab| (tab.id, tab))
         .collect::<HashMap<_, _>>();
     let mut events = Vec::new();
+    for old in &previous.windows {
+        if !new_windows.contains_key(&old.id) {
+            events.push(ChromeModelEvent::WindowRemoved { window_id: old.id });
+        }
+    }
+    for new in &current.windows {
+        match old_windows.get(&new.id) {
+            None => events.push(ChromeModelEvent::WindowCreated(new.clone())),
+            Some(old)
+                if old.left != new.left
+                    || old.top != new.top
+                    || old.width != new.width
+                    || old.height != new.height =>
+            {
+                events.push(ChromeModelEvent::WindowBoundsChanged(new.clone()));
+            }
+            Some(_) => {}
+        }
+    }
+    let old_focused = previous
+        .windows
+        .iter()
+        .find(|window| window.focused)
+        .map_or(-1, |window| window.id);
+    let new_focused = current
+        .windows
+        .iter()
+        .find(|window| window.focused)
+        .map_or(-1, |window| window.id);
+    if old_focused != new_focused {
+        events.push(ChromeModelEvent::WindowFocusChanged {
+            window_id: new_focused,
+        });
+    }
     for old in &previous.tabs {
         if !new_tabs.contains_key(&old.id) {
             events.push(ChromeModelEvent::TabRemoved {

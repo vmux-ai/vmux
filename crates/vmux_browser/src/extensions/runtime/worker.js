@@ -2,6 +2,7 @@
   const CHANNEL = __VMUX_BRIDGE_CHANNEL__;
   const KEEPALIVE_CHANNEL = __VMUX_KEEPALIVE_CHANNEL__;
   const BRIDGE_URL = chrome.runtime.getURL("vmux_bridge.html");
+  const IS_WORKER = typeof globalThis.document === "undefined";
   const listeners = new Map();
   const subscriptionRetries = new Map();
   const deliveredSequences = new Set();
@@ -19,6 +20,7 @@
   const nativeOnMessageRemove = chrome.runtime.onMessage.removeListener.bind(chrome.runtime.onMessage);
   const nativeOnMessageHas = chrome.runtime.onMessage.hasListener.bind(chrome.runtime.onMessage);
   const onMessageWrappers = new WeakMap();
+  const subscriptionContextId = nativeRandomUUID();
   let lastTab = null;
 
   function webUrl(value) {
@@ -31,14 +33,50 @@
     }
   }
 
-  function senderWithTab(message, sender) {
+  function sameDocument(leftValue, rightValue) {
+    try {
+      const left = new URL(leftValue);
+      const right = new URL(rightValue);
+      left.hash = "";
+      right.hash = "";
+      return left.href === right.href;
+    } catch (_error) {
+      return leftValue === rightValue;
+    }
+  }
+
+  function sameWebOrigin(leftValue, rightValue) {
+    try {
+      const left = new URL(leftValue);
+      const right = new URL(rightValue);
+      if (left.protocol === "file:" || right.protocol === "file:") {
+        return sameDocument(leftValue, rightValue);
+      }
+      return left.origin === right.origin;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function verifiedSenderUrl(message, sender) {
+    const senderUrl = webUrl(sender?.url);
+    const claimedUrl = webUrl(message?.__vmuxSenderUrl);
+    if (senderUrl && claimedUrl && sameWebOrigin(senderUrl, claimedUrl)) return claimedUrl;
+    return senderUrl;
+  }
+
+  function senderWithTab(message, sender, useLastTab) {
     rememberTab(sender);
     if (sender?.tab) return sender;
-    const url = webUrl(message?.__vmuxSenderUrl) || webUrl(sender?.url);
-    const useLastTab = message?.command === "triggerAutofillScriptInjection" && lastTab;
-    if (!url && !useLastTab) return sender;
+    const url = verifiedSenderUrl(message, sender);
+    const shouldUseLastTab =
+      lastTab &&
+      url &&
+      sameDocument(lastTab.url, url) &&
+      (useLastTab || message?.command === "triggerAutofillScriptInjection");
+    if (!url) return sender;
     const tab =
-      lastTab && (!url || lastTab.url === url)
+      lastTab && (shouldUseLastTab || sameDocument(lastTab.url, url))
         ? lastTab
         : {
             id: 1,
@@ -53,85 +91,99 @@
     return { ...(sender || {}), tab };
   }
 
-  nativeOnConnectAdd((port) => {
-    rememberTab(port?.sender);
-    if (!port || port.name !== KEEPALIVE_CHANNEL) return;
-    if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== BRIDGE_URL) {
-      port.disconnect();
-      return;
-    }
-    port.onMessage.addListener(() => undefined);
-  });
-  try {
-    chrome.runtime.onConnect.addListener = (listener) => {
-      if (onConnectWrappers.has(listener)) return;
-      const wrapper = (port) => {
-        if (port?.name === KEEPALIVE_CHANNEL) return;
-        rememberTab(port?.sender);
-        return listener(port);
-      };
-      onConnectWrappers.set(listener, wrapper);
-      nativeOnConnectAdd(wrapper);
+  function normalizePortSender(port) {
+    const useLastTab =
+      typeof port?.name === "string" && port.name.endsWith("-message-connector");
+    const sender = senderWithTab(null, port?.sender, useLastTab);
+    if (!port || !sender || sender === port.sender) return port;
+    return {
+      disconnect: port.disconnect.bind(port),
+      name: port.name,
+      onDisconnect: port.onDisconnect,
+      onMessage: port.onMessage,
+      postMessage: port.postMessage.bind(port),
+      sender,
     };
-    chrome.runtime.onConnect.removeListener = (listener) => {
-      const wrapper = onConnectWrappers.get(listener) || listener;
-      onConnectWrappers.delete(listener);
-      nativeOnConnectRemove(wrapper);
-    };
-    chrome.runtime.onConnect.hasListener = (listener) =>
-      nativeOnConnectHas(onConnectWrappers.get(listener) || listener);
-  } catch (_error) {}
+  }
+
   nativeOnMessageAdd((message, sender, sendResponse) => {
     if (!message || message.channel !== CHANNEL) return undefined;
     if (sender?.id !== chrome.runtime.id || sender?.url !== BRIDGE_URL) return undefined;
-    if (message.type === "event") {
-      if (deliveredSequences.has(message.sequence)) {
-        sendResponse({ ok: true, sequence: message.sequence });
-        return false;
-      }
-      const handlers = listeners.get(`${message.namespace}.${message.event}`) || [];
-      for (const handler of handlers) {
-        try {
-          handler(...message.arguments);
-        } catch (_error) {}
-      }
-      deliveredSequences.add(message.sequence);
-      deliveredSequenceOrder.push(message.sequence);
-      while (deliveredSequenceOrder.length > 256) {
-        deliveredSequences.delete(deliveredSequenceOrder.shift());
-      }
+    if (message.type !== "event") return undefined;
+    if (deliveredSequences.has(message.sequence)) {
       sendResponse({ ok: true, sequence: message.sequence });
       return false;
     }
-    return undefined;
+    const handlers = listeners.get(`${message.namespace}.${message.event}`) || [];
+    for (const handler of handlers) {
+      try {
+        handler(...message.arguments);
+      } catch (_error) {}
+    }
+    deliveredSequences.add(message.sequence);
+    deliveredSequenceOrder.push(message.sequence);
+    while (deliveredSequenceOrder.length > 256) {
+      deliveredSequences.delete(deliveredSequenceOrder.shift());
+    }
+    sendResponse({ ok: true, sequence: message.sequence });
+    return false;
   });
 
-  function isReservedMessage(message, sender) {
-    return (
-      message?.channel === CHANNEL &&
-      sender?.id === chrome.runtime.id &&
-      sender?.url === BRIDGE_URL
-    );
-  }
-
-  try {
-    chrome.runtime.onMessage.addListener = (listener) => {
-      if (onMessageWrappers.has(listener)) return;
-      const wrapper = (message, sender, sendResponse) => {
-        if (isReservedMessage(message, sender)) return undefined;
-        return listener(message, senderWithTab(message, sender), sendResponse);
+  if (IS_WORKER) {
+    nativeOnConnectAdd((port) => {
+      rememberTab(port?.sender);
+      if (!port || port.name !== KEEPALIVE_CHANNEL) return;
+      if (port.sender?.id !== chrome.runtime.id || port.sender?.url !== BRIDGE_URL) {
+        port.disconnect();
+        return;
+      }
+      port.onMessage.addListener(() => undefined);
+    });
+    try {
+      chrome.runtime.onConnect.addListener = (listener) => {
+        if (onConnectWrappers.has(listener)) return;
+        const wrapper = (port) => {
+          if (port?.name === KEEPALIVE_CHANNEL) return;
+          return listener(normalizePortSender(port));
+        };
+        onConnectWrappers.set(listener, wrapper);
+        nativeOnConnectAdd(wrapper);
       };
-      onMessageWrappers.set(listener, wrapper);
-      nativeOnMessageAdd(wrapper);
-    };
-    chrome.runtime.onMessage.removeListener = (listener) => {
-      const wrapper = onMessageWrappers.get(listener) || listener;
-      onMessageWrappers.delete(listener);
-      nativeOnMessageRemove(wrapper);
-    };
-    chrome.runtime.onMessage.hasListener = (listener) =>
-      nativeOnMessageHas(onMessageWrappers.get(listener) || listener);
-  } catch (_error) {}
+      chrome.runtime.onConnect.removeListener = (listener) => {
+        const wrapper = onConnectWrappers.get(listener) || listener;
+        onConnectWrappers.delete(listener);
+        nativeOnConnectRemove(wrapper);
+      };
+      chrome.runtime.onConnect.hasListener = (listener) =>
+        nativeOnConnectHas(onConnectWrappers.get(listener) || listener);
+    } catch (_error) {}
+    function isReservedMessage(message, sender) {
+      return (
+        message?.channel === CHANNEL &&
+        sender?.id === chrome.runtime.id &&
+        sender?.url === BRIDGE_URL
+      );
+    }
+
+    try {
+      chrome.runtime.onMessage.addListener = (listener) => {
+        if (onMessageWrappers.has(listener)) return;
+        const wrapper = (message, sender, sendResponse) => {
+          if (isReservedMessage(message, sender)) return undefined;
+          return listener(message, senderWithTab(message, sender), sendResponse);
+        };
+        onMessageWrappers.set(listener, wrapper);
+        nativeOnMessageAdd(wrapper);
+      };
+      chrome.runtime.onMessage.removeListener = (listener) => {
+        const wrapper = onMessageWrappers.get(listener) || listener;
+        onMessageWrappers.delete(listener);
+        nativeOnMessageRemove(wrapper);
+      };
+      chrome.runtime.onMessage.hasListener = (listener) =>
+        nativeOnMessageHas(onMessageWrappers.get(listener) || listener);
+    } catch (_error) {}
+  }
 
   function cancelSubscriptionRetry(key) {
     const retry = subscriptionRetries.get(key);
@@ -144,7 +196,7 @@
     nativeSendMessage({
       channel: CHANNEL,
       type: "subscribe",
-      subscriptionId: key,
+      subscriptionId: `${subscriptionContextId}:${key}`,
       namespace,
       event,
     }).then(
@@ -169,30 +221,8 @@
     }, delay);
     subscriptionRetries.set(key, { timer });
   }
-  globalThis.__vmuxExtensionRuntime = {
+  const bridgeRuntime = {
     channel: CHANNEL,
-    register(namespace, event, handler) {
-      const key = `${namespace}.${event}`;
-      const handlers = listeners.get(key) || [];
-      handlers.push(handler);
-      listeners.set(key, handlers);
-      if (handlers.length === 1) {
-        sendSubscription(key, namespace, event, 0);
-      }
-      return () => {
-        const current = listeners.get(key) || [];
-        const index = current.indexOf(handler);
-        if (index >= 0) current.splice(index, 1);
-        if (current.length) return;
-        listeners.delete(key);
-        cancelSubscriptionRetry(key);
-        nativeSendMessage({
-          channel: CHANNEL,
-          type: "unsubscribe",
-          subscriptionId: key,
-        }).catch(() => undefined);
-      };
-    },
     request(namespace, method, argumentsValue) {
       return nativeSendMessage({
         channel: CHANNEL,
@@ -203,10 +233,35 @@
         arguments: argumentsValue,
       }).then((response) => {
         if (response && response.error) {
-          throw new Error(response.error.message);
+          const error = new Error(response.error.message);
+          error.code = response.error.code;
+          throw error;
         }
         return response ? response.result : undefined;
       });
     },
   };
+  bridgeRuntime.register = (namespace, event, handler) => {
+    const key = `${namespace}.${event}`;
+    const handlers = listeners.get(key) || [];
+    handlers.push(handler);
+    listeners.set(key, handlers);
+    if (handlers.length === 1) {
+      sendSubscription(key, namespace, event, 0);
+    }
+    return () => {
+      const current = listeners.get(key) || [];
+      const index = current.indexOf(handler);
+      if (index >= 0) current.splice(index, 1);
+      if (current.length) return;
+      listeners.delete(key);
+      cancelSubscriptionRetry(key);
+      nativeSendMessage({
+        channel: CHANNEL,
+        type: "unsubscribe",
+        subscriptionId: `${subscriptionContextId}:${key}`,
+      }).catch(() => undefined);
+    };
+  };
+  globalThis.__vmuxExtensionRuntime = bridgeRuntime;
 })();

@@ -10,5 +10,6 @@ pub(crate) mod model;
 mod runtime;
 mod shim;
 mod template;
+pub(crate) mod windows;
 
 pub use manager_page::ExtensionsPlugin;

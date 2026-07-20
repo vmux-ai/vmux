@@ -11,9 +11,12 @@ use vmux_core::extension::protocol::{
     ExtensionCallerContext,
 };
 
-use super::bridge::{BridgeInbound, ExtensionBridgeServer};
+use super::bridge::{BridgeAuthorization, BridgeInbound, ExtensionBridgeServer};
 use super::capability::{CapabilityKind, CapabilityMatrix, CapabilityStatus};
 use super::model::{ChromeModel, ChromeModelEvent};
+use super::windows::{
+    CloseExtensionWindowRequest, ExtensionWindows, UpdateHostWindowRequest, WindowEffect,
+};
 
 const CONFORMANCE_NAMESPACE: &str = "__vmux_conformance";
 const MODEL_CHANGED_EVENT: &str = "modelChanged";
@@ -89,8 +92,12 @@ pub fn drain_bridge_requests(
     mut wake_timer: Option<ResMut<ConformanceWakeTimer>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
     mut response_cache: ResMut<BridgeResponseCache>,
+    mut extension_windows: ResMut<ExtensionWindows>,
     mut seen: Local<SeenBridgeRequests>,
     mut app_commands: MessageWriter<AppCommand>,
+    mut close_window_requests: MessageWriter<CloseExtensionWindowRequest>,
+    mut update_host_window_requests: MessageWriter<UpdateHostWindowRequest>,
+    mut model_events: MessageWriter<ChromeModelEvent>,
 ) {
     for _ in 0..MAX_BRIDGE_MESSAGES_PER_UPDATE {
         let Ok(inbound) = server.try_recv() else {
@@ -135,6 +142,16 @@ pub fn drain_bridge_requests(
                     }
                     continue;
                 }
+                let Some(authorization) = server.authorization(&extension_id) else {
+                    send_fatal_to_session(
+                        &server,
+                        &extension_id,
+                        session_id,
+                        "unauthorized_extension",
+                        "extension authorization is unavailable",
+                    );
+                    continue;
+                };
                 if let Some(response) = response_cache.0.get(&extension_id).and_then(|responses| {
                     responses
                         .iter()
@@ -172,10 +189,34 @@ pub fn drain_bridge_requests(
                     &CAPABILITY_MATRIX,
                     request,
                     &model,
+                    &mut extension_windows,
+                    authorization,
                     extension_conformance_enabled(),
                 );
-                if let Some(command) = dispatched.command {
+                for command in dispatched.commands {
                     app_commands.write(command);
+                }
+                for effect in dispatched.effects {
+                    match effect {
+                        WindowEffect::Open(urls) => {
+                            for url in urls {
+                                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
+                                    OpenCommand::InNewStack { url },
+                                )));
+                            }
+                        }
+                        WindowEffect::Close { tab_ids, urls } => {
+                            close_window_requests
+                                .write(CloseExtensionWindowRequest { tab_ids, urls });
+                        }
+                        WindowEffect::UpdateHost { window_id, update } => {
+                            update_host_window_requests
+                                .write(UpdateHostWindowRequest { window_id, update });
+                        }
+                    }
+                }
+                for event in dispatched.events {
+                    model_events.write(event);
                 }
                 let response = dispatched.response;
                 let responses = response_cache.0.entry(extension_id.clone()).or_default();
@@ -205,13 +246,18 @@ pub fn drain_bridge_requests(
                         continue;
                     }
                 };
-                if wake_timer.is_none()
-                    || !server
+                let conformance_subscription = subscription.namespace == CONFORMANCE_NAMESPACE
+                    && subscription.event == MODEL_CHANGED_EVENT
+                    && wake_timer.is_some()
+                    && server
                         .authorization(&extension_id)
-                        .is_some_and(|authorization| authorization.conformance)
-                    || subscription.namespace != CONFORMANCE_NAMESPACE
-                    || subscription.event != MODEL_CHANGED_EVENT
-                {
+                        .is_some_and(|authorization| authorization.conformance);
+                let windows_subscription = subscription.namespace == "windows"
+                    && matches!(
+                        subscription.event.as_str(),
+                        "onCreated" | "onRemoved" | "onFocusChanged" | "onBoundsChanged"
+                    );
+                if !conformance_subscription && !windows_subscription {
                     send_fatal_to_session(
                         &server,
                         &extension_id,
@@ -246,6 +292,9 @@ pub fn drain_bridge_requests(
                     entries.push(stored);
                 }
                 resend_pending(&server, &pending, &extension_id);
+                if !conformance_subscription {
+                    continue;
+                }
                 if let Some(timer) = wake_timer.as_mut() {
                     if timer.scheduled.contains(&extension_id) {
                         continue;
@@ -331,19 +380,10 @@ pub fn drain_bridge_requests(
                 }
             }
             BridgeClientMessage::Ack { sequence } => {
-                let removed = pending
+                pending
                     .events
                     .get_mut(&extension_id)
                     .and_then(|events| events.remove(&sequence));
-                if removed.is_none() {
-                    send_fatal_to_session(
-                        &server,
-                        &extension_id,
-                        session_id,
-                        "protocol_error",
-                        "unknown bridge event acknowledgement",
-                    );
-                }
             }
             BridgeClientMessage::Hello(_) => send_fatal_to_session(
                 &server,
@@ -629,17 +669,37 @@ pub fn forward_chrome_model_events(
     mut pending: ResMut<PendingBridgeEvents>,
 ) {
     for event in events.read() {
-        let Ok(value) = serde_json::to_value(event) else {
-            bevy::log::error!("failed to serialize Chrome model event");
-            continue;
-        };
-        for extension_id in subscriptions.0.keys() {
-            queue_event(
-                &server,
-                &mut pending,
-                extension_id,
-                serde_json::json!([value.clone()]),
-            );
+        for (extension_id, entries) in &subscriptions.0 {
+            if entries.iter().any(|entry| {
+                entry.namespace == CONFORMANCE_NAMESPACE && entry.event == MODEL_CHANGED_EVENT
+            }) {
+                let Ok(value) = serde_json::to_value(event) else {
+                    bevy::log::error!("failed to serialize Chrome model event");
+                    continue;
+                };
+                queue_event(
+                    &server,
+                    &mut pending,
+                    extension_id,
+                    CONFORMANCE_NAMESPACE,
+                    MODEL_CHANGED_EVENT,
+                    serde_json::json!([value]),
+                );
+            }
+            if let Some((event_name, arguments)) = super::windows::event_payload(event)
+                && entries
+                    .iter()
+                    .any(|entry| entry.namespace == "windows" && entry.event == event_name)
+            {
+                queue_event(
+                    &server,
+                    &mut pending,
+                    extension_id,
+                    "windows",
+                    event_name,
+                    arguments,
+                );
+            }
         }
     }
 }
@@ -669,6 +729,8 @@ pub fn fire_conformance_wake_timer(
             &server,
             &mut pending,
             &extension_id,
+            CONFORMANCE_NAMESPACE,
+            MODEL_CHANGED_EVENT,
             serde_json::json!([snapshot]),
         );
     }
@@ -676,13 +738,17 @@ pub fn fire_conformance_wake_timer(
 
 struct DispatchedApiRequest {
     response: BridgeServerMessage,
-    command: Option<AppCommand>,
+    commands: Vec<AppCommand>,
+    effects: Vec<WindowEffect>,
+    events: Vec<ChromeModelEvent>,
 }
 
 fn dispatched_response(response: BridgeServerMessage) -> DispatchedApiRequest {
     DispatchedApiRequest {
         response,
-        command: None,
+        commands: Vec::new(),
+        effects: Vec::new(),
+        events: Vec::new(),
     }
 }
 
@@ -728,6 +794,8 @@ fn dispatch_api_request(
     matrix: &CapabilityMatrix,
     request: ApiRequest,
     model: &ChromeModel,
+    extension_windows: &mut ExtensionWindows,
+    authorization: &BridgeAuthorization,
     conformance_enabled: bool,
 ) -> DispatchedApiRequest {
     if request.namespace == CONFORMANCE_NAMESPACE {
@@ -748,9 +816,26 @@ fn dispatch_api_request(
             ChromeError::new("unsupported_api", "reserved conformance API is disabled"),
         )));
     }
+    if request.namespace == "windows" {
+        return match super::windows::dispatch(&request, model, extension_windows, authorization) {
+            Ok(dispatched) => DispatchedApiRequest {
+                response: BridgeServerMessage::Response(ApiResponse::success(
+                    request.request_id,
+                    dispatched.result,
+                )),
+                commands: Vec::new(),
+                effects: dispatched.effects,
+                events: dispatched.events,
+            },
+            Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
+                request.request_id,
+                error,
+            ))),
+        };
+    }
     if matches!(
         (request.namespace.as_str(), request.method.as_str()),
-        ("windows", "create") | ("tabs", "create")
+        ("tabs", "create")
     ) {
         return match create_page_command(&request) {
             Ok(command) => DispatchedApiRequest {
@@ -758,7 +843,9 @@ fn dispatch_api_request(
                     request.request_id,
                     serde_json::Value::Null,
                 )),
-                command: Some(command),
+                commands: vec![command],
+                effects: Vec::new(),
+                events: Vec::new(),
             },
             Err(error) => dispatched_response(BridgeServerMessage::Response(ApiResponse::failure(
                 request.request_id,
@@ -810,6 +897,8 @@ fn queue_event(
     server: &ExtensionBridgeServer,
     pending: &mut PendingBridgeEvents,
     extension_id: &str,
+    namespace: &str,
+    event_name: &str,
     arguments: serde_json::Value,
 ) {
     if pending
@@ -830,8 +919,8 @@ fn queue_event(
     pending.next_sequence = pending.next_sequence.saturating_add(1).max(1);
     let event = ApiEvent {
         sequence,
-        namespace: CONFORMANCE_NAMESPACE.into(),
-        event: MODEL_CHANGED_EVENT.into(),
+        namespace: namespace.into(),
+        event: event_name.into(),
         arguments,
     };
     pending
@@ -1017,26 +1106,23 @@ mod tests {
             &CapabilityMatrix::embedded().unwrap(),
             request,
             &ChromeModel::default(),
+            &mut ExtensionWindows::default(),
+            &BridgeAuthorization::default(),
             false,
         );
 
-        assert_eq!(
-            dispatched.command,
-            Some(AppCommand::Browser(BrowserCommand::Open(
-                OpenCommand::InNewStack {
-                    url: Some(format!(
-                        "chrome-extension://{EXTENSION_ID}/popup/index.html"
-                    )),
-                },
-            )))
-        );
-        assert_eq!(
-            dispatched.response,
-            BridgeServerMessage::Response(ApiResponse::success(
-                "window-create",
-                serde_json::Value::Null,
-            ))
-        );
+        assert!(matches!(
+            &dispatched.effects[0],
+            WindowEffect::Open(urls)
+                if urls == &vec![Some(format!(
+                    "chrome-extension://{EXTENSION_ID}/popup/index.html"
+                ))]
+        ));
+        let BridgeServerMessage::Response(response) = dispatched.response else {
+            panic!("expected response");
+        };
+        assert_eq!(response.request_id, "window-create");
+        assert!(response.result.unwrap()["id"].as_i64().is_some());
     }
 
     #[test]
@@ -1055,18 +1141,17 @@ mod tests {
             &CapabilityMatrix::embedded().unwrap(),
             request,
             &ChromeModel::default(),
+            &mut ExtensionWindows::default(),
+            &BridgeAuthorization::default(),
             false,
         );
 
-        assert_eq!(dispatched.command, None);
+        assert!(dispatched.commands.is_empty());
         assert_eq!(
             dispatched.response,
             BridgeServerMessage::Response(ApiResponse::failure(
                 "window-create",
-                ChromeError::new(
-                    "invalid_url",
-                    "extension page URL uses an unsupported scheme",
-                ),
+                ChromeError::new("invalid_url", "window URL uses an unsupported scheme",),
             ))
         );
     }
@@ -1115,7 +1200,11 @@ mod tests {
             .init_resource::<BridgeResponseCache>()
             .init_resource::<PendingBridgeEvents>()
             .init_resource::<ChromeModel>()
+            .init_resource::<ExtensionWindows>()
             .add_message::<AppCommand>()
+            .add_message::<CloseExtensionWindowRequest>()
+            .add_message::<UpdateHostWindowRequest>()
+            .add_message::<ChromeModelEvent>()
             .add_systems(Update, drain_bridge_requests);
         for _ in 0..20 {
             app.update();
@@ -1186,8 +1275,15 @@ mod tests {
             caller_context: caller_context(),
         };
 
-        let enabled = dispatch_api_request(&matrix, request(), &model, true);
-        assert_eq!(enabled.command, None);
+        let enabled = dispatch_api_request(
+            &matrix,
+            request(),
+            &model,
+            &mut ExtensionWindows::default(),
+            &BridgeAuthorization::default(),
+            true,
+        );
+        assert!(enabled.commands.is_empty());
         assert_eq!(
             enabled.response,
             BridgeServerMessage::Response(ApiResponse::success(
@@ -1195,8 +1291,15 @@ mod tests {
                 serde_json::to_value(&model).unwrap()
             ))
         );
-        let disabled = dispatch_api_request(&matrix, request(), &model, false);
-        assert_eq!(disabled.command, None);
+        let disabled = dispatch_api_request(
+            &matrix,
+            request(),
+            &model,
+            &mut ExtensionWindows::default(),
+            &BridgeAuthorization::default(),
+            false,
+        );
+        assert!(disabled.commands.is_empty());
         assert_eq!(
             disabled.response,
             BridgeServerMessage::Response(ApiResponse::failure(
@@ -1323,6 +1426,8 @@ mod tests {
             &server,
             &mut pending,
             EXTENSION_ID,
+            CONFORMANCE_NAMESPACE,
+            MODEL_CHANGED_EVENT,
             serde_json::json!([{ "change": 1 }]),
         );
         let first = read_server(&mut socket);
@@ -1350,7 +1455,11 @@ mod tests {
             .init_resource::<BridgeResponseCache>()
             .init_resource::<ChromeModel>()
             .init_resource::<ConformanceWakeTimer>()
+            .init_resource::<ExtensionWindows>()
             .add_message::<AppCommand>()
+            .add_message::<CloseExtensionWindowRequest>()
+            .add_message::<UpdateHostWindowRequest>()
+            .add_message::<ChromeModelEvent>()
             .add_systems(Update, drain_bridge_requests);
         pump(&mut app);
 
@@ -1370,6 +1479,80 @@ mod tests {
                 .get(EXTENSION_ID)
                 .is_none_or(BTreeMap::is_empty)
         );
+
+        send_client(
+            &mut restarted,
+            &BridgeClientMessage::Ack {
+                sequence: first_event.sequence,
+            },
+        );
+        pump(&mut app);
+        send_client(
+            &mut restarted,
+            &BridgeClientMessage::ApiRequest(ApiRequest {
+                request_id: "after-duplicate-ack".into(),
+                namespace: "windows".into(),
+                method: "getAll".into(),
+                arguments: serde_json::json!([{}]),
+                caller_context: caller_context(),
+            }),
+        );
+        pump(&mut app);
+        assert!(matches!(
+            read_server(&mut restarted),
+            BridgeServerMessage::Response(ApiResponse { request_id, .. })
+                if request_id == "after-duplicate-ack"
+        ));
+    }
+
+    #[test]
+    fn windows_subscription_receives_window_events() {
+        let server = conformance_server();
+        let mut socket = connect_bridge(&server);
+        send_client(
+            &mut socket,
+            &BridgeClientMessage::Subscribe(EventSubscribe {
+                subscription_id: "windows.onRemoved".into(),
+                namespace: "windows".into(),
+                event: "onRemoved".into(),
+                caller_context: caller_context(),
+            }),
+        );
+        let mut app = App::new();
+        app.insert_resource(server)
+            .init_resource::<BridgeSubscriptions>()
+            .init_resource::<BridgeResponseCache>()
+            .init_resource::<PendingBridgeEvents>()
+            .init_resource::<ChromeModel>()
+            .init_resource::<ExtensionWindows>()
+            .add_message::<AppCommand>()
+            .add_message::<CloseExtensionWindowRequest>()
+            .add_message::<UpdateHostWindowRequest>()
+            .add_message::<ChromeModelEvent>()
+            .add_systems(
+                Update,
+                (
+                    drain_bridge_requests,
+                    forward_chrome_model_events.after(drain_bridge_requests),
+                ),
+            );
+        pump(&mut app);
+        assert!(
+            app.world().resource::<BridgeSubscriptions>().0[EXTENSION_ID]
+                .iter()
+                .any(|entry| entry.namespace == "windows" && entry.event == "onRemoved")
+        );
+
+        app.world_mut()
+            .write_message(ChromeModelEvent::WindowRemoved { window_id: 42 });
+        app.update();
+
+        let BridgeServerMessage::Event(event) = read_server(&mut socket) else {
+            panic!("expected window event");
+        };
+        assert_eq!(event.namespace, "windows");
+        assert_eq!(event.event, "onRemoved");
+        assert_eq!(event.arguments, serde_json::json!([42]));
     }
 
     #[test]
@@ -1396,7 +1579,11 @@ mod tests {
                 scheduler: Some(scheduler),
                 ..Default::default()
             })
+            .init_resource::<ExtensionWindows>()
             .add_message::<AppCommand>()
+            .add_message::<CloseExtensionWindowRequest>()
+            .add_message::<UpdateHostWindowRequest>()
+            .add_message::<ChromeModelEvent>()
             .add_systems(Update, drain_bridge_requests);
         pump(&mut app);
         let first_deadline = app.world().resource::<ConformanceWakeTimer>().deadlines[EXTENSION_ID];

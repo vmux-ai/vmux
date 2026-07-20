@@ -154,7 +154,10 @@ impl Plugin for BrowserPlugin {
             .init_resource::<crate::extensions::broker::PendingBridgeEvents>()
             .init_resource::<crate::extensions::model::ChromeModel>()
             .init_resource::<crate::extensions::model::ChromeStableIds>()
+            .init_resource::<crate::extensions::windows::ExtensionWindows>()
             .add_message::<crate::extensions::model::ChromeModelEvent>()
+            .add_message::<crate::extensions::windows::CloseExtensionWindowRequest>()
+            .add_message::<crate::extensions::windows::UpdateHostWindowRequest>()
             .add_systems(
                 Update,
                 (
@@ -167,7 +170,20 @@ impl Plugin for BrowserPlugin {
             .add_systems(
                 Update,
                 crate::extensions::broker::drain_bridge_requests
+                    .after(crate::extensions::windows::sync_extension_windows),
+            )
+            .add_systems(
+                Update,
+                crate::extensions::windows::sync_extension_windows
                     .after(crate::extensions::model::rebuild_chrome_model),
+            )
+            .add_systems(
+                Update,
+                (
+                    crate::extensions::windows::route_close_extension_windows,
+                    crate::extensions::windows::apply_host_window_updates,
+                )
+                    .after(crate::extensions::broker::drain_bridge_requests),
             )
             .add_systems(
                 Update,

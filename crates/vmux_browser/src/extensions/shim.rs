@@ -4,7 +4,9 @@ use vmux_core::extension::protocol::{BRIDGE_CHANNEL, KEEPALIVE_CHANNEL};
 
 const PATCH_TEMPLATE: &str = include_str!("shim.js");
 const PATCH_FILE: &str = "vmux_patch.js";
-const PAGE_LOADER: &str = r#"<script src="/vmux_patch.js"></script>"#;
+const WORKER_LOADER_FILE: &str = "vmux_sw.js";
+const PAGE_LOADER: &str =
+    r#"<script src="/vmux_runtime.js"></script><script src="/vmux_patch.js"></script>"#;
 
 pub(crate) fn patch_source() -> Result<String, String> {
     super::template::render(
@@ -22,15 +24,6 @@ pub(crate) fn patch_source() -> Result<String, String> {
     )
 }
 
-fn content_hash(source: &str) -> String {
-    let mut hash: u32 = 0x811c_9dc5;
-    for byte in source.as_bytes() {
-        hash ^= u32::from(*byte);
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    format!("{hash:08x}")
-}
-
 pub(crate) fn install_worker_loader(dir: &Path, runtime_file: &str) -> Result<String, String> {
     let manifest_path = dir.join("manifest.json");
     let raw = std::fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
@@ -44,15 +37,12 @@ pub(crate) fn install_worker_loader(dir: &Path, runtime_file: &str) -> Result<St
         .and_then(Value::as_str)
         .ok_or("manifest has no background service worker")?
         .to_string();
-    if original.starts_with("vmux_sw_") || original == PATCH_FILE || original == runtime_file {
+    if original == WORKER_LOADER_FILE || original == PATCH_FILE || original == runtime_file {
         return Err("manifest service worker is already generated".into());
     }
     let is_module = background.get("type").and_then(Value::as_str) == Some("module");
     let patch_source = patch_source()?;
-    let loader_file = format!(
-        "vmux_sw_{}.js",
-        content_hash(&format!("{runtime_file}\0{patch_source}"))
-    );
+    let loader_file = WORKER_LOADER_FILE.to_string();
     let loader = if is_module {
         format!(
             "import \"./{runtime_file}\";\nimport \"./{PATCH_FILE}\";\nimport \"./{original}\";\n"
@@ -128,6 +118,7 @@ mod tests {
         let loader_file = install_worker_loader(dir.path(), "vmux_runtime.js").unwrap();
 
         assert_eq!(worker(dir.path()), loader_file);
+        assert_eq!(loader_file, WORKER_LOADER_FILE);
         let loader = std::fs::read_to_string(dir.path().join(loader_file)).unwrap();
         assert!(loader.contains("importScripts(\"vmux_runtime.js\")"));
         assert!(loader.contains("importScripts(\"vmux_patch.js\")"));
@@ -136,11 +127,61 @@ mod tests {
         let patch = std::fs::read_to_string(dir.path().join(PATCH_FILE)).unwrap();
         assert!(patch.contains("message.channel === BRIDGE_CHANNEL"));
         assert!(patch.contains("capture(message, sender)"));
-        assert!(patch.contains("bridgeRuntime.request(\"windows\", \"create\""));
+        for method in [
+            "get",
+            "getCurrent",
+            "getLastFocused",
+            "getAll",
+            "create",
+            "update",
+            "remove",
+        ] {
+            assert!(patch.contains(&format!("windowRequest(\"{method}\"")));
+        }
+        for event in [
+            "onCreated",
+            "onRemoved",
+            "onFocusChanged",
+            "onBoundsChanged",
+        ] {
+            assert!(patch.contains(&format!("patchWindowEvent(\"{event}\")")));
+        }
+        assert!(patch.contains("WINDOW_ID_NONE"));
+        assert!(patch.contains("WINDOW_ID_CURRENT"));
+        assert!(patch.contains("normalizeTabWindowIds"));
+        assert!(patch.contains("tabMatchesQuery"));
+        assert!(patch.contains("knownWindows.length"));
+        assert!(patch.contains("typeof result === \"undefined\" ? useFallback() : result"));
         assert!(!patch.contains("self.clients.openWindow"));
+        assert!(!patch.contains("openPopout(info)"));
         assert!(patch.contains("__vmux_active_tab_v1"));
         assert!(patch.contains("c.storage.session.set(stored)"));
-        assert!(!patch.contains("event.addListener = function"));
+        assert!(patch.contains("event.addListener = function"));
+    }
+
+    #[test]
+    fn windows_namespace_is_fully_shimmed() {
+        let patch = patch_source().unwrap();
+
+        for member in [
+            "WINDOW_ID_NONE",
+            "WINDOW_ID_CURRENT",
+            "c.windows.get =",
+            "c.windows.getCurrent =",
+            "c.windows.getLastFocused =",
+            "c.windows.getAll =",
+            "c.windows.create =",
+            "c.windows.update =",
+            "c.windows.remove =",
+            "onCreated",
+            "onRemoved",
+            "onFocusChanged",
+            "onBoundsChanged",
+            "globalThis.close = function",
+            "tabMatchesQuery",
+        ] {
+            assert!(patch.contains(member));
+        }
     }
 
     #[test]
@@ -186,6 +227,7 @@ mod tests {
 
         let html = std::fs::read_to_string(path).unwrap();
         assert!(html.find(PAGE_LOADER).unwrap() < html.find("main.js").unwrap());
+        assert!(html.find("vmux_runtime.js").unwrap() < html.find("vmux_patch.js").unwrap());
         assert_eq!(html.matches(PAGE_LOADER).count(), 1);
     }
 

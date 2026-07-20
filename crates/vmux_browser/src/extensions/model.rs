@@ -5,6 +5,7 @@ mod project;
 pub(crate) use project::rebuild_chrome_model;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChromeWindow {
     pub id: i32,
     pub focused: bool,
@@ -12,9 +13,15 @@ pub struct ChromeWindow {
     pub top: i32,
     pub width: i32,
     pub height: i32,
+    pub incognito: bool,
+    #[serde(rename = "type")]
+    pub window_type: String,
+    pub state: String,
+    pub always_on_top: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChromeTab {
     pub id: i32,
     pub window_id: i32,
@@ -72,12 +79,28 @@ impl ChromeStableIds {
         self.tabs.insert(entity, id);
         id
     }
+
+    pub(crate) fn tab_entity(&self, id: i32) -> Option<Entity> {
+        self.tabs
+            .iter()
+            .find_map(|(entity, stable_id)| (*stable_id == id).then_some(*entity))
+    }
+
+    pub(crate) fn window_entity(&self, id: i32) -> Option<Entity> {
+        self.windows
+            .iter()
+            .find_map(|(entity, stable_id)| (*stable_id == id).then_some(*entity))
+    }
 }
 
 #[derive(Message, Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 #[allow(clippy::enum_variant_names)]
 pub enum ChromeModelEvent {
+    WindowCreated(ChromeWindow),
+    WindowRemoved { window_id: i32 },
+    WindowFocusChanged { window_id: i32 },
+    WindowBoundsChanged(ChromeWindow),
     TabCreated(ChromeTab),
     TabUpdated { old: ChromeTab, new: ChromeTab },
     TabRemoved { tab_id: i32, window_id: i32 },

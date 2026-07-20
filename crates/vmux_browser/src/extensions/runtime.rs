@@ -37,8 +37,9 @@ pub(crate) struct BridgeConfig<'a> {
     pub conformance: bool,
 }
 
-pub fn prepare_runtime(
+pub fn prepare_runtime_in(
     root: &Path,
+    runtime_store: &Path,
     profile: &str,
     entry: &store::ExtEntry,
 ) -> Result<PreparedRuntime, String> {
@@ -55,10 +56,10 @@ pub fn prepare_runtime(
 
     let worker_source = render_worker_source()?;
     let runtime_hash = runtime_hash(&source_hash, &worker_source)?;
-    let runtime_root = store::runtime_profile_dir(root, profile, &entry.id);
+    let runtime_root = store::runtime_profile_dir(runtime_store, profile, &entry.id);
     std::fs::create_dir_all(&runtime_root).map_err(|error| error.to_string())?;
-    let temp_dir = runtime_root.join(format!("{runtime_hash}.tmp"));
-    let final_dir = runtime_root.join(&runtime_hash);
+    let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
+    let final_dir = runtime_root.join("current");
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).map_err(|error| error.to_string())?;
     }
@@ -315,13 +316,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (entry, source, original_manifest) = source_entry(root.path(), "background.js", false);
 
-        let prepared = prepare_runtime(root.path(), "personal", &entry).unwrap();
+        let prepared = prepare_runtime_in(root.path(), root.path(), "personal", &entry).unwrap();
 
         assert!(prepared.dir.starts_with(store::runtime_profile_dir(
             root.path(),
             "personal",
             &entry.id
         )));
+        assert_eq!(prepared.dir.file_name().unwrap(), "current");
         assert_eq!(
             std::fs::read_to_string(source.join("manifest.json")).unwrap(),
             original_manifest
@@ -351,7 +353,29 @@ mod tests {
         })
         .unwrap();
         assert!(bridge.contains("pulseWorker"));
+        assert!(bridge.contains("CLOSE_POLICY_ERROR = 4008"));
+        assert!(!bridge.contains(", 1002,"));
+        assert!(!bridge.contains(", 1008,"));
+        assert!(!bridge.contains(", 1009,"));
+        assert!(!bridge.contains(", 1013,"));
         assert!(!bridge.contains("__VMUX_"));
+    }
+
+    #[test]
+    fn prepares_runtime_outside_shared_package_store() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime_store = tempfile::tempdir().unwrap();
+        let (entry, _, _) = source_entry(root.path(), "background.js", false);
+
+        let prepared =
+            prepare_runtime_in(root.path(), runtime_store.path(), "personal", &entry).unwrap();
+
+        assert!(prepared.dir.starts_with(store::runtime_profile_dir(
+            runtime_store.path(),
+            "personal",
+            &entry.id
+        )));
+        assert!(!prepared.dir.starts_with(store::runtimes_root(root.path())));
     }
 
     #[test]
@@ -359,7 +383,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let (entry, _, _) = source_entry(root.path(), "sw/main.js", true);
 
-        let prepared = prepare_runtime(root.path(), "personal", &entry).unwrap();
+        let prepared = prepare_runtime_in(root.path(), root.path(), "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -394,7 +418,7 @@ mod tests {
         .unwrap();
         entry.source_hash = store::tree_sha256(&source).unwrap();
 
-        let prepared = prepare_runtime(root.path(), "personal", &entry).unwrap();
+        let prepared = prepare_runtime_in(root.path(), root.path(), "personal", &entry).unwrap();
 
         let generated: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(prepared.dir.join("manifest.json")).unwrap(),
@@ -411,8 +435,11 @@ mod tests {
         assert!(retry.contains("sendPromise(args, attempt + 1)"));
         assert!(retry.contains("__vmuxSenderUrl"));
         let worker = std::fs::read_to_string(prepared.dir.join("vmux_runtime.js")).unwrap();
-        assert!(worker.contains("senderWithTab(message, sender)"));
+        assert!(worker.contains("senderWithTab(message, sender, useLastTab)"));
         assert!(worker.contains("triggerAutofillScriptInjection"));
+        assert!(worker.contains("normalizePortSender(port)"));
+        assert!(worker.contains("endsWith(\"-message-connector\")"));
+        assert!(retry.contains("nativeSetTimeout(resolve, 1000)"));
     }
 
     #[test]
@@ -428,9 +455,10 @@ mod tests {
         .unwrap();
         entry.source_hash = store::tree_sha256(&source).unwrap();
 
-        let prepared = prepare_runtime(root.path(), "personal", &entry).unwrap();
+        let prepared = prepare_runtime_in(root.path(), root.path(), "personal", &entry).unwrap();
 
         let popup = std::fs::read_to_string(prepared.dir.join("popup/index.html")).unwrap();
+        assert!(popup.find("/vmux_runtime.js").unwrap() < popup.find("/vmux_patch.js").unwrap());
         assert!(popup.find("/vmux_patch.js").unwrap() < popup.find("main.js").unwrap());
     }
 }
