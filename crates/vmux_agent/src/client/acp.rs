@@ -587,8 +587,18 @@ fn apply_agent_compatibility_env(
     match crate::acp_install::registry_id_alias(agent_id) {
         "mistral-vibe" => apply_vibe_compatibility_env(env),
         "codex-acp" => apply_codex_compatibility_env(env),
+        "claude-acp" => apply_claude_compatibility_env(env),
         _ => env,
     }
+}
+
+fn apply_claude_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+    env.retain(|(key, _)| key != "MCP_TOOL_TIMEOUT");
+    env.push((
+        "MCP_TOOL_TIMEOUT".to_string(),
+        (crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS * 1_000).to_string(),
+    ));
+    env
 }
 
 fn apply_vibe_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
@@ -699,6 +709,25 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
         .as_object_mut()
         .unwrap()
         .insert("web_search".to_string(), serde_json::Value::Bool(false));
+
+    let mcp_servers = config
+        .entry("mcp_servers")
+        .or_insert_with(|| serde_json::json!({}));
+    if !mcp_servers.is_object() {
+        *mcp_servers = serde_json::json!({});
+    }
+    let vmux = mcp_servers
+        .as_object_mut()
+        .unwrap()
+        .entry("vmux")
+        .or_insert_with(|| serde_json::json!({}));
+    if !vmux.is_object() {
+        *vmux = serde_json::json!({});
+    }
+    vmux.as_object_mut().unwrap().insert(
+        "tool_timeout_sec".to_string(),
+        serde_json::json!(crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS),
+    );
 
     let instructions = config
         .get("developer_instructions")
@@ -1586,6 +1615,7 @@ mod tests {
             assert_eq!(config["features"]["unified_exec"], false);
             assert_eq!(config["tools"]["web_search"], false);
             assert_eq!(config["approvals_reviewer"], "user");
+            assert_eq!(config["mcp_servers"]["vmux"]["tool_timeout_sec"], 660);
             assert_eq!(
                 config["features"]["code_mode"]["direct_only_tool_namespaces"],
                 serde_json::json!([crate::client::cli::codex::DIRECT_ONLY_NAMESPACE])
@@ -1595,6 +1625,19 @@ mod tests {
                     .as_str()
                     .unwrap()
                     .contains("mcp__vmux__run")
+            );
+        }
+    }
+
+    #[test]
+    fn claude_acp_extends_mcp_tool_timeout() {
+        for agent_id in ["claude", "claude-acp"] {
+            let env = apply_agent_compatibility_env(agent_id, vec![s("MCP_TOOL_TIMEOUT", "60000")]);
+            assert_eq!(
+                env.iter()
+                    .find(|(key, _)| key == "MCP_TOOL_TIMEOUT")
+                    .map(|(_, value)| value.as_str()),
+                Some("660000")
             );
         }
     }

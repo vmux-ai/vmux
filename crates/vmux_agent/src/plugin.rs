@@ -5047,7 +5047,9 @@ fn rebuilt_args_env_for_restart(
     session_id: Option<&str>,
     new_id: ProcessId,
 ) -> (Vec<String>, Vec<(String, String)>) {
-    let Ok(mcp_cfg) = crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id) else {
+    let Ok(mcp_cfg) =
+        crate::mcp::resolve(std::path::Path::new(&launch.cwd), new_id, strategy.kind())
+    else {
         return (launch.args.clone(), launch.env.clone());
     };
     let args = strategy.build_args(&mcp_cfg, session_id);

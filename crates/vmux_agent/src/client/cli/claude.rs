@@ -15,7 +15,8 @@ const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
 mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll";
 const RUN_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. Run \
 ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
-over). Do ALL web access via the vmux browser tools in the user's visible browser: \
+over). Use the output returned by run directly; call read_terminal only when run says the command \
+is still running. Do ALL web access via the vmux browser tools in the user's visible browser: \
 mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
 to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
 built-in web search.";
@@ -60,7 +61,10 @@ impl CliAgentStrategy for ClaudeStrategy {
     }
 
     fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
-        vec![]
+        vec![(
+            "MCP_TOOL_TIMEOUT".to_string(),
+            (crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS * 1_000).to_string(),
+        )]
     }
 
     fn discover_session(
@@ -521,6 +525,20 @@ mod tests {
         assert!(json.contains("\"cwd\":\"/work\""));
         assert!(json.contains("\"vmux\""));
         assert!(json.contains("\"mcpServers\""));
+    }
+
+    #[test]
+    fn build_env_extends_mcp_tool_timeout() {
+        let mcp = McpServerConfig {
+            command: "/bin/vmux".into(),
+            args: vec!["mcp".into()],
+            cwd: None,
+        };
+
+        assert_eq!(
+            ClaudeStrategy.build_env(&mcp),
+            vec![("MCP_TOOL_TIMEOUT".into(), "660000".into())]
+        );
     }
 
     #[test]

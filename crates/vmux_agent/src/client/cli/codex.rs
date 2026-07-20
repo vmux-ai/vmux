@@ -11,7 +11,8 @@ use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 const DISABLED_FEATURES: &[&str] = &["shell_tool", "unified_exec"];
 pub(crate) const DIRECT_ONLY_NAMESPACE: &str = "mcp__vmux";
 pub(crate) const RUN_STEER_PROMPT: &str = "The native shell and web search tools are disabled. Run ALL shell \
-commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). To READ \
+commands via the mcp__vmux__run tool (a visible terminal the user can watch and take over). Use the \
+output returned by run directly; call read_terminal only when run says the command is still running. To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
 text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
 opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Do ALL web access via the vmux browser tools in the \
@@ -44,6 +45,11 @@ impl CliAgentStrategy for CodexStrategy {
             format!("mcp_servers.vmux.command={}", quote_toml(&mcp.command)),
             "-c".into(),
             format!("mcp_servers.vmux.args={}", toml_array(&mcp.args)),
+            "-c".into(),
+            format!(
+                "mcp_servers.vmux.tool_timeout_sec={}",
+                crate::mcp::LONG_MCP_TOOL_TIMEOUT_SECS
+            ),
         ];
         if let Some(cwd) = &mcp.cwd {
             args.push("-c".into());
@@ -402,6 +408,10 @@ mod tests {
                 .any(|a| a == "mcp_servers.vmux.command=\"/bin/vmux\"")
         );
         assert!(args.iter().any(|a| a == "mcp_servers.vmux.args=[\"mcp\"]"));
+        assert!(
+            args.iter()
+                .any(|a| a == "mcp_servers.vmux.tool_timeout_sec=660")
+        );
     }
 
     #[test]
