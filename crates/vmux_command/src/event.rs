@@ -172,6 +172,7 @@ pub struct CommandBarActionEvent {
     pub value: String,
     pub target: Option<crate::open_target::OpenTarget>,
     pub agent_url: Option<String>,
+    pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
 }
 
 #[derive(
@@ -464,11 +465,13 @@ mod tests {
             value: "google.com".to_string(),
             target: None,
             agent_url: None,
+            attachments: Vec::new(),
         };
         assert_eq!(evt.action, "open");
         assert_eq!(evt.value, "google.com");
         assert_eq!(evt.target, None);
         assert_eq!(evt.agent_url, None);
+        assert!(evt.attachments.is_empty());
     }
 
     #[test]

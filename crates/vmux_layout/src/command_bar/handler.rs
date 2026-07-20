@@ -32,7 +32,10 @@ use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt};
+use vmux_core::agent::{
+    PageAgentAttachRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
+    PendingAgentPromptAttachments,
+};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
@@ -1326,7 +1329,18 @@ fn on_command_bar_action(
     match evt.action.as_str() {
         "prompt" => {
             let prompt = evt.value.trim();
-            if !prompt.is_empty() {
+            let attachments = evt
+                .attachments
+                .iter()
+                .filter(|attachment| !attachment.path.is_empty())
+                .map(|attachment| vmux_wire::protocol::AgentAttachment {
+                    path: attachment.path.clone(),
+                    name: attachment.name.clone(),
+                    mime_type: attachment.mime_type.clone(),
+                    size: attachment.size,
+                })
+                .collect::<Vec<_>>();
+            if !prompt.is_empty() || !attachments.is_empty() {
                 let (_, _, focused_stack) = focused_stack(
                     queries.active_tab_param.get(),
                     &queries.all_children,
@@ -1347,6 +1361,15 @@ fn on_command_bar_action(
                     commands
                         .entity(stack)
                         .insert(PendingAgentPrompt(prompt.to_string()));
+                    if !attachments.is_empty() {
+                        commands
+                            .entity(stack)
+                            .insert(PendingAgentPromptAttachments(attachments));
+                    } else {
+                        commands
+                            .entity(stack)
+                            .remove::<PendingAgentPromptAttachments>();
+                    }
                     writer_params.p1().write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack),
                         url,
@@ -1869,6 +1892,7 @@ fn reveal_command_bar(
                     value: String::new(),
                     target: None,
                     agent_url: None,
+                    attachments: Vec::new(),
                 },
             });
             continue;
@@ -2704,6 +2728,7 @@ mod tests {
                     value: String::new(),
                     target: None,
                     agent_url: None,
+                    attachments: Vec::new(),
                 },
             });
         app.world_mut().flush();

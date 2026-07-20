@@ -4,102 +4,12 @@
 
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
-/// Bin-event id: native → page files selected from disk or the clipboard.
-pub const CHAT_ATTACHMENTS_EVENT: &str = "chat_attachments";
-/// Bin-event id: native → page previews for media already present in the transcript.
-pub const CHAT_ATTACHMENT_PREVIEWS_EVENT: &str = "chat_attachment_previews";
-/// Bin-event id: native → page media entries matching an inline `@` query.
-pub const CHAT_MEDIA_ENTRIES_EVENT: &str = "chat_media_entries";
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatAttachment {
-    pub path: String,
-    pub name: String,
-    pub mime_type: String,
-    pub size: u64,
-    pub preview_data_url: String,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatSubmitAttachment {
-    pub path: String,
-    pub name: String,
-    pub mime_type: String,
-    pub size: u64,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatAttachments {
-    pub attachments: Vec<ChatAttachment>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatMediaEntry {
-    pub path: String,
-    pub name: String,
-    pub parent: String,
-    pub mime_type: String,
-    pub is_dir: bool,
-    pub preview_data_url: String,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatMediaEntries {
-    pub request_id: u64,
-    pub query: String,
-    pub entries: Vec<ChatMediaEntry>,
-}
+pub use vmux_command::prompt_media::{
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatSubmitAttachment,
+};
 
 #[derive(
     Clone,
@@ -172,19 +82,6 @@ pub struct ChatSubmit {
     pub attachments: Vec<ChatSubmitAttachment>,
 }
 
-/// Page → native: open a multi-select file picker rooted at the user's home directory.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatPickFiles;
-
 /// Page → native: open the workspace folder picker requested by the agent.
 #[derive(
     Clone,
@@ -197,65 +94,6 @@ pub struct ChatPickFiles;
     rkyv::Deserialize,
 )]
 pub struct ChatChooseWorkspace;
-
-/// Page → native: attach image media from the system clipboard, if present.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatPasteMedia;
-
-/// Page → native: list media and directories for an inline `@` query.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatMediaListRequest {
-    pub request_id: u64,
-    pub query: String,
-}
-
-/// Page → native: attach paths selected from the inline `@` menu.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatAttachPaths {
-    pub paths: Vec<String>,
-}
-
-/// Page → native: load previews for media already present in the transcript.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatAttachmentPreviewRequest {
-    pub paths: Vec<String>,
-}
 
 /// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
 /// 2 = allow-always.

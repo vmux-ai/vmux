@@ -2,11 +2,10 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, edit_prompt, filter_models, filter_sessions, inline_media_query,
-    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
-    prompt_history_direction, prompt_prefix_at_utf16, replace_inline_media_query,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_expand_thinking,
-    should_fetch_resume, tool_activity,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
+    menu_direction, move_prompt_history, move_selection, prompt_history_direction,
+    prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
+    should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
@@ -22,12 +21,13 @@ use crate::chat_page::event::{
 use dioxus::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use vmux_command::prompt_media::{inline_media_query, media_reference, replace_inline_media_query};
 use vmux_terminal::matrix_rain::MatrixRain;
-use vmux_terminal::page::PromptGhost;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 const PROMPT_ID: &str = "agent-chat-prompt";
@@ -149,19 +149,6 @@ fn file_extension_label(name: &str) -> String {
 
 fn attachment_label(attachment: &ChatAttachment) -> String {
     file_extension_label(&attachment.name)
-}
-
-fn media_reference(entry: &ChatMediaEntry) -> String {
-    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
-    if entry.parent == "~" {
-        format!("~/{name}", name = encode(&entry.name))
-    } else {
-        format!(
-            "{parent}/{name}",
-            parent = encode(&entry.parent),
-            name = encode(&entry.name)
-        )
-    }
 }
 
 fn select_media_entry(
@@ -299,10 +286,12 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
 pub fn Page(
     #[props(default)] agent_override: Option<String>,
     #[props(default)] transition_prompt: Option<String>,
+    #[props(default)] transition_attachments: Option<Vec<ChatAttachment>>,
 ) -> Element {
     use_theme();
     let agent = agent_override.unwrap_or_else(current_agent);
     let mut transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
+    let mut transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
@@ -419,6 +408,7 @@ pub fn Page(
         error.set(snap.error.clone());
         queued.set(snap.queued.clone());
         transition_preview.set(String::new());
+        transition_attachments.set(Vec::new());
         paused.set(snap.paused);
         agent_name.set(snap.agent_name.clone());
         agent_icon.set(snap.agent_icon.clone());
@@ -563,8 +553,10 @@ pub fn Page(
     let rain_accent = accent_rgb(&theme_accent, agent_accent.rain_rgb);
     let installing = status() == "installing";
     let installing_splash = installing && items.read().is_empty();
-    let show_capability_examples =
-        items.read().is_empty() && queued.read().is_empty() && attachments.read().is_empty();
+    let show_capability_examples = items.read().is_empty()
+        && queued.read().is_empty()
+        && attachments.read().is_empty()
+        && transition_attachments.read().is_empty();
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
@@ -1084,6 +1076,24 @@ pub fn Page(
                             }
                         }
                         div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
+                            for attachment in transition_attachments.read().iter() {
+                                div {
+                                    key: "transition-attachment-{attachment.path}",
+                                    class: "flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-2 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
+                                    if attachment.preview_data_url.is_empty() {
+                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
+                                            "{attachment_label(attachment)}"
+                                        }
+                                    } else {
+                                        img {
+                                            src: "{attachment.preview_data_url}",
+                                            alt: "{attachment.name}",
+                                            class: "h-5 w-5 rounded-full object-cover",
+                                        }
+                                    }
+                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
+                                }
+                            }
                             for (i , attachment) in attachments.read().iter().cloned().enumerate() {
                                 div {
                                     key: "attachment-pill-{attachment.path}",

@@ -34,6 +34,7 @@ fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartA
             |agent_url| vmux_layout::command_bar::palette::StartAgentTransition {
                 agent_url,
                 prompt: String::new(),
+                attachments: Vec::new(),
             },
         )
 }
@@ -65,6 +66,7 @@ fn StartAgentPage() -> Element {
             vmux_agent::chat_page::page::Page {
                 agent_override: Some(inline_agent_id(&active.agent_url)),
                 transition_prompt: Some(active.prompt),
+                transition_attachments: Some(active.attachments),
             }
         };
     }

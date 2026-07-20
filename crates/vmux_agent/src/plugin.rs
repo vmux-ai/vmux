@@ -6,8 +6,8 @@ use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
     AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest, PageAgentAttachRequest,
-    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, PendingAgentPrompt, RestartAgentPty,
-    SpawnAgentInStackRequest,
+    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
+    PendingAgentPromptAttachments, RestartAgentPty, SpawnAgentInStackRequest,
 };
 use vmux_core::{
     LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, Ready,
@@ -18,6 +18,7 @@ use vmux_layout::{
     stack::FocusedStack,
 };
 use vmux_service::client::ServiceClient;
+use vmux_service::protocol::AgentAttachment;
 use vmux_service::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
     AgentRequestId, AgentShellMode, ClientMessage, ProcessId,
@@ -4221,7 +4222,7 @@ fn prepare_agent_tab_worktrees(
 fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask), PendingPageOpen>,
-        Query<&PendingAgentPrompt>,
+        Query<(&PendingAgentPrompt, Option<&PendingAgentPromptAttachments>)>,
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
@@ -4270,11 +4271,18 @@ fn handle_agent_page_open(
                 continue;
             }
         };
-        let initial_prompt = open_q
+        let (initial_prompt, initial_attachments) = open_q
             .p1()
             .get(task.stack)
-            .ok()
-            .map(|prompt| prompt.0.clone());
+            .map(|(prompt, attachments)| {
+                (
+                    Some(prompt.0.clone()),
+                    attachments
+                        .map(|attachments| attachments.0.clone())
+                        .unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
         let transition_webview = transitions
             .get(task.stack)
             .ok()
@@ -4283,6 +4291,7 @@ fn handle_agent_page_open(
         match handle_agent_page_open_task(
             &task,
             initial_prompt,
+            initial_attachments,
             transition_webview,
             &children_q,
             &agents,
@@ -4405,6 +4414,7 @@ fn handle_swap_stack_session(
                     session_id,
                     stack: ev.stack,
                     initial_prompt: None,
+                    initial_attachments: Vec::new(),
                 });
             }
             crate::AgentUrl::Acp { id, sid } => {
@@ -4440,6 +4450,7 @@ fn handle_swap_stack_session(
 fn handle_agent_page_open_task(
     task: &PageOpenTask,
     initial_prompt: Option<String>,
+    initial_attachments: Vec<AgentAttachment>,
     transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
@@ -4486,7 +4497,7 @@ fn handle_agent_page_open_task(
                 kind_q,
             )
             .ok_or_else(|| format!("no Page agent strategy registered for {provider}/{model}"))?;
-            insert_initial_prompt_queue(task.stack, initial_prompt, commands);
+            insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
         Some(crate::AgentUrl::PageDefault) => {
@@ -4517,7 +4528,7 @@ fn handle_agent_page_open_task(
                     provider.provider, provider.default_model
                 )
             })?;
-            insert_initial_prompt_queue(task.stack, initial_prompt, commands);
+            insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
         Some(crate::AgentUrl::Cli { kind, sid }) => {
@@ -4529,6 +4540,7 @@ fn handle_agent_page_open_task(
                         session_id: None,
                         stack: task.stack,
                         initial_prompt,
+                        initial_attachments,
                     });
                 }
                 return Ok(());
@@ -4545,6 +4557,7 @@ fn handle_agent_page_open_task(
                 session_id: Some(sid),
                 stack: task.stack,
                 initial_prompt,
+                initial_attachments,
             });
             Ok(())
         }
@@ -4568,6 +4581,7 @@ fn handle_agent_page_open_task(
                             session_id: None,
                             stack: task.stack,
                             initial_prompt,
+                            initial_attachments,
                         });
                     }
                     return Ok(());
@@ -4603,7 +4617,7 @@ fn handle_agent_page_open_task(
                 meshes,
                 webview_mt,
             );
-            insert_initial_prompt_queue(task.stack, initial_prompt, commands);
+            insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
         }
         None => Err(format!("malformed agent URL '{}'", task.url)),
@@ -4613,17 +4627,42 @@ fn handle_agent_page_open_task(
 fn insert_initial_prompt_queue(
     stack: Entity,
     initial_prompt: Option<String>,
+    initial_attachments: Vec<AgentAttachment>,
     commands: &mut Commands,
 ) {
-    let Some(prompt) = initial_prompt.filter(|prompt| !prompt.trim().is_empty()) else {
+    let prompt = initial_prompt.unwrap_or_default();
+    if prompt.trim().is_empty() && initial_attachments.is_empty() {
         return;
-    };
+    }
     let mut queue = crate::components::PromptQueue::default();
-    queue.enqueue(prompt);
+    queue.enqueue_with_attachments(prompt, initial_attachments);
     commands
         .entity(stack)
         .insert(queue)
-        .remove::<PendingAgentPrompt>();
+        .remove::<(PendingAgentPrompt, PendingAgentPromptAttachments)>();
+}
+
+fn cli_initial_prompt(
+    kind: AgentKind,
+    prompt: Option<&str>,
+    attachments: &[AgentAttachment],
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(prompt) = prompt.filter(|prompt| !prompt.trim().is_empty()) {
+        parts.push(prompt.to_string());
+    }
+    parts.extend(attachments.iter().filter_map(|attachment| {
+        if attachment.path.is_empty() {
+            return None;
+        }
+        let path = vmux_terminal::image_path_payload(kind == AgentKind::Vibe, &attachment.path);
+        Some(if kind == AgentKind::Vibe {
+            format!("@{path}")
+        } else {
+            path
+        })
+    }));
+    (!parts.is_empty()).then(|| parts.join(" "))
 }
 
 fn stack_has_agent_of_kind(
@@ -4818,7 +4857,11 @@ fn handle_spawn_agent_requests(
                         cwd: req.cwd.clone(),
                     });
                 }
-                if let Some(prompt) = req.initial_prompt.clone().filter(|p| !p.trim().is_empty()) {
+                if let Some(prompt) = cli_initial_prompt(
+                    req.kind,
+                    req.initial_prompt.as_deref(),
+                    &req.initial_attachments,
+                ) {
                     commands
                         .entity(terminal)
                         .insert(vmux_terminal::PromptCapture {
@@ -4826,7 +4869,9 @@ fn handle_spawn_agent_requests(
                             skipped: false,
                         });
                 }
-                commands.entity(req.stack).remove::<PendingAgentPrompt>();
+                commands
+                    .entity(req.stack)
+                    .remove::<(PendingAgentPrompt, PendingAgentPromptAttachments)>();
             }
             Err(e) => {
                 bevy::log::warn!("agent spawn ({:?}) failed: {e}", req.kind);
@@ -7331,6 +7376,12 @@ mod tests {
             .spawn((
                 vmux_layout::stack::stack_bundle(),
                 PendingAgentPrompt("keep this prompt".to_string()),
+                PendingAgentPromptAttachments(vec![AgentAttachment {
+                    path: "/tmp/reference.png".to_string(),
+                    name: "reference.png".to_string(),
+                    mime_type: "image/png".to_string(),
+                    size: 42,
+                }]),
             ))
             .id();
         let webview = app
@@ -7385,7 +7436,20 @@ mod tests {
             queue.items.front().map(|item| item.text.as_str()),
             Some("keep this prompt")
         );
+        assert_eq!(
+            queue
+                .items
+                .front()
+                .and_then(|item| item.attachments.first())
+                .map(|attachment| attachment.path.as_str()),
+            Some("/tmp/reference.png")
+        );
         assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
+        assert!(
+            app.world()
+                .get::<PendingAgentPromptAttachments>(stack)
+                .is_none()
+        );
         assert!(
             app.world()
                 .get::<vmux_layout::start::StartAgentTransition>(stack)
@@ -7654,6 +7718,7 @@ mod tests {
                 session_id: None,
                 stack,
                 initial_prompt: Some("@asdfas".to_string()),
+                initial_attachments: Vec::new(),
             });
 
         app.update();
@@ -7667,6 +7732,25 @@ mod tests {
         assert_eq!(capture.draft, "@asdfas");
         assert!(!capture.skipped);
         assert!(!buffered);
+    }
+
+    #[test]
+    fn cli_initial_prompt_keeps_media_paths() {
+        let attachments = vec![AgentAttachment {
+            path: "/tmp/reference image.png".to_string(),
+            name: "reference image.png".to_string(),
+            mime_type: "image/png".to_string(),
+            size: 42,
+        }];
+
+        assert_eq!(
+            cli_initial_prompt(AgentKind::Codex, Some("describe this"), &attachments).as_deref(),
+            Some("describe this /tmp/reference image.png")
+        );
+        assert_eq!(
+            cli_initial_prompt(AgentKind::Vibe, Some("describe this"), &attachments).as_deref(),
+            Some("describe this @'/tmp/reference image.png'")
+        );
     }
 
     #[test]

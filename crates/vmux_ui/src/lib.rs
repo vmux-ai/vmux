@@ -13,6 +13,8 @@ pub mod file_icon;
 
 pub mod icon;
 
+pub mod prompt_ghost;
+
 pub mod theme;
 
 #[cfg(any(target_arch = "wasm32", test))]

@@ -837,6 +837,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
                     value: String::new(),
                     target: None,
                     agent_url: None,
+                    attachments: Vec::new(),
                 },
             });
             break;
@@ -861,6 +862,7 @@ fn dismiss_windowed_command_bar_from_native_monitor(
             value: String::new(),
             target: None,
             agent_url: None,
+            attachments: Vec::new(),
         },
     });
 }

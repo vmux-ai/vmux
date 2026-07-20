@@ -2481,7 +2481,7 @@ fn bracketed_paste(payload: &[u8]) -> Vec<u8> {
 /// (it prepends its own `@` on paste; the quotes keep paths with spaces as one
 /// token, with embedded `'` shell-escaped); Claude Code and Codex auto-detect a
 /// bare path.
-fn image_path_payload(is_vibe: bool, path: &str) -> String {
+pub fn image_path_payload(is_vibe: bool, path: &str) -> String {
     if is_vibe {
         format!("'{}'", path.replace('\'', "'\\''"))
     } else {
@@ -4676,34 +4676,12 @@ mod tests {
         assert!(page.contains("MatrixRain {"));
         assert!(page.contains("accent.rain_rgb"));
         assert!(page.contains("terminal: true"));
-        assert!(page.contains("git status --short"));
         assert!(page.contains("type a command · runs when ready"));
 
         let rain = include_str!("matrix_rain.rs");
         assert!(rain.contains("request_animation_frame"));
         assert!(rain.contains("use_drop"));
         assert!(rain.contains("prefers-reduced-motion"));
-    }
-
-    #[test]
-    fn prompt_ghost_rotates_many_random_agent_examples() {
-        let source = include_str!("page.rs");
-        let examples = source
-            .split("const AGENT_PROMPT_EXAMPLES")
-            .nth(1)
-            .and_then(|tail| tail.split("];").next())
-            .unwrap_or_default();
-        assert!(
-            examples
-                .lines()
-                .filter(|line| line.trim_start().starts_with('"'))
-                .count()
-                >= 40
-        );
-        assert!(source.contains("random_prompt_example_index"));
-        assert!(source.contains("js_sys::Math::random()"));
-        assert!(source.contains("relative top-px ml-px h-4 w-1.5 shrink-0"));
-        assert!(source.contains("vmux-prompt-caret-blink 1s step-end infinite"));
     }
 
     #[test]

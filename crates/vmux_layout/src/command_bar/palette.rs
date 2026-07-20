@@ -6,7 +6,7 @@ use crate::command_bar::keyboard::{
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_url, filter_results, space_switch_results, start_page_results,
+    agent_page_results, agent_page_url, filter_results, space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -23,12 +23,18 @@ use vmux_command::event::{
     is_start_prompt_query, looks_like_url, should_open_typed_query_on_enter,
 };
 use vmux_command::open_target::OpenTarget;
+use vmux_command::prompt_media::{
+    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
+    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
+    ChatPickFiles, inline_media_query, media_reference, replace_inline_media_query,
+};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
+use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -45,6 +51,7 @@ pub enum PaletteVariant {
 pub struct StartAgentTransition {
     pub agent_url: String,
     pub prompt: String,
+    pub attachments: Vec<vmux_command::prompt_media::ChatAttachment>,
 }
 
 /// Props for [`CommandPalette`].
@@ -85,6 +92,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut suggestions_request_id = use_signal(|| 0u64);
     let mut last_open_id = use_signal(|| u64::MAX);
     let mut last_focus_open_id = use_signal(|| u64::MAX);
+    let mut attachments = use_signal(Vec::<ChatAttachment>::new);
+    let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
+    let mut media_request_id = use_signal(|| 0u64);
+    let mut media_requested_query = use_signal(|| None::<String>);
+    let mut media_loading = use_signal(|| false);
+    let mut media_selected = use_signal(|| 0usize);
 
     use_effect(move || {
         let s = state();
@@ -99,6 +112,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             nav_mode.set(false);
             path_completions.set(Vec::new());
             history_suggestions.set(Vec::new());
+            if is_start {
+                attachments.set(Vec::new());
+                media_entries.set(Vec::new());
+                media_requested_query.set(None);
+                media_loading.set(false);
+                media_selected.set(0);
+            }
         }
     });
 
@@ -126,6 +146,31 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         },
     );
 
+    let _attachments_listener =
+        use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+            if !is_start {
+                return;
+            }
+            let mut next = attachments.peek().clone();
+            for attachment in &selected.attachments {
+                if !next.iter().any(|existing| existing.path == attachment.path) {
+                    next.push(attachment.clone());
+                }
+            }
+            attachments.set(next);
+            focus_command_input_end();
+        });
+
+    let _media_entries_listener =
+        use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+            if !is_start || response.request_id != media_request_id() {
+                return;
+            }
+            media_entries.set(response.entries.clone());
+            media_loading.set(false);
+            media_selected.set(0);
+        });
+
     use_effect(move || {
         let q = query();
         let trimmed = q.trim();
@@ -146,6 +191,41 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             limit: 5,
             request_id: id,
         });
+    });
+
+    use_effect(move || {
+        if !is_start {
+            return;
+        }
+        let value = query();
+        let Some(media_query) = inline_media_query(&value).map(|query| query.query.to_string())
+        else {
+            media_entries.set(Vec::new());
+            if media_requested_query.peek().is_some() {
+                media_request_id.set(media_request_id().wrapping_add(1).max(1));
+            }
+            media_requested_query.set(None);
+            media_loading.set(false);
+            media_selected.set(0);
+            return;
+        };
+        if media_requested_query().as_deref() == Some(media_query.as_str()) {
+            return;
+        }
+        let request_id = media_request_id().wrapping_add(1).max(1);
+        media_request_id.set(request_id);
+        media_requested_query.set(Some(media_query.clone()));
+        media_entries.set(Vec::new());
+        media_loading.set(true);
+        media_selected.set(0);
+        if try_cef_bin_emit_rkyv(&ChatMediaListRequest {
+            request_id,
+            query: media_query,
+        })
+        .is_err()
+        {
+            media_loading.set(false);
+        }
     });
 
     use_effect(move || {
@@ -178,6 +258,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
 
     let q = query();
+    let media_query = is_start.then(|| inline_media_query(&q)).flatten();
+    let media_menu_open = media_query.is_some();
+    let media_sel = media_selected().min(media_entries.read().len().saturating_sub(1));
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
@@ -231,6 +314,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             r
         }
     };
+    let default_agent_item = is_start
+        .then(|| agent_page_results(&pages, "").into_iter().next())
+        .flatten();
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
     let active_agent_accent = active_item
@@ -305,6 +391,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     });
 
+    use_effect(move || {
+        let selected = media_selected();
+        let _ = media_entries.read().len();
+        if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| {
+                document.get_element_by_id(&format!("command-bar-media-item-{selected}"))
+            })
+        {
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+        }
+    });
+
     let execute = move |item: &ResultItem| {
         let prompt = query();
         let transition = if is_start
@@ -317,20 +418,22 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 StartAgentTransition {
                     agent_url: agent_url.to_string(),
                     prompt: prompt.trim().to_string(),
+                    attachments: attachments.peek().clone(),
                 },
             ))
         } else {
             None
         };
         if matches!(variant, PaletteVariant::Start)
-            && is_start_prompt_query(&prompt)
+            && (is_start_prompt_query(&prompt) || !attachments.peek().is_empty())
             && let Some(agent_url) = agent_page_url(item)
         {
             on_close.call(());
-            if agent_page_matches_query(item, &prompt) {
+            let selected_attachments = attachments.peek().clone();
+            if agent_page_matches_query(item, &prompt) && selected_attachments.is_empty() {
                 emit_action_with_target("open", agent_url, open_target);
             } else {
-                emit_prompt_action(prompt.trim(), open_target, agent_url);
+                emit_prompt_action(prompt.trim(), open_target, agent_url, &selected_attachments);
             }
             if let Some((handler, next)) = transition {
                 handler.call(next);
@@ -409,12 +512,59 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             PromptBox {
                 glass: is_start,
                 class: if is_start { "" } else { "p-2" },
-                div { class: if is_start { "relative z-10 flex min-w-0 w-full items-center gap-2 overflow-hidden px-2" } else { command_bar_input_row_class() },
+                div { class: if is_start { "relative z-10 flex min-w-0 w-full flex-wrap items-center gap-2 overflow-hidden px-2 py-1" } else { command_bar_input_row_class() },
                 if !is_start && !space_name.is_empty() {
                     span {
                         title: "{space_name}",
                         class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
                         "{space_name}"
+                    }
+                }
+                if is_start {
+                    button {
+                        class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                        title: "Attach files",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                        },
+                        Icon { class: "h-4 w-4",
+                            path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
+                        }
+                    }
+                    for (i, attachment) in attachments.read().iter().cloned().enumerate() {
+                        div {
+                            key: "start-attachment-{attachment.path}",
+                            class: "group relative z-10 flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-1.5 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
+                            if attachment.preview_data_url.is_empty() {
+                                span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
+                                    "{file_extension_label(&attachment.name)}"
+                                }
+                            } else {
+                                img {
+                                    src: "{attachment.preview_data_url}",
+                                    alt: "{attachment.name}",
+                                    class: "h-5 w-5 rounded-full object-cover",
+                                }
+                            }
+                            span { class: "min-w-0 max-w-28 truncate", "{attachment.name}" }
+                            button {
+                                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
+                                title: "Remove attachment",
+                                onmousedown: move |event| event.prevent_default(),
+                                onclick: move |_| {
+                                    let mut next = attachments.peek().clone();
+                                    if i < next.len() {
+                                        next.remove(i);
+                                        attachments.set(next);
+                                    }
+                                    focus_command_input_end();
+                                },
+                                Icon { class: "h-3 w-3",
+                                    path { d: "M6 6l12 12M18 6L6 18" }
+                                }
+                            }
+                        }
                     }
                 }
                 if !is_start {
@@ -466,7 +616,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
                 }
-                div { class: command_bar_input_wrap_class(),
+                div { class: if is_start { "relative min-w-48 flex-1 overflow-hidden" } else { command_bar_input_wrap_class() },
+                    if is_start && q.is_empty() && ghost_text.is_empty() {
+                        div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
+                            PromptGhost {
+                                accent_bg: "bg-foreground/70".to_string(),
+                                terminal: false,
+                            }
+                        }
+                    }
                     if !ghost_text.is_empty() {
                         div {
                             class: "pointer-events-none absolute inset-0 flex items-center",
@@ -478,7 +636,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         id: "command-bar-input",
                         r#type: "text",
                         "data-ghost": "{ghost_text}",
-                        class: if is_start { "w-full min-w-0 cursor-text bg-transparent px-1.5 py-2 text-[15px] leading-6 text-foreground caret-foreground outline-none placeholder:text-muted-foreground/50" } else { command_bar_input_class() },
+                        class: if is_start { "relative z-10 w-full min-w-0 cursor-text bg-transparent px-1.5 py-2 text-[15px] leading-6 text-foreground caret-foreground outline-none placeholder:text-transparent" } else { command_bar_input_class() },
                         placeholder: if is_start { "Ask anything…" } else { placeholder },
                         value: "{display_text}",
                         autofocus: true,
@@ -487,9 +645,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             selected.set(0);
                             nav_mode.set(false);
                         },
+                        onpaste: move |_| {
+                            if is_start {
+                                let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
+                            }
+                        },
                         onkeydown: {
                             let q = q.clone();
                             let results = results.clone();
+                            let default_agent_item = default_agent_item.clone();
                             move |e| {
                             if e.key() == Key::Tab {
                                 e.prevent_default();
@@ -549,6 +713,39 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             let go_up = (e.key() == Key::ArrowUp && !ctrl)
                                 || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
 
+                            if media_menu_open {
+                                if go_down {
+                                    e.prevent_default();
+                                    let max = media_entries.read().len().saturating_sub(1);
+                                    media_selected.set((media_sel + 1).min(max));
+                                    return;
+                                }
+                                if go_up {
+                                    e.prevent_default();
+                                    media_selected.set(media_sel.saturating_sub(1));
+                                    return;
+                                }
+                                if e.key() == Key::Enter {
+                                    e.prevent_default();
+                                    if let Some(entry) = media_entries.read().get(media_sel).cloned() {
+                                        select_start_media_entry(
+                                            &entry,
+                                            query,
+                                            media_selected,
+                                        );
+                                    }
+                                    return;
+                                }
+                                if e.key() == Key::Escape {
+                                    e.prevent_default();
+                                    if let Some(media_query) = inline_media_query(&q) {
+                                        query.set(replace_inline_media_query(&q, media_query, ""));
+                                    }
+                                    media_selected.set(0);
+                                    return;
+                                }
+                            }
+
                             if go_down {
                                 e.prevent_default();
                                 let max = results.len().saturating_sub(1);
@@ -563,6 +760,23 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             {
                                 on_dismiss.call(());
                             } else if e.key() == Key::Enter {
+                                if is_start
+                                    && q.trim().is_empty()
+                                    && !attachments.peek().is_empty()
+                                {
+                                    if let Some(item) = default_agent_item.as_ref() {
+                                        execute(item);
+                                    } else {
+                                        let selected_attachments = attachments.peek().clone();
+                                        emit_prompt_action(
+                                            "",
+                                            open_target,
+                                            "",
+                                            &selected_attachments,
+                                        );
+                                    }
+                                    return;
+                                }
                                 if space_switch {
                                     if let Some(item) = results.get(sel) {
                                         execute(item);
@@ -573,7 +787,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                             execute(item);
                                         } else {
                                             on_close.call(());
-                                            emit_prompt_action(q.trim(), open_target, "");
+                                            let selected_attachments = attachments.peek().clone();
+                                            emit_prompt_action(
+                                                q.trim(),
+                                                open_target,
+                                                "",
+                                                &selected_attachments,
+                                            );
                                         }
                                         return;
                                     }
@@ -601,18 +821,31 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 if is_start {
                     button {
-                        class: if q.trim().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-foreground text-background shadow-lg transition hover:brightness-110 active:scale-95" },
-                        disabled: q.trim().is_empty(),
+                        class: if q.trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-foreground text-background shadow-lg transition hover:brightness-110 active:scale-95" },
+                        disabled: q.trim().is_empty() && attachments.read().is_empty(),
                         title: "Send (Enter)",
                         onclick: {
                             let results = results.clone();
                             let q = q.clone();
+                            let default_agent_item = default_agent_item.clone();
                             move |_| {
                                 if let Some(item) = results.get(sel) {
                                     execute(item);
-                                } else if !q.trim().is_empty() {
-                                    on_close.call(());
-                                    emit_prompt_action(q.trim(), open_target, "");
+                                } else if !q.trim().is_empty() || !attachments.peek().is_empty() {
+                                    if q.trim().is_empty()
+                                        && let Some(item) = default_agent_item.as_ref()
+                                    {
+                                        execute(item);
+                                    } else {
+                                        on_close.call(());
+                                        let selected_attachments = attachments.peek().clone();
+                                        emit_prompt_action(
+                                            q.trim(),
+                                            open_target,
+                                            "",
+                                            &selected_attachments,
+                                        );
+                                    }
                                 }
                             }
                         },
@@ -648,7 +881,56 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             }
-            if !results.is_empty() {
+            if media_menu_open {
+                PromptPopup {
+                    placement: PromptPopupPlacement::Downward,
+                    id: "command-bar-results",
+                    if media_loading() {
+                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
+                    } else if media_entries.read().is_empty() {
+                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
+                    } else {
+                        for (i, entry) in media_entries.read().iter().cloned().enumerate() {
+                            {
+                                let entry = entry.clone();
+                                rsx! {
+                                    div {
+                                        key: "start-media-{entry.path}",
+                                        id: "command-bar-media-item-{i}",
+                                        class: if i == media_sel { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
+                                        onmouseenter: move |_| media_selected.set(i),
+                                        onclick: move |_| select_start_media_entry(
+                                            &entry,
+                                            query,
+                                            media_selected,
+                                        ),
+                                        div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                                            if entry.is_dir {
+                                                Icon { class: "h-4 w-4",
+                                                    path { d: "M3 6h6l2 2h10v10H3z" }
+                                                }
+                                            } else if !entry.preview_data_url.is_empty() {
+                                                img {
+                                                    src: "{entry.preview_data_url}",
+                                                    alt: "{entry.name}",
+                                                    class: "h-full w-full object-contain",
+                                                }
+                                            } else {
+                                                span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
+                                            }
+                                        }
+                                        div { class: "min-w-0 flex-1",
+                                            div { class: "truncate text-sm text-foreground", "{entry.name}" }
+                                            div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !media_menu_open && !results.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
@@ -906,6 +1188,68 @@ fn completion_query(input: &str) -> Option<String> {
     }
 }
 
+fn file_extension_label(name: &str) -> String {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_uppercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| "FILE".to_string())
+}
+
+fn focus_command_input_end() {
+    let closure = Closure::once(move || {
+        let Some(input) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id("command-bar-input"))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let end = input.value().encode_utf16().count() as u32;
+        let _ = input.focus();
+        let _ = input.set_selection_range(end, end);
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    closure.forget();
+}
+
+fn select_start_media_entry(
+    entry: &ChatMediaEntry,
+    mut query: Signal<String>,
+    mut selected: Signal<usize>,
+) {
+    let value = query.peek().clone();
+    let Some(media_query) = inline_media_query(&value) else {
+        return;
+    };
+    let reference = media_reference(entry);
+    let replacement = if entry.is_dir {
+        format!("@{reference}/")
+    } else {
+        if try_cef_bin_emit_rkyv(&ChatAttachPaths {
+            paths: vec![entry.path.clone()],
+        })
+        .is_err()
+        {
+            return;
+        }
+        String::new()
+    };
+    query.set(replace_inline_media_query(
+        &value,
+        media_query,
+        &replacement,
+    ));
+    selected.set(0);
+    focus_command_input_end();
+}
+
 /// Emit a command-bar action to the host with no explicit open target.
 pub(crate) fn emit_action(action: &str, value: &str) {
     emit_action_with_target(action, value, None);
@@ -918,15 +1262,32 @@ pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<
         value: value.to_string(),
         target,
         agent_url: None,
+        attachments: Vec::new(),
     });
 }
 
-fn emit_prompt_action(value: &str, target: Option<OpenTarget>, agent_url: &str) {
+fn emit_prompt_action(
+    value: &str,
+    target: Option<OpenTarget>,
+    agent_url: &str,
+    attachments: &[ChatAttachment],
+) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
         action: "prompt".to_string(),
         value: value.to_string(),
         target,
         agent_url: (!agent_url.is_empty()).then(|| agent_url.to_string()),
+        attachments: attachments
+            .iter()
+            .map(
+                |attachment| vmux_command::prompt_media::ChatSubmitAttachment {
+                    path: attachment.path.clone(),
+                    name: attachment.name.clone(),
+                    mime_type: attachment.mime_type.clone(),
+                    size: attachment.size,
+                },
+            )
+            .collect(),
     });
 }
 

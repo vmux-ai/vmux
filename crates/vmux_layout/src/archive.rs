@@ -617,6 +617,7 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
             session_id,
             stack,
             initial_prompt: None,
+            initial_attachments: Vec::new(),
         };
         commands.queue(move |world: &mut World| {
             world.write_message(request);
