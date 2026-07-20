@@ -188,9 +188,10 @@ pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
                 shortcut: page.shortcut.clone(),
             }),
     );
-    if !query.trim().is_empty() {
+    let trimmed = query.trim();
+    if !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
-            url: query.trim().to_string(),
+            url: trimmed.to_string(),
         });
     }
     results
