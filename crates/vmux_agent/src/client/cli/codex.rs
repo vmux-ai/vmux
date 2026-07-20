@@ -254,8 +254,9 @@ pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
         let Ok(file) = std::fs::File::open(path) else {
             return;
         };
+        let mut reader = BufReader::new(file);
         let mut line = String::new();
-        let Ok(read) = BufReader::new(file).read_line(&mut line) else {
+        let Ok(read) = reader.read_line(&mut line) else {
             return;
         };
         if read == 0 {
@@ -267,13 +268,30 @@ pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
         if head.kind != "session_meta" {
             return;
         }
-        let title = head
+        let fallback = head
             .payload
             .id
             .split('-')
             .next()
             .unwrap_or(&head.payload.id)
             .to_string();
+        let title = lines_skipping_invalid_utf8(reader)
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+            .find_map(|value| {
+                (value.get("type").and_then(|value| value.as_str()) == Some("event_msg"))
+                    .then(|| value.get("payload"))
+                    .flatten()
+                    .filter(|payload| {
+                        payload.get("type").and_then(|value| value.as_str()) == Some("user_message")
+                    })
+                    .and_then(|payload| payload.get("message"))
+                    .and_then(|message| message.as_str())
+                    .map(str::trim)
+                    .filter(|message| !message.is_empty())
+                    .map(|message| message.lines().collect::<Vec<_>>().join(" "))
+                    .map(|message| message.chars().take(80).collect())
+            })
+            .unwrap_or(fallback);
         out.push(ResumableSession {
             kind: AgentKind::Codex,
             sid: head.payload.id.clone(),
@@ -562,7 +580,30 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].sid, "cx-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/x"));
+        assert_eq!(out[0].title, "cx");
         assert!(out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_uses_first_user_prompt_as_title() {
+        let tmp = unique_tmp("codex-list-title");
+        let day = tmp.join("2026/07");
+        std::fs::create_dir_all(&day).unwrap();
+        std::fs::write(
+            day.join("sess.jsonl"),
+            concat!(
+                "{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"hello\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the\\napproval flow\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"second prompt\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let out = list_codex_sessions(&tmp);
+
+        assert_eq!(out[0].title, "fix the approval flow");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
