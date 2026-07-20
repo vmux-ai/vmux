@@ -311,6 +311,7 @@ async fn run_session(
                                         call_id: cid.clone(),
                                         name: name.clone(),
                                         args: args.clone(),
+                                        parent_call_id: None,
                                     });
                                     pending_tool = Some((cid, name, args));
                                 }

@@ -56,8 +56,15 @@ fn messages_to_responses_input(messages: &[Message]) -> Vec<Value> {
                             call_id,
                             name,
                             args,
+                            ..
                         } => out.push(json!({
                             "type":"function_call","call_id":call_id,"name":name,"arguments":args
+                        })),
+                        AssistantBlock::Subagent(subagent) => out.push(json!({
+                            "type":"function_call",
+                            "call_id":subagent.call_id,
+                            "name":"subagent",
+                            "arguments":subagent.raw_input
                         })),
                         AssistantBlock::Diff { .. }
                         | AssistantBlock::Thinking(_)

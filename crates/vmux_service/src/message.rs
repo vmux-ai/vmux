@@ -48,7 +48,10 @@ pub enum AssistantBlock {
         call_id: String,
         name: String,
         args: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent_call_id: Option<String>,
     },
+    Subagent(Box<SubagentBlock>),
     /// A proposed file edit (ACP `ToolCallContent::Diff`), rendered as an inline diff in the chat.
     Diff {
         call_id: String,
@@ -61,6 +64,25 @@ pub enum AssistantBlock {
     Plan {
         steps: Vec<PlanStep>,
     },
+}
+
+/// A delegated agent operation surfaced by an ACP adapter.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SubagentBlock {
+    pub call_id: String,
+    pub provider: String,
+    pub title: String,
+    pub status: String,
+    pub action: String,
+    pub agent_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub parent_thread_id: Option<String>,
+    pub child_thread_ids: Vec<String>,
+    pub parent_call_id: Option<String>,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub raw_input: String,
 }
 
 /// One entry in an agent [`AssistantBlock::Plan`]. `status` is `pending` | `in_progress` |
@@ -99,12 +121,43 @@ mod tests {
                     call_id: "abc".into(),
                     name: "list_spaces".into(),
                     args: "{}".to_string(),
+                    parent_call_id: None,
                 },
+                AssistantBlock::Subagent(Box::new(SubagentBlock {
+                    call_id: "agent-1".into(),
+                    provider: "Codex".into(),
+                    title: "Start subagent explorer".into(),
+                    status: "in_progress".into(),
+                    action: "started".into(),
+                    agent_name: Some("explorer".into()),
+                    thread_id: Some("thread-1".into()),
+                    parent_thread_id: Some("thread-root".into()),
+                    child_thread_ids: vec!["thread-1".into()],
+                    parent_call_id: None,
+                    prompt: Some("Inspect ACP support".into()),
+                    model: Some("gpt-5.4".into()),
+                    reasoning_effort: Some("high".into()),
+                    raw_input: "{}".into(),
+                })),
             ],
         };
         let json = serde_json::to_string(&m).unwrap();
         let back: Message = serde_json::from_str(&json).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn tool_use_deserializes_without_parent_call_id() {
+        let block: AssistantBlock =
+            serde_json::from_str(r#"{"ToolUse":{"call_id":"abc","name":"run","args":"{}"}}"#)
+                .unwrap();
+        assert!(matches!(
+            block,
+            AssistantBlock::ToolUse {
+                parent_call_id: None,
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -250,6 +250,7 @@ mod tests {
                         call_id: "c".into(),
                         name: "run".into(),
                         args: "{}".into(),
+                        parent_call_id: None,
                     },
                 ],
             },
