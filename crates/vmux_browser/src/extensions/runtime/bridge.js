@@ -52,6 +52,10 @@
   const nativeNow = Date.now.bind(Date);
   const WEBSOCKET_OPEN = 1;
   const WEBSOCKET_CLOSED = 3;
+  const CLOSE_PROTOCOL_ERROR = 4002;
+  const CLOSE_POLICY_ERROR = 4008;
+  const CLOSE_MESSAGE_TOO_LARGE = 4009;
+  const CLOSE_OVERLOADED = 4013;
 
   const pendingFrames = [];
   const pendingCallbacks = new Map();
@@ -208,7 +212,7 @@
       if (requestId) {
         finishCallback(requestId, responseError("extension bridge queue is full"));
       } else if (socket && socket.readyState !== WEBSOCKET_CLOSED) {
-        nativeWebSocketClose(socket, 1013, "extension bridge queue is full");
+        nativeWebSocketClose(socket, CLOSE_OVERLOADED, "extension bridge queue is full");
       }
       return false;
     }
@@ -240,7 +244,7 @@
         if (frame.requestId) {
           finishCallback(frame.requestId, responseError("extension bridge write timed out"));
         }
-        nativeWebSocketClose(current, 1013, "extension bridge write timed out");
+        nativeWebSocketClose(current, CLOSE_OVERLOADED, "extension bridge write timed out");
         return;
       }
       if (nativeBufferedAmount(current) > MAX_SOCKET_BUFFERED_BYTES) {
@@ -360,13 +364,13 @@
     try {
       message = JSON.parse(event.data);
     } catch (_error) {
-      nativeWebSocketClose(current, 1002, "invalid bridge message");
+      nativeWebSocketClose(current, CLOSE_PROTOCOL_ERROR, "invalid bridge message");
       return;
     }
     if (message.type === "ready") {
       if (message.payload?.protocol_version !== PROTOCOL_VERSION) {
         stopped = true;
-        nativeWebSocketClose(current, 1002, "bridge protocol mismatch");
+        nativeWebSocketClose(current, CLOSE_PROTOCOL_ERROR, "bridge protocol mismatch");
         return;
       }
       ready = true;
@@ -383,11 +387,11 @@
       stopped = true;
       failPending(message.payload?.message || "extension bridge failed");
       disconnectKeepalive();
-      nativeWebSocketClose(current, 1008, "extension bridge failed");
+      nativeWebSocketClose(current, CLOSE_POLICY_ERROR, "extension bridge failed");
       return;
     }
     if (!ready) {
-      nativeWebSocketClose(current, 1002, "bridge message before ready");
+      nativeWebSocketClose(current, CLOSE_PROTOCOL_ERROR, "bridge message before ready");
       return;
     }
     if (message.type === "response") {
@@ -422,7 +426,7 @@
 
   function enqueueInbound(current, event, generation) {
     if (typeof event.data !== "string") {
-      nativeWebSocketClose(current, 1002, "invalid bridge frame type");
+      nativeWebSocketClose(current, CLOSE_PROTOCOL_ERROR, "invalid bridge frame type");
       return;
     }
     const bytes = nativeTextEncode(textEncoder, event.data).byteLength;
@@ -431,7 +435,7 @@
       inboundFrames.length >= MAX_INBOUND_FRAMES ||
       inboundFrameBytes + bytes > MAX_INBOUND_BYTES
     ) {
-      nativeWebSocketClose(current, 1009, "extension bridge inbound queue is full");
+      nativeWebSocketClose(current, CLOSE_MESSAGE_TOO_LARGE, "extension bridge inbound queue is full");
       return;
     }
     inboundFrames.push({ current, event, generation, bytes });

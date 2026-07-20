@@ -61,6 +61,17 @@
   function patchedSendMessage() {
     const args = withSenderContext(Array.from(arguments));
     const callback = typeof args.at(-1) === "function" ? args.pop() : null;
+    const messageIndex = typeof args[0] === "string" ? 1 : 0;
+    const isAutofillTrigger = args[messageIndex]?.command === "triggerAutofillScriptInjection";
+    if (isAutofillTrigger) {
+      if (!callback) {
+        return new Promise((resolve) => nativeSetTimeout(resolve, 1000)).then(() =>
+          sendPromise(args, 0),
+        );
+      }
+      nativeSetTimeout(() => sendCallback(args, callback, 0), 1000);
+      return;
+    }
     if (!callback) return sendPromise(args, 0);
     sendCallback(args, callback, 0);
   }
