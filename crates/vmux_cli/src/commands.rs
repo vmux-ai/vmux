@@ -5,6 +5,7 @@ pub mod notify;
 pub mod notify_file_touch;
 pub mod notify_turn_end;
 pub mod open;
+pub mod remote;
 pub mod service;
 
 #[derive(Debug, Parser)]
@@ -48,4 +49,6 @@ pub enum Command {
         anchor: Option<String>,
     },
     Service(service::ServiceArgs),
+    /// Expose active agent chats to a paired phone over Tailscale
+    Remote(remote::RemoteArgs),
 }

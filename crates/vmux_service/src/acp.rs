@@ -11,16 +11,20 @@ pub use driver::{AcpInput, AcpShared};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{broadcast, mpsc};
 use vmux_core::ProcessId;
 
 use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::ServiceMessage;
+use crate::remote::RemoteSession;
 
 struct AcpHandle {
     input_tx: mpsc::UnboundedSender<AcpInput>,
     shared: Arc<AcpShared>,
+    agent_id: String,
+    created_at_ms: u64,
 }
 
 /// Tracks live ACP sessions by sid. Constructed once in the daemon and shared like
@@ -63,13 +67,21 @@ impl AcpSessionManager {
             command,
             args,
             env,
-            agent_id,
+            agent_id.clone(),
             mcp_servers,
             resume,
             shared.clone(),
             input_rx,
         ));
-        self.sessions.insert(sid, AcpHandle { input_tx, shared });
+        self.sessions.insert(
+            sid,
+            AcpHandle {
+                input_tx,
+                shared,
+                agent_id,
+                created_at_ms: now_ms(),
+            },
+        );
     }
 
     pub fn input(&self, sid: &str, input: AcpInput) -> bool {
@@ -103,6 +115,31 @@ impl AcpSessionManager {
             .and_then(|handle| handle.shared.model_info_message())
     }
 
+    pub fn remote_messages(&self, sid: &str) -> Option<Vec<crate::message::Message>> {
+        self.sessions
+            .get(sid)
+            .map(|handle| handle.shared.remote_messages())
+    }
+
+    pub fn remote_sessions(&self) -> Vec<RemoteSession> {
+        self.sessions
+            .values()
+            .map(|handle| {
+                handle
+                    .shared
+                    .remote_session(&handle.agent_id, handle.created_at_ms)
+            })
+            .collect()
+    }
+
+    pub fn remote_session(&self, sid: &str) -> Option<RemoteSession> {
+        self.sessions.get(sid).map(|handle| {
+            handle
+                .shared
+                .remote_session(&handle.agent_id, handle.created_at_ms)
+        })
+    }
+
     pub fn contains(&self, sid: &str) -> bool {
         self.sessions.contains_key(sid)
     }
@@ -123,6 +160,13 @@ impl AcpSessionManager {
             let _ = handle.input_tx.send(AcpInput::Close);
         }
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 #[cfg(test)]
