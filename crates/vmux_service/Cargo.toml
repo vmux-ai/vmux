@@ -21,6 +21,8 @@ path = "src/lib.rs"
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+vmux_remote = { path = "../vmux_remote" }
+vmux_wire = { path = "../vmux_wire" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 base64 = "0.22"
@@ -40,11 +42,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
 axum = "0.8"
-mime_guess = "2"
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_service_client = { path = "../vmux_service_client" }
-vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 tempfile = "3.27.0"
@@ -53,25 +53,13 @@ url = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
-futures-util = "0.3"
-gloo-net = "0.6"
-gloo-timers = { version = "0.3", features = ["futures"] }
-serde_json = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
-vmux_wire = { path = "../vmux_wire" }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
+    "Window",
     "Document",
     "Element",
-    "EventSource",
-    "History",
     "HtmlElement",
-    "HtmlTextAreaElement",
-    "Location",
-    "MessageEvent",
-    "Navigator",
-    "ServiceWorkerContainer",
-    "Window",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

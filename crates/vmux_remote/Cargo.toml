@@ -1,0 +1,13 @@
+[package]
+name = "vmux_remote"
+version.workspace = true
+edition.workspace = true
+description = "Shared protocol types for Vmux Remote clients"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+vmux_wire = { path = "../vmux_wire" }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -383,7 +383,7 @@ pub fn resolve_dx_executable() -> PathBuf {
     }
     panic!(
         "vmux: `dx` (dioxus-cli) not found. Install e.g.\n\
-         cargo install dioxus-cli --locked --version 0.7.4\n\
+         cargo install dioxus-cli --locked --version 0.7.9\n\
          Or set DX=/path/to/dx\n\
          (vmux does not use npm for web bundles; optional Tailwind is a standalone `tailwindcss` binary.)"
     );

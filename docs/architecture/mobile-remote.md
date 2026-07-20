@@ -1,27 +1,49 @@
 # Mobile Remote: continue agent chats from a phone
 
-Vmux Remote is an installable Dioxus web app served by the background service. It lists active
-agent sessions, replays their transcripts, streams new output, sends prompts, interrupts turns,
-and handles tool approvals. The agent still runs on the Mac; the phone is a thin client.
+Vmux Remote is a native Dioxus Mobile app for iOS and Android. It lists active agent sessions,
+replays their transcripts, streams new output, sends prompts, interrupts turns, and handles tool
+approvals. Agents continue running on the Mac; the mobile app is a thin client.
+
+## Build and run
+
+iOS requires Xcode. Build or run the simulator app from the repository root:
+
+```sh
+make mobile-ios
+make mobile-ios-run
+```
+
+Android requires Android Studio, an SDK, an NDK, a JDK, `ANDROID_HOME`, and `ANDROID_NDK_HOME`:
+
+```sh
+make mobile-android
+make mobile-android-run
+```
+
+The build targets only compile the app. The run targets start Dioxus on the selected simulator or
+connected device. Pass a device directly through Dioxus when selection is needed:
+
+```sh
+dx serve --ios -p vmux_mobile --device "iPhone"
+dx serve --android -p vmux_mobile --device "Pixel"
+```
 
 ## Connect
 
-Run:
+Start the Mac endpoint:
 
 ```sh
 vmux remote
 ```
 
-The command starts the Vmux service, configures Tailscale Serve when available, and prints a
-pairing URL. Open that URL on the phone and use Add to Home Screen. `vmux remote --local` prints a
-localhost URL without configuring Tailscale. `vmux remote --reset` revokes the previous pairing
-token.
+The command starts the Vmux service, configures Tailscale Serve when available, and prints a pairing
+URL. Paste that URL into the native app. `vmux remote --reset` revokes the previous token.
 
 ## Runtime path
 
-The daemon binds the remote HTTP server to loopback. Tailscale Serve provides the encrypted HTTPS
-endpoint and tailnet access. The Dioxus page is part of the existing `vmux_server` WASM bundle, so
-the desktop webviews and phone app share the Rust UI toolchain and packaged assets.
+The daemon binds an authenticated JSON and server-sent-events API to loopback. Tailscale Serve
+provides the encrypted HTTPS endpoint and tailnet access. The native app uses `reqwest` and stores
+the paired endpoint and bearer token in its WebView sandbox.
 
 Each phone connection uses the same daemon registries as the desktop client:
 
@@ -33,10 +55,8 @@ Each phone connection uses the same daemon registries as the desktop client:
 ## Pairing and exposure
 
 The daemon generates a 256-bit bearer token in its profile-specific service directory with mode
-`0600`. The pairing URL carries it in the URL fragment, which is not sent to the HTTP server. The
-app exchanges it once for an HttpOnly, SameSite cookie and removes the fragment from browser
-history.
+`0600`. The pairing URL carries it in the URL fragment. The native app extracts the endpoint and
+token, verifies them against the API, and persists them locally.
 
-The API is same-origin, rejects unauthenticated requests, caps prompt size, applies a restrictive
-content security policy, and never listens on a LAN interface. Resetting the token restarts the
-daemon and invalidates paired phones.
+The API rejects unauthenticated requests, caps prompt size, and listens only on loopback. Resetting
+the token restarts the daemon and invalidates paired phones.
