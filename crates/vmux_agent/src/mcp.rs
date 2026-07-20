@@ -3,10 +3,14 @@ use std::path::{Path, PathBuf};
 use vmux_core::ProcessId;
 pub use vmux_core::agent::McpServerConfig;
 
-use crate::exec;
+use crate::{AgentKind, exec};
 
-pub fn resolve(cwd: &Path, anchor: ProcessId) -> Result<McpServerConfig, String> {
-    resolve_inner(cwd, anchor, false, false)
+const DEFAULT_RUN_TIMEOUT_SECS: u64 = 50;
+pub(crate) const LONG_RUN_TIMEOUT_SECS: u64 = 600;
+pub(crate) const LONG_MCP_TOOL_TIMEOUT_SECS: u64 = LONG_RUN_TIMEOUT_SECS + 60;
+
+pub fn resolve(cwd: &Path, anchor: ProcessId, kind: AgentKind) -> Result<McpServerConfig, String> {
+    resolve_inner(cwd, anchor, false, false, run_timeout_secs_for_kind(kind))
 }
 
 /// Resolve the MCP sidecar for an ACP agent. Agents that use ACP client terminals hide the
@@ -16,7 +20,27 @@ pub fn resolve_acp(
     anchor: ProcessId,
     agent_id: &str,
 ) -> Result<McpServerConfig, String> {
-    resolve_inner(cwd, anchor, true, acp_uses_native_terminals(agent_id))
+    resolve_inner(
+        cwd,
+        anchor,
+        true,
+        acp_uses_native_terminals(agent_id),
+        run_timeout_secs_for_agent_id(agent_id),
+    )
+}
+
+fn run_timeout_secs_for_kind(kind: AgentKind) -> u64 {
+    match kind {
+        AgentKind::Vibe => DEFAULT_RUN_TIMEOUT_SECS,
+        AgentKind::Claude | AgentKind::Codex => LONG_RUN_TIMEOUT_SECS,
+    }
+}
+
+fn run_timeout_secs_for_agent_id(agent_id: &str) -> u64 {
+    match crate::acp_install::registry_id_alias(agent_id) {
+        "claude-acp" | "codex-acp" => LONG_RUN_TIMEOUT_SECS,
+        _ => DEFAULT_RUN_TIMEOUT_SECS,
+    }
 }
 
 fn acp_uses_native_terminals(agent_id: &str) -> bool {
@@ -31,10 +55,19 @@ fn resolve_inner(
     anchor: ProcessId,
     acp_session: bool,
     acp_terminals: bool,
+    run_timeout_secs: u64,
 ) -> Result<McpServerConfig, String> {
     let sidecar = vmux_sidecar_path()?;
     let profile = vmux_core::profile::active_profile_name();
-    resolve_with_sidecar(&sidecar, cwd, anchor, &profile, acp_session, acp_terminals)
+    resolve_with_sidecar(
+        &sidecar,
+        cwd,
+        anchor,
+        &profile,
+        acp_session,
+        acp_terminals,
+        run_timeout_secs,
+    )
 }
 
 fn resolve_with_sidecar(
@@ -44,11 +77,18 @@ fn resolve_with_sidecar(
     profile: &str,
     acp_session: bool,
     acp_terminals: bool,
+    run_timeout_secs: u64,
 ) -> Result<McpServerConfig, String> {
     if exec::is_executable_path(sidecar) {
         return Ok(McpServerConfig {
             command: sidecar.to_string_lossy().to_string(),
-            args: mcp_subcommand_args(anchor, profile, acp_session, acp_terminals),
+            args: mcp_subcommand_args(
+                anchor,
+                profile,
+                acp_session,
+                acp_terminals,
+                run_timeout_secs,
+            ),
             cwd: None,
         });
     }
@@ -63,6 +103,7 @@ fn resolve_with_sidecar(
         profile,
         acp_session,
         acp_terminals,
+        run_timeout_secs,
     ));
     Ok(McpServerConfig {
         command: "cargo".to_string(),
@@ -76,6 +117,7 @@ fn mcp_subcommand_args(
     profile: &str,
     acp_session: bool,
     acp_terminals: bool,
+    run_timeout_secs: u64,
 ) -> Vec<String> {
     let mut args = vec![
         "mcp".to_string(),
@@ -83,6 +125,8 @@ fn mcp_subcommand_args(
         anchor.to_string(),
         "--profile".to_string(),
         profile.to_string(),
+        "--run-timeout-secs".to_string(),
+        run_timeout_secs.to_string(),
     ];
     if acp_session {
         args.push("--acp-session".to_string());
@@ -120,7 +164,7 @@ mod tests {
     fn mcp_args_always_append_profile() {
         let anchor = ProcessId::new();
         for profile in ["personal", "gregor"] {
-            let args = mcp_subcommand_args(anchor, profile, false, false);
+            let args = mcp_subcommand_args(anchor, profile, false, false, DEFAULT_RUN_TIMEOUT_SECS);
             assert!(
                 args.windows(2)
                     .any(|w| w[0] == "--profile" && w[1] == profile)
@@ -131,8 +175,8 @@ mod tests {
     #[test]
     fn acp_args_append_acp_terminals_flag() {
         let anchor = ProcessId::new();
-        let plain = mcp_subcommand_args(anchor, "personal", false, false);
-        let acp = mcp_subcommand_args(anchor, "personal", true, true);
+        let plain = mcp_subcommand_args(anchor, "personal", false, false, DEFAULT_RUN_TIMEOUT_SECS);
+        let acp = mcp_subcommand_args(anchor, "personal", true, true, DEFAULT_RUN_TIMEOUT_SECS);
         assert!(!plain.iter().any(|a| a == "--acp-session"));
         assert!(acp.iter().any(|a| a == "--acp-session"));
         assert!(!plain.iter().any(|a| a == "--acp-terminals"));
@@ -151,6 +195,38 @@ mod tests {
     }
 
     #[test]
+    fn codex_and_claude_use_long_run_timeout() {
+        assert_eq!(
+            run_timeout_secs_for_kind(AgentKind::Codex),
+            LONG_RUN_TIMEOUT_SECS
+        );
+        assert_eq!(
+            run_timeout_secs_for_kind(AgentKind::Claude),
+            LONG_RUN_TIMEOUT_SECS
+        );
+        assert_eq!(
+            run_timeout_secs_for_agent_id("codex"),
+            LONG_RUN_TIMEOUT_SECS
+        );
+        assert_eq!(
+            run_timeout_secs_for_agent_id("claude"),
+            LONG_RUN_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn vibe_keeps_default_run_timeout() {
+        assert_eq!(
+            run_timeout_secs_for_kind(AgentKind::Vibe),
+            DEFAULT_RUN_TIMEOUT_SECS
+        );
+        assert_eq!(
+            run_timeout_secs_for_agent_id("mistral-vibe"),
+            DEFAULT_RUN_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
     fn falls_back_to_cargo_run_when_sidecar_is_missing() {
         let temp = std::env::temp_dir().join(format!("vmux-agent-mcp-{}", std::process::id()));
         let workspace = temp.join("workspace");
@@ -165,6 +241,7 @@ mod tests {
             "personal",
             false,
             false,
+            DEFAULT_RUN_TIMEOUT_SECS,
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&temp);
@@ -184,7 +261,9 @@ mod tests {
                 "--anchor",
                 &anchor.to_string(),
                 "--profile",
-                "personal"
+                "personal",
+                "--run-timeout-secs",
+                "50"
             ]
         );
         assert_eq!(config.cwd, Some(workspace));
@@ -205,6 +284,7 @@ mod tests {
             "personal",
             false,
             false,
+            DEFAULT_RUN_TIMEOUT_SECS,
         )
         .unwrap();
         let _ = std::fs::remove_dir_all(&temp);

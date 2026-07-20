@@ -28,6 +28,8 @@ pub enum Command {
         /// terminals instead); `terminal_send` stays.
         #[arg(long)]
         acp_terminals: bool,
+        #[arg(long, default_value_t = 50)]
+        run_timeout_secs: u64,
     },
     Notify {
         #[arg(long)]

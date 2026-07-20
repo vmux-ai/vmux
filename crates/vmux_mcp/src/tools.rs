@@ -403,8 +403,8 @@ fn run_definition() -> ToolDefinition {
         description:
             "Run a shell command in a visible terminal pane the user can watch live and take over. \
 Blocks until the command finishes and returns its full output plus the exit code \
-(`terminal: <id>`, `exit: <code>`, `output: ...`). If it has not finished within ~50s, returns the \
-output so far with a note to call read_terminal for the rest. \
+(`terminal: <id>`, `exit: <code>`, `output: ...`). If it reaches the configured wait limit, returns \
+the output so far with a note to call read_terminal for the rest. \
 \
 PLACEMENT — by DEFAULT you don't need to think about this: a bare `run` reuses ONE persistent terminal \
 beside you — the SAME shell across calls, so its working directory and environment persist. Do NOT `cd` \

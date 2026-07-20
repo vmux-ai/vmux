@@ -6,9 +6,6 @@ use vmux_service::protocol::{
     ServiceMessage,
 };
 
-/// How long `run` waits for a command to finish before returning a partial
-/// result. Kept under vibe's 60s default MCP tool timeout.
-const RUN_BLOCK_TIMEOUT: Duration = Duration::from_secs(50);
 const RUN_PROCESS_MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Interval between terminal reads while waiting for the completion marker.
 const RUN_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -28,6 +25,7 @@ pub async fn run_stdio(
     anchor: Option<vmux_service::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
+    run_block_timeout: Duration,
 ) -> io::Result<()> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -35,7 +33,15 @@ pub async fn run_stdio(
     let mut writer = stdout.lock();
 
     while let Some(message) = read_json_line(&mut reader)? {
-        if let Some(response) = handle_message(message, anchor, acp_session, acp_terminals).await {
+        if let Some(response) = handle_message(
+            message,
+            anchor,
+            acp_session,
+            acp_terminals,
+            run_block_timeout,
+        )
+        .await
+        {
             serde_json::to_writer(&mut writer, &response)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -49,6 +55,7 @@ async fn handle_message(
     anchor: Option<vmux_service::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
+    run_block_timeout: Duration,
 ) -> Option<Value> {
     let id = message.get("id").cloned()?;
     let method = message.get("method").and_then(Value::as_str).unwrap_or("");
@@ -59,7 +66,16 @@ async fn handle_message(
         "tools/list" => Ok(json!({
             "tools": crate::tools::tool_definitions_filtered(acp_session, acp_terminals)
         })),
-        "tools/call" => tool_call_result(&params, anchor, acp_session, acp_terminals).await,
+        "tools/call" => {
+            tool_call_result(
+                &params,
+                anchor,
+                acp_session,
+                acp_terminals,
+                run_block_timeout,
+            )
+            .await
+        }
         _ => {
             return Some(json!({
                 "jsonrpc": "2.0",
@@ -108,6 +124,7 @@ async fn tool_call_result(
     anchor: Option<vmux_service::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
+    run_block_timeout: Duration,
 ) -> Result<Value, String> {
     let name = params
         .get("name")
@@ -139,7 +156,7 @@ async fn tool_call_result(
         crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
         | crate::tools::DispatchTarget::Command(
             command @ AgentCommand::RunWithPlacementOverride { .. },
-        ) => run_blocking(command).await,
+        ) => run_blocking(command, run_block_timeout).await,
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
@@ -411,13 +428,19 @@ fn blocking_run_with_marker(mut run: AgentCommand, request_id: AgentRequestId) -
     run
 }
 
-fn run_result(pid: &str, exit: Option<i32>, output: &str, timed_out: bool) -> Value {
+fn run_result(
+    pid: &str,
+    exit: Option<i32>,
+    output: &str,
+    timed_out: bool,
+    run_block_timeout: Duration,
+) -> Value {
     let mut text = format!("terminal: {pid}\n");
     match exit {
         Some(code) => text.push_str(&format!("exit: {code}\n")),
         None if timed_out => text.push_str(&format!(
             "note: still running after {}s; call read_terminal({pid}) to read more\n",
-            RUN_BLOCK_TIMEOUT.as_secs()
+            run_block_timeout.as_secs()
         )),
         None => {}
     }
@@ -453,7 +476,7 @@ fn run_completion_exit(
 /// Send `run`, then block (polling `RunCompletion`) until the invisible OSC
 /// completion escape for this run's token is seen, returning the output + exit
 /// code in one response.
-async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
+async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<Value, String> {
     let connection = vmux_service::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
@@ -501,7 +524,7 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
 
     let start = Instant::now();
     let baseline_text = read_full_text(&connection, process_id).await;
-    let deadline = start + RUN_BLOCK_TIMEOUT;
+    let deadline = start + run_block_timeout;
     let materialize_deadline = start + RUN_PROCESS_MATERIALIZE_TIMEOUT;
     let mut process_materialized = false;
     loop {
@@ -513,12 +536,18 @@ async fn run_blocking(run: AgentCommand) -> Result<Value, String> {
         if let Some(exit) = exit {
             let final_text = read_full_text(&connection, process_id).await;
             let output = output_since(&baseline_text, &final_text);
-            return Ok(run_result(&pid, Some(exit), &output, false));
+            return Ok(run_result(
+                &pid,
+                Some(exit),
+                &output,
+                false,
+                run_block_timeout,
+            ));
         }
         if Instant::now() >= deadline {
             let final_text = read_full_text(&connection, process_id).await;
             let output = output_since(&baseline_text, &final_text);
-            return Ok(run_result(&pid, None, &output, true));
+            return Ok(run_result(&pid, None, &output, true, run_block_timeout));
         }
         tokio::time::sleep(RUN_POLL_INTERVAL).await;
     }
@@ -811,6 +840,7 @@ mod tests {
                 None,
                 true,
                 true,
+                Duration::from_secs(50),
             )
             .await
             .unwrap();
@@ -835,6 +865,7 @@ mod tests {
             None,
             true,
             false,
+            Duration::from_secs(50),
         )
         .await
         .unwrap();
@@ -906,15 +937,17 @@ mod tests {
 
     #[test]
     fn run_result_shapes_text() {
-        let done = run_result("pid7", Some(1), "boom", false);
+        let timeout = Duration::from_secs(600);
+        let done = run_result("pid7", Some(1), "boom", false, timeout);
         let text = done["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("terminal: pid7"));
         assert!(text.contains("exit: 1"));
         assert!(text.contains("output:\nboom"));
 
-        let timeout = run_result("pid7", None, "partial", true);
-        let text = timeout["content"][0]["text"].as_str().unwrap();
+        let timed_out = run_result("pid7", None, "partial", true, timeout);
+        let text = timed_out["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("still running"));
+        assert!(text.contains("600s"));
         assert!(text.contains("read_terminal(pid7)"));
     }
 
