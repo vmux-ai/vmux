@@ -11,6 +11,12 @@ pub struct WorkspacePickerStartRequest {
     pub webview: Entity,
 }
 
+#[derive(Event, Clone, Copy)]
+pub struct AgentChoiceSelected {
+    pub webview: Entity,
+    pub index: usize,
+}
+
 #[derive(Event, Clone, Debug)]
 pub struct AgentInput {
     pub session: Entity,

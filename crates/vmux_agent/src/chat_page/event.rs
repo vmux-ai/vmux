@@ -64,6 +64,8 @@ pub struct ChatSnapshot {
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
     pub workspace_selection_pending: bool,
+    pub choice_question: String,
+    pub choice_options: Vec<String>,
 }
 
 /// Page → native: the user submitted a prompt.
@@ -94,6 +96,21 @@ pub struct ChatSubmit {
     rkyv::Deserialize,
 )]
 pub struct ChatChooseWorkspace;
+
+/// Page → native: answer the active agent-authored multiple-choice prompt.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatChoiceSelected {
+    pub index: u32,
+}
 
 /// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
 /// 2 = allow-always.
@@ -553,6 +570,8 @@ mod tests {
             handoff_truncated: true,
             handoff_message_count: 2,
             workspace_selection_pending: true,
+            choice_question: "Repository?".into(),
+            choice_options: vec!["Local".into(), "Remote".into(), "Create".into()],
             queued: vec![
                 QueuedPromptSnapshot {
                     id: 4,
@@ -581,6 +600,8 @@ mod tests {
         assert!(back.handoff_truncated);
         assert_eq!(back.handoff_message_count, 2);
         assert!(back.workspace_selection_pending);
+        assert_eq!(back.choice_question, "Repository?");
+        assert_eq!(back.choice_options.len(), 3);
     }
 
     #[test]
@@ -606,6 +627,15 @@ mod tests {
                 .preview_data_url
                 .starts_with("data:image/png")
         );
+    }
+
+    #[test]
+    fn chat_choice_selected_rkyv_roundtrip() {
+        let value = ChatChoiceSelected { index: 2 };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&value).unwrap();
+        let back = rkyv::from_bytes::<ChatChoiceSelected, rkyv::rancor::Error>(&bytes).unwrap();
+
+        assert_eq!(back.index, 2);
     }
 
     #[test]

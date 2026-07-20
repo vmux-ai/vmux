@@ -158,6 +158,15 @@ pub(crate) fn menu_direction(key: &str, ctrl: bool) -> Option<MenuDirection> {
     }
 }
 
+pub(crate) fn choice_number_index(key: &str, len: usize) -> Option<usize> {
+    let number = key.parse::<usize>().ok()?;
+    if number == 0 || number > len {
+        None
+    } else {
+        Some(number - 1)
+    }
+}
+
 pub(crate) fn move_selection(current: usize, len: usize, direction: MenuDirection) -> usize {
     if len == 0 {
         return 0;
@@ -502,6 +511,10 @@ mod tests {
         assert_eq!(menu_direction("p", true), Some(MenuDirection::Previous));
         assert_eq!(menu_direction("n", false), None);
         assert_eq!(menu_direction("ArrowDown", true), None);
+        assert_eq!(choice_number_index("1", 3), Some(0));
+        assert_eq!(choice_number_index("3", 3), Some(2));
+        assert_eq!(choice_number_index("0", 3), None);
+        assert_eq!(choice_number_index("4", 3), None);
     }
 
     #[test]

@@ -12,14 +12,22 @@ use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 const DISALLOWED_TOOLS: &str = "Bash,Monitor,WebSearch,WebFetch";
 const ALLOWED_TOOLS: &str = "mcp__vmux__run,mcp__vmux__read_terminal,\
-mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll";
+mcp__vmux__browser_navigate,mcp__vmux__browser_snapshot,mcp__vmux__browser_scroll,\
+mcp__vmux__request_user_choice,mcp__vmux__choose_workspace,mcp__vmux__create_worktree";
 const RUN_STEER_PROMPT: &str = "The native Bash, WebSearch, and WebFetch tools are disabled. Run \
 ALL shell commands via the mcp__vmux__run tool (a visible terminal the user can watch and take \
 over). Use the output returned by run directly; call read_terminal only when run says the command \
 is still running. Do ALL web access via the vmux browser tools in the user's visible browser: \
 mcp__vmux__browser_navigate (it returns the page snapshot on load), then mcp__vmux__browser_scroll \
 to read more. Omit the pane argument - it targets your own browser pane. Do not look for a \
-built-in web search.";
+built-in web search. For development work without a selected repository, first call \
+mcp__vmux__request_user_choice with options Local repository, Remote repository, Create repository \
+in that order, then call mcp__vmux__choose_workspace after the answer. Pass a known path so vmux \
+only opens the folder picker when path resolution fails. Immediately before the first edit, write, \
+test, build, or mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
+worktrees, ask whether to create or choose an existing path, then call create_worktree with \
+create=true or the selected path. Never \
+run git worktree add yourself.";
 const FILE_TOUCH_MATCHER: &str = "Read|Edit|Write|MultiEdit";
 
 pub struct ClaudeStrategy;
@@ -439,6 +447,9 @@ mod tests {
         let allowed = args.iter().position(|a| a == "--allowedTools").unwrap();
         assert!(args[allowed + 1].contains("mcp__vmux__run"));
         assert!(args[allowed + 1].contains("mcp__vmux__read_terminal"));
+        assert!(args[allowed + 1].contains("mcp__vmux__request_user_choice"));
+        assert!(args[allowed + 1].contains("mcp__vmux__choose_workspace"));
+        assert!(args[allowed + 1].contains("mcp__vmux__create_worktree"));
 
         let steer = args
             .iter()
@@ -446,6 +457,10 @@ mod tests {
             .unwrap();
         assert!(args[steer + 1].contains("mcp__vmux__run"));
         assert!(args[steer + 1].contains("browser_navigate"));
+        let repository = args[steer + 1].find("Local repository").unwrap();
+        let workspace = args[steer + 1].find("mcp__vmux__choose_workspace").unwrap();
+        let worktree = args[steer + 1].find("mcp__vmux__create_worktree").unwrap();
+        assert!(repository < workspace && workspace < worktree);
     }
 
     #[test]

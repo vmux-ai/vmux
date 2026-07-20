@@ -208,6 +208,27 @@ pub enum AgentCommand {
         title: Option<String>,
         favicon_url: Option<String>,
     },
+    /// Show a native multiple-choice prompt and resume the same agent session with the answer.
+    /// Appended to preserve existing positional enum discriminants.
+    RequestUserChoice {
+        anchor: ProcessId,
+        question: String,
+        options: Vec<String>,
+    },
+    /// Select a known project path, falling back to the native folder picker when it is invalid.
+    /// Appended to preserve existing positional enum discriminants.
+    ChooseWorkspaceAtPath {
+        anchor: ProcessId,
+        path: String,
+    },
+    /// Prepare a worktree immediately before mutation, reusing a known checkout when possible.
+    /// Appended to preserve existing positional enum discriminants.
+    PrepareWorktree {
+        anchor: ProcessId,
+        path: Option<String>,
+        task: Option<String>,
+        create: bool,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -376,6 +397,18 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::CreateWorktreeOnBranch { branch, .. } if branch.trim().is_empty() => {
             Err("create_worktree.branch is empty")
+        }
+        AgentCommand::RequestUserChoice {
+            question, options, ..
+        } if question.trim().is_empty()
+            || options.len() < 2
+            || options.len() > 9
+            || options.iter().any(|option| option.trim().is_empty()) =>
+        {
+            Err("request_user_choice requires a question and 2 to 9 non-empty options")
+        }
+        AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
+            Err("choose_workspace.path is empty")
         }
         _ => Ok(()),
     }
@@ -1450,6 +1483,21 @@ mod tests {
             AgentCommand::CreateWorktreeOnBranch {
                 anchor: ProcessId::new(),
                 branch: "feature/fun-terminal".into(),
+            },
+            AgentCommand::RequestUserChoice {
+                anchor: ProcessId::new(),
+                question: "Repository?".into(),
+                options: vec!["Local".into(), "Remote".into(), "Create".into()],
+            },
+            AgentCommand::ChooseWorkspaceAtPath {
+                anchor: ProcessId::new(),
+                path: "/repo".into(),
+            },
+            AgentCommand::PrepareWorktree {
+                anchor: ProcessId::new(),
+                path: Some("/repo-wt".into()),
+                task: Some("feature".into()),
+                create: false,
             },
         ];
         for command in commands {

@@ -36,11 +36,11 @@ use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
-    AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, BrowserScrollRequest,
-    BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin, NavAwaitingSnapshot,
-    RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
-    ScreenshotImage, ScreenshotRequest, ScreenshotResponse, WorkspacePickerStartRequest,
-    snapshot_response_to_query_result,
+    AgentChoiceSelected, AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest,
+    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin,
+    NavAwaitingSnapshot, RecordStartRequest, RecordStartResponse, RecordStopRequest,
+    RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+    WorkspacePickerStartRequest, snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -53,7 +53,11 @@ pub use vmux_space::cwd::valid_cwd;
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 const WORKSPACE_SELECTION_REQUESTED: &str = "Workspace selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
 const WORKSPACE_SELECTION_PENDING: &str = "Workspace selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const REPOSITORY_SOURCE_QUESTION: &str = "Which repository should this task use?";
+const REPOSITORY_SOURCE_OPTIONS: [&str; 3] =
+    ["Local repository", "Remote repository", "Create repository"];
 
 /// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
 /// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
@@ -204,6 +208,7 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .add_observer(start_workspace_picker)
+            .add_observer(handle_agent_choice_selected)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
@@ -2002,6 +2007,9 @@ fn handle_agent_commands(
             | ServiceAgentCommand::RunWithPlacementOverride { .. }
             | ServiceAgentCommand::CreateWorktree { .. }
             | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
+            | ServiceAgentCommand::PrepareWorktree { .. }
+            | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
             | ServiceAgentCommand::ResumeInAcp { .. } => {
                 continue;
@@ -2102,6 +2110,9 @@ fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
         | ServiceAgentCommand::RunWithPlacementOverride { anchor, .. }
         | ServiceAgentCommand::CreateWorktree { anchor }
         | ServiceAgentCommand::ChooseWorkspace { anchor }
+        | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. }
+        | ServiceAgentCommand::PrepareWorktree { anchor, .. }
+        | ServiceAgentCommand::RequestUserChoice { anchor, .. }
         | ServiceAgentCommand::CreateWorktreeOnBranch { anchor, .. } => Some(*anchor),
         _ => None,
     }
@@ -2112,6 +2123,9 @@ fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
         command,
         ServiceAgentCommand::CreateWorktree { .. }
             | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
+            | ServiceAgentCommand::PrepareWorktree { .. }
+            | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) {
         0
@@ -2128,6 +2142,9 @@ fn self_command_blocked_by_worktree_failure(
         command,
         ServiceAgentCommand::CreateWorktree { .. }
             | ServiceAgentCommand::ChooseWorkspace { .. }
+            | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
+            | ServiceAgentCommand::PrepareWorktree { .. }
+            | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
@@ -2572,7 +2589,21 @@ struct AgentSelfCommandWriters<'w> {
 pub(crate) struct PendingAgentProject(pub(crate) PathBuf);
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
-struct PendingAgentContinuation(String);
+pub(crate) struct PendingAgentContinuation(String);
+
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PendingAgentChoice {
+    session_entity: Entity,
+    tab_entity: Option<Entity>,
+    pub(crate) question: String,
+    pub(crate) options: Vec<String>,
+}
+
+#[derive(Component, Clone, Copy)]
+struct RepositorySourceSelected;
+
+#[derive(Component, Clone, Copy)]
+pub(crate) struct RepositoryNeedsWorktree;
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct PendingWorkspaceSelection {
@@ -2594,10 +2625,53 @@ struct PendingWorkspacePicker {
 struct WorkspacePickerContext<'w, 's> {
     selections: Query<'w, 's, &'static PendingWorkspaceSelection>,
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
+    choices: Query<'w, 's, &'static PendingAgentChoice>,
+    repository_sources: Query<'w, 's, (), With<RepositorySourceSelected>>,
     chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
     page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
     cli_sessions: Query<'w, 's, &'static AgentSession>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
+}
+
+fn handle_agent_choice_selected(
+    trigger: On<AgentChoiceSelected>,
+    choices: Query<&PendingAgentChoice>,
+    mut commands: Commands,
+) {
+    let event = trigger.event();
+    let Ok(choice) = choices.get(event.webview) else {
+        return;
+    };
+    let Some(selected) = choice.options.get(event.index) else {
+        return;
+    };
+    let continuation = if choice.tab_entity.is_some() {
+        format!(
+            "VMUX REPOSITORY SOURCE SELECTED: The user selected \"{selected}\". Continue repository setup in this same conversation. Obtain or create the local checkout, then call choose_workspace before project work."
+        )
+    } else {
+        format!(
+            "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
+            choice.question, selected
+        )
+    };
+    commands
+        .entity(choice.session_entity)
+        .insert(PendingAgentContinuation(continuation));
+    if let Some(tab_entity) = choice.tab_entity {
+        commands.entity(tab_entity).insert(RepositorySourceSelected);
+    }
+    commands
+        .entity(event.webview)
+        .remove::<PendingAgentChoice>()
+        .remove::<crate::chat_page::ChatSynced>();
+}
+
+fn repository_source_choice(options: &[String]) -> bool {
+    options
+        .iter()
+        .map(String::as_str)
+        .eq(REPOSITORY_SOURCE_OPTIONS)
 }
 
 fn workspace_picker_task(
@@ -2620,6 +2694,19 @@ fn workspace_picker_task(
             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
         selected
+    })
+}
+
+fn workspace_path_task(
+    path: PathBuf,
+    proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
+) -> Task<Option<PathBuf>> {
+    let wake = proxy.map(|proxy| (**proxy).clone());
+    IoTaskPool::get().spawn(async move {
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
+        Some(path)
     })
 }
 
@@ -2657,7 +2744,7 @@ fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execu
 
 fn workspace_ready_continuation(path: &Path) -> String {
     format!(
-        "VMUX WORKSPACE SELECTION COMPLETED: Workspace {} is ready. Continue the original user request in this same conversation using this directory.",
+        "VMUX REPOSITORY SELECTION COMPLETED: Repository {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
         path.display()
     )
 }
@@ -2714,6 +2801,7 @@ fn activate_agent_worktree(
             vmux_layout::tab::TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
+        .remove::<RepositoryNeedsWorktree>()
         .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
     let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
         .and_then(|stack| rebind_acp_workspace(stack, &execution_dir, acp_sessions, commands));
@@ -2746,6 +2834,7 @@ fn activate_agent_directory(
             vmux_layout::tab::TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
+        .remove::<RepositoryNeedsWorktree>()
         .remove::<vmux_layout::tab::TabWorktree>()
         .remove::<vmux_layout::worktree::TabWorktreeReady>()
         .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
@@ -2758,45 +2847,114 @@ fn activate_selected_workspace(
     tab_entity: Entity,
     agent_entity: Entity,
     selected: &Path,
-    managed_root: &Path,
+    _managed_root: &Path,
     tabs: &mut Query<&mut vmux_layout::tab::Tab>,
     acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>), String> {
-    if vmux_git::worktree::checkout_info(selected).is_ok()
-        && !vmux_git::worktree::is_linked_worktree(selected)
-    {
-        let name = tabs
-            .get(tab_entity)
-            .map(|tab| tab.name.clone())
-            .map_err(|_| "tab not found".to_string())?;
-        let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(&name, selected);
-        let activation =
-            vmux_layout::worktree::create_worktree_blocking(selected, &slug_hint, managed_root)?;
-        activate_agent_worktree(
-            tab_entity,
-            agent_entity,
-            selected,
-            activation,
-            tabs,
-            acp_sessions,
-            child_of,
-            commands,
-        )
-    } else {
-        let rebind = activate_agent_directory(
-            tab_entity,
-            agent_entity,
-            selected,
-            selected,
-            tabs,
-            acp_sessions,
-            child_of,
-            commands,
-        )?;
-        Ok((selected.to_path_buf(), rebind))
+    vmux_git::worktree::checkout_info(selected).map_err(|_| {
+        "selected directory is not a Git repository; initialize it before choosing it".to_string()
+    })?;
+    let needs_worktree = !vmux_git::worktree::is_linked_worktree(selected);
+    let rebind = activate_agent_directory(
+        tab_entity,
+        agent_entity,
+        selected,
+        selected,
+        tabs,
+        acp_sessions,
+        child_of,
+        commands,
+    )?;
+    if needs_worktree {
+        commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
     }
+    Ok((selected.to_path_buf(), rebind))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExistingWorktreeCandidate {
+    checkout_dir: PathBuf,
+    execution_dir: PathBuf,
+    branch: String,
+}
+
+fn existing_worktree_candidates(
+    project_dir: &Path,
+) -> Result<Vec<ExistingWorktreeCandidate>, String> {
+    let project_dir = project_dir
+        .canonicalize()
+        .map_err(|error| format!("invalid project directory: {error}"))?;
+    let project_checkout =
+        vmux_git::worktree::checkout_info(&project_dir).map_err(|error| error.0)?;
+    let relative_dir = project_dir
+        .strip_prefix(&project_checkout.root)
+        .map_err(|_| "project directory is outside its checkout".to_string())?;
+    let mut candidates = vmux_git::worktree::worktree_registrations(&project_checkout.root)
+        .map_err(|error| error.0)?
+        .into_iter()
+        .filter_map(|registration| {
+            let branch = registration.branch?;
+            let checkout = vmux_git::worktree::checkout_info(&registration.path).ok()?;
+            if checkout.common_dir != project_checkout.common_dir
+                || !vmux_git::worktree::is_linked_worktree(&checkout.root)
+            {
+                return None;
+            }
+            let execution_dir = checkout.root.join(relative_dir).canonicalize().ok()?;
+            execution_dir.is_dir().then_some(ExistingWorktreeCandidate {
+                checkout_dir: checkout.root,
+                execution_dir,
+                branch,
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.execution_dir.cmp(&right.execution_dir));
+    candidates.dedup_by(|left, right| left.execution_dir == right.execution_dir);
+    Ok(candidates)
+}
+
+fn resolve_requested_worktree(
+    project_dir: &Path,
+    requested: &Path,
+) -> Result<ExistingWorktreeCandidate, String> {
+    let requested = requested
+        .canonicalize()
+        .map_err(|error| format!("invalid worktree path: {error}"))?;
+    existing_worktree_candidates(project_dir)?
+        .into_iter()
+        .find(|candidate| {
+            requested == candidate.execution_dir
+                || requested.starts_with(&candidate.execution_dir)
+                || requested == candidate.checkout_dir
+                || requested.starts_with(&candidate.checkout_dir)
+        })
+        .ok_or_else(|| {
+            format!(
+                "{} is not an existing linked worktree for this repository",
+                requested.display()
+            )
+        })
+}
+
+fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate]) -> String {
+    let existing = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| {
+            format!(
+                "{}. {} — {}",
+                index + 2,
+                candidate.branch,
+                candidate.execution_dir.display()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Multiple existing worktrees match this repository. Ask the user with request_user_choice using these options, then call create_worktree again with create=true or the selected path:\n1. Create new worktree\n{existing}"
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3146,7 +3304,53 @@ fn handle_agent_self_commands(
                     }
                 }
             }
-            ServiceAgentCommand::ChooseWorkspace { anchor } => {
+            ServiceAgentCommand::RequestUserChoice {
+                anchor,
+                question,
+                options,
+            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                None => AgentCommandResult::Error("agent pane not found".to_string()),
+                Some((agent_entity, pane)) => {
+                    let Some(session_entity) = ancestor_agent_session(
+                        agent_entity,
+                        &acp_sessions,
+                        &workspace_picker.page_sessions,
+                        &workspace_picker.cli_sessions,
+                        &ctx.child_of_q,
+                    ) else {
+                        service.0.send(ClientMessage::AgentCommandResponse {
+                            request_id: request.request_id,
+                            result: AgentCommandResult::Error(
+                                "agent session not found".to_string(),
+                            ),
+                        });
+                        continue;
+                    };
+                    if workspace_picker.choices.get(agent_entity).is_ok() {
+                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+                    } else if workspace_picker.chat_views.contains(agent_entity) {
+                        let tab_entity = repository_source_choice(options)
+                            .then(|| ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q));
+                        commands
+                            .entity(agent_entity)
+                            .insert(PendingAgentChoice {
+                                session_entity,
+                                tab_entity: tab_entity.flatten(),
+                                question: question.clone(),
+                                options: options.clone(),
+                            })
+                            .remove::<crate::chat_page::ChatSynced>();
+                        AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+                    } else {
+                        AgentCommandResult::Error(
+                            "Native choice prompts require the chat agent view; ask the user with the same numbered options in the current terminal session."
+                                .to_string(),
+                        )
+                    }
+                }
+            },
+            ServiceAgentCommand::ChooseWorkspace { anchor }
+            | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
                     Some((agent_entity, pane)) => {
@@ -3174,8 +3378,42 @@ fn handle_agent_self_commands(
                             });
                             continue;
                         };
-                        if !workspace_picker_tabs.insert(tab_entity) {
+                        if tab_worktree.workspaces.get(tab_entity).is_err()
+                            && !workspace_picker.repository_sources.contains(tab_entity)
+                            && workspace_picker.chat_views.contains(agent_entity)
+                        {
+                            if workspace_picker.choices.get(agent_entity).is_err() {
+                                commands
+                                    .entity(agent_entity)
+                                    .insert(PendingAgentChoice {
+                                        session_entity,
+                                        tab_entity: Some(tab_entity),
+                                        question: REPOSITORY_SOURCE_QUESTION.to_string(),
+                                        options: REPOSITORY_SOURCE_OPTIONS
+                                            .into_iter()
+                                            .map(str::to_string)
+                                            .collect(),
+                                    })
+                                    .remove::<crate::chat_page::ChatSynced>();
+                            }
+                            AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
+                        } else if !workspace_picker_tabs.insert(tab_entity) {
                             AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
+                        } else if let ServiceAgentCommand::ChooseWorkspaceAtPath { path, .. } =
+                            &request.command
+                            && let Ok(selected) = Path::new(path).canonicalize()
+                            && selected.is_dir()
+                        {
+                            commands.spawn(PendingWorkspacePicker {
+                                tab_entity,
+                                agent_entity,
+                                session_entity,
+                                task: workspace_path_task(
+                                    selected,
+                                    workspace_picker.proxy.as_deref(),
+                                ),
+                            });
+                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         } else if workspace_picker.chat_views.contains(agent_entity) {
                             commands
                                 .entity(agent_entity)
@@ -3199,6 +3437,159 @@ fn handle_agent_self_commands(
                     }
                 }
             }
+            ServiceAgentCommand::PrepareWorktree {
+                anchor,
+                path,
+                task,
+                create,
+            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                None => AgentCommandResult::Error("agent pane not found".to_string()),
+                Some((agent_entity, pane)) => {
+                    let Some(tab_entity) =
+                        ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q)
+                    else {
+                        service.0.send(ClientMessage::AgentCommandResponse {
+                            request_id: request.request_id,
+                            result: AgentCommandResult::Error("no tab for agent".to_string()),
+                        });
+                        continue;
+                    };
+                    let current_dir =
+                        tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
+                            stored_tab_cwd(tab.startup_dir.as_deref()).ok().flatten()
+                        });
+                    if let Some(current_dir) = current_dir.as_deref()
+                        && vmux_git::worktree::is_linked_worktree(current_dir)
+                    {
+                        AgentCommandResult::Text(current_dir.to_string_lossy().into_owned())
+                    } else {
+                        let project_dir = tab_worktree
+                            .workspaces
+                            .get(tab_entity)
+                            .ok()
+                            .and_then(|workspace| {
+                                stored_tab_cwd(Some(&workspace.project_dir)).ok().flatten()
+                            })
+                            .or_else(|| {
+                                tab_worktree
+                                    .pending_projects
+                                    .get(tab_entity)
+                                    .ok()
+                                    .map(|project| project.0.clone())
+                            })
+                            .or(current_dir);
+                        let Some(project_dir) = project_dir else {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "No repository selected. Complete choose_workspace first."
+                                        .to_string(),
+                                ),
+                            });
+                            continue;
+                        };
+                        if vmux_git::worktree::checkout_info(&project_dir).is_err() {
+                            AgentCommandResult::Text(project_dir.to_string_lossy().into_owned())
+                        } else {
+                            let candidate = if *create {
+                                Ok(None)
+                            } else {
+                                match path.as_deref() {
+                                    Some(path) => {
+                                        resolve_requested_worktree(&project_dir, Path::new(path))
+                                            .map(Some)
+                                    }
+                                    None => match existing_worktree_candidates(&project_dir) {
+                                        Ok(candidates) if candidates.is_empty() => Ok(None),
+                                        Ok(candidates) if candidates.len() == 1 => {
+                                            Ok(candidates.into_iter().next())
+                                        }
+                                        Ok(candidates) => {
+                                            Err(ambiguous_worktree_message(&candidates))
+                                        }
+                                        Err(error) => Err(error),
+                                    },
+                                }
+                            };
+                            match candidate {
+                                Err(error) => AgentCommandResult::Error(error),
+                                Ok(Some(candidate)) => match activate_agent_directory(
+                                    tab_entity,
+                                    agent_entity,
+                                    &project_dir,
+                                    &candidate.execution_dir,
+                                    &mut tab_worktree.tabs,
+                                    &mut acp_sessions,
+                                    &ctx.child_of_q,
+                                    &mut commands,
+                                ) {
+                                    Ok(rebind) => {
+                                        if let Some(message) = rebind {
+                                            service.0.send(message);
+                                        }
+                                        AgentCommandResult::Text(format!(
+                                            "Worktree ready: {}\nContinue the user's request in this directory.",
+                                            candidate.execution_dir.display()
+                                        ))
+                                    }
+                                    Err(error) => AgentCommandResult::Error(error),
+                                },
+                                Ok(None) => {
+                                    let name = task
+                                        .as_deref()
+                                        .filter(|task| !task.trim().is_empty())
+                                        .map(str::to_string)
+                                        .or_else(|| {
+                                            tab_worktree
+                                                .tabs
+                                                .get(tab_entity)
+                                                .ok()
+                                                .map(|tab| tab.name.clone())
+                                        })
+                                        .unwrap_or_else(|| "task".to_string());
+                                    let slug_hint = vmux_layout::worktree::tab_worktree_slug_hint(
+                                        &name,
+                                        &project_dir,
+                                    );
+                                    match vmux_layout::worktree::create_worktree_blocking(
+                                        &project_dir,
+                                        &slug_hint,
+                                        &managed_root,
+                                    ) {
+                                        Ok(activation) => match activate_agent_worktree(
+                                            tab_entity,
+                                            agent_entity,
+                                            &project_dir,
+                                            activation,
+                                            &mut tab_worktree.tabs,
+                                            &mut acp_sessions,
+                                            &ctx.child_of_q,
+                                            &mut commands,
+                                        ) {
+                                            Ok((execution_dir, rebind)) => {
+                                                if let Some(message) = rebind {
+                                                    service.0.send(message);
+                                                }
+                                                worktree_created_this_batch.insert(
+                                                    tab_entity,
+                                                    vmux_git::worktree::head_ref(&execution_dir)
+                                                        .unwrap_or_default(),
+                                                );
+                                                AgentCommandResult::Text(format!(
+                                                    "Worktree ready: {}\nContinue the user's request in this directory.",
+                                                    execution_dir.display()
+                                                ))
+                                            }
+                                            Err(error) => AgentCommandResult::Error(error),
+                                        },
+                                        Err(error) => AgentCommandResult::Error(error),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             ServiceAgentCommand::CreateWorktree { anchor } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                     None => AgentCommandResult::Error("agent pane not found".to_string()),
@@ -3434,7 +3825,8 @@ fn handle_agent_self_commands(
             (&request.command, &result),
             (
                 ServiceAgentCommand::CreateWorktree { .. }
-                    | ServiceAgentCommand::CreateWorktreeOnBranch { .. },
+                    | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
+                    | ServiceAgentCommand::PrepareWorktree { .. },
                 AgentCommandResult::Error(_)
             )
         ) && let Some(anchor) = request_anchor
@@ -5216,9 +5608,58 @@ mod tests {
         let cancelled = failed_workspace_continuation("The user cancelled workspace selection");
 
         assert!(ready.contains("same conversation"));
-        assert!(ready.contains("Workspace /repo/dashboard is ready"));
-        assert!(!ready.contains("create_worktree"));
+        assert!(ready.contains("Repository /repo/dashboard is ready"));
+        assert!(ready.contains("Immediately before the first edit"));
+        assert!(ready.contains("create_worktree"));
         assert!(cancelled.contains("Do not retry automatically"));
+    }
+
+    #[test]
+    fn repository_source_choice_requires_exact_order() {
+        let ordered = REPOSITORY_SOURCE_OPTIONS
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let reordered = [
+            "Remote repository".to_string(),
+            "Local repository".to_string(),
+            "Create repository".to_string(),
+        ];
+
+        assert!(repository_source_choice(&ordered));
+        assert!(!repository_source_choice(&reordered));
+    }
+
+    #[test]
+    fn selected_agent_choice_resumes_session_and_unlocks_repository_selection() {
+        let mut app = App::new();
+        app.add_observer(handle_agent_choice_selected);
+        let session = app.world_mut().spawn_empty().id();
+        let tab = app.world_mut().spawn_empty().id();
+        let webview = app
+            .world_mut()
+            .spawn(PendingAgentChoice {
+                session_entity: session,
+                tab_entity: Some(tab),
+                question: REPOSITORY_SOURCE_QUESTION.into(),
+                options: REPOSITORY_SOURCE_OPTIONS
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            })
+            .id();
+
+        app.world_mut()
+            .trigger(AgentChoiceSelected { webview, index: 1 });
+        app.update();
+
+        let continuation = app
+            .world()
+            .get::<PendingAgentContinuation>(session)
+            .unwrap();
+        assert!(continuation.0.contains("Remote repository"));
+        assert!(app.world().get::<RepositorySourceSelected>(tab).is_some());
+        assert!(app.world().get::<PendingAgentChoice>(webview).is_none());
     }
 
     #[test]
@@ -5390,7 +5831,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_workspace_reuses_linked_worktree_or_creates_managed_checkout() {
+    fn selected_workspace_binds_repository_without_eager_worktree_creation() {
         use bevy::ecs::system::RunSystemOnce;
 
         let repo = init_worktree_test_repo();
@@ -5443,6 +5884,11 @@ mod tests {
                 .get::<vmux_layout::tab::TabWorktree>(linked_tab)
                 .is_none()
         );
+        assert!(
+            app.world()
+                .get::<RepositoryNeedsWorktree>(linked_tab)
+                .is_none()
+        );
         assert_eq!(
             app.world()
                 .get::<vmux_layout::tab::TabWorkspace>(linked_tab)
@@ -5490,10 +5936,15 @@ mod tests {
             .unwrap()
             .0;
 
-        assert!(managed_execution.starts_with(managed_root.path().canonicalize().unwrap()));
+        assert_eq!(managed_execution, project_dir);
         assert!(
             app.world()
                 .get::<vmux_layout::tab::TabWorktree>(managed_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<RepositoryNeedsWorktree>(managed_tab)
                 .is_some()
         );
         assert_eq!(
@@ -5507,8 +5958,73 @@ mod tests {
             vmux_git::worktree::worktree_list(&project_dir)
                 .unwrap()
                 .len(),
-            3
+            2
         );
+    }
+
+    #[test]
+    fn selected_workspace_rejects_non_git_directory() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let directory = tempfile::tempdir().unwrap();
+        let selected = directory.path().canonicalize().unwrap();
+        let managed_root = tempfile::tempdir().unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Create".into(),
+                startup_dir: None,
+            })
+            .id();
+        let agent = app.world_mut().spawn(ChildOf(tab)).id();
+
+        let error = app
+            .world_mut()
+            .run_system_once(
+                move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
+                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      child_of: Query<&ChildOf>,
+                      mut commands: Commands| {
+                    activate_selected_workspace(
+                        tab,
+                        agent,
+                        &selected,
+                        managed_root.path(),
+                        &mut tabs,
+                        &mut sessions,
+                        &child_of,
+                        &mut commands,
+                    )
+                },
+            )
+            .unwrap()
+            .unwrap_err();
+
+        assert!(error.contains("not a Git repository"));
+    }
+
+    #[test]
+    fn worktree_candidates_resolve_known_path_and_offer_create_when_ambiguous() {
+        let repo = init_worktree_test_repo();
+        let project_dir = repo.path().canonicalize().unwrap();
+        let roots = tempfile::tempdir().unwrap();
+        let first = roots.path().join("first");
+        let second = roots.path().join("second");
+        vmux_git::worktree::worktree_add(&project_dir, &first, "feature/first", "main").unwrap();
+        vmux_git::worktree::worktree_add(&project_dir, &second, "feature/second", "main").unwrap();
+
+        let candidates = existing_worktree_candidates(&project_dir).unwrap();
+        let resolved = resolve_requested_worktree(&project_dir, &first).unwrap();
+        let message = ambiguous_worktree_message(&candidates);
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(resolved.branch, "feature/first");
+        assert!(message.contains("1. Create new worktree"));
+        assert!(message.contains("feature/first"));
+        assert!(message.contains("feature/second"));
+        assert!(message.contains("create=true"));
     }
 
     fn swap_test_app() -> App {
