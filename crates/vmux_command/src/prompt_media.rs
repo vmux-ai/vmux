@@ -202,6 +202,14 @@ pub fn media_reference(entry: &ChatMediaEntry) -> String {
     }
 }
 
+pub fn media_display_path(entry: &ChatMediaEntry) -> String {
+    if entry.parent == "~" {
+        format!("~/{}", entry.name)
+    } else {
+        format!("{}/{}", entry.parent.trim_end_matches('/'), entry.name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +243,22 @@ mod tests {
             "inspect @Pictures/photo.png "
         );
         assert_eq!(replace_inline_media_query(draft, query, ""), "inspect ");
+    }
+
+    #[test]
+    fn media_display_path_includes_entry_name() {
+        let entry = ChatMediaEntry {
+            name: "Accessibility".into(),
+            parent: "~/Library".into(),
+            ..Default::default()
+        };
+        assert_eq!(media_display_path(&entry), "~/Library/Accessibility");
+
+        let root_entry = ChatMediaEntry {
+            name: "Pictures".into(),
+            parent: "~".into(),
+            ..Default::default()
+        };
+        assert_eq!(media_display_path(&root_entry), "~/Pictures");
     }
 }

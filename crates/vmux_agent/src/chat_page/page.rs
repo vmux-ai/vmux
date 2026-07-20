@@ -21,7 +21,9 @@ use crate::chat_page::event::{
 use dioxus::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use vmux_command::prompt_media::{inline_media_query, media_reference, replace_inline_media_query};
+use vmux_command::prompt_media::{
+    inline_media_query, media_display_path, media_reference, replace_inline_media_query,
+};
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
@@ -807,6 +809,7 @@ pub fn Page(
                                 for (i , entry) in media_entries.read().iter().cloned().enumerate() {
                                     {
                                         let entry = entry.clone();
+                                        let display_path = media_display_path(&entry);
                                         rsx! {
                                             div {
                                                 key: "media-{entry.path}",
@@ -837,7 +840,7 @@ pub fn Page(
                                                 }
                                                 div { class: "min-w-0 flex-1",
                                                     div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                                    div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
+                                                    div { class: "truncate text-xs text-muted-foreground", "{display_path}" }
                                                 }
                                             }
                                         }
