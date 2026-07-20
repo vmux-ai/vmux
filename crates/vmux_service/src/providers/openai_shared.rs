@@ -104,10 +104,16 @@ pub fn messages_to_chat_completions(messages: &[Message]) -> Vec<Value> {
                             call_id,
                             name,
                             args,
+                            ..
                         } => tool_calls.push(json!({
                             "id": call_id,
                             "type":"function",
                             "function": {"name": name, "arguments": args}
+                        })),
+                        AssistantBlock::Subagent(subagent) => tool_calls.push(json!({
+                            "id": subagent.call_id,
+                            "type":"function",
+                            "function": {"name": "subagent", "arguments": subagent.raw_input}
                         })),
                         AssistantBlock::Diff { .. }
                         | AssistantBlock::Thinking(_)

@@ -1706,6 +1706,7 @@ enum ActivityIcon {
     Command,
     Browser,
     Guardian,
+    Subagent,
     Tool,
     Output,
     Error,
@@ -1755,6 +1756,12 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
         ActivityIcon::Guardian => &[
             "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
             "m9 12 2 2 4-4",
+        ],
+        ActivityIcon::Subagent => &[
+            "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+            "M5 21v-2a7 7 0 0 1 14 0v2",
+            "M5.5 11a2.5 2.5 0 1 0 0-5",
+            "M18.5 11a2.5 2.5 0 1 1 0-5",
         ],
         ActivityIcon::Tool => &[
             "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
@@ -1828,6 +1835,9 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         ActivityIcon::Guardian => {
             "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
         }
+        ActivityIcon::Subagent => {
+            "bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-300"
+        }
         ActivityIcon::Tool => {
             "bg-orange-500/10 text-orange-600 ring-orange-500/20 dark:text-orange-300"
         }
@@ -1899,6 +1909,7 @@ fn current_activity_icon(items: &[ChatItem], status: &str) -> Option<ActivityIco
                 Some(ChatBlock::Text(_)) => ActivityIcon::Writing,
                 Some(ChatBlock::Thinking(_)) | None => ActivityIcon::Thinking,
                 Some(ChatBlock::ToolUse { name, args, .. }) => tool_activity_icon_for(name, args),
+                Some(ChatBlock::Subagent(_)) => ActivityIcon::Subagent,
                 Some(ChatBlock::Diff { path, .. }) => {
                     language_activity_icon(path).unwrap_or(ActivityIcon::Diff)
                 }
@@ -2044,6 +2055,80 @@ fn render_block(
                 }
             }
         }
+        ChatBlock::Subagent(subagent) => {
+            let status_label = subagent_status_label(&subagent.status);
+            let status_class = subagent_status_class(&subagent.status);
+            let title = if subagent.title.is_empty() {
+                "Subagent".to_string()
+            } else {
+                subagent.title.replace('_', " ")
+            };
+            let action = subagent.action.replace('_', " ");
+            let child_threads = subagent.child_thread_ids.join(", ");
+            rsx! {
+                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
+                    {render_activity_icon(ActivityIcon::Subagent)}
+                    div { class: "min-w-0",
+                        details { open: subagent.status == "in_progress", class: "disclosure text-sm text-muted-foreground",
+                            summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                                span { class: "font-medium text-foreground/85", "{title}" }
+                                span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
+                                {render_disclosure_icon()}
+                            }
+                            div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
+                                span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
+                                if !subagent.action.is_empty() {
+                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{action}" }
+                                }
+                                if let Some(agent_name) = &subagent.agent_name {
+                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{agent_name}" }
+                                }
+                                if let Some(model) = &subagent.model {
+                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 font-mono text-foreground/60", "{model}" }
+                                }
+                                if let Some(effort) = &subagent.reasoning_effort {
+                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{effort}" }
+                                }
+                            }
+                            if let Some(prompt) = &subagent.prompt {
+                                div { class: "mt-2 rounded-lg bg-foreground/[0.025] p-2 text-xs leading-relaxed text-foreground/75 ring-1 ring-inset ring-foreground/10",
+                                    div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", "Prompt" }
+                                    div { class: "whitespace-pre-wrap", "{prompt}" }
+                                }
+                            }
+                            div { class: "mt-2 grid gap-1 text-[10px] text-muted-foreground/75",
+                                if let Some(thread_id) = &subagent.thread_id {
+                                    div { span { class: "font-semibold", "Thread " } code { class: "font-mono", "{thread_id}" } }
+                                }
+                                if let Some(parent_thread_id) = &subagent.parent_thread_id {
+                                    div { span { class: "font-semibold", "Parent " } code { class: "font-mono", "{parent_thread_id}" } }
+                                }
+                                if !child_threads.is_empty() {
+                                    div { span { class: "font-semibold", "Children " } code { class: "break-all font-mono", "{child_threads}" } }
+                                }
+                                div { span { class: "font-semibold", "Call " } code { class: "font-mono", "{subagent.call_id}" } }
+                            }
+                            if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
+                                details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
+                                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
+                                        span { class: "font-medium", "Raw event" }
+                                        {render_disclosure_icon()}
+                                    }
+                                    pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
+                                }
+                            }
+                        }
+                        if !children.is_empty() {
+                            div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
+                                for (child_key , child) in children {
+                                    {render_tool_child(*child_key, child)}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         ChatBlock::Plan { steps } => {
             let n = steps.len();
             rsx! {
@@ -2140,10 +2225,50 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                 }
             }
         }
+        ChatBlock::Subagent(subagent) => {
+            let status_label = subagent_status_label(&subagent.status);
+            let status_class = subagent_status_class(&subagent.status);
+            rsx! {
+                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
+                    summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
+                        span { class: "font-medium", "{subagent.title}" }
+                        span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
+                        {render_disclosure_icon()}
+                    }
+                    div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
+                        span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
+                        if let Some(agent_name) = &subagent.agent_name {
+                            span { class: "rounded-full bg-foreground/[0.055] px-1.5 py-0.5", "{agent_name}" }
+                        }
+                    }
+                    if let Some(prompt) = &subagent.prompt {
+                        div { class: "mt-1.5 whitespace-pre-wrap rounded-lg bg-foreground/[0.025] p-2 text-[11px] leading-relaxed ring-1 ring-inset ring-foreground/10", "{prompt}" }
+                    }
+                }
+            }
+        }
         ChatBlock::ToolResult {
             content, is_error, ..
         } => render_nested_tool_result(key, content, *is_error),
         _ => rsx! {},
+    }
+}
+
+fn subagent_status_label(status: &str) -> &'static str {
+    match status {
+        "in_progress" => "Running",
+        "completed" => "Done",
+        "failed" => "Failed",
+        _ => "Pending",
+    }
+}
+
+fn subagent_status_class(status: &str) -> &'static str {
+    match status {
+        "in_progress" => "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+        "completed" => "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        "failed" => "bg-red-500/10 text-red-700 dark:text-red-300",
+        _ => "bg-amber-500/10 text-amber-700 dark:text-amber-300",
     }
 }
 

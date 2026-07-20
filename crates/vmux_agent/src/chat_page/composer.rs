@@ -630,6 +630,7 @@ mod tests {
                 call_id: "1".into(),
                 name: "functions.exec_command".into(),
                 args: "{}".into(),
+                parent_call_id: None,
             }),
             "Ship dynamic titles"
         );
@@ -638,6 +639,7 @@ mod tests {
                 call_id: "2".into(),
                 name: "search_files".into(),
                 args: "{}".into(),
+                parent_call_id: None,
             }),
             "Ship dynamic titles"
         );

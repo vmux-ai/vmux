@@ -1815,6 +1815,7 @@ mod native_tests {
                         call_id: "call-1".into(),
                         name: "run".into(),
                         args: "{}".into(),
+                        parent_call_id: None,
                     }],
                 },
                 crate::Message::ToolResult {

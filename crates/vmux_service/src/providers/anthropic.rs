@@ -56,11 +56,19 @@ fn messages_to_anthropic_blocks(messages: &[Message]) -> Vec<Value> {
                             call_id,
                             name,
                             args,
+                            ..
                         } => json!({
                             "type":"tool_use",
                             "id":call_id,
                             "name":name,
                             "input": serde_json::from_str::<Value>(args).unwrap_or(json!({}))
+                        }),
+                        AssistantBlock::Subagent(subagent) => json!({
+                            "type":"tool_use",
+                            "id":subagent.call_id,
+                            "name":"subagent",
+                            "input": serde_json::from_str::<Value>(&subagent.raw_input)
+                                .unwrap_or(json!({}))
                         }),
                         AssistantBlock::Diff { .. }
                         | AssistantBlock::Thinking(_)

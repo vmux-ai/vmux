@@ -361,7 +361,9 @@ pub enum ChatBlock {
         call_id: String,
         name: String,
         args: String,
+        parent_call_id: Option<String>,
     },
+    Subagent(Box<ChatSubagent>),
     Diff {
         call_id: String,
         path: String,
@@ -380,6 +382,25 @@ pub enum ChatBlock {
         attempt: u32,
         total: u32,
     },
+}
+
+/// Page representation of `vmux_service::message::SubagentBlock`.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ChatSubagent {
+    pub call_id: String,
+    pub provider: String,
+    pub title: String,
+    pub status: String,
+    pub action: String,
+    pub agent_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub parent_thread_id: Option<String>,
+    pub child_thread_ids: Vec<String>,
+    pub parent_call_id: Option<String>,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub raw_input: String,
 }
 
 /// Mirror of `vmux_service::message::PlanStep`.
@@ -438,36 +459,55 @@ pub(crate) fn is_guardian_tool(name: &str) -> bool {
 
 impl ChatTurn {
     pub(crate) fn parent_tool_index(&self, index: usize) -> Option<usize> {
+        let mut parent = self.direct_parent_index(index)?;
+        for _ in 0..self.blocks.len() {
+            let Some(next) = self.direct_parent_index(parent) else {
+                break;
+            };
+            if next == parent {
+                break;
+            }
+            parent = next;
+        }
+        Some(parent)
+    }
+
+    fn direct_parent_index(&self, index: usize) -> Option<usize> {
         match self.blocks.get(index)? {
+            ChatBlock::ToolUse {
+                parent_call_id: Some(parent_call_id),
+                ..
+            } => self.call_index(parent_call_id),
+            ChatBlock::Subagent(subagent) => subagent
+                .parent_call_id
+                .as_deref()
+                .and_then(|parent_call_id| self.call_index(parent_call_id)),
             ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {
                 self.guardian_parent_index(index)
             }
             ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
-                let tool_index = self.blocks.iter().position(|block| {
-                    matches!(
-                        block,
-                        ChatBlock::ToolUse {
-                            call_id: tool_call_id,
-                            ..
-                        } if tool_call_id == call_id
-                    )
-                })?;
-                match &self.blocks[tool_index] {
-                    ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {
-                        self.guardian_parent_index(tool_index).or(Some(tool_index))
-                    }
-                    _ => Some(tool_index),
-                }
+                self.call_index(call_id)
             }
             _ => None,
         }
+    }
+
+    fn call_index(&self, call_id: &str) -> Option<usize> {
+        self.blocks.iter().position(|block| match block {
+            ChatBlock::ToolUse {
+                call_id: block_call_id,
+                ..
+            } => block_call_id == call_id,
+            ChatBlock::Subagent(subagent) => subagent.call_id == call_id,
+            _ => false,
+        })
     }
 
     fn guardian_parent_index(&self, index: usize) -> Option<usize> {
         for (candidate, block) in self.blocks[..index].iter().enumerate().rev() {
             match block {
                 ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {}
-                ChatBlock::ToolUse { .. } => return Some(candidate),
+                ChatBlock::ToolUse { .. } | ChatBlock::Subagent(_) => return Some(candidate),
                 _ => return None,
             }
         }
@@ -633,11 +673,13 @@ mod tests {
                     call_id: "read-1".into(),
                     name: "read_file".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
                 ChatBlock::ToolUse {
                     call_id: "review-1".into(),
                     name: "guardian_review".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
                 ChatBlock::ToolResult {
                     call_id: "read-1".into(),
@@ -667,6 +709,7 @@ mod tests {
                     call_id: String::new(),
                     name: "read_file".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
                 ChatBlock::ToolResult {
                     call_id: String::new(),
@@ -689,6 +732,7 @@ mod tests {
                     call_id: "review-1".into(),
                     name: "guardian_review".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
                 ChatBlock::ToolResult {
                     call_id: "review-1".into(),

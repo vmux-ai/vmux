@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 
-use crate::message::{AssistantBlock, Message, PlanStep};
+use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 use crate::protocol::AgentAttachment;
 use agent_client_protocol::schema::v1::{
     ContentBlock, Plan, PlanEntryStatus, SessionUpdate, ToolCall, ToolCallContent,
@@ -205,8 +205,13 @@ impl AcpProjector {
                     call_id: existing,
                     name,
                     args,
+                    ..
                 } = block
                 else {
+                    if let AssistantBlock::Subagent(subagent) = block {
+                        return (subagent.call_id == call_id)
+                            .then(|| (subagent.title.clone(), subagent.raw_input.clone()));
+                    }
                     return None;
                 };
                 (existing == call_id).then(|| (name.clone(), args.clone()))
@@ -394,7 +399,24 @@ impl AcpProjector {
 
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
         let call_id = tc.tool_call_id.to_string();
-        self.upsert_tool_use(&call_id, &tc.title, &raw_input_json(tc.raw_input.as_ref()));
+        let subagent = subagent_block(
+            &call_id,
+            &tc.title,
+            Some(&tc.status),
+            tc.raw_input.as_ref(),
+            tc.meta.as_ref(),
+        );
+        let is_subagent = subagent.is_some();
+        if let Some(subagent) = subagent {
+            self.upsert_subagent(subagent);
+        } else {
+            self.upsert_tool_use(
+                &call_id,
+                &tc.title,
+                &raw_input_json(tc.raw_input.as_ref()),
+                parent_call_id(tc.meta.as_ref()),
+            );
+        }
         let diff_locations = tc
             .locations
             .is_empty()
@@ -408,22 +430,57 @@ impl AcpProjector {
             Some(tc.status),
             true,
         ));
-        intents.extend(self.record_tool_content(
-            &call_id,
-            &tc.content,
-            matches!(tc.status, ToolCallStatus::Failed),
-        ));
+        if !is_subagent
+            || matches!(
+                tc.status,
+                ToolCallStatus::Completed | ToolCallStatus::Failed
+            )
+        {
+            intents.extend(self.record_tool_content(
+                &call_id,
+                &tc.content,
+                matches!(tc.status, ToolCallStatus::Failed),
+            ));
+            if is_subagent && tool_output_text(&tc.content).is_empty() {
+                self.record_raw_output(
+                    &call_id,
+                    tc.raw_output.as_ref(),
+                    matches!(tc.status, ToolCallStatus::Failed),
+                );
+            }
+        }
         intents
     }
 
     fn apply_tool_call_update(&mut self, update: ToolCallUpdate) -> Vec<Intent> {
         let call_id = update.tool_call_id.to_string();
         let title = update.fields.title.clone().unwrap_or_default();
-        self.upsert_tool_use(
+        let subagent = subagent_block(
             &call_id,
             &title,
-            &raw_input_json(update.fields.raw_input.as_ref()),
+            update.fields.status.as_ref(),
+            update.fields.raw_input.as_ref(),
+            update.meta.as_ref(),
         );
+        let is_subagent = if let Some(subagent) = subagent {
+            self.upsert_subagent(subagent);
+            true
+        } else if self.update_subagent(
+            &call_id,
+            &title,
+            update.fields.status.as_ref(),
+            update.fields.raw_input.as_ref(),
+        ) {
+            true
+        } else {
+            self.upsert_tool_use(
+                &call_id,
+                &title,
+                &raw_input_json(update.fields.raw_input.as_ref()),
+                parent_call_id(update.meta.as_ref()),
+            );
+            false
+        };
         let diff_locations = update
             .fields
             .content
@@ -446,9 +503,24 @@ impl AcpProjector {
             update.fields.status,
             false,
         ));
-        if let Some(content) = &update.fields.content {
+        let terminal_status = matches!(
+            update.fields.status,
+            Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
+        );
+        if let Some(content) = &update.fields.content
+            && (!is_subagent || terminal_status)
+        {
             let failed = matches!(update.fields.status, Some(ToolCallStatus::Failed));
             intents.extend(self.record_tool_content(&call_id, content, failed));
+            if is_subagent && tool_output_text(content).is_empty() {
+                self.record_raw_output(&call_id, update.fields.raw_output.as_ref(), failed);
+            }
+        } else if is_subagent && terminal_status {
+            self.record_raw_output(
+                &call_id,
+                update.fields.raw_output.as_ref(),
+                matches!(update.fields.status, Some(ToolCallStatus::Failed)),
+            );
         }
         intents
     }
@@ -516,7 +588,91 @@ impl AcpProjector {
         });
     }
 
-    fn upsert_tool_use(&mut self, call_id: &str, name: &str, args: &str) {
+    fn record_raw_output(
+        &mut self,
+        call_id: &str,
+        raw_output: Option<&serde_json::Value>,
+        is_error: bool,
+    ) {
+        let Some(raw_output) = raw_output.filter(|value| !value.is_null()) else {
+            return;
+        };
+        self.upsert_tool_result(call_id, pretty_json(raw_output), is_error);
+    }
+
+    fn update_subagent(
+        &mut self,
+        call_id: &str,
+        title: &str,
+        status: Option<&ToolCallStatus>,
+        raw_input: Option<&serde_json::Value>,
+    ) -> bool {
+        for message in self.messages.iter_mut() {
+            let Message::Assistant { blocks } = message else {
+                continue;
+            };
+            for block in blocks.iter_mut() {
+                let AssistantBlock::Subagent(subagent) = block else {
+                    continue;
+                };
+                if subagent.call_id != call_id {
+                    continue;
+                }
+                if !title.is_empty() {
+                    subagent.title = title.to_string();
+                }
+                if let Some(status) = status {
+                    subagent.status = tool_call_status(status).to_string();
+                }
+                if let Some(raw_input) = raw_input {
+                    subagent.raw_input = pretty_json(raw_input);
+                    merge_subagent_input(subagent, raw_input);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    fn upsert_subagent(&mut self, subagent: SubagentBlock) {
+        for message in self.messages.iter_mut() {
+            let Message::Assistant { blocks } = message else {
+                continue;
+            };
+            for block in blocks.iter_mut() {
+                let same_call = match block {
+                    AssistantBlock::ToolUse {
+                        call_id: existing, ..
+                    } => existing == &subagent.call_id,
+                    AssistantBlock::Subagent(existing) => existing.call_id == subagent.call_id,
+                    _ => false,
+                };
+                if !same_call {
+                    continue;
+                }
+                match block {
+                    AssistantBlock::Subagent(existing) => merge_subagent(existing, subagent),
+                    _ => *block = AssistantBlock::Subagent(Box::new(subagent)),
+                }
+                return;
+            }
+        }
+        let block = AssistantBlock::Subagent(Box::new(subagent));
+        match self.messages.last_mut() {
+            Some(Message::Assistant { blocks }) => blocks.push(block),
+            _ => self.messages.push(Message::Assistant {
+                blocks: vec![block],
+            }),
+        }
+    }
+
+    fn upsert_tool_use(
+        &mut self,
+        call_id: &str,
+        name: &str,
+        args: &str,
+        parent_call_id: Option<String>,
+    ) {
         for message in self.messages.iter_mut() {
             if let Message::Assistant { blocks } = message {
                 for block in blocks.iter_mut() {
@@ -524,6 +680,7 @@ impl AcpProjector {
                         call_id: existing,
                         name: existing_name,
                         args: existing_args,
+                        parent_call_id: existing_parent_call_id,
                     } = block
                         && existing == call_id
                     {
@@ -532,6 +689,9 @@ impl AcpProjector {
                         }
                         if args != "{}" {
                             *existing_args = args.to_string();
+                        }
+                        if parent_call_id.is_some() {
+                            *existing_parent_call_id = parent_call_id;
                         }
                         return;
                     }
@@ -542,6 +702,7 @@ impl AcpProjector {
             call_id: call_id.to_string(),
             name: name.to_string(),
             args: args.to_string(),
+            parent_call_id,
         };
         match self.messages.last_mut() {
             Some(Message::Assistant { blocks }) => blocks.push(block),
@@ -591,6 +752,211 @@ impl AcpProjector {
     }
 }
 
+fn subagent_block(
+    call_id: &str,
+    title: &str,
+    status: Option<&ToolCallStatus>,
+    raw_input: Option<&serde_json::Value>,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<SubagentBlock> {
+    codex_subagent_block(call_id, title, status, raw_input, meta)
+        .or_else(|| claude_subagent_block(call_id, title, status, raw_input, meta))
+}
+
+fn codex_subagent_block(
+    call_id: &str,
+    title: &str,
+    status: Option<&ToolCallStatus>,
+    raw_input: Option<&serde_json::Value>,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<SubagentBlock> {
+    let codex = meta?.get("codex")?.as_object()?;
+    let input = raw_input.and_then(serde_json::Value::as_object);
+    if let Some(subagent) = codex.get("subagent").and_then(serde_json::Value::as_object) {
+        let path = string_field(subagent, "path");
+        return Some(SubagentBlock {
+            call_id: call_id.to_string(),
+            provider: "Codex".to_string(),
+            title: title.to_string(),
+            status: status.map(tool_call_status).unwrap_or_default().to_string(),
+            action: string_field(subagent, "activity").unwrap_or_default(),
+            agent_name: path.as_deref().and_then(agent_name_from_path),
+            thread_id: string_field(subagent, "threadId")
+                .or_else(|| input.and_then(|input| string_field(input, "agentThreadId"))),
+            parent_thread_id: None,
+            child_thread_ids: Vec::new(),
+            parent_call_id: None,
+            prompt: input.and_then(|input| string_field(input, "prompt")),
+            model: input.and_then(|input| string_field(input, "model")),
+            reasoning_effort: input.and_then(|input| string_field(input, "reasoningEffort")),
+            raw_input: raw_input.map(pretty_json).unwrap_or_default(),
+        });
+    }
+    let collaboration = codex
+        .get("collaboration")
+        .and_then(serde_json::Value::as_object)?;
+    let child_thread_ids = string_list_field(collaboration, "receiverThreadIds");
+    Some(SubagentBlock {
+        call_id: call_id.to_string(),
+        provider: "Codex".to_string(),
+        title: title.to_string(),
+        status: status.map(tool_call_status).unwrap_or_default().to_string(),
+        action: string_field(collaboration, "tool").unwrap_or_default(),
+        agent_name: None,
+        thread_id: None,
+        parent_thread_id: string_field(collaboration, "senderThreadId")
+            .or_else(|| input.and_then(|input| string_field(input, "senderThreadId"))),
+        child_thread_ids: if child_thread_ids.is_empty() {
+            input
+                .map(|input| string_list_field(input, "receiverThreadIds"))
+                .unwrap_or_default()
+        } else {
+            child_thread_ids
+        },
+        parent_call_id: None,
+        prompt: input.and_then(|input| string_field(input, "prompt")),
+        model: input.and_then(|input| string_field(input, "model")),
+        reasoning_effort: input.and_then(|input| string_field(input, "reasoningEffort")),
+        raw_input: raw_input.map(pretty_json).unwrap_or_default(),
+    })
+}
+
+fn claude_subagent_block(
+    call_id: &str,
+    title: &str,
+    status: Option<&ToolCallStatus>,
+    raw_input: Option<&serde_json::Value>,
+    meta: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Option<SubagentBlock> {
+    let claude = meta?.get("claudeCode")?.as_object()?;
+    let tool_name = claude.get("toolName")?.as_str()?;
+    if !matches!(tool_name, "Agent" | "Task") {
+        return None;
+    }
+    let input = raw_input.and_then(serde_json::Value::as_object);
+    let action = if input.is_some_and(|input| input.get("resume").is_some()) {
+        "resume"
+    } else if input
+        .and_then(|input| input.get("run_in_background"))
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        "background"
+    } else {
+        "delegate"
+    };
+    Some(SubagentBlock {
+        call_id: call_id.to_string(),
+        provider: "Claude".to_string(),
+        title: title.to_string(),
+        status: status.map(tool_call_status).unwrap_or_default().to_string(),
+        action: action.to_string(),
+        agent_name: input.and_then(|input| {
+            string_field(input, "name").or_else(|| string_field(input, "subagent_type"))
+        }),
+        thread_id: input.and_then(|input| string_field(input, "resume")),
+        parent_thread_id: None,
+        child_thread_ids: Vec::new(),
+        parent_call_id: string_field(claude, "parentToolUseId"),
+        prompt: input.and_then(|input| string_field(input, "prompt")),
+        model: input.and_then(|input| string_field(input, "model")),
+        reasoning_effort: None,
+        raw_input: raw_input.map(pretty_json).unwrap_or_default(),
+    })
+}
+
+fn parent_call_id(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<String> {
+    meta?
+        .get("claudeCode")?
+        .as_object()
+        .and_then(|claude| string_field(claude, "parentToolUseId"))
+}
+
+fn merge_subagent(existing: &mut SubagentBlock, update: SubagentBlock) {
+    if !update.provider.is_empty() {
+        existing.provider = update.provider;
+    }
+    if !update.title.is_empty() {
+        existing.title = update.title;
+    }
+    if !update.status.is_empty() {
+        existing.status = update.status;
+    }
+    if !update.action.is_empty() {
+        existing.action = update.action;
+    }
+    existing.agent_name = update.agent_name.or(existing.agent_name.take());
+    existing.thread_id = update.thread_id.or(existing.thread_id.take());
+    existing.parent_thread_id = update.parent_thread_id.or(existing.parent_thread_id.take());
+    if !update.child_thread_ids.is_empty() {
+        existing.child_thread_ids = update.child_thread_ids;
+    }
+    existing.parent_call_id = update.parent_call_id.or(existing.parent_call_id.take());
+    existing.prompt = update.prompt.or(existing.prompt.take());
+    existing.model = update.model.or(existing.model.take());
+    existing.reasoning_effort = update.reasoning_effort.or(existing.reasoning_effort.take());
+    if !update.raw_input.is_empty() {
+        existing.raw_input = update.raw_input;
+    }
+}
+
+fn merge_subagent_input(subagent: &mut SubagentBlock, raw_input: &serde_json::Value) {
+    let Some(input) = raw_input.as_object() else {
+        return;
+    };
+    subagent.prompt = string_field(input, "prompt").or(subagent.prompt.take());
+    subagent.model = string_field(input, "model").or(subagent.model.take());
+    subagent.reasoning_effort =
+        string_field(input, "reasoningEffort").or(subagent.reasoning_effort.take());
+    let child_thread_ids = string_list_field(input, "receiverThreadIds");
+    if !child_thread_ids.is_empty() {
+        subagent.child_thread_ids = child_thread_ids;
+    }
+}
+
+fn string_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Option<String> {
+    let value = object.get(field)?;
+    value.as_str().map(ToString::to_string).or_else(|| {
+        (!value.is_null() && !value.is_object() && !value.is_array()).then(|| value.to_string())
+    })
+}
+
+fn string_list_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Vec<String> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(ToString::to_string))
+        .collect()
+}
+
+fn agent_name_from_path(path: &str) -> Option<String> {
+    path.rsplit('/')
+        .find(|part| !part.is_empty())
+        .map(|part| part.trim_end_matches(".toml").to_string())
+}
+
+fn tool_call_status(status: &ToolCallStatus) -> &'static str {
+    match status {
+        ToolCallStatus::Pending => "pending",
+        ToolCallStatus::InProgress => "in_progress",
+        ToolCallStatus::Completed => "completed",
+        ToolCallStatus::Failed => "failed",
+        _ => "pending",
+    }
+}
+
+fn pretty_json(value: &serde_json::Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
 fn raw_input_json(raw: Option<&serde_json::Value>) -> String {
     raw.map(|v| v.to_string())
         .unwrap_or_else(|| "{}".to_string())
@@ -624,6 +990,13 @@ mod tests {
         SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
             text,
         ))))
+    }
+
+    fn meta(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        let serde_json::Value::Object(meta) = value else {
+            panic!("expected metadata object")
+        };
+        meta
     }
 
     #[test]
@@ -749,6 +1122,164 @@ mod tests {
             )),
             other => panic!("expected assistant message, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn codex_subagent_metadata_projects_first_class_block() {
+        let mut p = AcpProjector::new();
+        let tc = ToolCall::new("sub-1", "Start subagent explorer")
+            .status(ToolCallStatus::InProgress)
+            .raw_input(serde_json::json!({
+                "agentThreadId": "thread-child",
+                "agentPath": ".codex/agents/explorer.toml",
+                "activityKind": "started",
+                "prompt": "Inspect ACP projection",
+                "model": "gpt-5.4",
+                "reasoningEffort": "high"
+            }))
+            .meta(meta(serde_json::json!({
+                "codex": {
+                    "subagent": {
+                        "threadId": "thread-child",
+                        "path": ".codex/agents/explorer.toml",
+                        "activity": "started"
+                    }
+                }
+            })));
+
+        p.apply(SessionUpdate::ToolCall(tc));
+
+        let Message::Assistant { blocks } = &p.messages()[0] else {
+            panic!("expected assistant message")
+        };
+        let AssistantBlock::Subagent(subagent) = &blocks[0] else {
+            panic!("expected subagent block")
+        };
+        assert_eq!(subagent.provider, "Codex");
+        assert_eq!(subagent.status, "in_progress");
+        assert_eq!(subagent.action, "started");
+        assert_eq!(subagent.agent_name.as_deref(), Some("explorer"));
+        assert_eq!(subagent.thread_id.as_deref(), Some("thread-child"));
+        assert_eq!(subagent.prompt.as_deref(), Some("Inspect ACP projection"));
+        assert_eq!(subagent.model.as_deref(), Some("gpt-5.4"));
+        assert_eq!(subagent.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn codex_collaboration_metadata_projects_child_threads() {
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("spawn-1", "spawn_agent")
+                .status(ToolCallStatus::InProgress)
+                .raw_input(serde_json::json!({
+                    "prompt": "Inspect two subsystems",
+                    "receiverThreadIds": ["thread-a", "thread-b"],
+                    "model": "gpt-5.4",
+                    "reasoningEffort": "medium"
+                }))
+                .meta(meta(serde_json::json!({
+                    "codex": {
+                        "collaboration": {
+                            "tool": "spawn_agent",
+                            "senderThreadId": "thread-root",
+                            "receiverThreadIds": ["thread-a", "thread-b"]
+                        }
+                    }
+                }))),
+        ));
+
+        let Message::Assistant { blocks } = &p.messages()[0] else {
+            panic!("expected assistant message")
+        };
+        let AssistantBlock::Subagent(subagent) = &blocks[0] else {
+            panic!("expected subagent block")
+        };
+        assert_eq!(subagent.action, "spawn_agent");
+        assert_eq!(subagent.parent_thread_id.as_deref(), Some("thread-root"));
+        assert_eq!(subagent.child_thread_ids, ["thread-a", "thread-b"]);
+        assert_eq!(subagent.prompt.as_deref(), Some("Inspect two subsystems"));
+    }
+
+    #[test]
+    fn subagent_update_without_metadata_preserves_identity_and_records_output() {
+        use agent_client_protocol::schema::v1::{ToolCallUpdate, ToolCallUpdateFields};
+
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("sub-1", "Start subagent explorer")
+                .status(ToolCallStatus::InProgress)
+                .meta(meta(serde_json::json!({
+                    "codex": {
+                        "subagent": {
+                            "threadId": "thread-child",
+                            "path": "explorer",
+                            "activity": "started"
+                        }
+                    }
+                }))),
+        ));
+
+        p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "sub-1",
+            ToolCallUpdateFields::new()
+                .status(ToolCallStatus::Completed)
+                .raw_output(serde_json::json!({"summary": "inspection complete"})),
+        )));
+
+        let Message::Assistant { blocks } = &p.messages()[0] else {
+            panic!("expected assistant message")
+        };
+        assert!(matches!(
+            &blocks[0],
+            AssistantBlock::Subagent(subagent) if subagent.status == "completed"
+        ));
+        assert!(p.messages().iter().any(|message| matches!(
+            message,
+            Message::ToolResult { call_id, content, is_error: false }
+                if call_id == "sub-1" && content.contains("inspection complete")
+        )));
+    }
+
+    #[test]
+    fn claude_agent_and_child_tool_preserve_parent_relationship() {
+        let mut p = AcpProjector::new();
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("agent-1", "Inspect ACP support")
+                .status(ToolCallStatus::InProgress)
+                .raw_input(serde_json::json!({
+                    "description": "Inspect ACP support",
+                    "prompt": "Trace subagent metadata",
+                    "subagent_type": "Explore",
+                    "model": "sonnet"
+                }))
+                .meta(meta(serde_json::json!({
+                    "claudeCode": {"toolName": "Agent"}
+                }))),
+        ));
+        p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("read-1", "Read files").meta(meta(serde_json::json!({
+                "claudeCode": {
+                    "toolName": "Read",
+                    "parentToolUseId": "agent-1"
+                }
+            }))),
+        ));
+
+        let Message::Assistant { blocks } = &p.messages()[0] else {
+            panic!("expected assistant message")
+        };
+        assert!(matches!(
+            &blocks[0],
+            AssistantBlock::Subagent(subagent)
+                if subagent.provider == "Claude"
+                    && subagent.agent_name.as_deref() == Some("Explore")
+                    && subagent.prompt.as_deref() == Some("Trace subagent metadata")
+        ));
+        assert!(matches!(
+            &blocks[1],
+            AssistantBlock::ToolUse { parent_call_id, .. }
+                if parent_call_id.as_deref() == Some("agent-1")
+        ));
     }
 
     #[test]

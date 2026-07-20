@@ -2,8 +2,10 @@
 //! user bubbles and grouped assistant turns. Pure + unit-tested — the brain for the dumb chat
 //! page (see the context-collapse design).
 
-use crate::chat_page::event::{ChatBlock, ChatItem, ChatPlanStep, ChatSubmitAttachment, ChatTurn};
-use vmux_service::message::{AssistantBlock, Message, PlanStep};
+use crate::chat_page::event::{
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatSubmitAttachment, ChatTurn,
+};
+use vmux_service::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
 
 /// Group `messages` into `ChatItem`s: one `ChatItem::User` per user message, followed by one
 /// `ChatItem::Turn` per started turn. `durations[i]` is the finished seconds of the `i`-th
@@ -52,11 +54,16 @@ pub fn group_turns(messages: &[Message], durations: &[u32], running: bool) -> Ve
                             call_id,
                             name,
                             args,
+                            parent_call_id,
                         } => turn.blocks.push(ChatBlock::ToolUse {
                             call_id: call_id.clone(),
                             name: name.clone(),
                             args: args.clone(),
+                            parent_call_id: parent_call_id.clone(),
                         }),
+                        AssistantBlock::Subagent(subagent) => turn
+                            .blocks
+                            .push(ChatBlock::Subagent(Box::new(map_subagent(subagent)))),
                         AssistantBlock::Diff {
                             call_id,
                             path,
@@ -163,6 +170,25 @@ fn map_plan_step(step: &PlanStep) -> ChatPlanStep {
     }
 }
 
+fn map_subagent(subagent: &SubagentBlock) -> ChatSubagent {
+    ChatSubagent {
+        call_id: subagent.call_id.clone(),
+        provider: subagent.provider.clone(),
+        title: subagent.title.clone(),
+        status: subagent.status.clone(),
+        action: subagent.action.clone(),
+        agent_name: subagent.agent_name.clone(),
+        thread_id: subagent.thread_id.clone(),
+        parent_thread_id: subagent.parent_thread_id.clone(),
+        child_thread_ids: subagent.child_thread_ids.clone(),
+        parent_call_id: subagent.parent_call_id.clone(),
+        prompt: subagent.prompt.clone(),
+        model: subagent.model.clone(),
+        reasoning_effort: subagent.reasoning_effort.clone(),
+        raw_input: subagent.raw_input.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,7 +201,27 @@ mod tests {
             call_id: id.into(),
             name: "run".into(),
             args: "{}".into(),
+            parent_call_id: None,
         }
+    }
+
+    fn subagent(id: &str) -> AssistantBlock {
+        AssistantBlock::Subagent(Box::new(SubagentBlock {
+            call_id: id.into(),
+            provider: "Claude".into(),
+            title: "Inspect ACP support".into(),
+            status: "in_progress".into(),
+            action: "delegate".into(),
+            agent_name: Some("Explore".into()),
+            thread_id: None,
+            parent_thread_id: None,
+            child_thread_ids: Vec::new(),
+            parent_call_id: None,
+            prompt: Some("Trace metadata".into()),
+            model: Some("sonnet".into()),
+            reasoning_effort: None,
+            raw_input: "{}".into(),
+        }))
     }
 
     #[test]
@@ -382,11 +428,13 @@ mod tests {
                     call_id: "read-1".into(),
                     name: "read_file".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
                 AssistantBlock::ToolUse {
                     call_id: "review-1".into(),
                     name: "guardian_review".into(),
                     args: "{}".into(),
+                    parent_call_id: None,
                 },
             ]),
             Message::ToolResult {
@@ -400,6 +448,42 @@ mod tests {
             panic!()
         };
         assert_eq!(turn.step_count, 1);
+    }
+
+    #[test]
+    fn subagent_children_and_results_fold_into_one_visible_step() {
+        let msgs = vec![
+            Message::user("a"),
+            assistant(vec![
+                subagent("agent-1"),
+                AssistantBlock::ToolUse {
+                    call_id: "read-1".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                    parent_call_id: Some("agent-1".into()),
+                },
+            ]),
+            Message::ToolResult {
+                call_id: "read-1".into(),
+                content: "file contents".into(),
+                is_error: false,
+            },
+            Message::ToolResult {
+                call_id: "agent-1".into(),
+                content: "done".into(),
+                is_error: false,
+            },
+        ];
+
+        let items = group_turns(&msgs, &[], false);
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!()
+        };
+        assert_eq!(turn.step_count, 1);
+        assert!(matches!(&turn.blocks[0], ChatBlock::Subagent(_)));
+        assert_eq!(turn.parent_tool_index(1), Some(0));
+        assert_eq!(turn.parent_tool_index(2), Some(0));
+        assert_eq!(turn.parent_tool_index(3), Some(0));
     }
 
     #[test]
