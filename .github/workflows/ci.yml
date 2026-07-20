@@ -558,3 +558,9 @@ jobs:
               --generate-notes \
               "${ASSETS[@]}"
           fi
+
+      - name: Require release metadata commit
+        if: env.IS_RELEASE_PR == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/update-release-metadata.sh --check
