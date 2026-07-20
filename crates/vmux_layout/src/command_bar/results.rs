@@ -188,6 +188,11 @@ pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
                 shortcut: page.shortcut.clone(),
             }),
     );
+    if !query.trim().is_empty() {
+        results.push(CommandBarResultItem::Navigate {
+            url: query.trim().to_string(),
+        });
+    }
     results
 }
 
@@ -797,6 +802,16 @@ mod tests {
             .collect();
 
         assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://settings/"]);
+    }
+
+    #[test]
+    fn start_page_offers_web_search_for_prompt_text() {
+        let results = start_page_results(&sample_pages(), "fix the failing test");
+
+        assert!(matches!(
+            results.last(),
+            Some(CommandBarResultItem::Navigate { url }) if url == "fix the failing test"
+        ));
     }
 
     #[test]

@@ -309,7 +309,7 @@ fn build_settings_schema() -> SettingsSchema {
                 id: "browser".to_string(),
                 title: "Browser".to_string(),
                 description: None,
-                synthetic_keys: vec!["startup_url".to_string()],
+                synthetic_keys: vec![],
                 root_path: "browser".to_string(),
             },
         ],
@@ -348,7 +348,7 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "browser",
                 FieldSpec {
-                    order: vec!["startup_url".into()],
+                    order: vec!["startup_url".into(), "search_engine".into()],
                     ..Default::default()
                 },
             ),
@@ -358,6 +358,37 @@ fn build_settings_schema() -> SettingsSchema {
                     label: Some("Startup URL".into()),
                     hint: Some("Empty opens the command bar prompt.".into()),
                     placeholder: Some("https://example.com".into()),
+                    ..Default::default()
+                },
+            ),
+            field(
+                "browser.search_engine",
+                FieldSpec {
+                    label: Some("Search engine".into()),
+                    hint: Some("Used for web searches from Start and the command bar.".into()),
+                    widget: Some(WidgetKind::Select),
+                    options: vec![
+                        SelectOption {
+                            value: "google".into(),
+                            label: "Google".into(),
+                        },
+                        SelectOption {
+                            value: "bing".into(),
+                            label: "Bing".into(),
+                        },
+                        SelectOption {
+                            value: "duckduckgo".into(),
+                            label: "DuckDuckGo".into(),
+                        },
+                        SelectOption {
+                            value: "brave".into(),
+                            label: "Brave Search".into(),
+                        },
+                        SelectOption {
+                            value: "kagi".into(),
+                            label: "Kagi".into(),
+                        },
+                    ],
                     ..Default::default()
                 },
             ),
@@ -512,6 +543,29 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+}
+
+#[cfg(test)]
+mod browser_schema_tests {
+    use super::*;
+
+    #[test]
+    fn schema_exposes_search_engine_select() {
+        let schema = build_settings_schema();
+        let field = schema
+            .field("browser.search_engine")
+            .expect("search engine field");
+        assert_eq!(field.widget, Some(WidgetKind::Select));
+        let values: Vec<_> = field
+            .options
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect();
+        assert_eq!(
+            values,
+            vec!["google", "bing", "duckduckgo", "brave", "kagi"]
+        );
     }
 }
 

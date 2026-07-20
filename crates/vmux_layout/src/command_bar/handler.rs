@@ -20,7 +20,7 @@ use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
     CommandBarSpace, CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
-    PathCompleteResponse, PathEntry,
+    PathCompleteResponse, PathEntry, SearchEngine,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
@@ -1261,13 +1261,16 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     }
 }
 
-fn normalize_url(value: &str) -> String {
-    if value.contains("://") || vmux_command::event::is_data_uri(value) {
+fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
+    let value = value.trim();
+    if vmux_command::event::is_data_uri(value)
+        || (value.contains("://") && vmux_command::event::looks_like_url(value))
+    {
         value.to_string()
-    } else if value.contains('.') && !value.contains(' ') {
+    } else if vmux_command::event::looks_like_url(value) {
         format!("https://{}", value)
     } else {
-        format!("https://www.google.com/search?q={}", value)
+        search_engine.search_url(value)
     }
 }
 
@@ -1284,6 +1287,7 @@ fn prompt_agent_url(
 
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
+    search_engine: Option<Res<SearchEngine>>,
     mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
     queries: CommandBarActionQueries,
     mut stack_params: ParamSet<(
@@ -1420,7 +1424,10 @@ fn on_command_bar_action(
                     custom_keyboard_restore = true;
                 }
             } else {
-                let url = normalize_url(&evt.value);
+                let url = normalize_url(
+                    &evt.value,
+                    search_engine.as_deref().copied().unwrap_or_default(),
+                );
                 let inline_transition = if matches!(evt.target, None | Some(OpenTarget::InPlace))
                     && crate::start::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
@@ -2955,31 +2962,61 @@ mod tests {
 
     #[test]
     fn normalize_url_adds_https_for_domain() {
-        assert_eq!(normalize_url("google.com"), "https://google.com");
+        assert_eq!(
+            normalize_url("google.com", SearchEngine::Google),
+            "https://google.com"
+        );
     }
 
     #[test]
     fn normalize_url_preserves_explicit_protocol() {
-        assert_eq!(normalize_url("http://example.com"), "http://example.com");
-        assert_eq!(normalize_url("https://example.com"), "https://example.com");
+        assert_eq!(
+            normalize_url("http://example.com", SearchEngine::Google),
+            "http://example.com"
+        );
+        assert_eq!(
+            normalize_url("https://example.com", SearchEngine::Google),
+            "https://example.com"
+        );
     }
 
     #[test]
     fn normalize_url_search_query_becomes_google() {
-        let result = normalize_url("hello world");
-        assert!(result.starts_with("https://www.google.com/search?q="));
-        assert!(result.contains("hello world"));
+        assert_eq!(
+            normalize_url("hello world", SearchEngine::Google),
+            "https://www.google.com/search?q=hello+world"
+        );
+    }
+
+    #[test]
+    fn normalize_url_uses_selected_search_engine() {
+        assert_eq!(
+            normalize_url("hello world", SearchEngine::DuckDuckGo),
+            "https://duckduckgo.com/?q=hello+world"
+        );
+    }
+
+    #[test]
+    fn normalize_url_searches_multiline_text_with_embedded_url() {
+        let prompt = "Continue DSK-627\nPR: https://github.com/example/repo/pull/1";
+        assert_eq!(
+            normalize_url(prompt, SearchEngine::Google),
+            "https://www.google.com/search?q=Continue+DSK-627%0APR%3A+https%3A%2F%2Fgithub.com%2Fexample%2Frepo%2Fpull%2F1"
+        );
     }
 
     #[test]
     fn normalize_url_preserves_vmux_protocol() {
-        assert_eq!(normalize_url("vmux://terminal/123"), "vmux://terminal/123");
+        assert_eq!(
+            normalize_url("vmux://terminal/123", SearchEngine::Google),
+            "vmux://terminal/123"
+        );
     }
 
     #[test]
     fn normalize_url_preserves_data_scheme() {
         let data = "data:text/html,<style>body{background:white}</style><h1>x</h1>";
-        assert_eq!(normalize_url(data), data);
+        assert_eq!(normalize_url(data, SearchEngine::Google), data);
     }
 
     #[test]

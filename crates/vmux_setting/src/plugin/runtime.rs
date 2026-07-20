@@ -4,6 +4,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
+use vmux_command::event::SearchEngine;
 use vmux_layout::settings::ConfirmCloseSettings;
 pub use vmux_layout::settings::LayoutSettings;
 #[cfg(test)]
@@ -480,11 +481,20 @@ impl KeyComboDef {
 pub struct BrowserSettings {
     #[serde(default = "default_browser_startup_url")]
     pub startup_url: String,
+    #[serde(default)]
+    pub search_engine: SearchEngine,
 }
 
 fn default_browser_settings() -> BrowserSettings {
     BrowserSettings {
         startup_url: default_browser_startup_url(),
+        search_engine: SearchEngine::default(),
+    }
+}
+
+impl Default for BrowserSettings {
+    fn default() -> Self {
+        default_browser_settings()
     }
 }
 
@@ -1295,6 +1305,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: default_browser_startup_url(),
+                search_engine: SearchEngine::default(),
             },
             layout: LayoutSettings {
                 radius: 0.0,
@@ -1774,6 +1785,13 @@ mod tests {
         let s = parse_settings("()").unwrap();
         assert_eq!(s.shortcuts.leader.key, "b");
         assert_eq!(s.browser.startup_url, "vmux://start/");
+        assert_eq!(s.browser.search_engine, SearchEngine::Google);
+    }
+
+    #[test]
+    fn parse_settings_selects_search_engine() {
+        let s = parse_settings(r#"(browser: (search_engine: duckduckgo))"#).unwrap();
+        assert_eq!(s.browser.search_engine, SearchEngine::DuckDuckGo);
     }
 
     #[test]

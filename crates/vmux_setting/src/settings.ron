@@ -1,6 +1,7 @@
 (
     browser: (
         startup_url: "vmux://start/",
+        search_engine: google,
     ),
     layout: (
         window: (

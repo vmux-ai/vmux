@@ -42,3 +42,5 @@ pub use plugin::runtime::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::view::Settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub use vmux_command::event::SearchEngine;

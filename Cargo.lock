@@ -9578,6 +9578,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "url",
  "vmux_core",
  "vmux_history",
  "vmux_macro",

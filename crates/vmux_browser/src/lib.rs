@@ -5377,6 +5377,7 @@ mod tests {
         AppSettings {
             browser: vmux_setting::BrowserSettings {
                 startup_url: "about:blank".to_string(),
+                ..Default::default()
             },
             layout: vmux_layout::settings::LayoutSettings {
                 radius,
@@ -6514,6 +6515,7 @@ mod tests {
             AppSettings {
                 browser: BrowserSettings {
                     startup_url: "about:blank".to_string(),
+                    ..Default::default()
                 },
                 layout: LayoutSettings {
                     radius: 0.0,

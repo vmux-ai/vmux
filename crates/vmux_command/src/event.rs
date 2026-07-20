@@ -5,6 +5,45 @@ pub use vmux_history::event::{
 
 pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
+/// Search provider used when command-bar input is not a URL or local path.
+#[cfg_attr(not(target_arch = "wasm32"), derive(bevy::prelude::Resource))]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchEngine {
+    #[default]
+    Google,
+    Bing,
+    DuckDuckGo,
+    Brave,
+    Kagi,
+}
+
+impl SearchEngine {
+    /// Build a search result URL for `query`.
+    pub fn search_url(self, query: &str) -> String {
+        let query: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
+        match self {
+            Self::Google => format!("https://www.google.com/search?q={query}"),
+            Self::Bing => format!("https://www.bing.com/search?q={query}"),
+            Self::DuckDuckGo => format!("https://duckduckgo.com/?q={query}"),
+            Self::Brave => format!("https://search.brave.com/search?q={query}"),
+            Self::Kagi => format!("https://kagi.com/search?q={query}"),
+        }
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -319,16 +358,20 @@ pub fn is_data_uri(s: &str) -> bool {
 }
 
 pub fn looks_like_url(s: &str) -> bool {
-    if s.contains("://") || is_data_uri(s) {
+    let s = s.trim();
+    if is_data_uri(s) {
         return true;
     }
-    if s.contains(' ')
+    if s.chars().any(char::is_whitespace)
         || s.starts_with('/')
         || s.starts_with("~/")
         || s.starts_with("./")
         || s.starts_with("../")
     {
         return false;
+    }
+    if s.contains("://") {
+        return true;
     }
     let before_slash = s.split('/').next().unwrap_or(s);
     before_slash.contains('.')
@@ -422,6 +465,14 @@ mod tests {
     fn looks_like_url_rejects_spaces() {
         assert!(!looks_like_url("search query"));
         assert!(!looks_like_url("hello world.txt"));
+    }
+
+    #[test]
+    fn multiline_prompt_with_embedded_url_is_not_a_url() {
+        let prompt = "Continue DSK-627 in:\n\nWorktree:\n  /tmp/dashboard\n\nPR:\n  https://github.com/mistralai/dashboard/pull/39364";
+
+        assert!(!looks_like_url(prompt));
+        assert!(is_start_prompt_query(prompt));
     }
 
     #[test]
@@ -571,6 +622,30 @@ mod tests {
     #[test]
     fn start_plain_text_is_prompt_query() {
         assert!(is_start_prompt_query("fix the failing test"));
+    }
+
+    #[test]
+    fn search_engines_build_encoded_urls() {
+        assert_eq!(
+            SearchEngine::Google.search_url("hello world"),
+            "https://www.google.com/search?q=hello+world"
+        );
+        assert_eq!(
+            SearchEngine::Bing.search_url("hello world"),
+            "https://www.bing.com/search?q=hello+world"
+        );
+        assert_eq!(
+            SearchEngine::DuckDuckGo.search_url("hello world"),
+            "https://duckduckgo.com/?q=hello+world"
+        );
+        assert_eq!(
+            SearchEngine::Brave.search_url("hello world"),
+            "https://search.brave.com/search?q=hello+world"
+        );
+        assert_eq!(
+            SearchEngine::Kagi.search_url("hello world"),
+            "https://kagi.com/search?q=hello+world"
+        );
     }
 
     #[test]
