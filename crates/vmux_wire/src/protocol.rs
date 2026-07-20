@@ -522,6 +522,11 @@ pub enum ClientMessage {
         config_id: String,
         model_id: String,
     },
+    /// Start one authentication method advertised by the ACP agent during initialization.
+    AcpAuthenticate {
+        sid: String,
+        method_id: String,
+    },
     /// Interrupt the session's in-flight turn without tearing the session down.
     AgentCancel {
         sid: String,
@@ -878,6 +883,12 @@ pub enum ServiceMessage {
         sid: String,
         name: String,
     },
+    /// The agent rejected session creation until the user completes one advertised login method.
+    AcpAuthRequired {
+        sid: String,
+        methods: Vec<AcpAuthMethod>,
+        error: String,
+    },
     AcpWorkspaceChanged {
         sid: String,
         name: String,
@@ -904,6 +915,14 @@ pub enum ServiceMessage {
 /// One model exposed by an ACP session configuration selector.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AcpModelOption {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// One authentication choice advertised by an ACP agent during initialization.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AcpAuthMethod {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
@@ -1509,6 +1528,10 @@ mod tests {
                 sid: "s".into(),
                 cwd: "/tmp/worktree".into(),
             },
+            ClientMessage::AcpAuthenticate {
+                sid: "s".into(),
+                method_id: "browser".into(),
+            },
         ];
         for msg in messages {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
@@ -1580,6 +1603,15 @@ mod tests {
             ServiceMessage::AcpAgentInfo {
                 sid: "s".into(),
                 name: "Antigravity".into(),
+            },
+            ServiceMessage::AcpAuthRequired {
+                sid: "s".into(),
+                methods: vec![AcpAuthMethod {
+                    id: "browser".into(),
+                    name: "Continue in browser".into(),
+                    description: Some("Sign in to your account".into()),
+                }],
+                error: String::new(),
             },
             ServiceMessage::AcpModelInfo {
                 sid: "s".into(),

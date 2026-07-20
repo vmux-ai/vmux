@@ -11,19 +11,19 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::schema::v1::{
-    AudioContent, CancelNotification, ContentBlock, CreateTerminalRequest, CreateTerminalResponse,
-    ImageContent, Implementation, InitializeRequest, KillTerminalRequest, KillTerminalResponse,
-    LoadSessionRequest, McpServer, NewSessionRequest, PermissionOption, PermissionOptionId,
-    PromptCapabilities, PromptRequest, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
+    AudioContent, AuthMethod, AuthenticateRequest, CancelNotification, ContentBlock,
+    CreateTerminalRequest, CreateTerminalResponse, ImageContent, Implementation, InitializeRequest,
+    KillTerminalRequest, KillTerminalResponse, LoadSessionRequest, McpServer, NewSessionRequest,
+    PermissionOption, PermissionOptionId, PromptCapabilities, PromptRequest, ReadTextFileRequest,
+    ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
     TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
     WriteTextFileRequest, WriteTextFileResponse,
 };
-use agent_client_protocol::{Client, Responder};
+use agent_client_protocol::{Client, ErrorCode, Responder};
 use base64::Engine;
 use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -33,7 +33,7 @@ use vmux_core::ProcessId;
 use super::projector::{AcpProjector, Intent};
 use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
+    AcpAuthMethod, AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
     ServiceMessage, compose_agent_prompt,
 };
 
@@ -57,6 +57,9 @@ pub enum AcpInput {
         config_id: String,
         model_id: String,
     },
+    Authenticate {
+        method_id: String,
+    },
     /// Interrupt the in-flight prompt (ACP `session/cancel`); keep the session alive.
     Cancel,
     Close,
@@ -74,6 +77,12 @@ pub struct AcpTerminal {
     pub process_id: ProcessId,
     pub exit_rx: watch::Receiver<AcpTerminalExit>,
     pub output_byte_limit: Option<u64>,
+}
+
+#[derive(Clone)]
+struct AcpAuthRequiredState {
+    methods: Vec<AcpAuthMethod>,
+    error: String,
 }
 
 #[derive(Clone)]
@@ -133,6 +142,7 @@ pub struct AcpShared {
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
+    auth_required: Mutex<Option<AcpAuthRequiredState>>,
     history_replay: AtomicBool,
     history_replay_updates: AtomicUsize,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
@@ -161,6 +171,7 @@ impl AcpShared {
             input_writers,
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
+            auth_required: Mutex::new(None),
             history_replay: AtomicBool::new(false),
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
@@ -228,6 +239,35 @@ impl AcpShared {
             .unwrap()
             .as_ref()
             .map(|state| state.message(&self.sid))
+    }
+
+    pub fn auth_required_message(&self) -> Option<ServiceMessage> {
+        self.auth_required
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|state| ServiceMessage::AcpAuthRequired {
+                sid: self.sid.clone(),
+                methods: state.methods.clone(),
+                error: state.error.clone(),
+            })
+    }
+
+    fn publish_auth_required(&self, methods: &[AcpAuthMethod], error: String) {
+        let state = AcpAuthRequiredState {
+            methods: methods.to_vec(),
+            error,
+        };
+        *self.auth_required.lock().unwrap() = Some(state.clone());
+        self.emit(ServiceMessage::AcpAuthRequired {
+            sid: self.sid.clone(),
+            methods: state.methods,
+            error: state.error,
+        });
+    }
+
+    fn clear_auth_required(&self) {
+        self.auth_required.lock().unwrap().take();
     }
 
     fn publish_agent_info(&self, name: String) {
@@ -748,6 +788,7 @@ pub async fn run(
             init.client_capabilities.terminal = true;
             let init_resp = cx.send_request(init).block_task().await?;
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
+            let auth_methods = acp_auth_methods(&init_resp.auth_methods);
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
                 main_shared.publish_agent_info(name);
@@ -812,14 +853,21 @@ pub async fn run(
                         }
                     }
                     Err(err) => {
-                        main_shared.emit_status(AgentRunStatus::Errored(format!(
-                            "acp session/new failed: {err}"
-                        )));
-                        return Ok(());
+                        if err.code == ErrorCode::AuthRequired {
+                            request_authentication(&main_shared, &auth_methods, &err);
+                        } else {
+                            main_shared.emit_status(AgentRunStatus::Errored(format!(
+                                "acp session/new failed: {err}"
+                            )));
+                            return Ok(());
+                        }
                     }
                 }
             }
-            main_shared.emit_status(AgentRunStatus::Idle);
+            if session_id.is_some() {
+                main_shared.clear_auth_required();
+                main_shared.emit_status(AgentRunStatus::Idle);
+            }
 
             while let Some(input) = input_rx.recv().await {
                 match input {
@@ -857,6 +905,10 @@ pub async fn run(
                         .await;
                         let (active_session_id, created) = match ensured {
                             Ok(value) => value,
+                            Err(err) if err.code == ErrorCode::AuthRequired => {
+                                request_authentication(&main_shared, &auth_methods, &err);
+                                continue;
+                            }
                             Err(err) => {
                                 main_shared.emit_status(AgentRunStatus::Errored(format!(
                                     "acp session/new failed: {err}"
@@ -898,6 +950,71 @@ pub async fn run(
                         if let Some(tx) = main_shared.pending_perms.lock().unwrap().remove(&call_id)
                         {
                             let _ = tx.send(decision);
+                        }
+                    }
+                    AcpInput::Authenticate { method_id } => {
+                        if !auth_methods.iter().any(|method| method.id == method_id) {
+                            main_shared.publish_auth_required(
+                                &auth_methods,
+                                "The agent no longer offers that login method".to_string(),
+                            );
+                            continue;
+                        }
+                        match cx
+                            .send_request(AuthenticateRequest::new(method_id))
+                            .block_task()
+                            .await
+                        {
+                            Ok(_) => {
+                                let ensured = ensure_session(&mut session_id, || {
+                                    let mut new_session = NewSessionRequest::new(main_shared.cwd());
+                                    new_session.mcp_servers = mcp_servers.clone();
+                                    new_session.meta = session_meta.clone();
+                                    let shared = main_shared.clone();
+                                    let cx = cx.clone();
+                                    async move {
+                                        cx.send_request(new_session).block_task().await.map(
+                                            |response| {
+                                                shared.publish_model_info(
+                                                    response
+                                                        .config_options
+                                                        .as_deref()
+                                                        .unwrap_or_default(),
+                                                );
+                                                response.session_id
+                                            },
+                                        )
+                                    }
+                                })
+                                .await;
+                                match ensured {
+                                    Ok((sid, created)) => {
+                                        main_shared.clear_auth_required();
+                                        if created {
+                                            main_shared.emit(ServiceMessage::AcpSessionCreated {
+                                                sid: main_shared.sid.clone(),
+                                                acp_session_id: sid.to_string(),
+                                            });
+                                        }
+                                        main_shared.emit_status(AgentRunStatus::Idle);
+                                    }
+                                    Err(err) if err.code == ErrorCode::AuthRequired => {
+                                        request_authentication(&main_shared, &auth_methods, &err);
+                                    }
+                                    Err(err) => {
+                                        main_shared.publish_auth_required(
+                                            &auth_methods,
+                                            format!("Sign-in completed, but startup failed: {err}"),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                main_shared.publish_auth_required(
+                                    &auth_methods,
+                                    format!("Sign-in failed: {err}"),
+                                );
+                            }
                         }
                     }
                     AcpInput::SetModel {
@@ -1044,6 +1161,37 @@ fn acp_display_name(info: Option<&Implementation>) -> Option<String> {
             (!name.is_empty()).then_some(name)
         })
         .map(str::to_string)
+}
+
+fn acp_auth_methods(methods: &[AuthMethod]) -> Vec<AcpAuthMethod> {
+    methods
+        .iter()
+        .map(|method| AcpAuthMethod {
+            id: method.id().to_string(),
+            name: method.name().to_string(),
+            description: method.description().map(str::to_string),
+        })
+        .collect()
+}
+
+fn request_authentication(
+    shared: &AcpShared,
+    methods: &[AcpAuthMethod],
+    error: &agent_client_protocol::Error,
+) {
+    if methods.is_empty() {
+        shared.emit_status(AgentRunStatus::Errored(
+            "Authentication required, but the agent did not advertise a login method. Run its CLI once or export its API key, then reopen this chat"
+                .to_string(),
+        ));
+        return;
+    }
+    let detail = if error.code == ErrorCode::AuthRequired {
+        String::new()
+    } else {
+        error.message.clone()
+    };
+    shared.publish_auth_required(methods, detail);
 }
 
 fn publish_model_selection_result(
@@ -2264,6 +2412,50 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         ));
         (shared, stream_rx)
+    }
+
+    #[test]
+    fn auth_methods_preserve_agent_metadata() {
+        let methods = acp_auth_methods(&[AuthMethod::Agent(
+            agent_client_protocol::schema::v1::AuthMethodAgent::new("browser", "Browser login")
+                .description("Use your existing account"),
+        )]);
+
+        assert_eq!(
+            methods,
+            vec![AcpAuthMethod {
+                id: "browser".into(),
+                name: "Browser login".into(),
+                description: Some("Use your existing account".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn auth_required_is_emitted_and_replayable() {
+        let (shared, mut stream_rx) =
+            test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+        let methods = vec![AcpAuthMethod {
+            id: "browser".into(),
+            name: "Browser login".into(),
+            description: None,
+        }];
+
+        request_authentication(
+            &shared,
+            &methods,
+            &agent_client_protocol::Error::auth_required(),
+        );
+
+        assert!(matches!(
+            stream_rx.try_recv().unwrap(),
+            ServiceMessage::AcpAuthRequired { methods: emitted, error, .. }
+                if emitted == methods && error.is_empty()
+        ));
+        assert!(matches!(
+            shared.auth_required_message(),
+            Some(ServiceMessage::AcpAuthRequired { methods: emitted, .. }) if emitted == methods
+        ));
     }
 
     #[test]

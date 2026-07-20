@@ -17,6 +17,11 @@ pub enum AgentRunState {
         name: String,
         args: serde_json::Value,
     },
+    AwaitingAuthentication {
+        methods: Vec<vmux_service::protocol::AcpAuthMethod>,
+        pending_method_id: Option<String>,
+        error: String,
+    },
     Errored(String),
 }
 

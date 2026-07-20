@@ -907,6 +907,13 @@ async fn handle_client(
                 }
             }
 
+            ClientMessage::AcpAuthenticate { sid, method_id } => {
+                acp_manager
+                    .lock()
+                    .await
+                    .input(&sid, crate::acp::AcpInput::Authenticate { method_id });
+            }
+
             ClientMessage::ClosePageAgent { sid } => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager.lock().await.close(&sid);
@@ -976,6 +983,10 @@ async fn handle_client(
                     if let Some(model_info) = acp_manager.lock().await.model_info(&sid) {
                         let mut w = writer.lock().await;
                         write_message!(&mut *w, &model_info)?;
+                    }
+                    if let Some(auth_required) = acp_manager.lock().await.auth_required(&sid) {
+                        let mut w = writer.lock().await;
+                        write_message!(&mut *w, &auth_required)?;
                     }
                     if let Some(old) = page_agent_forwarders.remove(&sid) {
                         old.abort();

@@ -86,6 +86,13 @@ pub struct PageAgentInfo {
 }
 
 #[derive(Message)]
+pub struct PageAgentAuthRequired {
+    pub sid: String,
+    pub methods: Vec<crate::protocol::AcpAuthMethod>,
+    pub error: String,
+}
+
+#[derive(Message)]
 pub struct PageAgentWorkspaceChanged {
     pub sid: String,
     pub name: String,

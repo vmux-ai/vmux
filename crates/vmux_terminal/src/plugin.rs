@@ -1169,6 +1169,7 @@ struct PollServiceWriters<'w> {
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
+    page_agent_auth_required: MessageWriter<'w, vmux_service::agent_events::PageAgentAuthRequired>,
     page_agent_workspace_changed:
         MessageWriter<'w, vmux_service::agent_events::PageAgentWorkspaceChanged>,
     page_agent_model_info: MessageWriter<'w, vmux_service::agent_events::PageAgentModelInfo>,
@@ -1674,6 +1675,19 @@ fn poll_service_messages(
                 writers
                     .page_agent_info
                     .write(vmux_service::agent_events::PageAgentInfo { sid, name });
+            }
+            ServiceMessage::AcpAuthRequired {
+                sid,
+                methods,
+                error,
+            } => {
+                writers.page_agent_auth_required.write(
+                    vmux_service::agent_events::PageAgentAuthRequired {
+                        sid,
+                        methods,
+                        error,
+                    },
+                );
             }
             ServiceMessage::AcpWorkspaceChanged {
                 sid,
@@ -3914,6 +3928,8 @@ mod tests {
             .expect("service handler body");
         assert!(handler.contains("ServiceMessage::AcpAgentInfo"));
         assert!(handler.contains(".page_agent_info"));
+        assert!(handler.contains("ServiceMessage::AcpAuthRequired"));
+        assert!(handler.contains(".page_agent_auth_required"));
     }
 
     #[test]

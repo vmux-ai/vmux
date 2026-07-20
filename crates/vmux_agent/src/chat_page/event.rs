@@ -49,6 +49,8 @@ pub struct ChatSnapshot {
     pub approval_call_id: String,
     pub approval_name: String,
     pub approval_args_json: String,
+    pub auth_methods: Vec<AuthMethodEntry>,
+    pub auth_pending_method_id: String,
     /// Prompts queued behind the running turn (FIFO), oldest first.
     pub queued: Vec<QueuedPromptSnapshot>,
     /// True after an interrupt: the queue is held (not auto-advancing) until resume/clear/submit.
@@ -64,6 +66,37 @@ pub struct ChatSnapshot {
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
     pub workspace_selection_pending: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct AuthMethodEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// Page → native: start an authentication method advertised by the ACP agent.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatAuthenticate {
+    pub method_id: String,
 }
 
 /// Page → native: the user submitted a prompt.

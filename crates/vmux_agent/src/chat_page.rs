@@ -23,12 +23,12 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    AuthMethodEntry, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
+    CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachments, ChatAuthenticate, ChatCancel,
+    ChatCancelQueuedPrompt, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatMediaEntries,
+    ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot,
+    ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
     SlashCommands,
@@ -182,12 +182,14 @@ impl Plugin for AgentChatPagePlugin {
             )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
+                ChatAuthenticate,
                 ChatPasteMedia,
                 ChatMediaListRequest,
                 ChatAttachPaths,
                 ChatAttachmentPreviewRequest,
             )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_submit)
+            .add_observer(on_chat_authenticate)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
             .add_observer(on_chat_resume)
@@ -243,7 +245,9 @@ fn track_turn_duration(
                         .push(time.elapsed().saturating_sub(start).as_secs() as u32);
                 }
             }
-            AgentRunState::AwaitingApproval { .. } | AgentRunState::Installing { .. } => {}
+            AgentRunState::AwaitingApproval { .. }
+            | AgentRunState::AwaitingAuthentication { .. }
+            | AgentRunState::Installing { .. } => {}
         }
     }
 }
@@ -923,6 +927,18 @@ fn snapshot_of(
         }
         AgentRunState::Streaming => ("streaming", String::new()),
         AgentRunState::AwaitingApproval { .. } => ("awaiting", String::new()),
+        AgentRunState::AwaitingAuthentication {
+            pending_method_id,
+            error,
+            ..
+        } => (
+            if pending_method_id.is_some() {
+                "authenticating"
+            } else {
+                "auth_required"
+            },
+            error.clone(),
+        ),
         AgentRunState::Errored(message) => ("errored", message.clone()),
     };
     let (call_id, name, args_json) = match state {
@@ -936,6 +952,24 @@ fn snapshot_of(
     let (agent_name, accent_color) = profile
         .map(|p| (p.name.clone(), p.avatar.color.clone()))
         .unwrap_or_default();
+    let (auth_methods, auth_pending_method_id) = match state {
+        AgentRunState::AwaitingAuthentication {
+            methods,
+            pending_method_id,
+            ..
+        } => (
+            methods
+                .iter()
+                .map(|method| AuthMethodEntry {
+                    id: method.id.clone(),
+                    name: method.name.clone(),
+                    description: method.description.clone().unwrap_or_default(),
+                })
+                .collect(),
+            pending_method_id.clone().unwrap_or_default(),
+        ),
+        _ => (Vec::new(), String::new()),
+    };
     let agent_icon = meta
         .map(|m| m.icon.favicon_url().to_string())
         .unwrap_or_default();
@@ -946,6 +980,8 @@ fn snapshot_of(
         approval_call_id: call_id,
         approval_name: name,
         approval_args_json: args_json,
+        auth_methods,
+        auth_pending_method_id,
         agent_name,
         agent_icon,
         accent_color,
@@ -974,6 +1010,42 @@ fn snapshot_of(
             .collect(),
         paused: queue.paused,
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_authenticate(
+    trigger: On<BinReceive<ChatAuthenticate>>,
+    child_of: Query<&ChildOf>,
+    mut sessions: Query<(&AcpSession, &mut AgentRunState)>,
+    service: Option<Res<ServiceClient>>,
+) {
+    let Some(service) = service else {
+        return;
+    };
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok((session, mut state)) = sessions.get_mut(parent.parent()) else {
+        return;
+    };
+    let method_id = trigger.event().payload.method_id.clone();
+    let AgentRunState::AwaitingAuthentication {
+        methods,
+        pending_method_id,
+        error,
+    } = &mut *state
+    else {
+        return;
+    };
+    if pending_method_id.is_some() || !methods.iter().any(|method| method.id == method_id) {
+        return;
+    }
+    *pending_method_id = Some(method_id.clone());
+    error.clear();
+    service.0.send(ClientMessage::AcpAuthenticate {
+        sid: session.sid.clone(),
+        method_id,
+    });
 }
 
 /// Push each changed session's conversation + run-state to its pane webview (the child
@@ -1863,6 +1935,32 @@ mod native_tests {
             snapshot.approval_args_json,
             r#"{"command":"echo hi","focus":true}"#
         );
+    }
+
+    #[test]
+    fn snapshot_includes_acp_authentication_choices() {
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::AwaitingAuthentication {
+                methods: vec![vmux_service::protocol::AcpAuthMethod {
+                    id: "browser".into(),
+                    name: "Browser login".into(),
+                    description: Some("Use your existing account".into()),
+                }],
+                pending_method_id: Some("browser".into()),
+                error: String::new(),
+            },
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+            false,
+        );
+
+        assert_eq!(snapshot.status, "authenticating");
+        assert_eq!(snapshot.auth_methods[0].id, "browser");
+        assert_eq!(snapshot.auth_pending_method_id, "browser");
     }
 
     #[test]
