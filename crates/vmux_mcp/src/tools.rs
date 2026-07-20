@@ -444,14 +444,16 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description: "Create vmux's isolated worktree on an exact user-specified branch for the current project. Use only when the user explicitly asks for that branch; normal workspace selection and automatic isolation are handled by choose_workspace. Never run git worktree add manually. Returns the absolute worktree path."
+        description: "Call immediately before the first edit, write, test, build, or other project mutation, after repository selection is complete. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
-            "required": ["branch"],
             "additionalProperties": false,
             "properties": {
-                "branch": {"type": "string"}
+                "path": {"type": "string"},
+                "branch": {"type": "string"},
+                "task": {"type": "string"},
+                "create": {"type": "boolean"}
             }
         }),
     }
@@ -460,12 +462,36 @@ fn create_worktree_definition() -> ToolDefinition {
 fn choose_workspace_definition() -> ToolDefinition {
     ToolDefinition {
         name: "choose_workspace".into(),
-        description: "Request the native workspace chooser before inspecting, searching, editing, testing, or running an existing project when this conversation has no project yet. vmux uses a selected linked worktree directly, creates an isolated managed worktree for a normal Git checkout, or binds a non-Git directory. The request returns immediately: stop the current turn and do not call this tool again while selection is pending. vmux resumes this same conversation after the workspace is ready or selection is cancelled. Do not search the user's home directory for repositories or create a worktree manually. Do not call for general questions or self-contained terminal demonstrations."
+        description: "Bind the repository selected by the user after request_user_choice has asked, in order: Local repository, Remote repository, or Create repository. Pass path when the conversation already identifies a valid local checkout; vmux tries it first and opens the native folder picker only when the path is absent or invalid. Remote repositories must be cloned and new repositories initialized before calling this tool. This binds the repository only; call create_worktree later, immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory for repositories. Do not call for general questions or self-contained terminal demonstrations."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
             "additionalProperties": false,
-            "properties": {}
+            "properties": {
+                "path": {"type": "string"}
+            }
+        }),
+    }
+}
+
+fn request_user_choice_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "request_user_choice".into(),
+        description: "Show a native multiple-choice question in the agent conversation. Use this for the required repository-source question before choose_workspace and for ambiguous worktree selection. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["question", "options"],
+            "additionalProperties": false,
+            "properties": {
+                "question": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 9,
+                    "items": {"type": "string"}
+                }
+            }
         }),
     }
 }
@@ -730,6 +756,7 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
     if !acp_terminals {
         defs.push(run_definition());
     }
+    defs.push(request_user_choice_definition());
     defs.push(choose_workspace_definition());
     defs.push(create_worktree_definition());
     if !acp_terminals {
@@ -903,18 +930,83 @@ pub fn dispatch_with_anchor(
             .get("branch")
             .and_then(Value::as_str)
             .map(str::trim)
-            .filter(|branch| !branch.is_empty())
-            .ok_or("create_worktree.branch is empty")?;
-        return Ok(DispatchTarget::Command(
-            AgentCommand::CreateWorktreeOnBranch {
-                anchor,
-                branch: branch.to_string(),
-            },
-        ));
+            .filter(|branch| !branch.is_empty());
+        if let Some(branch) = branch {
+            return Ok(DispatchTarget::Command(
+                AgentCommand::CreateWorktreeOnBranch {
+                    anchor,
+                    branch: branch.to_string(),
+                },
+            ));
+        }
+        let string_arg = |name: &str| {
+            arguments
+                .get(name)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        return Ok(DispatchTarget::Command(AgentCommand::PrepareWorktree {
+            anchor,
+            path: string_arg("path"),
+            task: string_arg("task"),
+            create: arguments
+                .get("create")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }));
+    }
+    if name == "request_user_choice" {
+        let anchor = anchor
+            .ok_or("request_user_choice requires an agent anchor (not available to this client)")?;
+        let question = arguments
+            .get("question")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|question| !question.is_empty())
+            .ok_or("request_user_choice.question is empty")?;
+        let options = arguments
+            .get("options")
+            .and_then(Value::as_array)
+            .ok_or("request_user_choice.options must be an array")?
+            .iter()
+            .map(|option| {
+                option
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|option| !option.is_empty())
+                    .map(str::to_string)
+                    .ok_or_else(|| {
+                        "request_user_choice options must be non-empty strings".to_string()
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if !(2..=9).contains(&options.len()) {
+            return Err("request_user_choice requires 2 to 9 options".to_string());
+        }
+        return Ok(DispatchTarget::Command(AgentCommand::RequestUserChoice {
+            anchor,
+            question: question.to_string(),
+            options,
+        }));
     }
     if name == "choose_workspace" {
         let anchor = anchor
             .ok_or("choose_workspace requires an agent anchor (not available to this client)")?;
+        if let Some(path) = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            return Ok(DispatchTarget::Command(
+                AgentCommand::ChooseWorkspaceAtPath {
+                    anchor,
+                    path: path.to_string(),
+                },
+            ));
+        }
         return Ok(DispatchTarget::Command(AgentCommand::ChooseWorkspace {
             anchor,
         }));
@@ -1360,6 +1452,7 @@ mod tests {
             "open_page",
             "run",
             "read_terminal",
+            "request_user_choice",
             "choose_workspace",
             "create_worktree",
         ] {
@@ -1537,6 +1630,7 @@ mod tests {
     fn workspace_tools_dispatch_with_anchor_and_branch() {
         let anchor = vmux_service::protocol::ProcessId::new();
         let choose_definition = choose_workspace_definition();
+        let choice_definition = request_user_choice_definition();
         assert!(
             choose_definition
                 .description
@@ -1547,24 +1641,45 @@ mod tests {
                 .description
                 .contains("Do not search the user's home directory")
         );
+        assert!(choose_definition.description.contains("Local repository"));
+        assert!(choose_definition.description.contains("folder picker"));
         assert!(
             choose_definition
                 .description
-                .contains("linked worktree directly")
+                .contains("binds the repository only")
         );
-        assert!(choose_definition.description.contains("managed worktree"));
-        assert!(choose_definition.description.contains("workspace is ready"));
         assert!(
             choose_definition
                 .description
                 .contains("returns immediately")
         );
-        assert!(choose_definition.description.contains("same conversation"));
+        assert!(choice_definition.description.contains("Ctrl+N/Ctrl+P"));
         let choose =
             dispatch_with_anchor("choose_workspace", serde_json::json!({}), Some(anchor)).unwrap();
+        let choose_path = dispatch_with_anchor(
+            "choose_workspace",
+            serde_json::json!({"path": "/repo"}),
+            Some(anchor),
+        )
+        .unwrap();
         let create = dispatch_with_anchor(
             "create_worktree",
             serde_json::json!({"branch": "feature/fun-terminal"}),
+            Some(anchor),
+        )
+        .unwrap();
+        let prepare = dispatch_with_anchor(
+            "create_worktree",
+            serde_json::json!({"path": "/repo-wt", "task": "fun terminal", "create": false}),
+            Some(anchor),
+        )
+        .unwrap();
+        let choice = dispatch_with_anchor(
+            "request_user_choice",
+            serde_json::json!({
+                "question": "Repository?",
+                "options": ["Local repository", "Remote repository", "Create repository"]
+            }),
             Some(anchor),
         )
         .unwrap();
@@ -1574,13 +1689,28 @@ mod tests {
             DispatchTarget::Command(AgentCommand::ChooseWorkspace { anchor: got }) if got == anchor
         ));
         assert!(matches!(
+            choose_path,
+            DispatchTarget::Command(AgentCommand::ChooseWorkspaceAtPath { anchor: got, path })
+                if got == anchor && path == "/repo"
+        ));
+        assert!(matches!(
             create,
             DispatchTarget::Command(AgentCommand::CreateWorktreeOnBranch { anchor: got, branch })
                 if got == anchor && branch == "feature/fun-terminal"
         ));
-        assert!(
-            dispatch_with_anchor("create_worktree", serde_json::json!({}), Some(anchor)).is_err()
-        );
+        assert!(matches!(
+            prepare,
+            DispatchTarget::Command(AgentCommand::PrepareWorktree { anchor: got, path, task, create })
+                if got == anchor
+                    && path.as_deref() == Some("/repo-wt")
+                    && task.as_deref() == Some("fun terminal")
+                    && !create
+        ));
+        assert!(matches!(
+            choice,
+            DispatchTarget::Command(AgentCommand::RequestUserChoice { anchor: got, question, options })
+                if got == anchor && question == "Repository?" && options.len() == 3
+        ));
     }
 
     #[test]

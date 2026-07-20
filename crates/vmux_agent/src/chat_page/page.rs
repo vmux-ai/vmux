@@ -2,21 +2,22 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
-    menu_direction, move_prompt_history, move_selection, prompt_history_direction,
-    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_expand_thinking,
-    should_fetch_resume, tool_activity,
+    chat_page_title, choice_number_index, edit_prompt, filter_models, filter_sessions,
+    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
+    prompt_history_direction, resume_menu_state, selector_mode, should_clear_draft_on_escape,
+    should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT,
+    ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
+    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
+    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -161,7 +162,11 @@ fn dispatch_keyboard_event(
     }
 }
 
-fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<SlashCommandEntry>>) {
+fn install_global_prompt_input(
+    draft: Signal<String>,
+    slash_cmds: Signal<Vec<SlashCommandEntry>>,
+    choice_options: Signal<Vec<String>>,
+) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
         let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID) else {
             return;
@@ -191,6 +196,8 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
                 }
         };
         let key = event.key();
+        let choice_len = choice_options.peek().len();
+        let choice_open = choice_len > 0;
         let direction = if event.meta_key() || event.alt_key() {
             None
         } else {
@@ -201,7 +208,12 @@ fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<Sla
             && !event.alt_key()
             && matches!(key.as_str(), "Enter" | "Escape");
         let selector_key = direction.is_some() || plain_invoke_or_close;
-        if direction.is_some() || (selector_open && selector_key) {
+        let choice_key = direction.is_some()
+            || (!event.meta_key()
+                && !event.ctrl_key()
+                && !event.alt_key()
+                && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
+        if (choice_open && choice_key) || direction.is_some() || (selector_open && selector_key) {
             event.prevent_default();
             event.stop_propagation();
             let _ = textarea.focus();
@@ -262,6 +274,8 @@ pub fn Page(
     let mut handoff_message_count = use_signal(|| 0u32);
     let mut workspace_selection_pending = use_signal(|| false);
     let mut workspace_picker_open = use_signal(|| false);
+    let mut choice_question = use_signal(String::new);
+    let mut choice_options = use_signal(Vec::<String>::new);
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
@@ -287,7 +301,7 @@ pub fn Page(
     let mut resume_loading = use_signal(|| false);
     let mut verb = use_signal(|| "Working".to_string());
 
-    use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(move || install_global_prompt_input(draft, slash_cmds, choice_options));
     use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
 
     use_future(move || async move {
@@ -369,6 +383,11 @@ pub fn Page(
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
         workspace_selection_pending.set(snap.workspace_selection_pending);
+        if choice_options.peek().as_slice() != snap.choice_options.as_slice() {
+            menu_sel.set(0);
+        }
+        choice_question.set(snap.choice_question.clone());
+        choice_options.set(snap.choice_options.clone());
         if !snap.workspace_selection_pending {
             workspace_picker_open.set(false);
         }
@@ -610,9 +629,47 @@ pub fn Page(
     } else {
         "Send (Enter)"
     };
-    let prompt_action_enabled =
-        prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty();
+    let choice_pending = !choice_options.read().is_empty();
+    let prompt_action_enabled = !choice_pending
+        && (prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty());
     let prompt_keydown = move |e: KeyboardEvent| {
+        let pending_choices = choice_options.peek().clone();
+        if !pending_choices.is_empty() {
+            let key = e.key().to_string();
+            if !e.modifiers().meta()
+                && !e.modifiers().alt()
+                && let Some(direction) = menu_direction(&key, e.modifiers().ctrl())
+            {
+                e.prevent_default();
+                let selected = *menu_sel.peek();
+                menu_sel.set(move_selection(selected, pending_choices.len(), direction));
+                return;
+            }
+            let numbered = !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt()
+                && choice_number_index(&key, pending_choices.len()).is_some();
+            let entered = e.key() == Key::Enter
+                && !e.modifiers().shift()
+                && !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt();
+            if numbered || entered {
+                e.prevent_default();
+                let selected = *menu_sel.peek();
+                let index = choice_number_index(&key, pending_choices.len()).unwrap_or(selected);
+                if try_cef_bin_emit_rkyv(&ChatChoiceSelected {
+                    index: index as u32,
+                })
+                .is_ok()
+                {
+                    choice_question.set(String::new());
+                    choice_options.set(Vec::new());
+                    menu_sel.set(0);
+                }
+                return;
+            }
+        }
         let streaming = matches!(status().as_str(), "streaming" | "awaiting");
         let draft_now = draft.peek().clone();
         let (cmd_items, sess_items, model_items, session_selector_open, model_selector_open) =
@@ -793,7 +850,10 @@ pub fn Page(
         let _ = sessions.read().len();
         let _ = models.read().len();
         let _ = media_entries.read().len();
-        let item_id = if media_open {
+        let choice_open = !choice_options.read().is_empty();
+        let item_id = if choice_open {
+            format!("agent-choice-item-{selected}")
+        } else if media_open {
             format!("prompt-media-item-{selected}")
         } else {
             format!("agent-selector-item-{selected}")
@@ -1070,6 +1130,30 @@ pub fn Page(
                             }
                         }
                     }
+                    if !choice_options.read().is_empty() {
+                        div { class: "rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-3.5 shadow-sm backdrop-blur-xl",
+                            div { class: "mb-3 text-sm font-medium text-foreground", "{choice_question}" }
+                            div { class: "flex flex-col gap-1.5",
+                                for (index, option) in choice_options.read().iter().cloned().enumerate() {
+                                    button {
+                                        key: "choice-{index}",
+                                        id: "agent-choice-item-{index}",
+                                        class: if index == menu_sel() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                                        onclick: move |_| {
+                                            if try_cef_bin_emit_rkyv(&ChatChoiceSelected { index: index as u32 }).is_ok() {
+                                                choice_question.set(String::new());
+                                                choice_options.set(Vec::new());
+                                                menu_sel.set(0);
+                                            }
+                                        },
+                                        span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
+                                        span { class: "min-w-0 flex-1", "{option}" }
+                                    }
+                                }
+                            }
+                            div { class: "mt-2.5 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–9 · Enter" }
+                        }
+                    }
                     if workspace_selection_pending() {
                         div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-2.5 pl-3.5 shadow-sm backdrop-blur-xl",
                             div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.07] text-foreground/55 ring-1 ring-inset ring-foreground/10",
@@ -1085,8 +1169,8 @@ pub fn Page(
                                 }
                             }
                             div { class: "min-w-0 flex-1",
-                                div { class: "text-sm font-medium text-foreground", "Choose a workspace" }
-                                div { class: "truncate text-xs text-muted-foreground", "Select the project folder the agent should work in." }
+                                div { class: "text-sm font-medium text-foreground", "Choose repository folder" }
+                                div { class: "truncate text-xs text-muted-foreground", "Select the local Git repository the agent should use." }
                             }
                             button {
                                 class: if workspace_picker_open() { "flex h-8 shrink-0 cursor-default items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 text-xs font-medium text-muted-foreground/60" } else { "flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-2.5 text-xs font-medium text-background transition hover:opacity-85 active:scale-[0.98]" },
@@ -1204,7 +1288,7 @@ pub fn Page(
                         preview: transition_preview(),
                         attachments: prompt_attachments,
                         show_examples: show_capability_examples,
-                        placeholder: "Type / for commands or @ for media".to_string(),
+                        placeholder: if choice_pending { "Choose an option above".to_string() } else { "Type / for commands or @ for media".to_string() },
                         accent_bg: agent_accent.accent_bg.to_string(),
                         accent_color: theme_accent.clone(),
                         accent_gradient: agent_accent.grad.to_string(),

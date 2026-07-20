@@ -20,14 +20,16 @@ use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. If the user's request requires inspecting, searching, editing, testing, or running an existing project, your first project action must be to call the vmux choose_workspace tool. Do not search the user's home directory for repositories, do not access project paths directly, and never run git worktree add yourself. General questions and self-contained terminal demonstrations may run in the temporary current directory. vmux uses a selected linked worktree directly and creates an isolated managed worktree when the user selects a normal Git checkout.";
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected repository. For development work, first call request_user_choice with these options in this order: Local repository, Remote repository, Create repository. Only after the user answers, bind the resulting local checkout with choose_workspace. Pass a path when the conversation identifies one; vmux opens the folder picker only when it cannot resolve that path. Remote repositories must be cloned and new repositories initialized before choose_workspace. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
 const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
+const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The repository is selected, but this tab is not isolated. Reading and inspection are allowed. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpWorkspaceState {
     Bound,
     Unbound,
     PendingWorktree,
+    RepositoryNeedsWorktree,
 }
 
 fn ancestor_acp_workspace_state(
@@ -40,15 +42,19 @@ fn ancestor_acp_workspace_state(
     let mut current = entity;
     loop {
         if let Ok(tab) = tabs.get(current) {
-            return Some(
-                if workspaces.contains(current) || tab.startup_dir.is_some() {
-                    AcpWorkspaceState::Bound
-                } else if pending_projects.contains(current) {
-                    AcpWorkspaceState::PendingWorktree
-                } else {
-                    AcpWorkspaceState::Unbound
-                },
-            );
+            let state = match tab.startup_dir.as_deref() {
+                Some(path)
+                    if vmux_git::worktree::checkout_info(std::path::Path::new(path)).is_ok()
+                        && !vmux_git::worktree::is_linked_worktree(std::path::Path::new(path)) =>
+                {
+                    AcpWorkspaceState::RepositoryNeedsWorktree
+                }
+                Some(_) => AcpWorkspaceState::Bound,
+                None if workspaces.contains(current) => AcpWorkspaceState::Bound,
+                None if pending_projects.contains(current) => AcpWorkspaceState::PendingWorktree,
+                None => AcpWorkspaceState::Unbound,
+            };
+            return Some(state);
         }
         current = child_of.get(current).ok()?.parent();
     }
@@ -61,6 +67,7 @@ fn acp_prompt_context(
     let policy = match workspace_state {
         Some(AcpWorkspaceState::Unbound) => Some(UNBOUND_WORKSPACE_CONTEXT),
         Some(AcpWorkspaceState::PendingWorktree) => Some(PENDING_WORKTREE_CONTEXT),
+        Some(AcpWorkspaceState::RepositoryNeedsWorktree) => Some(REPOSITORY_WORKTREE_CONTEXT),
         Some(AcpWorkspaceState::Bound) | None => None,
     };
     match (handoff, policy) {
@@ -1067,12 +1074,24 @@ mod tests {
     fn unbound_workspace_context_requires_picker_before_project_work() {
         let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
-        assert!(context.contains("first project action"));
+        assert!(context.contains("Local repository, Remote repository, Create repository"));
+        assert!(context.contains("request_user_choice"));
         assert!(context.contains("choose_workspace"));
         assert!(context.contains("Do not search the user's home directory"));
-        assert!(context.contains("never run git worktree add"));
-        assert!(context.contains("selected linked worktree directly"));
-        assert!(context.contains("creates an isolated managed worktree"));
+        assert!(context.contains("folder picker"));
+        assert!(context.contains("Remote repositories must be cloned"));
+    }
+
+    #[test]
+    fn repository_context_defers_worktree_until_mutation() {
+        let context =
+            acp_prompt_context(None, Some(AcpWorkspaceState::RepositoryNeedsWorktree)).unwrap();
+
+        assert!(context.contains("Reading and inspection are allowed"));
+        assert!(context.contains("Immediately before the first edit"));
+        assert!(context.contains("create_worktree"));
+        assert!(context.contains("request_user_choice"));
+        assert!(context.contains("Never run git worktree add"));
     }
 
     #[test]
