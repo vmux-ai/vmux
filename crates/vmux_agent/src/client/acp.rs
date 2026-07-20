@@ -38,15 +38,13 @@ fn ancestor_acp_workspace_state(
     tabs: &Query<&vmux_layout::tab::Tab>,
     workspaces: &Query<(), With<vmux_layout::tab::TabWorkspace>>,
     pending_projects: &Query<(), With<crate::plugin::PendingAgentProject>>,
+    repositories_needing_worktrees: &Query<(), With<crate::plugin::RepositoryNeedsWorktree>>,
 ) -> Option<AcpWorkspaceState> {
     let mut current = entity;
     loop {
         if let Ok(tab) = tabs.get(current) {
             let state = match tab.startup_dir.as_deref() {
-                Some(path)
-                    if vmux_git::worktree::checkout_info(std::path::Path::new(path)).is_ok()
-                        && !vmux_git::worktree::is_linked_worktree(std::path::Path::new(path)) =>
-                {
+                Some(_) if repositories_needing_worktrees.contains(current) => {
                     AcpWorkspaceState::RepositoryNeedsWorktree
                 }
                 Some(_) => AcpWorkspaceState::Bound,
@@ -976,6 +974,7 @@ fn send_acp_input(
     tabs: Query<&vmux_layout::tab::Tab>,
     workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
     pending_projects: Query<(), With<crate::plugin::PendingAgentProject>>,
+    repositories_needing_worktrees: Query<(), With<crate::plugin::RepositoryNeedsWorktree>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
@@ -1000,8 +999,14 @@ fn send_acp_input(
         {
             imported.first_prompt = Some(text.clone());
         }
-        let workspace_state =
-            ancestor_acp_workspace_state(entity, &child_of, &tabs, &workspaces, &pending_projects);
+        let workspace_state = ancestor_acp_workspace_state(
+            entity,
+            &child_of,
+            &tabs,
+            &workspaces,
+            &pending_projects,
+            &repositories_needing_worktrees,
+        );
         let context = acp_prompt_context(handoff, workspace_state);
         service.0.send(ClientMessage::agent_input(
             session.sid.clone(),
@@ -1139,13 +1144,18 @@ mod tests {
                     move |child_of: Query<&ChildOf>,
                           tabs: Query<&vmux_layout::tab::Tab>,
                           workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
-                          pending: Query<(), With<crate::plugin::PendingAgentProject>>| {
+                          pending: Query<(), With<crate::plugin::PendingAgentProject>>,
+                          needs_worktree: Query<
+                        (),
+                        With<crate::plugin::RepositoryNeedsWorktree>,
+                    >| {
                         ancestor_acp_workspace_state(
                             stack,
                             &child_of,
                             &tabs,
                             &workspaces,
                             &pending,
+                            &needs_worktree,
                         )
                     },
                 )
@@ -1160,11 +1170,23 @@ mod tests {
             state(app.world_mut()),
             Some(AcpWorkspaceState::PendingWorktree)
         );
+        app.world_mut().entity_mut(tab).insert((
+            vmux_layout::tab::Tab {
+                name: "Tab 1".into(),
+                startup_dir: Some("/repo".into()),
+            },
+            crate::plugin::RepositoryNeedsWorktree,
+        ));
+        assert_eq!(
+            state(app.world_mut()),
+            Some(AcpWorkspaceState::RepositoryNeedsWorktree)
+        );
         app.world_mut()
             .entity_mut(tab)
             .insert(vmux_layout::tab::TabWorkspace {
                 project_dir: "/repo".into(),
-            });
+            })
+            .remove::<crate::plugin::RepositoryNeedsWorktree>();
         assert_eq!(state(app.world_mut()), Some(AcpWorkspaceState::Bound));
     }
 

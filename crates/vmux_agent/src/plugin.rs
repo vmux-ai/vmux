@@ -2603,6 +2603,9 @@ pub(crate) struct PendingAgentChoice {
 struct RepositorySourceSelected;
 
 #[derive(Component, Clone, Copy)]
+pub(crate) struct RepositoryNeedsWorktree;
+
+#[derive(Component, Clone, Copy)]
 pub(crate) struct PendingWorkspaceSelection {
     tab_entity: Entity,
     agent_entity: Entity,
@@ -2798,6 +2801,7 @@ fn activate_agent_worktree(
             vmux_layout::tab::TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
+        .remove::<RepositoryNeedsWorktree>()
         .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
     let rebind = ancestor_acp_stack(agent_entity, acp_sessions, child_of)
         .and_then(|stack| rebind_acp_workspace(stack, &execution_dir, acp_sessions, commands));
@@ -2830,6 +2834,7 @@ fn activate_agent_directory(
             vmux_layout::tab::TabDirDecided,
         ))
         .remove::<PendingAgentProject>()
+        .remove::<RepositoryNeedsWorktree>()
         .remove::<vmux_layout::tab::TabWorktree>()
         .remove::<vmux_layout::worktree::TabWorktreeReady>()
         .remove::<vmux_layout::tab::TabWorktreeUnavailable>();
@@ -2851,6 +2856,7 @@ fn activate_selected_workspace(
     vmux_git::worktree::checkout_info(selected).map_err(|_| {
         "selected directory is not a Git repository; initialize it before choosing it".to_string()
     })?;
+    let needs_worktree = !vmux_git::worktree::is_linked_worktree(selected);
     let rebind = activate_agent_directory(
         tab_entity,
         agent_entity,
@@ -2861,6 +2867,9 @@ fn activate_selected_workspace(
         child_of,
         commands,
     )?;
+    if needs_worktree {
+        commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
+    }
     Ok((selected.to_path_buf(), rebind))
 }
 
@@ -5875,6 +5884,11 @@ mod tests {
                 .get::<vmux_layout::tab::TabWorktree>(linked_tab)
                 .is_none()
         );
+        assert!(
+            app.world()
+                .get::<RepositoryNeedsWorktree>(linked_tab)
+                .is_none()
+        );
         assert_eq!(
             app.world()
                 .get::<vmux_layout::tab::TabWorkspace>(linked_tab)
@@ -5927,6 +5941,11 @@ mod tests {
             app.world()
                 .get::<vmux_layout::tab::TabWorktree>(managed_tab)
                 .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<RepositoryNeedsWorktree>(managed_tab)
+                .is_some()
         );
         assert_eq!(
             app.world()

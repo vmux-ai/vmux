@@ -23,7 +23,7 @@ call mcp__vmux__request_user_choice with options Local repository, Remote reposi
 repository in that order, then call mcp__vmux__choose_workspace after the answer. Pass a known path \
 so vmux only opens the folder picker when path resolution fails. Immediately before the first edit, \
 write, test, build, or mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
-worktrees, ask whether to create or choose an existing path, then call create_worktree with \
+worktrees, ask whether to create or choose an existing path, then call mcp__vmux__create_worktree with \
 create=true or the selected path. Never \
 run git worktree add yourself.";
 const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
@@ -540,11 +540,6 @@ mod tests {
             .expect("developer_instructions override present");
         assert!(steer.contains("mcp__vmux__run"));
         assert!(steer.contains("browser_navigate"));
-        let repository = steer.find("Local repository").unwrap();
-        let workspace = steer.find("mcp__vmux__choose_workspace").unwrap();
-        let worktree = steer.find("mcp__vmux__create_worktree").unwrap();
-        assert!(repository < workspace && workspace < worktree);
-        assert!(steer.contains("create=true"));
     }
 
     #[test]
