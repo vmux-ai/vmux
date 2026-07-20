@@ -321,6 +321,8 @@ pub(crate) fn discover_vibe_session_id(
 }
 
 pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
+    use std::io::BufReader;
+
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(root) else {
         return out;
@@ -353,12 +355,31 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
         if cwd.as_os_str().is_empty() {
             continue;
         }
+        let title = std::fs::File::open(path.join("messages.jsonl"))
+            .ok()
+            .and_then(|file| {
+                lines_skipping_invalid_utf8(BufReader::new(file))
+                    .filter_map(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+                    .filter(|value| {
+                        value.get("injected").and_then(|value| value.as_bool()) != Some(true)
+                    })
+                    .find_map(|value| {
+                        (value.get("role").and_then(|value| value.as_str()) == Some("user"))
+                            .then(|| value.get("content"))
+                            .flatten()
+                            .and_then(|content| content.as_str())
+                            .map(str::trim)
+                            .filter(|content| !content.is_empty())
+                            .map(|content| content.chars().take(80).collect())
+                    })
+            })
+            .unwrap_or_else(|| short_id.to_string());
         out.push(ResumableSession {
             kind: AgentKind::Vibe,
             sid: short_id.to_string(),
             cwd,
             mtime,
-            title: short_id.to_string(),
+            title,
             cross_runtime: true,
         });
     }
@@ -770,7 +791,35 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].sid, "vb-1");
         assert_eq!(out[0].cwd, PathBuf::from("/w/y"));
+        assert_eq!(out[0].title, "vb-1");
         assert!(out[0].cross_runtime);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn list_sessions_uses_first_user_prompt_as_title() {
+        let tmp = unique_tmp("vibe-list-title");
+        let sdir = tmp.join("session_vb-1");
+        std::fs::create_dir_all(&sdir).unwrap();
+        std::fs::write(
+            sdir.join("meta.json"),
+            b"{\"environment\":{\"working_directory\":\"/w/y\"}}",
+        )
+        .unwrap();
+        std::fs::write(
+            sdir.join("messages.jsonl"),
+            concat!(
+                "{\"role\":\"user\",\"content\":\"hidden\",\"injected\":true}\n",
+                "{\"role\":\"assistant\",\"content\":\"hello\",\"injected\":false}\n",
+                "{\"role\":\"user\",\"content\":\"fix the approval flow\",\"injected\":false}\n",
+                "{\"role\":\"user\",\"content\":\"second prompt\",\"injected\":false}\n"
+            ),
+        )
+        .unwrap();
+
+        let out = list_vibe_sessions(&tmp);
+
+        assert_eq!(out[0].title, "fix the approval flow");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
