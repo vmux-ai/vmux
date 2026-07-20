@@ -288,6 +288,7 @@ pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
                     .and_then(|message| message.as_str())
                     .map(str::trim)
                     .filter(|message| !message.is_empty())
+                    .map(|message| message.lines().collect::<Vec<_>>().join(" "))
                     .map(|message| message.chars().take(80).collect())
             })
             .unwrap_or(fallback);
@@ -594,7 +595,7 @@ mod tests {
             concat!(
                 "{\"type\":\"session_meta\",\"payload\":{\"id\":\"cx-1\",\"cwd\":\"/w/x\"}}\n",
                 "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"hello\"}}\n",
-                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the approval flow\"}}\n",
+                "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the\\napproval flow\"}}\n",
                 "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"second prompt\"}}\n"
             ),
         )

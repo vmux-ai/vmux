@@ -370,6 +370,7 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
                             .and_then(|content| content.as_str())
                             .map(str::trim)
                             .filter(|content| !content.is_empty())
+                            .map(|content| content.lines().collect::<Vec<_>>().join(" "))
                             .map(|content| content.chars().take(80).collect())
                     })
             })
@@ -811,7 +812,7 @@ mod tests {
             concat!(
                 "{\"role\":\"user\",\"content\":\"hidden\",\"injected\":true}\n",
                 "{\"role\":\"assistant\",\"content\":\"hello\",\"injected\":false}\n",
-                "{\"role\":\"user\",\"content\":\"fix the approval flow\",\"injected\":false}\n",
+                "{\"role\":\"user\",\"content\":\"fix the\\napproval flow\",\"injected\":false}\n",
                 "{\"role\":\"user\",\"content\":\"second prompt\",\"injected\":false}\n"
             ),
         )
