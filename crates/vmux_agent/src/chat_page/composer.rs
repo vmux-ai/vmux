@@ -375,10 +375,6 @@ pub(crate) fn edit_prompt(
     (updated, caret_utf16)
 }
 
-pub(crate) fn prompt_prefix_at_utf16(value: &str, offset: u32) -> &str {
-    &value[..utf16_to_byte(value, offset)]
-}
-
 fn utf16_to_byte(value: &str, offset: u32) -> usize {
     let mut units = 0u32;
     for (byte, character) in value.char_indices() {
@@ -728,11 +724,5 @@ mod tests {
         assert!(is_handoff_boundary(1, 2));
         assert!(!is_handoff_boundary(2, 2));
         assert!(!is_handoff_boundary(0, 0));
-    }
-
-    #[test]
-    fn prompt_prefix_uses_utf16_caret_offsets() {
-        assert_eq!(prompt_prefix_at_utf16("a🙂b", 3), "a🙂");
-        assert_eq!(prompt_prefix_at_utf16("a🙂b", 4), "a🙂b");
     }
 }

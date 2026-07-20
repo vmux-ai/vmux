@@ -283,7 +283,7 @@ mod tests {
         let source = include_str!("palette.rs");
 
         assert!(source.contains("should_open_typed_query_on_enter("));
-        assert!(source.contains("emit_action_with_target(\"open\", &q, open_target)"));
+        assert!(source.contains("emit_action_with_target(\"open\""));
     }
 
     #[test]

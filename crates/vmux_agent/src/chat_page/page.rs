@@ -4,8 +4,8 @@ use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
     chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
     menu_direction, move_prompt_history, move_selection, prompt_history_direction,
-    prompt_prefix_at_utf16, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_expand_thinking, should_fetch_resume, tool_activity,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_expand_thinking,
+    should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
@@ -26,13 +26,15 @@ use vmux_command::prompt_media::{
 };
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::components::prompt_box::{PromptBox, PromptPopup};
+use vmux_ui::components::prompt_box::PromptPopup;
+use vmux_ui::components::prompt_composer::{
+    PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
+    focus_prompt_end, prompt_textarea,
+};
+use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
-use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::{JsCast, closure::Closure};
-
-const PROMPT_ID: &str = "agent-chat-prompt";
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -75,52 +77,6 @@ fn accent_rgb(color: &str, fallback_rgb: &str) -> String {
     hex_accent_rgb(color)
         .map(|(red, green, blue)| format!("{red} {green} {blue}"))
         .unwrap_or_else(|| fallback_rgb.to_string())
-}
-
-fn prompt_textarea() -> Option<web_sys::HtmlTextAreaElement> {
-    web_sys::window()?
-        .document()?
-        .get_element_by_id(PROMPT_ID)?
-        .dyn_into()
-        .ok()
-}
-
-fn resize_prompt_textarea() {
-    let Some(textarea) = prompt_textarea() else {
-        return;
-    };
-    let _ = textarea.set_attribute("style", "height:auto;overflow-y:hidden");
-    let height = textarea.scroll_height().clamp(40, 160);
-    let overflow = if height == 160 { "auto" } else { "hidden" };
-    let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
-}
-
-fn sync_prompt_caret(mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>) {
-    let Some(textarea) = prompt_textarea() else {
-        return;
-    };
-    let start = textarea.selection_start().ok().flatten().unwrap_or(0);
-    let end = textarea.selection_end().ok().flatten().unwrap_or(start);
-    caret.set((start == end).then_some(start));
-    scroll_top.set(textarea.scroll_top());
-}
-
-fn focus_prompt_end() {
-    let closure = Closure::once(move || {
-        let Some(textarea) = prompt_textarea() else {
-            return;
-        };
-        let end = textarea.value().encode_utf16().count() as u32;
-        let _ = textarea.focus();
-        let _ = textarea.set_selection_range(end, end);
-    });
-    if let Some(window) = web_sys::window() {
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            closure.as_ref().unchecked_ref(),
-            0,
-        );
-    }
-    closure.forget();
 }
 
 fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<String> {
@@ -177,7 +133,7 @@ fn select_media_entry(
     };
     draft.set(replace_inline_media_query(&value, query, &replacement));
     menu_sel.set(0);
-    focus_prompt_end();
+    focus_prompt_end(PROMPT_INPUT_ID);
 }
 
 fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
@@ -207,13 +163,13 @@ fn dispatch_keyboard_event(
 
 fn install_global_prompt_input(draft: Signal<String>, slash_cmds: Signal<Vec<SlashCommandEntry>>) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
-        let Some(textarea) = prompt_textarea() else {
+        let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID) else {
             return;
         };
         let prompt_focused = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| document.active_element())
-            .is_some_and(|element| element.id() == PROMPT_ID);
+            .is_some_and(|element| element.id() == PROMPT_INPUT_ID);
         if prompt_focused {
             return;
         }
@@ -312,8 +268,6 @@ pub fn Page(
     let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
-    let prompt_caret = use_signal(|| Some(0u32));
-    let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
@@ -334,11 +288,7 @@ pub fn Page(
     let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
-    use_effect(focus_prompt_end);
-    use_effect(move || {
-        let _ = draft.read();
-        resize_prompt_textarea();
-    });
+    use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
 
     use_future(move || async move {
         loop {
@@ -444,7 +394,7 @@ pub fn Page(
             }
             attachment_previews.set(previews);
             attachments.set(next);
-            focus_prompt_end();
+            focus_prompt_end(PROMPT_INPUT_ID);
         });
     let _attachment_previews = use_bin_event_listener::<ChatAttachments, _>(
         CHAT_ATTACHMENT_PREVIEWS_EVENT,
@@ -568,10 +518,6 @@ pub fn Page(
         }
     };
     let draft_val = draft();
-    let prompt_caret_prefix = prompt_caret()
-        .filter(|_| !draft_val.is_empty())
-        .map(|offset| prompt_prefix_at_utf16(&draft_val, offset).to_string());
-    let prompt_scroll_offset = prompt_scroll_top();
     let selector = selector_mode(&draft_val);
     let command_query = match selector {
         SelectorMode::Commands(query) => Some(query),
@@ -615,18 +561,246 @@ pub fn Page(
             filtered_sessions.len(),
         )
     });
+    let prompt_media_options = media_entries
+        .read()
+        .iter()
+        .map(|entry| PromptMediaOption {
+            key: format!("media-{}", entry.path),
+            name: entry.name.clone(),
+            display_path: media_display_path(entry),
+            preview_data_url: entry.preview_data_url.clone(),
+            label: file_extension_label(&entry.name),
+            is_dir: entry.is_dir,
+        })
+        .collect::<Vec<_>>();
+    let prompt_attachments = transition_attachments
+        .read()
+        .iter()
+        .map(|attachment| PromptComposerAttachment {
+            key: format!("transition-attachment-{}", attachment.path),
+            name: attachment.name.clone(),
+            label: attachment_label(attachment),
+            preview_data_url: attachment.preview_data_url.clone(),
+            remove_index: None,
+        })
+        .chain(
+            attachments
+                .read()
+                .iter()
+                .enumerate()
+                .map(|(index, attachment)| PromptComposerAttachment {
+                    key: format!("attachment-pill-{}", attachment.path),
+                    name: attachment.name.clone(),
+                    label: attachment_label(attachment),
+                    preview_data_url: attachment.preview_data_url.clone(),
+                    remove_index: Some(index),
+                }),
+        )
+        .collect::<Vec<_>>();
+    let prompt_streaming = matches!(status().as_str(), "streaming" | "awaiting");
+    let prompt_action = if prompt_streaming && queued.read().is_empty() {
+        PromptComposerAction::Stop
+    } else {
+        PromptComposerAction::Send
+    };
+    let prompt_action_title = if prompt_streaming && !queued.read().is_empty() {
+        "Send all queued prompts now (Esc)"
+    } else if prompt_streaming {
+        "Stop"
+    } else {
+        "Send (Enter)"
+    };
+    let prompt_action_enabled =
+        prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty();
+    let prompt_keydown = move |e: KeyboardEvent| {
+        let streaming = matches!(status().as_str(), "streaming" | "awaiting");
+        let draft_now = draft.peek().clone();
+        let (cmd_items, sess_items, model_items, session_selector_open, model_selector_open) =
+            match selector_mode(&draft_now) {
+                SelectorMode::Commands(query) => {
+                    let query = query.to_lowercase();
+                    (
+                        slash_cmds
+                            .peek()
+                            .iter()
+                            .filter(|command| command.name.starts_with(&query))
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        Vec::new(),
+                        Vec::new(),
+                        false,
+                        false,
+                    )
+                }
+                SelectorMode::Resume(query) => (
+                    Vec::new(),
+                    filter_sessions(&sessions.peek(), query),
+                    Vec::new(),
+                    true,
+                    false,
+                ),
+                SelectorMode::Models(query) => (
+                    Vec::new(),
+                    Vec::new(),
+                    filter_models(&models.peek(), query),
+                    false,
+                    true,
+                ),
+                SelectorMode::None => (Vec::new(), Vec::new(), Vec::new(), false, false),
+            };
+        let media_selector_open = inline_media_query(&draft_now).is_some();
+        let media_items = if media_selector_open {
+            media_entries.peek().clone()
+        } else {
+            Vec::new()
+        };
+        let selector_open = media_selector_open
+            || session_selector_open
+            || model_selector_open
+            || !cmd_items.is_empty();
+        let selector_len = if media_selector_open {
+            media_items.len()
+        } else if session_selector_open {
+            sess_items.len()
+        } else if model_selector_open {
+            model_items.len()
+        } else {
+            cmd_items.len()
+        };
+        let key = e.key().to_string();
+        let command_modifier = e.modifiers().meta() || e.modifiers().ctrl() || e.modifiers().alt();
+        let direction = if e.modifiers().meta() || e.modifiers().alt() {
+            None
+        } else {
+            menu_direction(&key, e.modifiers().ctrl())
+        };
+
+        if selector_open && let Some(direction) = direction {
+            e.prevent_default();
+            let selected = *menu_sel.peek();
+            menu_sel.set(move_selection(selected, selector_len, direction));
+            return;
+        }
+        if selector_open && e.key() == Key::Enter && !e.modifiers().shift() && !command_modifier {
+            e.prevent_default();
+            let selected = *menu_sel.peek();
+            if media_selector_open {
+                if let Some(entry) = media_items.get(selected) {
+                    select_media_entry(entry, draft, menu_sel);
+                }
+            } else if session_selector_open {
+                if let Some(session) = sess_items.get(selected) {
+                    select_resume_session(session, draft);
+                }
+            } else if model_selector_open {
+                if let Some(model) = model_items.get(selected) {
+                    select_model(model, draft);
+                }
+            } else if let Some(command) = cmd_items.get(selected) {
+                run_slash_command(&command.name, draft, menu_sel);
+            }
+            return;
+        }
+        if selector_open && e.key() == Key::Escape && !command_modifier {
+            e.prevent_default();
+            if let Some(query) = inline_media_query(&draft_now) {
+                draft.set(replace_inline_media_query(&draft_now, query, ""));
+                focus_prompt_end(PROMPT_INPUT_ID);
+            } else {
+                draft.set(String::new());
+            }
+            menu_sel.set(0);
+            return;
+        }
+        if (media_selector_open || session_selector_open || model_selector_open)
+            && matches!(e.key(), Key::Enter | Key::Escape)
+        {
+            return;
+        }
+
+        if !selector_open
+            && !e.modifiers().meta()
+            && !e.modifiers().alt()
+            && let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID)
+        {
+            let start = textarea
+                .selection_start()
+                .ok()
+                .flatten()
+                .unwrap_or_default();
+            let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+            if let Some(direction) =
+                prompt_history_direction(&key, e.modifiers().ctrl(), &draft_now, start, end)
+            {
+                let history = prompt_history(&items.peek(), &queued.peek());
+                let current_cursor = *history_cursor.peek();
+                let should_handle = match direction {
+                    PromptHistoryDirection::Older => !history.is_empty(),
+                    PromptHistoryDirection::Newer => current_cursor.is_some(),
+                };
+                if should_handle {
+                    e.prevent_default();
+                    let (value, cursor, scratch) = move_prompt_history(
+                        &history,
+                        current_cursor,
+                        &history_scratch.peek(),
+                        &draft_now,
+                        direction,
+                    );
+                    draft.set(value);
+                    history_cursor.set(cursor);
+                    history_scratch.set(scratch);
+                    focus_prompt_end(PROMPT_INPUT_ID);
+                    return;
+                }
+            }
+        }
+
+        if e.key() == Key::Enter && !e.modifiers().shift() {
+            e.prevent_default();
+            do_submit(
+                draft,
+                attachments,
+                history_cursor,
+                history_scratch,
+                at_bottom,
+            );
+        } else if e.key() == Key::Escape {
+            e.prevent_default();
+            let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+            if should_clear_draft_on_escape(
+                streaming,
+                queued.peek().is_empty(),
+                draft.peek().is_empty(),
+            ) {
+                draft.set(String::new());
+            }
+        } else if e.modifiers().ctrl()
+            && matches!(e.key(), Key::Character(c) if c == "c")
+            && !has_text_selection()
+        {
+            e.prevent_default();
+            let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+        }
+    };
 
     use_effect(move || {
         let selected = menu_sel();
-        let _ = draft.read();
+        let media_open = {
+            let draft = draft.read();
+            inline_media_query(&draft).is_some()
+        };
         let _ = sessions.read().len();
         let _ = models.read().len();
         let _ = media_entries.read().len();
+        let item_id = if media_open {
+            format!("prompt-media-item-{selected}")
+        } else {
+            format!("agent-selector-item-{selected}")
+        };
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
-            .and_then(|document| {
-                document.get_element_by_id(&format!("agent-selector-item-{selected}"))
-            })
+            .and_then(|document| document.get_element_by_id(&item_id))
         {
             let options = web_sys::ScrollIntoViewOptions::new();
             options.set_block(web_sys::ScrollLogicalPosition::Nearest);
@@ -801,51 +975,16 @@ pub fn Page(
                     class: "agent-chat-prompt-shell vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
                         PromptPopup {
-                            if media_loading() {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
-                            } else if media_entries.read().is_empty() {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
-                            } else {
-                                for (i , entry) in media_entries.read().iter().cloned().enumerate() {
-                                    {
-                                        let entry = entry.clone();
-                                        let display_path = media_display_path(&entry);
-                                        rsx! {
-                                            div {
-                                                key: "media-{entry.path}",
-                                                id: "agent-selector-item-{i}",
-                                                class: if i == menu_sel() { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
-                                                onclick: move |_| select_media_entry(&entry, draft, menu_sel),
-                                                div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                                    if entry.is_dir {
-                                                        svg {
-                                                            class: "h-4 w-4",
-                                                            view_box: "0 0 24 24",
-                                                            fill: "none",
-                                                            stroke: "currentColor",
-                                                            stroke_width: "2",
-                                                            stroke_linecap: "round",
-                                                            stroke_linejoin: "round",
-                                                            path { d: "M3 6h6l2 2h10v10H3z" }
-                                                        }
-                                                    } else if !entry.preview_data_url.is_empty() {
-                                                        img {
-                                                            src: "{entry.preview_data_url}",
-                                                            alt: "{entry.name}",
-                                                            class: "h-full w-full object-contain",
-                                                        }
-                                                    } else {
-                                                        span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
-                                                    }
-                                                }
-                                                div { class: "min-w-0 flex-1",
-                                                    div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                                    div { class: "truncate text-xs text-muted-foreground", "{display_path}" }
-                                                }
-                                            }
-                                        }
+                            PromptMediaOptions {
+                                items: prompt_media_options,
+                                selected: menu_sel(),
+                                loading: media_loading(),
+                                on_hover: move |index| menu_sel.set(index),
+                                on_select: move |index| {
+                                    if let Some(entry) = media_entries.peek().get(index).cloned() {
+                                        select_media_entry(&entry, draft, menu_sel);
                                     }
-                                }
+                                },
                             }
                         }
                     }
@@ -1060,377 +1199,55 @@ pub fn Page(
                             }
                         }
                     }
-                    PromptBox { class: "agent-chat-prompt-box",
-                        button {
-                            class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
-                            title: "Attach files (/upload)",
-                            onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
-                            },
-                            svg {
-                                class: "h-4 w-4",
-                                view_box: "0 0 24 24",
-                                fill: "none",
-                                stroke: "currentColor",
-                                stroke_width: "2",
-                                stroke_linecap: "round",
-                                stroke_linejoin: "round",
-                                path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
+                    PromptComposer {
+                        value: draft_val.clone(),
+                        preview: transition_preview(),
+                        attachments: prompt_attachments,
+                        show_examples: show_capability_examples,
+                        placeholder: "Type / for commands or @ for media".to_string(),
+                        accent_bg: agent_accent.accent_bg.to_string(),
+                        accent_color: theme_accent.clone(),
+                        accent_gradient: agent_accent.grad.to_string(),
+                        action: prompt_action,
+                        action_title: prompt_action_title.to_string(),
+                        action_enabled: prompt_action_enabled,
+                        on_input: move |value| {
+                            draft.set(value);
+                            history_cursor.set(None);
+                            history_scratch.set(String::new());
+                            menu_sel.set(0);
+                        },
+                        on_keydown: prompt_keydown,
+                        on_paste: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
+                        },
+                        on_attach: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                        },
+                        on_remove_attachment: move |index| {
+                            let mut next = attachments.peek().clone();
+                            if index < next.len() {
+                                next.remove(index);
+                                attachments.set(next);
                             }
-                        }
-                        div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
-                            for attachment in transition_attachments.read().iter() {
-                                div {
-                                    key: "transition-attachment-{attachment.path}",
-                                    class: "flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-2 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
-                                    if attachment.preview_data_url.is_empty() {
-                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
-                                            "{attachment_label(attachment)}"
-                                        }
-                                    } else {
-                                        img {
-                                            src: "{attachment.preview_data_url}",
-                                            alt: "{attachment.name}",
-                                            class: "h-5 w-5 rounded-full object-cover",
-                                        }
-                                    }
-                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
-                                }
-                            }
-                            for (i , attachment) in attachments.read().iter().cloned().enumerate() {
-                                div {
-                                    key: "attachment-pill-{attachment.path}",
-                                    class: "group flex h-7 max-w-56 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-1.5 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
-                                    if attachment.preview_data_url.is_empty() {
-                                        span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
-                                            "{attachment_label(&attachment)}"
-                                        }
-                                    } else {
-                                        img {
-                                            src: "{attachment.preview_data_url}",
-                                            alt: "{attachment.name}",
-                                            class: "h-5 w-5 rounded-full object-cover",
-                                        }
-                                    }
-                                    span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
-                                    button {
-                                        class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
-                                        title: "Remove attachment",
-                                        onclick: move |_| {
-                                            let mut next = attachments.peek().clone();
-                                            if i < next.len() {
-                                                next.remove(i);
-                                                attachments.set(next);
-                                            }
-                                        },
-                                        svg {
-                                            class: "h-3 w-3",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2.5",
-                                            stroke_linecap: "round",
-                                            path { d: "M6 6l12 12M18 6L6 18" }
-                                        }
-                                    }
-                                }
-                            }
-                            div { class: "relative min-w-32 flex-1 overflow-hidden",
-                                if draft.read().is_empty() {
-                                    div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
-                                        if !transition_preview.read().is_empty() {
-                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{transition_preview}" }
-                                        } else if show_capability_examples {
-                                            PromptGhost {
-                                                accent_bg: agent_accent.accent_bg.to_string(),
-                                                terminal: false,
-                                            }
-                                        } else {
-                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for commands or @ for media" }
-                                        }
-                                    }
-                                }
-                                if let Some(prefix) = prompt_caret_prefix.as_ref() {
-                                    div { class: "pointer-events-none absolute inset-0 z-20 overflow-hidden",
-                                        div {
-                                            class: "min-h-10 w-full whitespace-pre-wrap break-words px-1.5 py-2 text-[15px] leading-6 text-transparent",
-                                            style: "transform:translateY(-{prompt_scroll_offset}px);",
-                                            span { "{prefix}" }
-                                            span { class: "agent-chat-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle" }
-                                        }
-                                    }
-                                }
-                                textarea {
-                                id: PROMPT_ID,
-                                class: "agent-chat-prompt relative z-10 max-h-40 min-h-10 w-full resize-none bg-transparent px-1.5 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
-                                autofocus: true,
-                                rows: "1",
-                                placeholder: "Message the agent…",
-                                value: "{draft}",
-                                oninput: move |e| {
-                                    draft.set(e.value());
-                                    history_cursor.set(None);
-                                    history_scratch.set(String::new());
-                                    menu_sel.set(0);
-                                    sync_prompt_caret(prompt_caret, prompt_scroll_top);
-                                },
-                                onpaste: move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
-                                },
-                                onfocus: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onblur: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onkeyup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onmouseup: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onscroll: move |_| sync_prompt_caret(prompt_caret, prompt_scroll_top),
-                                onkeydown: move |e| {
-                                    let streaming = matches!(status().as_str(), "streaming" | "awaiting");
-                                    let draft_now = draft.peek().clone();
-                                    let (cmd_items, sess_items, model_items, session_selector_open, model_selector_open) = match selector_mode(&draft_now) {
-                                        SelectorMode::Commands(query) => {
-                                            let query = query.to_lowercase();
-                                            (
-                                                slash_cmds
-                                                    .peek()
-                                                    .iter()
-                                                    .filter(|command| command.name.starts_with(&query))
-                                                    .cloned()
-                                                    .collect::<Vec<_>>(),
-                                                Vec::new(),
-                                                Vec::new(),
-                                                false,
-                                                false,
-                                            )
-                                        }
-                                        SelectorMode::Resume(query) => (
-                                            Vec::new(),
-                                            filter_sessions(&sessions.peek(), query),
-                                            Vec::new(),
-                                            true,
-                                            false,
-                                        ),
-                                        SelectorMode::Models(query) => (
-                                            Vec::new(),
-                                            Vec::new(),
-                                            filter_models(&models.peek(), query),
-                                            false,
-                                            true,
-                                        ),
-                                        SelectorMode::None => (Vec::new(), Vec::new(), Vec::new(), false, false),
-                                    };
-                                    let media_selector_open = inline_media_query(&draft_now).is_some();
-                                    let media_items = if media_selector_open {
-                                        media_entries.peek().clone()
-                                    } else {
-                                        Vec::new()
-                                    };
-                                    let selector_open = media_selector_open
-                                        || session_selector_open
-                                        || model_selector_open
-                                        || !cmd_items.is_empty();
-                                    let selector_len = if media_selector_open {
-                                        media_items.len()
-                                    } else if session_selector_open {
-                                        sess_items.len()
-                                    } else if model_selector_open {
-                                        model_items.len()
-                                    } else {
-                                        cmd_items.len()
-                                    };
-                                    let key = e.key().to_string();
-                                    let command_modifier = e.modifiers().meta()
-                                        || e.modifiers().ctrl()
-                                        || e.modifiers().alt();
-                                    let direction = if e.modifiers().meta() || e.modifiers().alt() {
-                                        None
-                                    } else {
-                                        menu_direction(&key, e.modifiers().ctrl())
-                                    };
-
-                                    if selector_open && let Some(direction) = direction {
-                                        e.prevent_default();
-                                        let selected = *menu_sel.peek();
-                                        menu_sel.set(move_selection(selected, selector_len, direction));
-                                        return;
-                                    }
-                                    if selector_open
-                                        && e.key() == Key::Enter
-                                        && !e.modifiers().shift()
-                                        && !command_modifier
-                                    {
-                                        e.prevent_default();
-                                        let selected = *menu_sel.peek();
-                                        if media_selector_open {
-                                            if let Some(entry) = media_items.get(selected) {
-                                                select_media_entry(entry, draft, menu_sel);
-                                            }
-                                        } else if session_selector_open {
-                                            if let Some(session) = sess_items.get(selected) {
-                                                select_resume_session(session, draft);
-                                            }
-                                        } else if model_selector_open {
-                                            if let Some(model) = model_items.get(selected) {
-                                                select_model(model, draft);
-                                            }
-                                        } else if let Some(command) = cmd_items.get(selected) {
-                                            run_slash_command(&command.name, draft, menu_sel);
-                                        }
-                                        return;
-                                    }
-                                    if selector_open && e.key() == Key::Escape && !command_modifier {
-                                        e.prevent_default();
-                                        if let Some(query) = inline_media_query(&draft_now) {
-                                            draft.set(replace_inline_media_query(&draft_now, query, ""));
-                                            focus_prompt_end();
-                                        } else {
-                                            draft.set(String::new());
-                                        }
-                                        menu_sel.set(0);
-                                        return;
-                                    }
-                                    if (media_selector_open || session_selector_open || model_selector_open)
-                                        && matches!(e.key(), Key::Enter | Key::Escape)
-                                    {
-                                        return;
-                                    }
-
-                                    if !selector_open
-                                        && !e.modifiers().meta()
-                                        && !e.modifiers().alt()
-                                        && let Some(textarea) = prompt_textarea()
-                                    {
-                                        let start = textarea
-                                            .selection_start()
-                                            .ok()
-                                            .flatten()
-                                            .unwrap_or_default();
-                                        let end = textarea
-                                            .selection_end()
-                                            .ok()
-                                            .flatten()
-                                            .unwrap_or(start);
-                                        if let Some(direction) = prompt_history_direction(
-                                            &key,
-                                            e.modifiers().ctrl(),
-                                            &draft_now,
-                                            start,
-                                            end,
-                                        ) {
-                                            let history = prompt_history(&items.peek(), &queued.peek());
-                                            let current_cursor = *history_cursor.peek();
-                                            let should_handle = match direction {
-                                                PromptHistoryDirection::Older => !history.is_empty(),
-                                                PromptHistoryDirection::Newer => current_cursor.is_some(),
-                                            };
-                                            if should_handle {
-                                                e.prevent_default();
-                                                let (value, cursor, scratch) = move_prompt_history(
-                                                    &history,
-                                                    current_cursor,
-                                                    &history_scratch.peek(),
-                                                    &draft_now,
-                                                    direction,
-                                                );
-                                                draft.set(value);
-                                                history_cursor.set(cursor);
-                                                history_scratch.set(scratch);
-                                                focus_prompt_end();
-                                                return;
-                                            }
-                                        }
-                                    }
-
-                                    if e.key() == Key::Enter && !e.modifiers().shift() {
-                                        e.prevent_default();
-                                        do_submit(
-                                            draft,
-                                            attachments,
-                                            history_cursor,
-                                            history_scratch,
-                                            at_bottom,
-                                        );
-                                    } else if e.key() == Key::Escape {
-                                        e.prevent_default();
-                                        let _ = try_cef_bin_emit_rkyv(&ChatEscape);
-                                        if should_clear_draft_on_escape(
-                                            streaming,
-                                            queued.peek().is_empty(),
-                                            draft.peek().is_empty(),
-                                        ) {
-                                            draft.set(String::new());
-                                        }
-                                    } else if e.modifiers().ctrl()
-                                        && matches!(e.key(), Key::Character(c) if c == "c")
-                                        && !has_text_selection()
-                                    {
-                                        e.prevent_default();
-                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                    }
-                                },
-                                }
-                            }
-                        }
-                        if matches!(status().as_str(), "streaming" | "awaiting") {
-                            if queued.read().is_empty() {
-                                button {
-                                    class: "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-white/40 text-foreground/70 shadow-sm ring-1 ring-inset ring-black/10 transition hover:bg-white/60 hover:text-foreground active:scale-95 dark:bg-white/[0.08] dark:ring-white/10 dark:hover:bg-white/[0.14]",
-                                    title: "Stop",
-                                    onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&ChatCancel);
-                                    },
-                                    svg {
-                                        class: "h-4 w-4",
-                                        view_box: "0 0 24 24",
-                                        fill: "currentColor",
-                                        rect { x: "6", y: "6", width: "12", height: "12", rx: "2.5" }
-                                    }
+                        },
+                        on_action: move |_| {
+                            if prompt_streaming {
+                                if queued.peek().is_empty() {
+                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                } else {
+                                    let _ = try_cef_bin_emit_rkyv(&ChatEscape);
                                 }
                             } else {
-                                button {
-                                    class: "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}",
-                                    title: "Send all queued prompts now (Esc)",
-                                    onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&ChatEscape);
-                                    },
-                                    svg {
-                                        class: "h-4 w-4",
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        path { d: "M12 19V5" }
-                                        path { d: "M5 12l7-7 7 7" }
-                                    }
-                                }
+                                do_submit(
+                                    draft,
+                                    attachments,
+                                    history_cursor,
+                                    history_scratch,
+                                    at_bottom,
+                                );
                             }
-                        } else {
-                            button {
-                                class: if draft.read().trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-gradient-to-br text-white shadow-lg transition hover:brightness-110 active:scale-95 {agent_accent.grad}" },
-                                disabled: draft.read().trim().is_empty() && attachments.read().is_empty(),
-                                title: "Send (Enter)",
-                                onclick: move |_| {
-                                    do_submit(
-                                        draft,
-                                        attachments,
-                                        history_cursor,
-                                        history_scratch,
-                                        at_bottom,
-                                    )
-                                },
-                                svg {
-                                    class: "h-4 w-4",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M12 19V5" }
-                                    path { d: "M5 12l7-7 7 7" }
-                                }
-                            }
-                        }
+                        },
                     }
                 }
             }
@@ -2294,12 +2111,7 @@ fn md_to_html(src: &str) -> String {
 /// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
 /// light and dark.
 const MD_CSS: &str = r#"
-.agent-chat-prompt{caret-color:transparent}
-.agent-chat-caret{animation:agent-chat-caret-blink 1s step-end infinite;background:var(--agent-accent)}
-@keyframes agent-chat-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
 .agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);filter:blur(16px);pointer-events:none}
-.agent-chat-prompt-box{border-color:rgba(255,255,255,0.18);box-shadow:0 22px 70px -28px rgba(255,255,255,0.2),inset 0 1px 0 rgba(255,255,255,0.16),inset 0 -1px 0 rgba(255,255,255,0.04)}
-.agent-chat-prompt-box:focus-within{border-color:rgba(255,255,255,0.28);box-shadow:0 26px 78px -26px rgba(255,255,255,0.28),inset 0 1px 0 rgba(255,255,255,0.2)}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
 .agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}

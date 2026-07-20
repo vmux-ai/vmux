@@ -26,15 +26,19 @@ use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, inline_media_query, media_reference, replace_inline_media_query,
+    ChatPickFiles, inline_media_query, media_display_path, media_reference,
+    replace_inline_media_query,
 };
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
+use vmux_ui::components::prompt_composer::{
+    PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
+};
+use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
-use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -158,7 +162,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             attachments.set(next);
-            focus_command_input_end();
+            focus_prompt_end(PROMPT_INPUT_ID);
         });
 
     let _media_entries_listener =
@@ -232,7 +236,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let open_id = state().open_id;
         if command_bar_should_refocus(last_focus_open_id(), open_id) {
             last_focus_open_id.set(open_id);
-            focus_and_install_ctrl_bindings();
+            if is_start {
+                focus_prompt_end(PROMPT_INPUT_ID);
+            } else {
+                focus_and_install_ctrl_bindings();
+            }
         }
     });
 
@@ -261,6 +269,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_query = is_start.then(|| inline_media_query(&q)).flatten();
     let media_menu_open = media_query.is_some();
     let media_sel = media_selected().min(media_entries.read().len().saturating_sub(1));
+    let prompt_media_options = media_entries
+        .read()
+        .iter()
+        .map(|entry| PromptMediaOption {
+            key: format!("media-{}", entry.path),
+            name: entry.name.clone(),
+            display_path: media_display_path(entry),
+            preview_data_url: entry.preview_data_url.clone(),
+            label: file_extension_label(&entry.name),
+            is_dir: entry.is_dir,
+        })
+        .collect::<Vec<_>>();
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
@@ -397,7 +417,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| {
-                document.get_element_by_id(&format!("command-bar-media-item-{selected}"))
+                document.get_element_by_id(&format!("prompt-media-item-{selected}"))
             })
         {
             let options = web_sys::ScrollIntoViewOptions::new();
@@ -500,6 +520,245 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
         }
     };
+    let start_accent = active_agent_accent.unwrap_or_else(|| agent_accent("vibe"));
+    let start_prompt_attachments = attachments
+        .read()
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| PromptComposerAttachment {
+            key: format!("start-attachment-{}", attachment.path),
+            name: attachment.name.clone(),
+            label: file_extension_label(&attachment.name),
+            preview_data_url: attachment.preview_data_url.clone(),
+            remove_index: Some(index),
+        })
+        .collect::<Vec<_>>();
+    let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
+    let start_keydown_q = q.clone();
+    let start_keydown_results = results.clone();
+    let start_keydown_default_agent = default_agent_item.clone();
+    let start_keydown_ghost = ghost_text.clone();
+    let start_keydown = move |e: KeyboardEvent| {
+        if e.key() == Key::Tab {
+            e.prevent_default();
+            if !start_keydown_ghost.is_empty() {
+                query.set(format!("{}{}", start_keydown_q, start_keydown_ghost));
+                selected.set(0);
+                focus_prompt_end(PROMPT_INPUT_ID);
+            }
+            return;
+        }
+
+        let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+        if space_switch
+            && !ctrl
+            && start_keydown_q.trim().is_empty()
+            && let Key::Character(s) = e.key()
+            && let Some(idx) = s
+                .chars()
+                .next()
+                .filter(|c| c.is_ascii_digit())
+                .and_then(|c| c.to_digit(10))
+        {
+            let space_count = start_keydown_results
+                .iter()
+                .filter(|result| matches!(result, ResultItem::Space { .. }))
+                .count();
+            if (idx as usize) < space_count {
+                e.prevent_default();
+                selected.set(idx as usize);
+                nav_mode.set(true);
+                return;
+            }
+        }
+        let go_down = (e.key() == Key::ArrowDown && !ctrl)
+            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
+        let go_up = (e.key() == Key::ArrowUp && !ctrl)
+            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+
+        if media_menu_open {
+            if go_down {
+                e.prevent_default();
+                let max = media_entries.read().len().saturating_sub(1);
+                media_selected.set((media_sel + 1).min(max));
+                return;
+            }
+            if go_up {
+                e.prevent_default();
+                media_selected.set(media_sel.saturating_sub(1));
+                return;
+            }
+            if e.key() == Key::Enter && !e.modifiers().shift() {
+                e.prevent_default();
+                if let Some(entry) = media_entries.read().get(media_sel).cloned() {
+                    select_start_media_entry(&entry, query, media_selected);
+                }
+                return;
+            }
+            if e.key() == Key::Escape {
+                e.prevent_default();
+                if let Some(media_query) = inline_media_query(&start_keydown_q) {
+                    query.set(replace_inline_media_query(
+                        &start_keydown_q,
+                        media_query,
+                        "",
+                    ));
+                }
+                media_selected.set(0);
+                return;
+            }
+        }
+
+        if go_down {
+            e.prevent_default();
+            let max = start_keydown_results.len().saturating_sub(1);
+            selected.set((sel + 1).min(max));
+            nav_mode.set(true);
+        } else if go_up {
+            e.prevent_default();
+            selected.set(sel.saturating_sub(1));
+            nav_mode.set(true);
+        } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
+            on_dismiss.call(());
+        } else if e.key() == Key::Enter && !e.modifiers().shift() {
+            e.prevent_default();
+            if start_keydown_q.trim().is_empty() && !attachments.peek().is_empty() {
+                if let Some(item) = start_keydown_default_agent.as_ref() {
+                    execute(item);
+                } else {
+                    let selected_attachments = attachments.peek().clone();
+                    emit_prompt_action("", open_target, "", &selected_attachments);
+                }
+                return;
+            }
+            if space_switch {
+                if let Some(item) = start_keydown_results.get(sel) {
+                    execute(item);
+                }
+            } else if start_prompt_mode {
+                if let Some(item) = start_keydown_results.get(sel) {
+                    execute(item);
+                } else {
+                    on_close.call(());
+                    let selected_attachments = attachments.peek().clone();
+                    emit_prompt_action(
+                        start_keydown_q.trim(),
+                        open_target,
+                        "",
+                        &selected_attachments,
+                    );
+                }
+            } else {
+                let prefer_page = matches!(
+                    start_keydown_results.get(sel),
+                    Some(ResultItem::Page { url, .. })
+                        if start_keydown_q.trim().starts_with("vmux://")
+                            && url.starts_with(start_keydown_q.trim())
+                );
+                if !prefer_page
+                    && should_open_typed_query_on_enter(open_target, nav_mode(), &start_keydown_q)
+                {
+                    on_close.call(());
+                    emit_action_with_target("open", &start_keydown_q, open_target);
+                } else if let Some(item) = start_keydown_results.get(sel) {
+                    execute(item);
+                } else if !start_keydown_q.is_empty() {
+                    emit_action_with_target("open", &start_keydown_q, open_target);
+                }
+            }
+        }
+    };
+    let modal_keydown_q = q.clone();
+    let modal_keydown_results = results.clone();
+    let modal_keydown_ghost = ghost_text.clone();
+    let modal_keydown = move |e: KeyboardEvent| {
+        if e.key() == Key::Tab {
+            e.prevent_default();
+            if !modal_keydown_ghost.is_empty() {
+                let new_value = format!("{}{}", modal_keydown_q, modal_keydown_ghost);
+                query.set(new_value.clone());
+                selected.set(0);
+                if let Some(element) = web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| document.get_element_by_id("command-bar-input"))
+                {
+                    let input: web_sys::HtmlInputElement = element.unchecked_into();
+                    input.set_value(&new_value);
+                    let len = new_value.len() as u32;
+                    let _ = input.set_selection_range(len, len);
+                    ensure_caret_visible(&input, new_value.len());
+                }
+            }
+            return;
+        }
+
+        let ctrl = e.modifiers().contains(Modifiers::CONTROL);
+        let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
+        if ctrl && ignore_physical_rerouted_ctrl_keydown(&e.code().to_string(), vmux_synthetic) {
+            e.prevent_default();
+            return;
+        }
+        if space_switch
+            && !ctrl
+            && modal_keydown_q.trim().is_empty()
+            && let Key::Character(s) = e.key()
+            && let Some(index) = s
+                .chars()
+                .next()
+                .filter(|character| character.is_ascii_digit())
+                .and_then(|character| character.to_digit(10))
+        {
+            let space_count = modal_keydown_results
+                .iter()
+                .filter(|result| matches!(result, ResultItem::Space { .. }))
+                .count();
+            if (index as usize) < space_count {
+                e.prevent_default();
+                selected.set(index as usize);
+                nav_mode.set(true);
+                return;
+            }
+        }
+        let go_down = (e.key() == Key::ArrowDown && !ctrl)
+            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
+        let go_up = (e.key() == Key::ArrowUp && !ctrl)
+            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+        if go_down {
+            e.prevent_default();
+            let max = modal_keydown_results.len().saturating_sub(1);
+            selected.set((sel + 1).min(max));
+            nav_mode.set(true);
+        } else if go_up {
+            e.prevent_default();
+            selected.set(sel.saturating_sub(1));
+            nav_mode.set(true);
+        } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
+            on_dismiss.call(());
+        } else if e.key() == Key::Enter {
+            if space_switch {
+                if let Some(item) = modal_keydown_results.get(sel) {
+                    execute(item);
+                }
+            } else {
+                let prefer_page = matches!(
+                    modal_keydown_results.get(sel),
+                    Some(ResultItem::Page { url, .. })
+                        if modal_keydown_q.trim().starts_with("vmux://")
+                            && url.starts_with(modal_keydown_q.trim())
+                );
+                if !prefer_page
+                    && should_open_typed_query_on_enter(open_target, nav_mode(), &modal_keydown_q)
+                {
+                    on_close.call(());
+                    emit_action_with_target("open", &modal_keydown_q, open_target);
+                } else if let Some(item) = modal_keydown_results.get(sel) {
+                    execute(item);
+                } else if !modal_keydown_q.is_empty() {
+                    emit_action_with_target("open", &modal_keydown_q, open_target);
+                }
+            }
+        }
+    };
 
     rsx! {
         div { class: "relative",
@@ -509,424 +768,195 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     div { class: "{accent.glow_bottom} transition-all duration-500 ease-out" }
                 }
             }
-            PromptBox {
-                glass: is_start,
-                class: if is_start { "" } else { "p-2" },
-                div { class: if is_start { "relative z-10 flex min-w-0 w-full flex-wrap items-center gap-2 overflow-hidden px-2 py-1" } else { command_bar_input_row_class() },
-                if !is_start && !space_name.is_empty() {
-                    span {
-                        title: "{space_name}",
-                        class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
-                        "{space_name}"
-                    }
-                }
-                if is_start {
-                    button {
-                        class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
-                        title: "Attach files",
-                        onmousedown: move |event| event.prevent_default(),
-                        onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
-                        },
-                        Icon { class: "h-4 w-4",
-                            path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
+            if is_start {
+                PromptComposer {
+                    value: display_text.clone(),
+                    completion: ghost_text.clone(),
+                    attachments: start_prompt_attachments,
+                    show_examples: q.is_empty() && ghost_text.is_empty(),
+                    placeholder: "Type / for commands or @ for media".to_string(),
+                    accent_bg: start_accent.accent_bg.to_string(),
+                    accent_color: format!("rgb({})", start_accent.rain_rgb),
+                    accent_gradient: start_accent.grad.to_string(),
+                    action_title: "Send (Enter)".to_string(),
+                    action_enabled: start_action_enabled,
+                    on_input: move |value| {
+                        query.set(value);
+                        selected.set(0);
+                        nav_mode.set(false);
+                    },
+                    on_keydown: start_keydown,
+                    on_paste: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
+                    },
+                    on_attach: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                    },
+                    on_remove_attachment: move |index| {
+                        let mut next = attachments.peek().clone();
+                        if index < next.len() {
+                            next.remove(index);
+                            attachments.set(next);
                         }
-                    }
-                    for (i, attachment) in attachments.read().iter().cloned().enumerate() {
-                        div {
-                            key: "start-attachment-{attachment.path}",
-                            class: "group relative z-10 flex h-7 max-w-48 shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.08] pl-1 pr-1.5 text-xs text-foreground/80 ring-1 ring-inset ring-foreground/10",
-                            if attachment.preview_data_url.is_empty() {
-                                span { class: "flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground/[0.08] px-1 font-mono text-[8px] font-semibold text-muted-foreground",
-                                    "{file_extension_label(&attachment.name)}"
+                    },
+                    on_action: {
+                        let action_results = results.clone();
+                        let action_query = q.clone();
+                        let action_default_agent = default_agent_item.clone();
+                        move |_| {
+                            if let Some(item) = action_results.get(sel) {
+                                execute(item);
+                            } else if !action_query.trim().is_empty()
+                                || !attachments.peek().is_empty()
+                            {
+                                if action_query.trim().is_empty()
+                                    && let Some(item) = action_default_agent.as_ref()
+                                {
+                                    execute(item);
+                                } else {
+                                    on_close.call(());
+                                    let selected_attachments = attachments.peek().clone();
+                                    emit_prompt_action(
+                                        action_query.trim(),
+                                        open_target,
+                                        "",
+                                        &selected_attachments,
+                                    );
+                                }
+                            }
+                        }
+                    },
+                }
+            } else {
+                PromptBox {
+                    glass: false,
+                    class: "p-2",
+                    div { class: command_bar_input_row_class(),
+                        if !space_name.is_empty() {
+                            span {
+                                title: "{space_name}",
+                                class: "max-w-36 shrink-0 truncate rounded-md bg-glass-hover px-2 py-1 text-ui-xs font-medium text-muted-foreground",
+                                "{space_name}"
+                            }
+                        }
+                        {
+                            let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
+                            let (is_command, is_path, is_url) = if nav {
+                                match &active_item {
+                                    Some(ResultItem::Command { .. }) => (true, false, false),
+                                    Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
+                                    Some(ResultItem::Terminal { .. }) => (false, true, false),
+                                    Some(ResultItem::Stack { .. }) => (false, false, true),
+                                    Some(ResultItem::Space { .. }) => (false, false, false),
+                                    Some(ResultItem::Page { .. }) => (false, false, false),
+                                    Some(ResultItem::Navigate { url }) => {
+                                        let is_url = url.contains("://")
+                                            || (url.contains('.') && !url.contains(' '));
+                                        (false, false, is_url)
+                                    }
+                                    Some(ResultItem::History { .. }) => (false, false, true),
+                                    Some(ResultItem::File { .. }) => (false, true, false),
+                                    Some(ResultItem::WorkDir { .. }) => (false, true, false),
+                                    Some(ResultItem::RecentFile { .. }) => (false, true, false),
+                                    None => (false, false, false),
                                 }
                             } else {
-                                img {
-                                    src: "{attachment.preview_data_url}",
-                                    alt: "{attachment.name}",
-                                    class: "h-5 w-5 rounded-full object-cover",
+                                let trimmed = q.trim();
+                                let command = trimmed.starts_with('>');
+                                let path = !command
+                                    && (trimmed.starts_with('/') || trimmed.starts_with('~'));
+                                let url = !command
+                                    && !path
+                                    && (trimmed.contains("://")
+                                        || (trimmed.contains('.') && !trimmed.contains(' ')));
+                                (command, path, url)
+                            };
+                            if is_command {
+                                rsx! { span { class: "select-none font-mono text-base text-muted-foreground", ">_" } }
+                            } else if is_path {
+                                rsx! { Icon { class: icon_class,
+                                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                                } }
+                            } else if is_url {
+                                rsx! { Icon { class: icon_class,
+                                    path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
+                                    path { d: "M2 12h20" }
+                                    path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
+                                } }
+                            } else {
+                                rsx! { Icon { class: icon_class,
+                                    circle { cx: "11", cy: "11", r: "8" }
+                                    path { d: "m21 21-4.3-4.3" }
+                                } }
+                            }
+                        }
+                        div { class: command_bar_input_wrap_class(),
+                            if !ghost_text.is_empty() {
+                                div {
+                                    class: "pointer-events-none absolute inset-0 flex items-center",
+                                    span { class: "invisible text-base", "{q}" }
+                                    span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
                                 }
                             }
-                            span { class: "min-w-0 max-w-28 truncate", "{attachment.name}" }
-                            button {
-                                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
-                                title: "Remove attachment",
-                                onmousedown: move |event| event.prevent_default(),
-                                onclick: move |_| {
-                                    let mut next = attachments.peek().clone();
-                                    if i < next.len() {
-                                        next.remove(i);
-                                        attachments.set(next);
-                                    }
-                                    focus_command_input_end();
-                                },
-                                Icon { class: "h-3 w-3",
-                                    path { d: "M6 6l12 12M18 6L6 18" }
-                                }
-                            }
-                        }
-                    }
-                }
-                if !is_start {
-                {
-                    let icon_class = "h-4 w-4 shrink-0 text-muted-foreground";
-                    let (is_command, is_path, is_url) = if nav {
-                        match &active_item {
-                            Some(ResultItem::Command { .. }) => (true, false, false),
-                            Some(ResultItem::Terminal { path }) if path.is_empty() => (true, false, false),
-                            Some(ResultItem::Terminal { .. }) => (false, true, false),
-                            Some(ResultItem::Stack { .. }) => (false, false, true),
-                            Some(ResultItem::Space { .. }) => (false, false, false),
-                            Some(ResultItem::Page { .. }) => (false, false, false),
-                            Some(ResultItem::Navigate { url }) => {
-                                let is_u = url.contains("://") || (url.contains('.') && !url.contains(' '));
-                                (false, false, is_u)
-                            }
-                            Some(ResultItem::History { .. }) => (false, false, true),
-                            Some(ResultItem::File { .. }) => (false, true, false),
-                            Some(ResultItem::WorkDir { .. }) => (false, true, false),
-                            Some(ResultItem::RecentFile { .. }) => (false, true, false),
-                            None => (false, false, false),
-                        }
-                    } else {
-                        let trimmed = q.trim();
-                        let cmd = trimmed.starts_with('>');
-                        let pth = !cmd && (trimmed.starts_with('/') || trimmed.starts_with('~'));
-                        let url = !cmd && !pth && (trimmed.contains("://") || (trimmed.contains('.') && !trimmed.contains(' ')));
-                        (cmd, pth, url)
-                    };
-                    if is_command {
-                        rsx! { span { class: "select-none font-mono text-base text-muted-foreground", ">_" } }
-                    } else if is_path {
-                        rsx! { Icon { class: icon_class,
-                            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                        } }
-                    } else if is_url {
-                        rsx! { Icon { class: icon_class,
-                            path { d: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" }
-                            path { d: "M2 12h20" }
-                            path { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z" }
-                        } }
-                    } else {
-                        rsx! { Icon { class: icon_class,
-                            circle { cx: "11", cy: "11", r: "8" }
-                            path { d: "m21 21-4.3-4.3" }
-                        } }
-                    }
-                }
-                }
-                div { class: if is_start { "relative min-w-48 flex-1 overflow-hidden" } else { command_bar_input_wrap_class() },
-                    if is_start && q.is_empty() && ghost_text.is_empty() {
-                        div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1.5",
-                            PromptGhost {
-                                accent_bg: "bg-foreground/70".to_string(),
-                                terminal: false,
-                            }
-                        }
-                    }
-                    if !ghost_text.is_empty() {
-                        div {
-                            class: "pointer-events-none absolute inset-0 flex items-center",
-                            span { class: "invisible text-base", "{q}" }
-                            span { class: "text-base text-muted-foreground/40", "{ghost_text}" }
-                        }
-                    }
-                    input {
-                        id: "command-bar-input",
-                        r#type: "text",
-                        "data-ghost": "{ghost_text}",
-                        class: if is_start { "relative z-10 w-full min-w-0 cursor-text bg-transparent px-1.5 py-2 text-[15px] leading-6 text-foreground caret-foreground outline-none placeholder:text-transparent" } else { command_bar_input_class() },
-                        placeholder: if is_start { "Ask anything…" } else { placeholder },
-                        value: "{display_text}",
-                        autofocus: true,
-                        oninput: move |e| {
-                            query.set(e.value());
-                            selected.set(0);
-                            nav_mode.set(false);
-                        },
-                        onpaste: move |_| {
-                            if is_start {
-                                let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
-                            }
-                        },
-                        onkeydown: {
-                            let q = q.clone();
-                            let results = results.clone();
-                            let default_agent_item = default_agent_item.clone();
-                            move |e| {
-                            if e.key() == Key::Tab {
-                                e.prevent_default();
-                                let gt = ghost_text.clone();
-                                if !gt.is_empty() {
-                                    let new_val = format!("{}{}", q, gt);
-                                    query.set(new_val.clone());
+                            input {
+                                id: "command-bar-input",
+                                r#type: "text",
+                                "data-ghost": "{ghost_text}",
+                                class: command_bar_input_class(),
+                                placeholder,
+                                value: "{display_text}",
+                                autofocus: true,
+                                oninput: move |event| {
+                                    query.set(event.value());
                                     selected.set(0);
-                                    if let Some(el) = web_sys::window()
-                                        .and_then(|w| w.document())
-                                        .and_then(|d| d.get_element_by_id("command-bar-input"))
-                                    {
-                                        let input: web_sys::HtmlInputElement = el.unchecked_into();
-                                        input.set_value(&new_val);
-                                        let len = new_val.len() as u32;
-                                        let _ = input.set_selection_range(len, len);
-                                        ensure_caret_visible(&input, new_val.len());
-                                    }
-                                }
-                                return;
+                                    nav_mode.set(false);
+                                },
+                                onkeydown: modal_keydown,
                             }
-
-                            let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-                            let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
-                            if ctrl
-                                && ignore_physical_rerouted_ctrl_keydown(
-                                    &e.code().to_string(),
-                                    vmux_synthetic,
-                                )
-                            {
-                                e.prevent_default();
-                                return;
+                        }
+                        button {
+                            r#type: "button",
+                            aria_label: "Bookmark this page",
+                            title: "Bookmark this page (⌘D)",
+                            class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                            onmousedown: move |event| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                            },
+                            onclick: move |event| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                let _ = try_cef_bin_emit_rkyv(&crate::event::BookmarksCommandEvent {
+                                    command: "toggle_active".into(),
+                                    uuid: None,
+                                    name: None,
+                                    url: None,
+                                    metadata: None,
+                                    folder: None,
+                                });
+                            },
+                            Icon { class: "h-4 w-4",
+                                path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
                             }
-                            if space_switch
-                                && !ctrl
-                                && q.trim().is_empty()
-                                && let Key::Character(s) = e.key()
-                                && let Some(idx) = s
-                                    .chars()
-                                    .next()
-                                    .filter(|c| c.is_ascii_digit())
-                                    .and_then(|c| c.to_digit(10))
-                            {
-                                let space_count = results
-                                    .iter()
-                                    .filter(|r| matches!(r, ResultItem::Space { .. }))
-                                    .count();
-                                if (idx as usize) < space_count {
-                                    e.prevent_default();
-                                    selected.set(idx as usize);
-                                    nav_mode.set(true);
-                                    return;
-                                }
-                            }
-                            let go_down = (e.key() == Key::ArrowDown && !ctrl)
-                                || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-                            let go_up = (e.key() == Key::ArrowUp && !ctrl)
-                                || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
-
-                            if media_menu_open {
-                                if go_down {
-                                    e.prevent_default();
-                                    let max = media_entries.read().len().saturating_sub(1);
-                                    media_selected.set((media_sel + 1).min(max));
-                                    return;
-                                }
-                                if go_up {
-                                    e.prevent_default();
-                                    media_selected.set(media_sel.saturating_sub(1));
-                                    return;
-                                }
-                                if e.key() == Key::Enter {
-                                    e.prevent_default();
-                                    if let Some(entry) = media_entries.read().get(media_sel).cloned() {
-                                        select_start_media_entry(
-                                            &entry,
-                                            query,
-                                            media_selected,
-                                        );
-                                    }
-                                    return;
-                                }
-                                if e.key() == Key::Escape {
-                                    e.prevent_default();
-                                    if let Some(media_query) = inline_media_query(&q) {
-                                        query.set(replace_inline_media_query(&q, media_query, ""));
-                                    }
-                                    media_selected.set(0);
-                                    return;
-                                }
-                            }
-
-                            if go_down {
-                                e.prevent_default();
-                                let max = results.len().saturating_sub(1);
-                                selected.set((sel + 1).min(max));
-                                nav_mode.set(true);
-                            } else if go_up {
-                                e.prevent_default();
-                                selected.set(sel.saturating_sub(1));
-                                nav_mode.set(true);
-                            } else if e.key() == Key::Escape
-                                || (ctrl && e.code() == Code::KeyC)
-                            {
-                                on_dismiss.call(());
-                            } else if e.key() == Key::Enter {
-                                if is_start
-                                    && q.trim().is_empty()
-                                    && !attachments.peek().is_empty()
-                                {
-                                    if let Some(item) = default_agent_item.as_ref() {
-                                        execute(item);
-                                    } else {
-                                        let selected_attachments = attachments.peek().clone();
-                                        emit_prompt_action(
-                                            "",
-                                            open_target,
-                                            "",
-                                            &selected_attachments,
-                                        );
-                                    }
-                                    return;
-                                }
-                                if space_switch {
-                                    if let Some(item) = results.get(sel) {
-                                        execute(item);
-                                    }
-                                } else {
-                                    if start_prompt_mode {
-                                        if let Some(item) = results.get(sel) {
-                                            execute(item);
-                                        } else {
-                                            on_close.call(());
-                                            let selected_attachments = attachments.peek().clone();
-                                            emit_prompt_action(
-                                                q.trim(),
-                                                open_target,
-                                                "",
-                                                &selected_attachments,
-                                            );
-                                        }
-                                        return;
-                                    }
-                                    let prefer_page = matches!(
-                                        results.get(sel),
-                                        Some(ResultItem::Page { url, .. })
-                                            if q.trim().starts_with("vmux://")
-                                                && url.starts_with(q.trim())
-                                    );
-                                    if !prefer_page
-                                        && should_open_typed_query_on_enter(open_target, nav_mode(), &q)
-                                    {
-                                        on_close.call(());
-                                        emit_action_with_target("open", &q, open_target);
-                                    } else if let Some(item) = results.get(sel) {
-                                        execute(item);
-                                    } else if !q.is_empty() {
-                                        emit_action_with_target("open", &q, open_target);
-                                    }
-                                }
-                            }
-                            }
-                        },
-                    }
-                }
-                if is_start {
-                    button {
-                        class: if q.trim().is_empty() && attachments.read().is_empty() { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 cursor-default self-center items-center justify-center rounded-lg bg-white/25 text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-black/[0.06] dark:bg-white/[0.055] dark:ring-white/[0.08]" } else { "relative z-10 mr-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg bg-foreground text-background shadow-lg transition hover:brightness-110 active:scale-95" },
-                        disabled: q.trim().is_empty() && attachments.read().is_empty(),
-                        title: "Send (Enter)",
-                        onclick: {
-                            let results = results.clone();
-                            let q = q.clone();
-                            let default_agent_item = default_agent_item.clone();
-                            move |_| {
-                                if let Some(item) = results.get(sel) {
-                                    execute(item);
-                                } else if !q.trim().is_empty() || !attachments.peek().is_empty() {
-                                    if q.trim().is_empty()
-                                        && let Some(item) = default_agent_item.as_ref()
-                                    {
-                                        execute(item);
-                                    } else {
-                                        on_close.call(());
-                                        let selected_attachments = attachments.peek().clone();
-                                        emit_prompt_action(
-                                            q.trim(),
-                                            open_target,
-                                            "",
-                                            &selected_attachments,
-                                        );
-                                    }
-                                }
-                            }
-                        },
-                        Icon { class: "h-4 w-4",
-                            path { d: "M12 19V5" }
-                            path { d: "M5 12l7-7 7 7" }
                         }
                     }
                 }
-                if matches!(variant, PaletteVariant::Modal) {
-                    button {
-                        r#type: "button",
-                        aria_label: "Bookmark this page",
-                        title: "Bookmark this page (\u{2318}D)",
-                        class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                        onmousedown: move |e| { e.prevent_default(); e.stop_propagation(); },
-                        onclick: move |e| {
-                            e.prevent_default();
-                            e.stop_propagation();
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::BookmarksCommandEvent {
-                                command: "toggle_active".into(),
-                                uuid: None,
-                                name: None,
-                                url: None,
-                                metadata: None,
-                                folder: None,
-                            });
-                        },
-                        Icon { class: "h-4 w-4",
-                            path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
-                        }
-                    }
-                }
-            }
             }
             if media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
-                    if media_loading() {
-                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
-                    } else if media_entries.read().is_empty() {
-                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
-                    } else {
-                        for (i, entry) in media_entries.read().iter().cloned().enumerate() {
-                            {
-                                let entry = entry.clone();
-                                rsx! {
-                                    div {
-                                        key: "start-media-{entry.path}",
-                                        id: "command-bar-media-item-{i}",
-                                        class: if i == media_sel { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
-                                        onmouseenter: move |_| media_selected.set(i),
-                                        onclick: move |_| select_start_media_entry(
-                                            &entry,
-                                            query,
-                                            media_selected,
-                                        ),
-                                        div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                            if entry.is_dir {
-                                                Icon { class: "h-4 w-4",
-                                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                                }
-                                            } else if !entry.preview_data_url.is_empty() {
-                                                img {
-                                                    src: "{entry.preview_data_url}",
-                                                    alt: "{entry.name}",
-                                                    class: "h-full w-full object-contain",
-                                                }
-                                            } else {
-                                                span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
-                                            }
-                                        }
-                                        div { class: "min-w-0 flex-1",
-                                            div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                            div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
-                                        }
-                                    }
-                                }
+                    PromptMediaOptions {
+                        items: prompt_media_options,
+                        selected: media_sel,
+                        loading: media_loading(),
+                        on_hover: move |index| media_selected.set(index),
+                        on_select: move |index| {
+                            if let Some(entry) = media_entries.peek().get(index).cloned() {
+                                select_start_media_entry(&entry, query, media_selected);
                             }
-                        }
+                        },
                     }
                 }
             }
@@ -1197,28 +1227,6 @@ fn file_extension_label(name: &str) -> String {
         .unwrap_or_else(|| "FILE".to_string())
 }
 
-fn focus_command_input_end() {
-    let closure = Closure::once(move || {
-        let Some(input) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id("command-bar-input"))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlInputElement>().ok())
-        else {
-            return;
-        };
-        let end = input.value().encode_utf16().count() as u32;
-        let _ = input.focus();
-        let _ = input.set_selection_range(end, end);
-    });
-    if let Some(window) = web_sys::window() {
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            closure.as_ref().unchecked_ref(),
-            0,
-        );
-    }
-    closure.forget();
-}
-
 fn select_start_media_entry(
     entry: &ChatMediaEntry,
     mut query: Signal<String>,
@@ -1247,7 +1255,7 @@ fn select_start_media_entry(
         &replacement,
     ));
     selected.set(0);
-    focus_command_input_end();
+    focus_prompt_end(PROMPT_INPUT_ID);
 }
 
 /// Emit a command-bar action to the host with no explicit open target.
