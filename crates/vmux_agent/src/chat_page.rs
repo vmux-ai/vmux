@@ -2148,6 +2148,11 @@ mod native_tests {
         assert!(source.contains("prompt_prefix_at_utf16"));
         assert!(source.contains("agent-chat-caret"));
         assert!(source.contains("caret-color:transparent"));
+        assert!(source.contains("install_prompt_page_focus_tracking"));
+        assert!(source.contains("document.has_focus().unwrap_or(false)"));
+        assert!(source.contains("add_event_listener_with_callback(\"focus\""));
+        assert!(source.contains("add_event_listener_with_callback(\"blur\""));
+        assert!(source.contains("if prompt_caret().is_some()"));
         assert!(source.contains("onkeyup"));
         assert!(source.contains("onscroll"));
         assert!(source.contains("placeholder:text-transparent"));

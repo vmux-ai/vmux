@@ -96,6 +96,13 @@ fn resize_prompt_textarea() {
 }
 
 fn sync_prompt_caret(mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>) {
+    let page_active = web_sys::window()
+        .and_then(|window| window.document())
+        .is_some_and(|document| document.has_focus().unwrap_or(false));
+    if !page_active {
+        caret.set(None);
+        return;
+    }
     let Some(textarea) = prompt_textarea() else {
         return;
     };
@@ -103,6 +110,25 @@ fn sync_prompt_caret(mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>
     let end = textarea.selection_end().ok().flatten().unwrap_or(start);
     caret.set((start == end).then_some(start));
     scroll_top.set(textarea.scroll_top());
+}
+
+fn install_prompt_page_focus_tracking(caret: Signal<Option<u32>>, scroll_top: Signal<i32>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+
+    let focus = Closure::wrap(Box::new(move || {
+        sync_prompt_caret(caret, scroll_top);
+    }) as Box<dyn FnMut()>);
+    let _ = window.add_event_listener_with_callback("focus", focus.as_ref().unchecked_ref());
+    focus.forget();
+
+    let mut blur_caret = caret;
+    let blur = Closure::wrap(Box::new(move || {
+        blur_caret.set(None);
+    }) as Box<dyn FnMut()>);
+    let _ = window.add_event_listener_with_callback("blur", blur.as_ref().unchecked_ref());
+    blur.forget();
 }
 
 fn focus_prompt_end() {
@@ -312,7 +338,7 @@ pub fn Page(
     let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
-    let prompt_caret = use_signal(|| Some(0u32));
+    let prompt_caret = use_signal(|| None::<u32>);
     let prompt_scroll_top = use_signal(|| 0i32);
     let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
@@ -334,6 +360,7 @@ pub fn Page(
     let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds));
+    use_effect(move || install_prompt_page_focus_tracking(prompt_caret, prompt_scroll_top));
     use_effect(focus_prompt_end);
     use_effect(move || {
         let _ = draft.read();
@@ -1146,7 +1173,12 @@ pub fn Page(
                                                 terminal: false,
                                             }
                                         } else {
-                                            div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50", "Type / for commands or @ for media" }
+                                            div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
+                                                if prompt_caret().is_some() {
+                                                    span { class: "agent-chat-caret relative top-px mr-px h-4 w-1.5 shrink-0" }
+                                                }
+                                                span { class: "min-w-0 truncate", "Type / for commands or @ for media" }
+                                            }
                                         }
                                     }
                                 }
