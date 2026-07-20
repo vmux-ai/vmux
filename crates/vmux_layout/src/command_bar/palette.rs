@@ -26,7 +26,8 @@ use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
     CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
     ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, inline_media_query, media_reference, replace_inline_media_query,
+    ChatPickFiles, inline_media_query, media_display_path, media_reference,
+    replace_inline_media_query,
 };
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
@@ -34,6 +35,7 @@ use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlaceme
 use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
+use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
@@ -267,6 +269,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_query = is_start.then(|| inline_media_query(&q)).flatten();
     let media_menu_open = media_query.is_some();
     let media_sel = media_selected().min(media_entries.read().len().saturating_sub(1));
+    let prompt_media_options = media_entries
+        .read()
+        .iter()
+        .map(|entry| PromptMediaOption {
+            key: format!("media-{}", entry.path),
+            name: entry.name.clone(),
+            display_path: media_display_path(entry),
+            preview_data_url: entry.preview_data_url.clone(),
+            label: file_extension_label(&entry.name),
+            is_dir: entry.is_dir,
+        })
+        .collect::<Vec<_>>();
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
     let results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
@@ -403,7 +417,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
             .and_then(|document| {
-                document.get_element_by_id(&format!("command-bar-media-item-{selected}"))
+                document.get_element_by_id(&format!("prompt-media-item-{selected}"))
             })
         {
             let options = web_sys::ScrollIntoViewOptions::new();
@@ -933,48 +947,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
-                    if media_loading() {
-                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
-                    } else if media_entries.read().is_empty() {
-                        div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
-                    } else {
-                        for (i, entry) in media_entries.read().iter().cloned().enumerate() {
-                            {
-                                let entry = entry.clone();
-                                rsx! {
-                                    div {
-                                        key: "start-media-{entry.path}",
-                                        id: "command-bar-media-item-{i}",
-                                        class: if i == media_sel { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
-                                        onmouseenter: move |_| media_selected.set(i),
-                                        onclick: move |_| select_start_media_entry(
-                                            &entry,
-                                            query,
-                                            media_selected,
-                                        ),
-                                        div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                            if entry.is_dir {
-                                                Icon { class: "h-4 w-4",
-                                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                                }
-                                            } else if !entry.preview_data_url.is_empty() {
-                                                img {
-                                                    src: "{entry.preview_data_url}",
-                                                    alt: "{entry.name}",
-                                                    class: "h-full w-full object-contain",
-                                                }
-                                            } else {
-                                                span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
-                                            }
-                                        }
-                                        div { class: "min-w-0 flex-1",
-                                            div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                            div { class: "truncate text-xs text-muted-foreground", "{entry.parent}" }
-                                        }
-                                    }
-                                }
+                    PromptMediaOptions {
+                        items: prompt_media_options,
+                        selected: media_sel,
+                        loading: media_loading(),
+                        on_hover: move |index| media_selected.set(index),
+                        on_select: move |index| {
+                            if let Some(entry) = media_entries.peek().get(index).cloned() {
+                                select_start_media_entry(&entry, query, media_selected);
                             }
-                        }
+                        },
                     }
                 }
             }

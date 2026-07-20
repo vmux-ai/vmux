@@ -31,6 +31,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
     focus_prompt_end, prompt_textarea,
 };
+use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -560,6 +561,18 @@ pub fn Page(
             filtered_sessions.len(),
         )
     });
+    let prompt_media_options = media_entries
+        .read()
+        .iter()
+        .map(|entry| PromptMediaOption {
+            key: format!("media-{}", entry.path),
+            name: entry.name.clone(),
+            display_path: media_display_path(entry),
+            preview_data_url: entry.preview_data_url.clone(),
+            label: file_extension_label(&entry.name),
+            is_dir: entry.is_dir,
+        })
+        .collect::<Vec<_>>();
     let prompt_attachments = transition_attachments
         .read()
         .iter()
@@ -773,15 +786,21 @@ pub fn Page(
 
     use_effect(move || {
         let selected = menu_sel();
-        let _ = draft.read();
+        let media_open = {
+            let draft = draft.read();
+            inline_media_query(&draft).is_some()
+        };
         let _ = sessions.read().len();
         let _ = models.read().len();
         let _ = media_entries.read().len();
+        let item_id = if media_open {
+            format!("prompt-media-item-{selected}")
+        } else {
+            format!("agent-selector-item-{selected}")
+        };
         if let Some(element) = web_sys::window()
             .and_then(|window| window.document())
-            .and_then(|document| {
-                document.get_element_by_id(&format!("agent-selector-item-{selected}"))
-            })
+            .and_then(|document| document.get_element_by_id(&item_id))
         {
             let options = web_sys::ScrollIntoViewOptions::new();
             options.set_block(web_sys::ScrollLogicalPosition::Nearest);
@@ -956,51 +975,16 @@ pub fn Page(
                     class: "agent-chat-prompt-shell vmux-agent-prompt-dock-enter relative mx-auto flex max-w-3xl flex-col gap-2",
                     if media_menu_open {
                         PromptPopup {
-                            if media_loading() {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading media…" }
-                            } else if media_entries.read().is_empty() {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching media" }
-                            } else {
-                                for (i , entry) in media_entries.read().iter().cloned().enumerate() {
-                                    {
-                                        let entry = entry.clone();
-                                        let display_path = media_display_path(&entry);
-                                        rsx! {
-                                            div {
-                                                key: "media-{entry.path}",
-                                                id: "agent-selector-item-{i}",
-                                                class: if i == menu_sel() { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
-                                                onclick: move |_| select_media_entry(&entry, draft, menu_sel),
-                                                div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                                    if entry.is_dir {
-                                                        svg {
-                                                            class: "h-4 w-4",
-                                                            view_box: "0 0 24 24",
-                                                            fill: "none",
-                                                            stroke: "currentColor",
-                                                            stroke_width: "2",
-                                                            stroke_linecap: "round",
-                                                            stroke_linejoin: "round",
-                                                            path { d: "M3 6h6l2 2h10v10H3z" }
-                                                        }
-                                                    } else if !entry.preview_data_url.is_empty() {
-                                                        img {
-                                                            src: "{entry.preview_data_url}",
-                                                            alt: "{entry.name}",
-                                                            class: "h-full w-full object-contain",
-                                                        }
-                                                    } else {
-                                                        span { class: "font-mono text-[9px] font-semibold", "{file_extension_label(&entry.name)}" }
-                                                    }
-                                                }
-                                                div { class: "min-w-0 flex-1",
-                                                    div { class: "truncate text-sm text-foreground", "{entry.name}" }
-                                                    div { class: "truncate text-xs text-muted-foreground", "{display_path}" }
-                                                }
-                                            }
-                                        }
+                            PromptMediaOptions {
+                                items: prompt_media_options,
+                                selected: menu_sel(),
+                                loading: media_loading(),
+                                on_hover: move |index| menu_sel.set(index),
+                                on_select: move |index| {
+                                    if let Some(entry) = media_entries.peek().get(index).cloned() {
+                                        select_media_entry(&entry, draft, menu_sel);
                                     }
-                                }
+                                },
                             }
                         }
                     }

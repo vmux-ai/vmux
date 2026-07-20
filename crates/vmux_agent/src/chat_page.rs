@@ -2162,6 +2162,7 @@ mod native_tests {
     fn composer_supports_history_uploads_and_clipboard_media() {
         let source = include_str!("chat_page/page.rs");
         let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
+        let media_options = include_str!("../../vmux_ui/src/components/prompt_media_options.rs");
         assert!(source.contains("prompt_history_direction"));
         assert!(source.contains("move_prompt_history"));
         assert!(source.contains("ChatPickFiles"));
@@ -2172,7 +2173,7 @@ mod native_tests {
         assert!(source.contains("ChatMediaListRequest"));
         assert!(source.contains("select_media_entry"));
         assert!(source.contains("entry.preview_data_url"));
-        assert!(source.contains("h-12 w-16"));
+        assert!(media_options.contains("h-12 w-16"));
         assert!(source.contains("attachment-pill-{}"));
         assert!(source.contains("String::new()"));
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
@@ -2199,9 +2200,15 @@ mod native_tests {
     fn start_and_agent_share_prompt_composer() {
         let agent = include_str!("chat_page/page.rs");
         let start = include_str!("../../vmux_layout/src/command_bar/palette.rs");
+        let media_options = include_str!("../../vmux_ui/src/components/prompt_media_options.rs");
 
         assert!(agent.contains("PromptComposer {"));
         assert!(start.contains("PromptComposer {"));
+        assert!(agent.contains("PromptMediaOptions {"));
+        assert!(start.contains("PromptMediaOptions {"));
+        assert!(agent.contains("display_path: media_display_path(entry)"));
+        assert!(start.contains("display_path: media_display_path(entry)"));
+        assert!(media_options.contains("{item.display_path}"));
         assert!(start.contains("PromptPopupPlacement::Downward"));
         assert!(agent.contains("PromptPopup {"));
     }
