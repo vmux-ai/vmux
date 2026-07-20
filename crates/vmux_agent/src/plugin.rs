@@ -1279,9 +1279,11 @@ fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
+    mut file_view_mode: Option<ResMut<Messages<vmux_editor::FileViewModeRequest>>>,
 ) {
     let mut previews: std::collections::HashMap<Entity, Vec<PendingFilePreview>> =
         std::collections::HashMap::new();
+    let mut request_diff_mode = false;
     for request in reader.read() {
         let ServiceAgentCommand::FileTouched {
             anchor,
@@ -1330,6 +1332,7 @@ fn handle_agent_file_touch(
         if !settings.agent.follow_files {
             continue;
         }
+        request_diff_mode |= *kind == vmux_service::protocol::FileTouchKind::Edit;
         previews
             .entry(agent_pane)
             .or_default()
@@ -1341,6 +1344,11 @@ fn handle_agent_file_touch(
                 user_origin: !origin_is_agent(&request.origin),
                 kind: *kind,
             });
+    }
+    if request_diff_mode && let Some(file_view_mode) = file_view_mode.as_mut() {
+        file_view_mode.write(vmux_editor::FileViewModeRequest(
+            vmux_core::event::FileViewMode::Diff,
+        ));
     }
     for previews in previews.into_values() {
         let mut deduped: Vec<PendingFilePreview> = Vec::new();
@@ -5837,6 +5845,7 @@ mod tests {
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_editor::FileViewModeRequest>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_file_touch);
@@ -5958,6 +5967,12 @@ mod tests {
             vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
         ));
         assert_eq!(opens[0].url, "file:///repo/latest.rs");
+        let view_modes = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_editor::FileViewModeRequest>>()
+            .drain()
+            .count();
+        assert_eq!(view_modes, 0);
     }
 
     #[test]
@@ -5984,6 +5999,17 @@ mod tests {
         assert_eq!(beside.len(), 2);
         assert_eq!(beside[0].url, "file:///repo/first.rs");
         assert_eq!(beside[1].url, "file:///repo/second.rs");
+        let view_modes: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_editor::FileViewModeRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(
+            view_modes,
+            vec![vmux_editor::FileViewModeRequest(
+                vmux_core::event::FileViewMode::Diff
+            )]
+        );
     }
 
     #[test]
@@ -6038,6 +6064,7 @@ mod tests {
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_editor::FileViewModeRequest>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_agent_file_touch);
@@ -6093,6 +6120,7 @@ mod tests {
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_editor::FileViewModeRequest>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(settings)
             .add_systems(Update, handle_agent_file_touch);
@@ -6161,6 +6189,7 @@ mod tests {
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_editor::FileViewModeRequest>()
             .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(settings)
             .add_systems(Update, handle_agent_file_touch);
@@ -6289,6 +6318,7 @@ mod tests {
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_layout::OpenBesideRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .add_message::<vmux_editor::FileViewModeRequest>()
             .init_resource::<CapturedRunCwd>()
             .insert_resource(settings)
             .add_systems(
