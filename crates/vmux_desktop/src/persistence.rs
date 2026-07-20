@@ -892,6 +892,7 @@ mod tests {
         AppSettings {
             browser: BrowserSettings {
                 startup_url: "about:blank".to_string(),
+                ..Default::default()
             },
             layout: LayoutSettings {
                 radius: 0.0,
