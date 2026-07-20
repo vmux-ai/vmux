@@ -8,19 +8,20 @@ use crate::chat_page::composer::{
     should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatItem,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
-    ChatResume, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT,
-    ModelOptionEntry, ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT,
-    ResumableSessionEntry, ResumableSessions, ResumeListRequest, ResumeSession,
-    RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
-    WORKING_VERBS,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
+    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
+    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock,
+    ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue,
+    ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
+    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use vmux_command::prompt_media::{
     inline_media_query, media_display_path, media_reference, replace_inline_media_query,
@@ -35,7 +36,7 @@ use vmux_ui::components::prompt_composer::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
-use wasm_bindgen::{JsCast, closure::Closure};
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -80,6 +81,109 @@ fn accent_rgb(color: &str, fallback_rgb: &str) -> String {
         .unwrap_or_else(|| fallback_rgb.to_string())
 }
 
+fn chat_scroll_element() -> Option<web_sys::Element> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id("chat-scroll")
+}
+
+thread_local! {
+    static SCROLL_TO_BOTTOM_PENDING: Cell<bool> = const { Cell::new(false) };
+}
+
+fn request_chat_history(before: u32, mut loading: Signal<bool>) {
+    if before == 0 || *loading.peek() {
+        return;
+    }
+    if try_cef_bin_emit_rkyv(&ChatHistoryRequest {
+        before,
+        limit: CHAT_HISTORY_PAGE_SIZE,
+    })
+    .is_ok()
+    {
+        loading.set(true);
+    }
+}
+
+fn schedule_scroll_to_bottom() {
+    if SCROLL_TO_BOTTOM_PENDING.replace(true) {
+        return;
+    }
+    let callback = Closure::once_into_js(move || {
+        SCROLL_TO_BOTTOM_PENDING.set(false);
+        if let Some(element) = chat_scroll_element() {
+            element.set_scroll_top(element.scroll_height());
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if let Some(window) = web_sys::window()
+        && window.request_animation_frame(&callback).is_ok()
+    {
+        return;
+    }
+    let _ = callback.call0(&JsValue::NULL);
+}
+
+fn schedule_scroll_restore(previous_height: i32, previous_top: i32) {
+    let callback = Closure::once_into_js(move || {
+        if let Some(element) = chat_scroll_element() {
+            let added_height = element.scroll_height().saturating_sub(previous_height);
+            element.set_scroll_top(previous_top.saturating_add(added_height));
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if let Some(window) = web_sys::window()
+        && window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, 0)
+            .is_ok()
+    {
+        return;
+    }
+    let _ = callback.call0(&JsValue::NULL);
+}
+
+fn merge_transcript_page(
+    current: &mut Vec<ChatItem>,
+    current_start: u32,
+    incoming: Vec<ChatItem>,
+    incoming_start: u32,
+) -> u32 {
+    if current_start <= incoming_start {
+        let keep = incoming_start.saturating_sub(current_start) as usize;
+        if keep <= current.len() {
+            current.truncate(keep);
+            current.extend(incoming);
+            return current_start;
+        }
+    }
+    *current = incoming;
+    incoming_start
+}
+
+fn request_attachment_previews(
+    items: &[ChatItem],
+    previews: Signal<HashMap<String, ChatAttachment>>,
+    mut requests: Signal<HashSet<String>>,
+) {
+    let known = previews.peek().keys().cloned().collect::<HashSet<_>>();
+    let mut requested = requests.peek().clone();
+    let paths = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::User { attachments, .. } => Some(attachments),
+            _ => None,
+        })
+        .flatten()
+        .filter(|attachment| attachment.mime_type.starts_with("image/"))
+        .filter(|attachment| {
+            !known.contains(&attachment.path) && requested.insert(attachment.path.clone())
+        })
+        .map(|attachment| attachment.path.clone())
+        .collect::<Vec<_>>();
+    if !paths.is_empty() && try_cef_bin_emit_rkyv(&ChatAttachmentPreviewRequest { paths }).is_ok() {
+        requests.set(requested);
+    }
+}
 fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<String> {
     let mut history = items
         .iter()
@@ -263,6 +367,11 @@ pub fn Page(
     let mut transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
     let mut transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
     let mut items = use_signal(Vec::<ChatItem>::new);
+    let mut loaded_start = use_signal(|| 0u32);
+    let mut messages_total = use_signal(|| 0u32);
+    let mut history_loading = use_signal(|| false);
+    let mut recent_messages_json = use_signal(String::new);
+    let mut recent_messages_start = use_signal(|| u32::MAX);
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
@@ -279,10 +388,9 @@ pub fn Page(
     let mut draft = use_signal(String::new);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
-    let mut attachment_preview_requests = use_signal(HashSet::<String>::new);
+    let attachment_preview_requests = use_signal(HashSet::<String>::new);
     let mut history_cursor = use_signal(|| None::<usize>);
     let mut history_scratch = use_signal(String::new);
-    let mut elapsed = use_signal(|| 0u32);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
     let mut queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
@@ -299,32 +407,9 @@ pub fn Page(
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
-    let mut verb = use_signal(|| "Working".to_string());
 
     use_effect(move || install_global_prompt_input(draft, slash_cmds, choice_options));
     use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
-
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(1000).await;
-            if matches!(status().as_str(), "streaming" | "installing") {
-                elapsed.set(elapsed() + 1);
-            } else if elapsed() != 0 {
-                elapsed.set(0);
-            }
-        }
-    });
-
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(2500).await;
-            if status() == "streaming" {
-                let n = WORKING_VERBS.len();
-                let idx = ((js_sys::Math::random() * n as f64) as usize).min(n - 1);
-                verb.set(WORKING_VERBS[idx].to_string());
-            }
-        }
-    });
 
     use_effect(move || {
         // Subscribe to any transcript/status change (each snapshot is a fresh `set`). Only pin to
@@ -334,42 +419,30 @@ pub fn Page(
         if !*at_bottom.peek() {
             return;
         }
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("chat-scroll"))
-        {
-            el.set_scroll_top(el.scroll_height());
-        }
+        schedule_scroll_to_bottom();
     });
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
-        if let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snap.messages_json) {
-            let known = attachment_previews
-                .peek()
-                .keys()
-                .cloned()
-                .collect::<HashSet<_>>();
-            let mut requested = attachment_preview_requests.peek().clone();
-            let paths = parsed
-                .iter()
-                .filter_map(|item| match item {
-                    ChatItem::User { attachments, .. } => Some(attachments),
-                    _ => None,
-                })
-                .flatten()
-                .filter(|attachment| attachment.mime_type.starts_with("image/"))
-                .filter(|attachment| {
-                    !known.contains(&attachment.path) && requested.insert(attachment.path.clone())
-                })
-                .map(|attachment| attachment.path.clone())
-                .collect::<Vec<_>>();
-            if !paths.is_empty()
-                && try_cef_bin_emit_rkyv(&ChatAttachmentPreviewRequest { paths }).is_ok()
-            {
-                attachment_preview_requests.set(requested);
+        let messages_changed = recent_messages_start() != snap.messages_start
+            || *recent_messages_json.peek() != snap.messages_json;
+        if messages_changed
+            && let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snap.messages_json)
+        {
+            request_attachment_previews(&parsed, attachment_previews, attachment_preview_requests);
+            let start = merge_transcript_page(
+                &mut items.write(),
+                loaded_start(),
+                parsed,
+                snap.messages_start,
+            );
+            loaded_start.set(start);
+            recent_messages_json.set(snap.messages_json.clone());
+            recent_messages_start.set(snap.messages_start);
+            if start == 0 {
+                history_loading.set(false);
             }
-            items.set(parsed);
         }
+        messages_total.set(snap.messages_total);
         status.set(snap.status.clone());
         error.set(snap.error.clone());
         queued.set(snap.queued.clone());
@@ -401,6 +474,25 @@ pub fn Page(
             approval.set(None);
         }
     });
+    let _history =
+        use_bin_event_listener::<ChatHistoryPage, _>(CHAT_HISTORY_PAGE_EVENT, move |page| {
+            history_loading.set(false);
+            if page.end != loaded_start() {
+                return;
+            }
+            let Ok(older) = serde_json::from_str::<Vec<ChatItem>>(&page.items_json) else {
+                return;
+            };
+            request_attachment_previews(&older, attachment_previews, attachment_preview_requests);
+            let metrics = chat_scroll_element()
+                .map(|element| (element.scroll_height(), element.scroll_top()));
+            drop(items.write().splice(0..0, older));
+            loaded_start.set(page.start);
+            messages_total.set(page.total);
+            if let Some((height, top)) = metrics {
+                schedule_scroll_restore(height, top);
+            }
+        });
     let _attachments =
         use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
             let mut next = attachments.peek().clone();
@@ -880,14 +972,8 @@ pub fn Page(
                         words: vec![header_name.to_uppercase()],
                     }
                 }
-            } else {
-                div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
-                    div { class: "agent-chat-glow agent-chat-glow-primary absolute -left-32 top-16 h-80 w-80 rounded-full blur-[110px]" }
-                    div { class: "agent-chat-glow agent-chat-glow-secondary absolute -right-24 top-1/3 h-72 w-72 rounded-full blur-[110px]" }
-                    div { class: "agent-chat-glow agent-chat-glow-tertiary absolute bottom-[-12rem] left-1/3 h-96 w-96 rounded-full blur-[140px]" }
-                }
             }
-            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/55 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] backdrop-blur-xl",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
@@ -901,12 +987,9 @@ pub fn Page(
             }
             div {
                 id: "chat-scroll",
-                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto px-4 py-6",
+                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto overscroll-contain px-4 py-6",
                 onscroll: move |_| {
-                    if let Some(el) = web_sys::window()
-                        .and_then(|w| w.document())
-                        .and_then(|d| d.get_element_by_id("chat-scroll"))
-                    {
+                    if let Some(el) = chat_scroll_element() {
                         let top = el.scroll_top();
                         let dist = el.scroll_height() - top - el.client_height();
                         // Re-pin once the user reaches the bottom; unpin only when they scroll UP
@@ -919,17 +1002,29 @@ pub fn Page(
                             at_bottom.set(false);
                         }
                         last_top.set(top);
+                        if top <= 160 {
+                            request_chat_history(loaded_start(), history_loading);
+                        }
                     }
                 },
                 div { class: "mx-auto flex min-h-full max-w-3xl flex-col gap-5",
+                    if loaded_start() > 0 {
+                        button {
+                            id: "chat-load-older",
+                            class: "mx-auto rounded-full border border-foreground/10 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50",
+                            disabled: history_loading(),
+                            onclick: move |_| request_chat_history(loaded_start(), history_loading),
+                            if history_loading() { "Loading older messages…" } else { "Load older messages" }
+                        }
+                    }
                     if installing_splash {
                         div { class: "my-auto flex flex-col items-center gap-3 py-16 text-center",
                             {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"
                             }
-                            div { class: "flex max-w-sm items-center gap-2 rounded-full bg-background/70 px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
-                                span { class: "h-1.5 w-1.5 shrink-0 animate-pulse rounded-full {agent_accent.accent_bg}" }
+                            div { class: "flex max-w-sm items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                                span { class: "h-1.5 w-1.5 shrink-0 rounded-full {agent_accent.accent_bg}" }
                                 span { class: "truncate", "{install_detail}" }
                             }
                         }
@@ -943,9 +1038,12 @@ pub fn Page(
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
-                        {render_item(i, item, &verb(), elapsed(), attachment_previews)}
+                        {render_item(loaded_start() as usize + i, item, attachment_previews)}
                         if !handoff_source().is_empty()
-                            && is_handoff_boundary(i, handoff_message_count())
+                            && is_handoff_boundary(
+                                loaded_start() as usize + i,
+                                handoff_message_count(),
+                            )
                         {
                             div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
                                 span { class: "h-px flex-1 bg-foreground/10" }
@@ -1131,7 +1229,7 @@ pub fn Page(
                         }
                     }
                     if !choice_options.read().is_empty() {
-                        div { class: "rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-3.5 shadow-sm backdrop-blur-xl",
+                        div { class: "rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-3.5 shadow-sm",
                             div { class: "mb-3 text-sm font-medium text-foreground", "{choice_question}" }
                             div { class: "flex flex-col gap-1.5",
                                 for (index, option) in choice_options.read().iter().cloned().enumerate() {
@@ -1155,7 +1253,7 @@ pub fn Page(
                         }
                     }
                     if workspace_selection_pending() {
-                        div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-foreground/[0.045] p-2.5 pl-3.5 shadow-sm backdrop-blur-xl",
+                        div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-background/95 p-2.5 pl-3.5 shadow-sm",
                             div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.07] text-foreground/55 ring-1 ring-inset ring-foreground/10",
                                 svg {
                                     class: "h-4 w-4",
@@ -1429,8 +1527,6 @@ fn send_approval(call_id: String, decision: u8) {
 fn render_item(
     key: usize,
     item: &ChatItem,
-    verb: &str,
-    elapsed: u32,
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
 ) -> Element {
     match item {
@@ -1441,7 +1537,7 @@ fn render_item(
         } => rsx! {
             div {
                 key: "{key}",
-                class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm backdrop-blur-sm",
+                class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm",
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
@@ -1476,7 +1572,7 @@ fn render_item(
                 }
             }
         },
-        ChatItem::Turn(turn) => render_turn(key, turn, verb, elapsed),
+        ChatItem::Turn(turn) => render_turn(key, turn),
     }
 }
 
@@ -1497,6 +1593,8 @@ fn render_user_attachment(
                 img {
                     src: "{preview_data_url}",
                     alt: "{attachment.name}",
+                    loading: "lazy",
+                    decoding: "async",
                     class: "max-h-80 max-w-full object-contain",
                 }
                 figcaption { class: "max-w-72 truncate px-2.5 py-1.5 text-[10px] text-muted-foreground", "{attachment.name}" }
@@ -1513,7 +1611,7 @@ fn render_user_attachment(
     }
 }
 
-fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element {
+fn render_turn(key: usize, turn: &ChatTurn) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
     let block_count = turn.blocks.len();
     let blocks = turn
@@ -1547,12 +1645,12 @@ fn render_turn(key: usize, turn: &ChatTurn, verb: &str, elapsed: u32) -> Element
         }
     });
     rsx! {
-        div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3 backdrop-blur-sm",
+        div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3",
             for (j , block , children) in blocks {
                 {render_block(j, block, &children, should_expand_thinking(j, block_count))}
             }
             if turn.running && !reconnecting {
-                {render_working(verb, elapsed)}
+                WorkingIndicator {}
             }
             if !turn.running && let Some(label) = duration_label {
                 div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 pt-0.5 text-[11px] text-muted-foreground/70",
@@ -1576,19 +1674,38 @@ fn render_disclosure_icon() -> Element {
     }
 }
 
-fn render_working(verb: &str, elapsed: u32) -> Element {
+#[component]
+fn WorkingIndicator() -> Element {
+    let mut elapsed = use_signal(|| 0u32);
+    let mut verb = use_signal(|| "Working".to_string());
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(1000).await;
+            elapsed.set(elapsed() + 1);
+        }
+    });
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(2500).await;
+            let count = WORKING_VERBS.len();
+            let index = ((js_sys::Math::random() * count as f64) as usize).min(count - 1);
+            verb.set(WORKING_VERBS[index].to_string());
+        }
+    });
+    let verb_text = verb();
+    let elapsed_text = fmt_elapsed(elapsed());
     rsx! {
         div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
             span { class: "agent-themed-activity flex h-6 w-6 items-center justify-center rounded-lg",
                 span { class: "flex items-end gap-0.5",
-                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.32s]" }
-                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current [animation-delay:-0.16s]" }
-                    span { class: "h-1 w-1 animate-bounce rounded-full bg-current" }
+                    span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
+                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:120ms]" }
+                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:240ms]" }
                 }
             }
             div { class: "flex items-baseline gap-2",
-                span { class: "agent-working-label animate-pulse font-medium", "{verb}" }
-                span { class: "tabular-nums text-xs", "{fmt_elapsed(elapsed)}" }
+                span { class: "agent-working-label font-medium", "{verb_text}" }
+                span { class: "tabular-nums text-xs", "{elapsed_text}" }
             }
         }
     }
@@ -2234,9 +2351,9 @@ fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> E
 
 fn status_dot_class(status: &str) -> &'static str {
     match status {
-        "streaming" => "bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.65)]",
-        "installing" => "bg-sky-400 animate-pulse shadow-[0_0_8px_rgba(56,189,248,0.65)]",
-        "awaiting" => "bg-violet-400 animate-pulse shadow-[0_0_8px_rgba(167,139,250,0.65)]",
+        "streaming" => "agent-status-dot bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
+        "installing" => "agent-status-dot bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
+        "awaiting" => "agent-status-dot bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
         _ => "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     }
@@ -2320,13 +2437,14 @@ fn md_to_html(src: &str) -> String {
 /// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
 /// light and dark.
 const MD_CSS: &str = r#"
-.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);filter:blur(16px);pointer-events:none}
+@keyframes agent-status-breathe{0%,100%{opacity:0.58;transform:scale(0.82)}50%{opacity:1;transform:scale(1)}}
+@keyframes agent-working-hop{0%,60%,100%{opacity:0.42;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+.agent-status-dot{animation:agent-status-breathe 1.8s ease-in-out infinite;will-change:opacity,transform}
+.agent-working-dot{animation:agent-working-hop 900ms ease-in-out infinite;will-change:opacity,transform}
+.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);pointer-events:none}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
-.agent-chat-glow-primary{background:color-mix(in srgb,var(--agent-accent) 8%,transparent)}
-.agent-chat-glow-secondary{background:color-mix(in srgb,var(--agent-accent) 6%,transparent)}
-.agent-chat-glow-tertiary{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
 .agent-chat-header{border-color:color-mix(in srgb,var(--agent-accent) 12%,transparent)}
-.chat-user-bubble,.chat-assistant-turn{transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
+.chat-user-bubble,.chat-assistant-turn{content-visibility:auto;contain-intrinsic-size:auto 160px;contain:layout paint style;transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
 .chat-user-bubble{border-color:color-mix(in srgb,var(--agent-accent) 18%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 19%,transparent),color-mix(in srgb,var(--agent-accent) 9%,transparent) 58%,color-mix(in srgb,var(--agent-accent) 4%,transparent));box-shadow:0 10px 32px color-mix(in srgb,var(--agent-accent) 9%,transparent)}
 .chat-user-bubble:hover{border-color:color-mix(in srgb,var(--agent-accent) 30%,transparent);box-shadow:0 14px 38px color-mix(in srgb,var(--agent-accent) 14%,transparent);transform:translateY(-1px)}
 .chat-assistant-turn{border-color:color-mix(in srgb,var(--agent-accent) 9%,rgba(127,127,127,0.08));background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 5%,transparent),rgba(127,127,127,0.025) 55%,transparent);box-shadow:0 10px 35px rgba(0,0,0,0.035)}
@@ -2368,5 +2486,5 @@ const MD_CSS: &str = r#"
 .chat-md hr{border:0;border-top:1px solid rgba(127,127,127,0.25);margin:0.9em 0}
 .chat-md table{border-collapse:collapse;margin:0.5em 0;font-size:0.95em}
 .chat-md th,.chat-md td{border:1px solid rgba(127,127,127,0.3);padding:0.3em 0.6em;text-align:left}
-@media (prefers-reduced-motion:reduce){.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.agent-chat-caret,.agent-status-dot,.agent-working-dot{animation:none}.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
 "#;

@@ -1,5 +1,8 @@
 #![allow(non_snake_case)]
 
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
 use crate::command_bar::keyboard::{
     CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
@@ -41,6 +44,46 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+const HOST_SEARCH_DEBOUNCE_MS: i32 = 150;
+
+type HostSearchTimer = Rc<RefCell<Option<(i32, js_sys::Function, Rc<Cell<bool>>)>>>;
+
+fn cancel_host_search(timer: &HostSearchTimer) {
+    let Some((id, callback, cancelled)) = timer.borrow_mut().take() else {
+        return;
+    };
+    cancelled.set(true);
+    if let Some(window) = web_sys::window() {
+        window.clear_timeout_with_handle(id);
+    }
+    let _ = callback.call0(&JsValue::NULL);
+}
+
+fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
+    cancel_host_search(&timer);
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let cancelled = Rc::new(Cell::new(false));
+    let callback_timer = timer.clone();
+    let callback_cancelled = cancelled.clone();
+    let callback = Closure::once_into_js(move || {
+        callback_timer.borrow_mut().take();
+        if !callback_cancelled.get() {
+            callback();
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    match window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, HOST_SEARCH_DEBOUNCE_MS)
+    {
+        Ok(id) => *timer.borrow_mut() = Some((id, callback, cancelled)),
+        Err(_) => {
+            let _ = callback.call0(&JsValue::NULL);
+        }
+    }
+}
 
 /// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
 #[derive(Clone, Copy, PartialEq)]
@@ -92,17 +135,22 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut selected = use_signal(|| 0usize);
     let mut nav_mode = use_signal(|| false);
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
+    let mut path_request_id = use_signal(|| 0u64);
+    let path_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
     let mut suggestions_request_id = use_signal(|| 0u64);
+    let suggestions_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut last_open_id = use_signal(|| u64::MAX);
     let mut last_focus_open_id = use_signal(|| u64::MAX);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
     let mut media_request_id = use_signal(|| 0u64);
     let mut media_requested_query = use_signal(|| None::<String>);
+    let media_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut media_loading = use_signal(|| false);
     let mut media_selected = use_signal(|| 0usize);
 
+    let path_search_effect_timer = path_search_timer.clone();
     use_effect(move || {
         let s = state();
         if last_open_id() != s.open_id {
@@ -133,11 +181,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let q = query();
+        let request_id = (*path_request_id.peek()).wrapping_add(1).max(1);
+        path_request_id.set(request_id);
         let Some(path_query) = completion_query(&q) else {
+            cancel_host_search(&path_search_effect_timer);
             path_completions.set(Vec::new());
             return;
         };
-        let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest { query: path_query });
+        schedule_host_search(path_search_effect_timer.clone(), move || {
+            if *path_request_id.peek() != request_id {
+                return;
+            }
+            let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest { query: path_query });
+        });
     });
 
     let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
@@ -175,9 +231,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             media_selected.set(0);
         });
 
+    let suggestions_search_effect_timer = suggestions_search_timer.clone();
     use_effect(move || {
         let q = query();
         let trimmed = q.trim();
+        let id = (*suggestions_request_id.peek()).wrapping_add(1).max(1);
+        suggestions_request_id.set(id);
         if trimmed.is_empty()
             || trimmed.starts_with('>')
             || trimmed.starts_with('/')
@@ -185,18 +244,24 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             || trimmed.starts_with("vmux://")
             || trimmed.starts_with("file:")
         {
+            cancel_host_search(&suggestions_search_effect_timer);
             history_suggestions.set(Vec::new());
             return;
         }
-        let id = *suggestions_request_id.peek() + 1;
-        suggestions_request_id.set(id);
-        let _ = try_cef_bin_emit_rkyv(&HistorySuggestionsRequest {
-            query: trimmed.to_string(),
-            limit: 5,
-            request_id: id,
+        let query = trimmed.to_string();
+        schedule_host_search(suggestions_search_effect_timer.clone(), move || {
+            if *suggestions_request_id.peek() != id {
+                return;
+            }
+            let _ = try_cef_bin_emit_rkyv(&HistorySuggestionsRequest {
+                query,
+                limit: 5,
+                request_id: id,
+            });
         });
     });
 
+    let media_search_effect_timer = media_search_timer.clone();
     use_effect(move || {
         if !is_start {
             return;
@@ -204,32 +269,45 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let value = query();
         let Some(media_query) = inline_media_query(&value).map(|query| query.query.to_string())
         else {
+            let request_id = (*media_request_id.peek()).wrapping_add(1).max(1);
+            media_request_id.set(request_id);
+            cancel_host_search(&media_search_effect_timer);
             media_entries.set(Vec::new());
-            if media_requested_query.peek().is_some() {
-                media_request_id.set(media_request_id().wrapping_add(1).max(1));
-            }
             media_requested_query.set(None);
             media_loading.set(false);
             media_selected.set(0);
             return;
         };
-        if media_requested_query().as_deref() == Some(media_query.as_str()) {
+        if media_requested_query.peek().as_deref() == Some(media_query.as_str()) {
             return;
         }
-        let request_id = media_request_id().wrapping_add(1).max(1);
+        let request_id = (*media_request_id.peek()).wrapping_add(1).max(1);
         media_request_id.set(request_id);
         media_requested_query.set(Some(media_query.clone()));
         media_entries.set(Vec::new());
         media_loading.set(true);
         media_selected.set(0);
-        if try_cef_bin_emit_rkyv(&ChatMediaListRequest {
-            request_id,
-            query: media_query,
-        })
-        .is_err()
-        {
-            media_loading.set(false);
-        }
+        schedule_host_search(media_search_effect_timer.clone(), move || {
+            if *media_request_id.peek() != request_id
+                || media_requested_query.peek().as_deref() != Some(media_query.as_str())
+            {
+                return;
+            }
+            if try_cef_bin_emit_rkyv(&ChatMediaListRequest {
+                request_id,
+                query: media_query,
+            })
+            .is_err()
+            {
+                media_loading.set(false);
+            }
+        });
+    });
+
+    use_drop(move || {
+        cancel_host_search(&path_search_timer);
+        cancel_host_search(&suggestions_search_timer);
+        cancel_host_search(&media_search_timer);
     });
 
     use_effect(move || {

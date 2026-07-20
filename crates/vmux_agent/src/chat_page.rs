@@ -23,18 +23,19 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_MAX_PAGE_SIZE,
+    CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT, CHAT_MEDIA_ENTRIES_EVENT,
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatMediaEntries,
-    ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot,
-    ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands,
+    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatHistoryPage,
+    ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
+    ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
+    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::chat_page::turns::group_turns;
+use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item_count};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
@@ -44,9 +45,7 @@ use crate::events::{
     AgentApprovalReply, AgentChoiceSelected, ApprovalDecision, WorkspacePickerStartRequest,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::handoff::{
-    DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context, visible_messages,
-};
+use crate::handoff::{DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 #[cfg(not(target_arch = "wasm32"))]
@@ -189,6 +188,7 @@ impl Plugin for AgentChatPagePlugin {
                 ChatAttachPaths,
                 ChatAttachmentPreviewRequest,
                 ChatChoiceSelected,
+                ChatHistoryRequest,
             )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
@@ -199,6 +199,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_escape)
             .add_observer(on_chat_choose_workspace)
             .add_observer(on_chat_choice_selected)
+            .add_observer(on_chat_history_request)
             .add_observer(on_chat_pick_files)
             .add_observer(on_chat_paste_media)
             .add_observer(on_chat_media_list_request)
@@ -922,11 +923,19 @@ fn snapshot_of(
     workspace_selection_pending: bool,
     choice: Option<&crate::plugin::PendingAgentChoice>,
 ) -> ChatSnapshot {
-    let display_messages = visible_messages(imported, &messages.0);
     let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
     let running = matches!(state, AgentRunState::Streaming);
-    let items = group_turns(&display_messages, durations, running);
-    let messages_json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+    let imported_messages = imported
+        .map(|conversation| conversation.messages.as_slice())
+        .unwrap_or_default();
+    let page = group_turns_tail(
+        imported_messages,
+        &messages.0,
+        durations,
+        running,
+        CHAT_INITIAL_ITEM_LIMIT as usize,
+    );
+    let messages_json = serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string());
     let (status, error) = match state {
         AgentRunState::Idle => ("idle", String::new()),
         AgentRunState::Installing { pct, message } => {
@@ -956,6 +965,8 @@ fn snapshot_of(
         .unwrap_or_default();
     ChatSnapshot {
         messages_json,
+        messages_start: u32::try_from(page.start).unwrap_or(u32::MAX),
+        messages_total: u32::try_from(page.total).unwrap_or(u32::MAX),
         status: status.to_string(),
         error,
         approval_call_id: call_id,
@@ -970,7 +981,7 @@ fn snapshot_of(
         handoff_truncated: imported.is_some_and(|imported| imported.truncated),
         handoff_message_count: imported
             .map(|imported| {
-                u32::try_from(group_turns(&imported.messages, &[], false).len()).unwrap_or(u32::MAX)
+                u32::try_from(grouped_item_count(&imported.messages, &[])).unwrap_or(u32::MAX)
             })
             .unwrap_or_default(),
         workspace_selection_pending,
@@ -1054,6 +1065,59 @@ fn push_chat_to_page(
             ),
         ));
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_history_request(
+    trigger: On<BinReceive<ChatHistoryRequest>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<(
+        &AgentMessages,
+        &AgentRunState,
+        Option<&AgentTurnMeta>,
+        Option<&ImportedConversation>,
+    )>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    let Ok(parent) = child_of.get(webview) else {
+        return;
+    };
+    let Ok((messages, state, turn_meta, imported)) = sessions.get(parent.parent()) else {
+        return;
+    };
+    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        return;
+    }
+    let request = &trigger.event().payload;
+    if request.before == 0 || request.limit == 0 {
+        return;
+    }
+    let imported_messages = imported
+        .map(|conversation| conversation.messages.as_slice())
+        .unwrap_or_default();
+    let durations = turn_meta
+        .map(|meta| meta.durations.as_slice())
+        .unwrap_or(&[]);
+    let page = group_turns_before(
+        imported_messages,
+        &messages.0,
+        durations,
+        matches!(state, AgentRunState::Streaming),
+        request.before as usize,
+        request.limit.clamp(1, CHAT_HISTORY_MAX_PAGE_SIZE) as usize,
+    );
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        webview,
+        CHAT_HISTORY_PAGE_EVENT,
+        &ChatHistoryPage {
+            items_json: serde_json::to_string(&page.items).unwrap_or_else(|_| "[]".to_string()),
+            start: u32::try_from(page.start).unwrap_or(u32::MAX),
+            end: u32::try_from(page.end).unwrap_or(u32::MAX),
+            total: u32::try_from(page.total).unwrap_or(u32::MAX),
+        },
+    ));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1947,6 +2011,21 @@ mod native_tests {
         assert!(page.contains("current_activity_icon(&items, &status)"));
         assert!(page.contains("ActivityIcon::Python"));
         assert!(page.contains("language_activity_icon(path)"));
+    }
+
+    #[test]
+    fn chat_page_bounds_gpu_work_without_losing_motion() {
+        let page = include_str!("chat_page/page.rs");
+        assert!(!page.contains("agent-chat-glow"));
+        assert!(!page.contains("backdrop-blur"));
+        assert!(!page.contains("blur-["));
+        assert!(page.contains("content-visibility:auto"));
+        assert!(page.contains("PromptComposer {"));
+        assert!(page.contains("agent-working-hop"));
+        assert!(page.contains("prefers-reduced-motion:reduce"));
+        assert!(page.contains("CHAT_HISTORY_PAGE_EVENT"));
+        assert!(page.contains("request_chat_history"));
+        assert!(page.contains("WorkingIndicator {}"));
     }
 
     #[test]

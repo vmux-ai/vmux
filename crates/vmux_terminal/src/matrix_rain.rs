@@ -125,7 +125,7 @@ fn start_rain(
         return;
     };
 
-    let dpr = window.device_pixel_ratio().max(1.0);
+    let dpr = window.device_pixel_ratio().clamp(1.0, 1.5);
 
     let reduced = window
         .match_media("(prefers-reduced-motion: reduce)")
@@ -193,7 +193,19 @@ fn start_rain(
     let raf_inner = raf.clone();
     let running_inner = running.clone();
     let handle_inner = handle.clone();
+    let mut last_frame_ms = 0.0;
     let closure = Closure::wrap(Box::new(move || {
+        let now = js_sys::Date::now();
+        if now - last_frame_ms < 33.0 {
+            if *running_inner.borrow()
+                && let Some(cb) = raf_inner.borrow().as_ref()
+                && let Ok(id) = win.request_animation_frame(cb.as_ref().unchecked_ref())
+            {
+                *handle_inner.borrow_mut() = Some(id);
+            }
+            return;
+        }
+        last_frame_ms = now;
         let w = canvas.client_width().max(1) as f64;
         let h = canvas.client_height().max(1) as f64;
         let want_w = (w * dpr) as u32;
