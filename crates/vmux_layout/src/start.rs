@@ -5,7 +5,12 @@ pub mod event;
 
 /// Whether an agent page can replace the launcher inside its existing webview.
 pub fn supports_inline_agent_transition(url: &str) -> bool {
-    url.starts_with("vmux://agent/") && !url.contains("/cli") && !url.contains("/setup")
+    let Some(path) = url.strip_prefix("vmux://agent/") else {
+        return false;
+    };
+    !path
+        .split('/')
+        .any(|segment| matches!(segment, "cli" | "setup"))
 }
 
 #[cfg(target_arch = "wasm32")]

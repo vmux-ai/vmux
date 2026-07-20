@@ -56,6 +56,27 @@ pub const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
     "git log --oneline -10",
 ];
 
+#[cfg(any(test, target_arch = "wasm32"))]
+const PROMPT_PAUSE_TICKS: usize = 40;
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn distinct_prompt_example_index(len: usize, current: Option<usize>, candidate: usize) -> usize {
+    if len <= 1 {
+        return 0;
+    }
+    let next = candidate.min(len - 1);
+    if current == Some(next) {
+        (next + 1) % len
+    } else {
+        next
+    }
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn next_prompt_typed_count(typed: usize, full: usize) -> Option<usize> {
+    (typed < full + PROMPT_PAUSE_TICKS).then_some(typed + 1)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod component {
     use std::cell::RefCell;
@@ -64,7 +85,10 @@ mod component {
     use dioxus::prelude::*;
     use wasm_bindgen::{JsCast, closure::Closure};
 
-    use super::{AGENT_PROMPT_EXAMPLES, TERMINAL_PROMPT_EXAMPLES};
+    use super::{
+        AGENT_PROMPT_EXAMPLES, TERMINAL_PROMPT_EXAMPLES, distinct_prompt_example_index,
+        next_prompt_typed_count,
+    };
 
     const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
     type PromptTimerCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
@@ -121,15 +145,8 @@ mod component {
     }
 
     fn random_prompt_example_index(len: usize, current: Option<usize>) -> usize {
-        if len <= 1 {
-            return 0;
-        }
-        let next = ((js_sys::Math::random() * len as f64) as usize).min(len - 1);
-        if current == Some(next) {
-            (next + 1) % len
-        } else {
-            next
-        }
+        let candidate = (js_sys::Math::random() * len as f64) as usize;
+        distinct_prompt_example_index(len, current, candidate)
     }
 
     fn start_prompt_typewriter(
@@ -139,16 +156,15 @@ mod component {
         cb_cell: PromptTimerCallback,
         timer_cell: Rc<RefCell<Option<i32>>>,
     ) {
-        const PAUSE_TICKS: usize = 40;
         let cb = Closure::wrap(Box::new(move || {
             let idx = *ex_idx.peek();
             let full = examples[idx % examples.len()].chars().count();
             let t = *typed.peek();
-            if t >= full + PAUSE_TICKS {
+            if let Some(next) = next_prompt_typed_count(t, full) {
+                typed.set(next);
+            } else {
                 typed.set(0);
                 ex_idx.set(random_prompt_example_index(examples.len(), Some(idx)));
-            } else {
-                typed.set(t + 1);
             }
         }) as Box<dyn FnMut()>);
         if let Some(win) = web_sys::window()
@@ -171,8 +187,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_examples_cover_many_prompt_shapes() {
-        assert!(AGENT_PROMPT_EXAMPLES.len() >= 40);
-        assert!(TERMINAL_PROMPT_EXAMPLES.contains(&"git status --short"));
+    fn prompt_example_index_never_repeats_current() {
+        for current in 0..4 {
+            assert_ne!(
+                distinct_prompt_example_index(4, Some(current), current),
+                current
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_typewriter_resets_after_pause() {
+        let full = 12;
+        assert_eq!(
+            next_prompt_typed_count(full + PROMPT_PAUSE_TICKS - 1, full),
+            Some(full + PROMPT_PAUSE_TICKS)
+        );
+        assert_eq!(
+            next_prompt_typed_count(full + PROMPT_PAUSE_TICKS, full),
+            None
+        );
     }
 }

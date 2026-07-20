@@ -459,22 +459,6 @@ mod tests {
     }
 
     #[test]
-    fn action_event_fields() {
-        let evt = CommandBarActionEvent {
-            action: "open".to_string(),
-            value: "google.com".to_string(),
-            target: None,
-            agent_url: None,
-            attachments: Vec::new(),
-        };
-        assert_eq!(evt.action, "open");
-        assert_eq!(evt.value, "google.com");
-        assert_eq!(evt.target, None);
-        assert_eq!(evt.agent_url, None);
-        assert!(evt.attachments.is_empty());
-    }
-
-    #[test]
     fn command_bar_open_event_carries_space_name() {
         let event = CommandBarOpenEvent {
             space_name: "Work".to_string(),

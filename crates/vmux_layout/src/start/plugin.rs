@@ -437,6 +437,12 @@ mod tests {
         assert!(!crate::start::supports_inline_agent_transition(
             "vmux://agent/vibe/setup"
         ));
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/cliff"
+        ));
+        assert!(crate::start::supports_inline_agent_transition(
+            "vmux://agent/setupwizard"
+        ));
     }
 
     #[test]
