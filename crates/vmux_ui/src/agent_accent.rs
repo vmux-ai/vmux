@@ -1,3 +1,4 @@
+#[derive(Clone, Copy)]
 pub struct AgentAccent {
     pub glow_top: &'static str,
     pub glow_bottom: &'static str,

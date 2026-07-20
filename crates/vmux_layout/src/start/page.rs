@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
+use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -153,13 +154,12 @@ fn try_focus_command_input_once() -> bool {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return true;
     };
-    let Some(el) = doc.get_element_by_id("command-bar-input") else {
+    let Some(input) = prompt_textarea(PROMPT_INPUT_ID) else {
         return false;
     };
-    let input: web_sys::HtmlInputElement = el.unchecked_into();
     let active_is_input = doc
         .active_element()
-        .map(|a| a.id() == "command-bar-input")
+        .map(|a| a.id() == PROMPT_INPUT_ID)
         .unwrap_or(false);
     if !active_is_input {
         let _ = input.focus();
@@ -231,24 +231,24 @@ fn install_keep_input_focused_on_click() {
         if start_transitioned(&window) {
             return;
         }
-        let Some(document) = window.document() else {
-            return;
-        };
-        let Some(input) = document.get_element_by_id("command-bar-input") else {
+        let Some(input) = prompt_textarea(PROMPT_INPUT_ID) else {
             return;
         };
         if let Some(el) = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
         {
-            let on_input = el.closest("#command-bar-input").ok().flatten().is_some();
+            let on_input = el
+                .closest(&format!("#{PROMPT_INPUT_ID}"))
+                .ok()
+                .flatten()
+                .is_some();
             let on_results = el.closest("#command-bar-results").ok().flatten().is_some();
             if on_input || on_results {
                 return;
             }
         }
         e.prevent_default();
-        let input: web_sys::HtmlInputElement = input.unchecked_into();
         let _ = input.focus();
     }) as Box<dyn FnMut(web_sys::Event)>);
     let target: &web_sys::EventTarget = document.as_ref();

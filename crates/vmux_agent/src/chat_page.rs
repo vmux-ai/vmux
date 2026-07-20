@@ -2118,10 +2118,11 @@ mod native_tests {
     #[test]
     fn installing_chat_uses_matrix_loading_composer() {
         let source = include_str!("chat_page/page.rs");
+        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
         assert!(source.contains("let installing_splash = installing && items.read().is_empty();"));
         assert!(source.contains("MatrixRain {"));
-        assert!(source.contains("PromptGhost {"));
-        assert!(source.contains("terminal: false"));
+        assert!(source.contains("PromptComposer {"));
+        assert!(composer.contains("PromptGhost {"));
         assert!(source.contains("id: \"chat-scroll\""));
         assert!(source.contains("bg-gradient-to-t from-background via-background/95"));
         assert!(!source.contains("absolute inset-0 z-20 flex items-center justify-center"));
@@ -2131,48 +2132,48 @@ mod native_tests {
     fn composer_auto_grows_and_contains_action_button() {
         let source = include_str!("chat_page/page.rs");
         let prompt_box = include_str!("../../vmux_ui/src/components/prompt_box.rs");
-        assert!(source.contains("fn resize_prompt_textarea()"));
-        assert!(source.contains("textarea.scroll_height().clamp(40, 160)"));
-        assert!(source.contains("max-h-40 min-h-10"));
-        assert!(source.contains("PromptBox {"));
+        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
+        assert!(composer.contains("fn resize_prompt_textarea"));
+        assert!(composer.contains("textarea.scroll_height().clamp(40, 160)"));
+        assert!(composer.contains("max-h-40 min-h-10"));
+        assert!(source.contains("PromptComposer {"));
+        assert!(composer.contains("PromptBox {"));
         assert!(source.contains("PromptPopup {"));
         assert!(prompt_box.contains("rounded-2xl"));
         assert!(prompt_box.contains("backdrop-blur-3xl backdrop-saturate-150"));
-        assert!(source.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
-        assert!(source.contains("if draft.read().is_empty()"));
+        assert!(composer.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
         assert!(source.contains("show_capability_examples"));
         assert!(source.contains("attachments.read().is_empty()"));
-        assert!(source.contains("if show_capability_examples"));
         assert!(source.contains("Type / for commands or @ for media"));
-        assert!(!source.contains("agent-chat-caret relative top-px ml-px h-4 w-1.5 shrink-0"));
-        assert!(source.contains("prompt_prefix_at_utf16"));
-        assert!(source.contains("agent-chat-caret"));
-        assert!(source.contains("caret-color:transparent"));
-        assert!(source.contains("install_prompt_page_focus_tracking"));
-        assert!(source.contains("document.has_focus().unwrap_or(false)"));
-        assert!(source.contains("add_event_listener_with_callback(\"focus\""));
-        assert!(source.contains("add_event_listener_with_callback(\"blur\""));
-        assert!(source.contains("if prompt_caret().is_some()"));
-        assert!(source.contains("onkeyup"));
-        assert!(source.contains("onscroll"));
-        assert!(source.contains("placeholder:text-transparent"));
+        assert!(composer.contains("prompt_prefix_at_utf16"));
+        assert!(composer.contains("vmux-prompt-caret"));
+        assert!(composer.contains("caret-color:transparent"));
+        assert!(composer.contains("install_prompt_focus_tracking"));
+        assert!(composer.contains("document.has_focus().unwrap_or(false)"));
+        assert!(composer.contains("add_event_listener_with_callback(\"focus\""));
+        assert!(composer.contains("add_event_listener_with_callback(\"blur\""));
+        assert!(composer.contains("if caret().is_some()"));
+        assert!(composer.contains("onkeyup"));
+        assert!(composer.contains("onscroll"));
+        assert!(composer.contains("placeholder:text-transparent"));
     }
 
     #[test]
     fn composer_supports_history_uploads_and_clipboard_media() {
         let source = include_str!("chat_page/page.rs");
+        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
         assert!(source.contains("prompt_history_direction"));
         assert!(source.contains("move_prompt_history"));
         assert!(source.contains("ChatPickFiles"));
         assert!(source.contains("ChatPasteMedia"));
         assert!(source.contains("preview_data_url"));
-        assert!(source.contains("Remove attachment"));
+        assert!(composer.contains("Remove attachment"));
         assert!(source.contains("attachments_to_submit"));
         assert!(source.contains("ChatMediaListRequest"));
         assert!(source.contains("select_media_entry"));
         assert!(source.contains("entry.preview_data_url"));
         assert!(source.contains("h-12 w-16"));
-        assert!(source.contains("attachment-pill-{attachment.path}"));
+        assert!(source.contains("attachment-pill-{}"));
         assert!(source.contains("String::new()"));
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
@@ -2185,13 +2186,24 @@ mod native_tests {
         let card = page
             .find("if workspace_selection_pending()")
             .expect("workspace card");
-        let composer = page.find("PromptBox {").expect("composer");
+        let composer = page.find("PromptComposer {").expect("composer");
 
         assert!(card < composer);
         assert!(page.contains("Choose a workspace"));
         assert!(page.contains("Choose folder"));
         assert!(page.contains("try_cef_bin_emit_rkyv(&ChatChooseWorkspace)"));
         assert!(include_str!("chat_page.rs").contains("WorkspacePickerStartRequest"));
+    }
+
+    #[test]
+    fn start_and_agent_share_prompt_composer() {
+        let agent = include_str!("chat_page/page.rs");
+        let start = include_str!("../../vmux_layout/src/command_bar/palette.rs");
+
+        assert!(agent.contains("PromptComposer {"));
+        assert!(start.contains("PromptComposer {"));
+        assert!(start.contains("PromptPopupPlacement::Downward"));
+        assert!(agent.contains("PromptPopup {"));
     }
 
     #[test]
@@ -2211,14 +2223,15 @@ mod native_tests {
     #[test]
     fn queued_flush_controls_repurpose_composer_button() {
         let source = include_str!("chat_page/page.rs");
+        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
         assert!(source.contains("kbd {"));
-        assert!(source.contains("if queued.read().is_empty()"));
+        assert!(source.contains("prompt_streaming && queued.read().is_empty()"));
         assert!(source.contains("ChatCancelQueuedPrompt"));
         assert!(source.contains("title: \"Cancel queued prompt\""));
-        assert!(source.contains("title: \"Stop\""));
-        assert!(source.contains("rect { x: \"6\", y: \"6\""));
+        assert!(source.contains("\"Stop\""));
+        assert!(composer.contains("rect { x: \"6\", y: \"6\""));
         assert!(source.contains("\"Send all queued prompts now (Esc)\""));
-        assert!(source.contains("path { d: \"M12 19V5\" }"));
+        assert!(composer.contains("path { d: \"M12 19V5\" }"));
     }
 
     #[test]
