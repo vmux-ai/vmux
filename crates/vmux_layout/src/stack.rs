@@ -3,7 +3,7 @@ use crate::{
     NewStackContext,
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
     swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
-    tab::Tab,
+    tab::{CloseTabRequest, Tab},
 };
 use bevy::{
     ecs::{relationship::Relationship, system::SystemParam},
@@ -251,7 +251,6 @@ pub fn stack_bundle() -> impl Bundle {
 
 fn handle_stack_commands(
     mut reader: MessageReader<AppCommand>,
-    tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -264,6 +263,7 @@ fn handle_stack_commands(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
 
     mut new_stack_ctx: ResMut<NewStackContext>,
+    mut close_tab_requests: MessageWriter<CloseTabRequest>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
     mut pending_cursor_warp: ResMut<PendingCursorWarp>,
@@ -361,11 +361,9 @@ fn handle_stack_commands(
                         && close_tab_if_only_closing_stack(
                             tab,
                             active,
-                            &tabs,
-                            &child_of_q,
                             &all_children,
                             &stack_q,
-                            &mut commands,
+                            &mut close_tab_requests,
                         )
                     {
                         if new_stack_ctx.stack == Some(active) {
@@ -594,23 +592,14 @@ fn handle_stack_commands(
 fn close_tab_if_only_closing_stack(
     tab: Entity,
     closing_stack: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-    child_of_q: &Query<&ChildOf>,
     all_children: &Query<&Children>,
     stack_q: &Query<Entity, With<Stack>>,
-    commands: &mut Commands,
+    close_tab_requests: &mut MessageWriter<CloseTabRequest>,
 ) -> bool {
     if entity_tree_contains_stack_other_than(tab, closing_stack, all_children, stack_q) {
         return false;
     }
-    let siblings = sibling_tabs(tab, tabs, child_of_q, all_children);
-    if siblings.len() <= 1 {
-        return false;
-    }
-    if let Some(next) = crate::tab::pick_after_close(tab, &siblings) {
-        commands.entity(next).insert(LastActivatedAt::now());
-    }
-    commands.entity(tab).despawn();
+    close_tab_requests.write(CloseTabRequest { tab });
     true
 }
 
@@ -626,21 +615,6 @@ fn entity_tree_contains_stack_other_than(
                 entity_tree_contains_stack_other_than(child, ignored_stack, all_children, stack_q)
             })
         })
-}
-
-fn sibling_tabs(
-    tab: Entity,
-    tabs: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-    child_of_q: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-) -> Vec<Entity> {
-    let Ok(parent) = child_of_q.get(tab).map(Relationship::get) else {
-        return vec![tab];
-    };
-    let Ok(children) = all_children.get(parent) else {
-        return vec![tab];
-    };
-    children.iter().filter(|e| tabs.get(*e).is_ok()).collect()
 }
 
 fn sync_stack_picking(
@@ -739,7 +713,6 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use bevy::ecs::relationship::Relationship;
-    use bevy::window::ClosingWindow;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_command::{CommandPlugin, WriteAppCommands};
 
@@ -865,21 +838,62 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_without_startup_url_opens_command_bar_with_replacement_stack() {
+    fn closing_last_stack_replaces_only_tab_with_fresh_tab() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
+            .init_resource::<crate::tab::LastTabCloseAt>()
+            .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands.in_set(WriteAppCommands),
+                    crate::archive::handle_close_tab_requests,
+                    crate::window::spawn_requested_tab_layouts,
+                )
+                    .chain(),
+            );
 
-        let window = app.world_mut().spawn(PrimaryWindow).id();
+        app.world_mut()
+            .spawn((bevy::window::Window::default(), PrimaryWindow));
+        let space = app
+            .world_mut()
+            .spawn((
+                crate::space::Space,
+                crate::space::SpaceId("s1".to_string()),
+                vmux_core::Active,
+            ))
+            .id();
+        let startup = tempfile::tempdir().unwrap();
+        let worktree = tempfile::tempdir().unwrap();
+        app.insert_resource(crate::settings::EffectiveStartupDir(Some((
+            space,
+            Some(startup.path().to_path_buf()),
+        ))));
         let tab_e = app
             .world_mut()
-            .spawn((Tab::default(), LastActivatedAt::now()))
+            .spawn((
+                Tab {
+                    name: "Worktree".to_string(),
+                    startup_dir: Some(worktree.path().to_string_lossy().into_owned()),
+                },
+                crate::tab::TabWorktree {
+                    repo_root: worktree.path().to_string_lossy().into_owned(),
+                    checkout_dir: worktree.path().to_string_lossy().into_owned(),
+                    branch: "test".to_string(),
+                    base_ref: "main".to_string(),
+                },
+                vmux_core::Active,
+                LastActivatedAt::now(),
+                ChildOf(space),
+            ))
             .id();
         let pane = app
             .world_mut()
@@ -887,7 +901,7 @@ mod tests {
             .id();
         let original_stack = app
             .world_mut()
-            .spawn((Stack::default(), LastActivatedAt::now(), ChildOf(pane)))
+            .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -897,35 +911,56 @@ mod tests {
 
         app.update();
 
-        assert!(!app.world().entity(window).contains::<ClosingWindow>());
+        assert!(app.world().get_entity(tab_e).is_err());
         assert!(app.world().get_entity(original_stack).is_err());
-
-        let ctx = app.world().resource::<NewStackContext>();
-        let Some(replacement_stack) = ctx.stack else {
-            panic!("expected replacement stack to open command bar");
-        };
-        assert!(ctx.needs_open);
-        assert_eq!(ctx.previous_stack, None);
+        let fresh_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<Tab>>()
+            .single(app.world())
+            .unwrap();
+        assert_ne!(fresh_tab, tab_e);
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorktree>(fresh_tab)
+                .is_none()
+        );
         assert_eq!(
             app.world()
-                .get::<ChildOf>(replacement_stack)
-                .map(Relationship::get),
-            Some(pane)
+                .get::<Tab>(fresh_tab)
+                .unwrap()
+                .startup_dir
+                .as_deref(),
+            startup.path().canonicalize().unwrap().to_str()
         );
+        let ctx = app.world().resource::<NewStackContext>();
+        assert!(ctx.needs_open);
+        assert!(ctx.stack.is_some());
+        assert_eq!(ctx.previous_stack, None);
     }
 
     #[test]
     fn closing_last_stack_in_tab_closes_the_tab_when_another_tab_exists() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
+            .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands.in_set(WriteAppCommands),
+                    crate::archive::handle_close_tab_requests,
+                )
+                    .chain(),
+            );
 
+        app.world_mut().spawn(PrimaryWindow);
         let root = app.world_mut().spawn_empty().id();
         let remaining_tab = app
             .world_mut()
@@ -976,14 +1011,25 @@ mod tests {
     fn closing_last_stack_in_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
+            .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
+            .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands.in_set(WriteAppCommands),
+                    crate::archive::handle_close_tab_requests,
+                )
+                    .chain(),
+            );
 
+        app.world_mut().spawn(PrimaryWindow);
         let root = app.world_mut().spawn_empty().id();
         let make_tab = |app: &mut App, ts: i64| -> Entity {
             let tab = app
@@ -1024,6 +1070,7 @@ mod tests {
     fn closing_only_stack_in_split_pane_closes_pane() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
@@ -1088,6 +1135,7 @@ mod tests {
     fn closing_stack_in_three_way_split_keeps_split_and_does_not_respawn_startup() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
@@ -1294,6 +1342,7 @@ mod tests {
     fn build_app_with_collector() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
+            .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
@@ -1327,12 +1376,12 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_uses_startup_url_for_replacement_stack() {
+    fn closing_last_stack_requests_tab_close_instead_of_reusing_pane() {
         let mut app = build_app_with_collector();
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
-        let (_tab, pane, original_stack) = build_hierarchy(&mut app);
+        let (tab, _pane, original_stack) = build_hierarchy(&mut app);
 
         app.world_mut()
             .resource_mut::<Messages<AppCommand>>()
@@ -1342,26 +1391,20 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(original_stack).is_err());
+        assert!(app.world().get_entity(original_stack).is_ok());
         let ctx = app.world().resource::<NewStackContext>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1);
-        assert_eq!(collected.0[0].url, "https://startup.test");
-        match collected.0[0].target {
-            PageOpenTarget::Stack(replacement_stack) => {
-                assert_ne!(replacement_stack, original_stack);
-                assert_eq!(
-                    app.world()
-                        .get::<ChildOf>(replacement_stack)
-                        .map(Relationship::get),
-                    Some(pane)
-                );
-            }
-            _ => panic!("expected stack target"),
-        }
+        assert!(collected.0.is_empty());
+        let close_requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<CloseTabRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(close_requests.len(), 1);
+        assert_eq!(close_requests[0].tab, tab);
     }
 
     #[test]
