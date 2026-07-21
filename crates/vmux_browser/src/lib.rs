@@ -4405,6 +4405,7 @@ fn handle_page_open_requests(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_filter: Query<Entity, With<Stack>>,
     service: Option<Res<vmux_service::client::ServiceClient>>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -4423,12 +4424,22 @@ fn handle_page_open_requests(
                 continue;
             }
         };
-        commands.spawn(PageOpenTask {
+        let task = PageOpenTask {
             id: PageOpenId::new(),
             stack,
             url: normalize_vmux_url(&request.url),
             request_id: request.request_id,
-        });
+        };
+        if request.request_id.is_some() {
+            commands.spawn((
+                task,
+                PageOpenAwaitSnapshot {
+                    started: time.elapsed(),
+                },
+            ));
+        } else {
+            commands.spawn(task);
+        }
     }
 }
 
@@ -4525,7 +4536,9 @@ fn attach_cef_page_requests(
 struct PageOpenFallbackDeferred;
 
 #[derive(Component, Clone, Debug)]
-struct PageOpenAwaitSnapshot;
+struct PageOpenAwaitSnapshot {
+    started: std::time::Duration,
+}
 
 fn handle_unclaimed_page_open_tasks(
     mut tasks: Query<
@@ -4541,9 +4554,6 @@ fn handle_unclaimed_page_open_tasks(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    child_of: Query<&ChildOf>,
-    time: Res<Time>,
-    mut pending_nav: ResMut<PendingNavSnapshots>,
 ) {
     for (entity, task, error, deferred_once) in &mut tasks {
         if let Some(error) = error {
@@ -4592,7 +4602,7 @@ fn handle_unclaimed_page_open_tasks(
                 },
             ));
         } else {
-            let browser = attach_cef_page_to_stack(
+            attach_cef_page_to_stack(
                 task.stack,
                 &task.url,
                 &task.url,
@@ -4602,26 +4612,7 @@ fn handle_unclaimed_page_open_tasks(
                 &mut meshes,
                 &mut webview_mt,
             );
-            if let Some(request_id) = task.request_id {
-                let pane = child_of
-                    .get(task.stack)
-                    .ok()
-                    .map(|child_of| child_of.get().to_bits().to_string());
-                pending_nav.0.insert(
-                    browser,
-                    NavPending {
-                        request_id,
-                        started: time.elapsed(),
-                        saw_loading: false,
-                        pane,
-                    },
-                );
-                commands
-                    .entity(entity)
-                    .insert((PageOpenHandled, PageOpenAwaitSnapshot));
-            } else {
-                commands.entity(entity).insert(PageOpenHandled);
-            }
+            commands.entity(entity).insert(PageOpenHandled);
         }
     }
 }
@@ -4632,22 +4623,61 @@ fn respond_page_open_tasks(
             Entity,
             &PageOpenTask,
             Option<&PageOpenError>,
-            Has<PageOpenAwaitSnapshot>,
+            Option<&PageOpenAwaitSnapshot>,
         ),
         With<PageOpenHandled>,
     >,
     service: Option<Res<vmux_service::client::ServiceClient>>,
+    time: Res<Time>,
+    children: Query<&Children>,
+    browsers: Query<(), With<Browser>>,
+    child_of: Query<&ChildOf>,
+    mut pending_nav: ResMut<PendingNavSnapshots>,
     mut commands: Commands,
 ) {
     for (entity, task, error, await_snapshot) in &tasks {
-        let result = match error {
-            Some(error) => Err(error.message.clone()),
-            None => Ok(()),
-        };
-        if !await_snapshot {
-            send_page_open_response(&service, task.request_id, result);
+        if let Some(error) = error {
+            send_page_open_response(&service, task.request_id, Err(error.message.clone()));
+            commands.entity(entity).despawn();
+            continue;
         }
-        commands.entity(entity).despawn();
+        let Some(await_snapshot) = await_snapshot else {
+            send_page_open_response(&service, task.request_id, Ok(()));
+            commands.entity(entity).despawn();
+            continue;
+        };
+        let webview = children
+            .get(task.stack)
+            .ok()
+            .and_then(|children| children.iter().find(|child| browsers.contains(*child)));
+        if let (Some(webview), Some(request_id)) = (webview, task.request_id) {
+            let pane = child_of
+                .get(task.stack)
+                .ok()
+                .map(|child_of| child_of.get().to_bits().to_string());
+            pending_nav.0.insert(
+                webview,
+                NavPending {
+                    request_id,
+                    started: await_snapshot.started,
+                    saw_loading: false,
+                    pane,
+                },
+            );
+            commands.entity(entity).despawn();
+        } else if time
+            .elapsed()
+            .saturating_sub(await_snapshot.started)
+            .as_secs_f32()
+            > 10.0
+        {
+            send_page_open_response(
+                &service,
+                task.request_id,
+                Err("page opened without a snapshot-capable webview".to_string()),
+            );
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -6801,7 +6831,7 @@ mod tests {
             for (entity, task) in &tasks {
                 if task.url.starts_with("vmux://terminal/") {
                     crate::clear_stack_children(task.stack, &children_q, &mut commands);
-                    commands.spawn((Terminal, ChildOf(task.stack)));
+                    commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                     commands.entity(entity).insert(PageOpenHandled);
                 } else if task.url.starts_with("vmux://agent/") {
                     crate::clear_stack_children(task.stack, &children_q, &mut commands);
@@ -7088,11 +7118,12 @@ mod tests {
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+            let request_id = AgentRequestId::new();
 
             app.world_mut()
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
-                    request_id: AgentRequestId::new(),
+                    request_id,
                     origin: vmux_service::agent_events::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate {
                         url: "vmux://terminal/".to_string(),
@@ -7108,6 +7139,14 @@ mod tests {
             assert!(
                 terminal_count >= 1,
                 "terminal should be spawned in focused pane"
+            );
+            assert!(
+                world
+                    .resource::<PendingNavSnapshots>()
+                    .0
+                    .values()
+                    .any(|pending| pending.request_id == request_id.0),
+                "terminal navigation should wait for its snapshot"
             );
         }
 

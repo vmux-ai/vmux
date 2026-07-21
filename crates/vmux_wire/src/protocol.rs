@@ -238,11 +238,19 @@ pub enum AgentCommand {
         task: Option<String>,
         create: bool,
     },
+    /// Forward global-search matches to the editor. Appended to preserve existing positional enum
+    /// discriminants.
     FileSearch {
         anchor: ProcessId,
         root: String,
         query: String,
         matches: Vec<FileSearchMatch>,
+    },
+    /// Replace the generated conversation title. Appended to preserve existing positional enum
+    /// discriminants.
+    SetConversationTitle {
+        anchor: ProcessId,
+        title: String,
     },
 }
 

@@ -329,12 +329,16 @@ async fn grep_result(
             )
             .await;
         }
+        let mut canonical_paths = std::collections::HashMap::new();
         let matches = search_matches
             .into_iter()
             .filter_map(|(path, line, col, end_col, preview)| {
-                let path = std::fs::canonicalize(path).ok()?;
+                let canonical = canonical_paths
+                    .entry(path.clone())
+                    .or_insert_with(|| std::fs::canonicalize(&path).ok())
+                    .clone()?;
                 Some(vmux_service::protocol::FileSearchMatch {
-                    path: path.to_string_lossy().into_owned(),
+                    path: canonical.to_string_lossy().into_owned(),
                     line,
                     col,
                     end_col,

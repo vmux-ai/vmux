@@ -185,7 +185,14 @@ struct GlobalSearchState(ExplorerSearchEvent);
 struct GlobalSearchDirty;
 
 #[derive(Resource, Default)]
-struct PendingGlobalSearch(Vec<GlobalSearchRequest>);
+struct PendingGlobalSearch(Vec<PendingGlobalSearchRequest>);
+
+struct PendingGlobalSearchRequest {
+    request: GlobalSearchRequest,
+    retries_left: u8,
+}
+
+const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
 
 #[derive(Component)]
 struct FileViewModeSent;
@@ -2878,7 +2885,15 @@ fn apply_global_search_requests(
     mut chrome: ResMut<ExplorerChrome>,
     mut commands: Commands,
 ) {
-    pending.0.extend(reader.read().cloned());
+    pending.0.extend(
+        reader
+            .read()
+            .cloned()
+            .map(|request| PendingGlobalSearchRequest {
+                request,
+                retries_left: GLOBAL_SEARCH_RETRY_LIMIT,
+            }),
+    );
     if !pending.0.is_empty() && !chrome.visible {
         chrome.visible = true;
         for (entity, _) in &views {
@@ -2886,14 +2901,19 @@ fn apply_global_search_requests(
         }
     }
     let mut remaining = Vec::new();
-    for request in pending.0.drain(..) {
+    for mut pending_request in pending.0.drain(..) {
+        let request = &pending_request.request;
         let Some((entity, _)) = views
             .iter()
             .find(|(_, view)| view.path == request.target_path)
         else {
-            remaining.push(request);
+            pending_request.retries_left = pending_request.retries_left.saturating_sub(1);
+            if pending_request.retries_left > 0 {
+                remaining.push(pending_request);
+            }
             continue;
         };
+        let request = pending_request.request;
         commands.entity(entity).insert((
             GlobalSearchState(ExplorerSearchEvent {
                 root: request.root,

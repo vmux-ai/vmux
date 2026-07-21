@@ -34,11 +34,14 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
     focus_prompt_end, prompt_textarea,
 };
+
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+
+const APPROVAL_OPTION_COUNT: usize = 3;
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -352,14 +355,19 @@ fn install_global_prompt_input(
             || (!event.meta_key()
                 && !event.ctrl_key()
                 && !event.alt_key()
-                && (key == "Enter" || choice_number_index(&key, 3).is_some()));
+                && (key == "Enter" || choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some()));
         if approval_open && approval_key {
             event.prevent_default();
             event.stop_propagation();
             if let Some(direction) = direction {
-                approval_sel.set(move_selection(approval_sel(), 3, direction));
+                approval_sel.set(move_selection(
+                    approval_sel(),
+                    APPROVAL_OPTION_COUNT,
+                    direction,
+                ));
             } else if let Some((call_id, _, _)) = active_approval {
-                let index = choice_number_index(&key, 3).unwrap_or(approval_sel());
+                let index =
+                    choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
                 if let Some(decision) = approval_decision_for_index(index)
                     && send_approval(call_id, decision)
                 {
@@ -429,6 +437,7 @@ pub fn Page(
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
     let mut approval_sel = use_signal(|| 0usize);
     let mut agent_name = use_signal(String::new);
+    let mut conversation_title = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
     let mut handoff_source = use_signal(String::new);
@@ -504,6 +513,7 @@ pub fn Page(
         transition_attachments.set(Vec::new());
         paused.set(snap.paused);
         agent_name.set(snap.agent_name.clone());
+        conversation_title.set(snap.conversation_title.clone());
         agent_icon.set(snap.agent_icon.clone());
         accent.set(snap.accent_color.clone());
         handoff_source.set(snap.handoff_source.clone());
@@ -649,9 +659,9 @@ pub fn Page(
             let n = agent_name();
             if n.is_empty() { current_agent() } else { n }
         };
+        let title = chat_page_title(&conversation_title(), &name);
         let status = status();
         let items = items.read();
-        let title = chat_page_title(&items, &status, &name);
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             if document.title() != title {
                 document.set_title(&title);
@@ -672,6 +682,7 @@ pub fn Page(
         let n = agent_name();
         if n.is_empty() { agent.clone() } else { n }
     };
+    let conversation_title = chat_page_title(&conversation_title(), &header_name);
     let agent_accent = agent_accent(&agent);
     let profile_accent = accent();
     let theme_accent = normalized_accent(&profile_accent, agent_accent.rain_rgb);
@@ -799,13 +810,17 @@ pub fn Page(
                 && let Some(direction) = menu_direction(&key, e.modifiers().ctrl())
             {
                 e.prevent_default();
-                approval_sel.set(move_selection(approval_sel(), 3, direction));
+                approval_sel.set(move_selection(
+                    approval_sel(),
+                    APPROVAL_OPTION_COUNT,
+                    direction,
+                ));
                 return;
             }
             let numbered = !e.modifiers().meta()
                 && !e.modifiers().ctrl()
                 && !e.modifiers().alt()
-                && choice_number_index(&key, 3).is_some();
+                && choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some();
             let entered = e.key() == Key::Enter
                 && !e.modifiers().shift()
                 && !e.modifiers().meta()
@@ -813,7 +828,8 @@ pub fn Page(
                 && !e.modifiers().alt();
             if numbered || entered {
                 e.prevent_default();
-                let index = choice_number_index(&key, 3).unwrap_or(approval_sel());
+                let index =
+                    choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
                 if let Some(decision) = approval_decision_for_index(index)
                     && send_approval(call_id, decision)
                 {
@@ -1095,7 +1111,7 @@ pub fn Page(
         _ => "Ready",
     };
     let composer_footer = rsx! {
-        div { class: "flex min-w-0 items-center justify-between gap-2 border-t border-foreground/[0.08] px-1.5 pb-0.5 pt-1.5",
+        div { class: "flex min-w-0 items-center justify-between gap-1",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
                 if !model_name.is_empty() {
                     button {
@@ -1275,11 +1291,14 @@ pub fn Page(
                     }
                 }
             }
-            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
-                span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
-                    "{header_name}"
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold text-transparent", title: "{conversation_title}",
+                        "{conversation_title}"
+                    }
+                    div { class: "truncate text-[10px] text-muted-foreground/60", "{header_name}" }
                 }
             }
             div {
@@ -1900,15 +1919,17 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
     });
     rsx! {
         div { key: "{key}", class: "flex max-w-[92%] flex-col gap-2 self-start",
-            div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
-                for (j , block , children) in blocks {
-                    {render_block(
-                        j,
-                        block,
-                        &children,
-                        should_expand_thinking(j, block_count),
-                        latest_tool_index == Some(j),
-                    )}
+            if !blocks.is_empty() {
+                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
+                    for (j , block , children) in blocks {
+                        {render_block(
+                            j,
+                            block,
+                            &children,
+                            should_expand_thinking(j, block_count),
+                            latest_tool_index == Some(j),
+                        )}
+                    }
                 }
             }
             if turn.running && !reconnecting {

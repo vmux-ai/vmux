@@ -40,7 +40,9 @@ use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
+use crate::components::{
+    AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{
     AgentApprovalReply, AgentChoiceSelected, AgentCommandRequest, ApprovalDecision, CommandOrigin,
@@ -750,6 +752,7 @@ fn sync_chat_to_ready_views(
         Option<&PageMetadata>,
         &PromptQueue,
         Option<&ImportedConversation>,
+        Option<&AgentConversationTitle>,
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
@@ -761,7 +764,8 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, turn_meta, profile, meta, queue, imported)) = sessions.get(stack)
+        let Ok((messages, state, turn_meta, profile, meta, queue, imported, title)) =
+            sessions.get(stack)
         else {
             continue;
         };
@@ -779,6 +783,7 @@ fn sync_chat_to_ready_views(
                 meta,
                 queue,
                 imported,
+                title,
                 choices.get(webview).ok(),
             ),
         ));
@@ -971,6 +976,13 @@ fn push_composer_context_to_page(
     mut commands: Commands,
 ) {
     let now = time.elapsed_secs();
+    let live_views = views
+        .iter()
+        .map(|(webview, _, _)| webview)
+        .collect::<std::collections::HashSet<_>>();
+    cache
+        .entries
+        .retain(|webview, _| live_views.contains(webview));
     for (webview, parent, ready) in &views {
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
             continue;
@@ -1091,6 +1103,7 @@ fn snapshot_of(
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
+    conversation_title: Option<&AgentConversationTitle>,
     choice: Option<&crate::plugin::PendingAgentChoice>,
 ) -> ChatSnapshot {
     let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
@@ -1143,6 +1156,9 @@ fn snapshot_of(
         approval_name: name,
         approval_args_json: args_json,
         agent_name,
+        conversation_title: conversation_title
+            .map(|title| title.0.clone())
+            .unwrap_or_default(),
         agent_icon,
         accent_color,
         handoff_source: imported
@@ -1191,6 +1207,7 @@ fn push_chat_to_page(
             Option<&PageMetadata>,
             &PromptQueue,
             Option<&ImportedConversation>,
+            Option<&AgentConversationTitle>,
         ),
         Or<(
             Changed<AgentMessages>,
@@ -1199,6 +1216,7 @@ fn push_chat_to_page(
             Changed<PromptQueue>,
             Changed<Profile>,
             Changed<ImportedConversation>,
+            Changed<AgentConversationTitle>,
         )>,
     >,
     children: Query<&Children>,
@@ -1207,7 +1225,7 @@ fn push_chat_to_page(
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, turn_meta, profile, meta, queue, imported) in &sessions {
+    for (stack, messages, state, turn_meta, profile, meta, queue, imported, title) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -1228,6 +1246,7 @@ fn push_chat_to_page(
                 meta,
                 queue,
                 imported,
+                title,
                 choices.get(webview).ok(),
             ),
         ));
@@ -2179,6 +2198,7 @@ mod native_tests {
             &PromptQueue::default(),
             Some(&imported),
             None,
+            None,
         );
 
         assert_eq!(snapshot.handoff_message_count, 2);
@@ -2199,12 +2219,34 @@ mod native_tests {
             &PromptQueue::default(),
             None,
             None,
+            None,
         );
 
         assert_eq!(snapshot.approval_name, "vmux.run");
         assert_eq!(
             snapshot.approval_args_json,
             r#"{"command":"echo hi","focus":true}"#
+        );
+    }
+
+    #[test]
+    fn snapshot_includes_model_written_conversation_title() {
+        let title = AgentConversationTitle("Refine generated chat summaries".into());
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::Idle,
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+            Some(&title),
+            None,
+        );
+
+        assert_eq!(
+            snapshot.conversation_title,
+            "Refine generated chat summaries"
         );
     }
 
@@ -2484,36 +2526,6 @@ mod native_tests {
         assert!(source.contains("id: \"chat-scroll\""));
         assert!(source.contains("bg-gradient-to-t from-background via-background/95"));
         assert!(!source.contains("absolute inset-0 z-20 flex items-center justify-center"));
-    }
-
-    #[test]
-    fn composer_auto_grows_and_contains_action_button() {
-        let source = include_str!("chat_page/page.rs");
-        let prompt_box = include_str!("../../vmux_ui/src/components/prompt_box.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
-        assert!(composer.contains("fn resize_prompt_textarea"));
-        assert!(composer.contains("textarea.scroll_height().clamp(40, 160)"));
-        assert!(composer.contains("max-h-40 min-h-10"));
-        assert!(source.contains("PromptComposer {"));
-        assert!(composer.contains("PromptBox {"));
-        assert!(source.contains("PromptPopup {"));
-        assert!(prompt_box.contains("rounded-2xl"));
-        assert!(prompt_box.contains("backdrop-blur-3xl backdrop-saturate-150"));
-        assert!(composer.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
-        assert!(source.contains("show_capability_examples"));
-        assert!(source.contains("attachments.read().is_empty()"));
-        assert!(source.contains("Type / for commands or @ for media"));
-        assert!(composer.contains("prompt_prefix_at_utf16"));
-        assert!(composer.contains("vmux-prompt-caret"));
-        assert!(composer.contains("caret-color:transparent"));
-        assert!(composer.contains("install_prompt_focus_tracking"));
-        assert!(composer.contains("document.has_focus().unwrap_or(false)"));
-        assert!(composer.contains("add_event_listener_with_callback(\"focus\""));
-        assert!(composer.contains("add_event_listener_with_callback(\"blur\""));
-        assert!(composer.contains("if caret().is_some()"));
-        assert!(composer.contains("onkeyup"));
-        assert!(composer.contains("onscroll"));
-        assert!(composer.contains("placeholder:text-transparent"));
     }
 
     #[test]

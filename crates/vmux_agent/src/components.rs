@@ -20,6 +20,9 @@ pub struct AgentSession {
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AgentMessages(pub Vec<Message>);
 
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConversationTitle(pub String);
+
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
 #[reflect(Component)]
 pub struct AgentApprovalPolicy {

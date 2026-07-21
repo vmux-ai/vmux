@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
-const PROMPT_BOX_ROOT: &str = "vmux-prompt-box relative overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25";
+const PROMPT_BOX_ROOT: &str = "vmux-prompt-box relative overflow-hidden rounded-[1.25rem] bg-background/90 p-2 shadow-[0_20px_60px_-28px_rgba(0,0,0,0.58),0_6px_20px_-12px_rgba(0,0,0,0.22),inset_0_1px_0_rgba(255,255,255,0.4)] ring-1 ring-inset ring-foreground/[0.12] backdrop-blur-2xl backdrop-saturate-150 transition-[background-color,box-shadow,filter] duration-200 focus-within:bg-background/95 focus-within:shadow-[0_28px_80px_-32px_rgba(0,0,0,0.68),0_8px_24px_-14px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.5)] dark:bg-[#171717]/90 dark:ring-white/[0.13] dark:focus-within:bg-[#171717]/95";
 
 const PROMPT_POPUP_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl";
 
@@ -40,8 +40,8 @@ pub fn PromptBox(
     rsx! {
         div { ..merged,
             if glass {
-                div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
-                div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
+                div { class: "pointer-events-none absolute inset-px rounded-[1.2rem] bg-gradient-to-b from-white/[0.18] via-white/[0.025] to-transparent dark:from-white/[0.075]" }
+                div { class: "pointer-events-none absolute -left-10 -top-16 h-28 w-80 rotate-[-5deg] rounded-full bg-white/[0.08] blur-3xl" }
             }
             {children}
         }

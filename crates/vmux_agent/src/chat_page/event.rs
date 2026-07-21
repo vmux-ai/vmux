@@ -62,6 +62,8 @@ pub struct ChatSnapshot {
     pub paused: bool,
     /// Agent display name (from the session `Profile`), for the header/hero.
     pub agent_name: String,
+    /// Model-written summary used as the conversation header and page title.
+    pub conversation_title: String,
     /// Agent favicon URL (from `PageMetadata.icon`); may be empty (page falls back per url).
     pub agent_icon: String,
     /// Agent brand accent color (hex, from the avatar), for loading/status accents.
@@ -669,6 +671,7 @@ mod tests {
             messages_start: 12,
             messages_total: 60,
             status: "streaming".to_string(),
+            conversation_title: "Refine generated summaries".to_string(),
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
             handoff_message_count: 2,
@@ -692,6 +695,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
+        assert_eq!(back.conversation_title, "Refine generated summaries");
         assert_eq!(back.messages_start, 12);
         assert_eq!(back.messages_total, 60);
         assert_eq!(back.queued.len(), 2);

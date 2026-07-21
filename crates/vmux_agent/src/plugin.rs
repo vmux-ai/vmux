@@ -1042,7 +1042,10 @@ impl AgentBrowserResolve<'_, '_> {
     /// Resolve the agent's browser pane from its anchor, and record it as that
     /// agent's active pane (for its focus ring). Returns the pane entity, or
     /// `None` if the agent has no browser pane yet (caller keeps the default).
-    fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+    fn claim_browser_pane(
+        &mut self,
+        anchor: vmux_service::protocol::ProcessId,
+    ) -> Option<(Entity, Option<Entity>)> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
         let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
@@ -1061,7 +1064,7 @@ impl AgentBrowserResolve<'_, '_> {
                     kind,
                 },
             });
-        Some(pane)
+        Some((pane, stack))
     }
 
     /// Returns the explicit pane if given, else the agent's resolved browser
@@ -1077,14 +1080,8 @@ impl AgentBrowserResolve<'_, '_> {
             return pane.clone();
         }
         let anchor = (*anchor)?;
-        let pane = self.claim_browser_pane(anchor)?;
-        let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
-        if let Some(stack) = self
-            .active
-            .get(&profile)
-            .filter(|active| active.pane == Some(pane))
-            .and_then(|active| active.stack)
-        {
+        let (pane, stack) = self.claim_browser_pane(anchor)?;
+        if let Some(stack) = stack {
             return Some(vmux_service::protocol::format_id(
                 vmux_service::protocol::NodeKind::Stack,
                 stack.to_bits(),
@@ -1263,36 +1260,40 @@ impl AgentFileResolve<'_, '_> {
 
     fn file_page_target(&self, agent_pane: Entity, url: &str) -> Option<FilePageTarget> {
         let panes = self.file_panes_for(agent_pane);
-        let mut clean = None;
-        for (_, page_co, meta, diff) in self.file_pages.iter() {
-            if !meta.url.starts_with("file:") {
-                continue;
-            }
-            let stack = page_co.get();
-            let Ok(pane_co) = self.child_of.get(stack) else {
-                continue;
-            };
-            let pane = pane_co.get();
-            if !panes.contains(&pane) {
-                continue;
-            }
-            let dirty = diff.is_some_and(|source| source.dirty);
-            if vmux_layout::placement::reusable_page_match(url, &meta.url) {
+        for pane in &panes {
+            for (_, page_co, meta, diff) in self.file_pages.iter() {
+                let stack = page_co.get();
+                if !meta.url.starts_with("file:")
+                    || self.child_of.get(stack).ok().map(Relationship::get) != Some(*pane)
+                    || !vmux_layout::placement::reusable_page_match(url, &meta.url)
+                {
+                    continue;
+                }
+                let dirty = diff.is_some_and(|source| source.dirty);
                 return Some(FilePageTarget {
                     stack,
-                    pane,
+                    pane: *pane,
                     navigate: !dirty && meta.url != url,
                 });
             }
-            if !dirty && clean.is_none() {
-                clean = Some(FilePageTarget {
+        }
+        for pane in panes {
+            for (_, page_co, meta, diff) in self.file_pages.iter() {
+                let stack = page_co.get();
+                if !meta.url.starts_with("file:")
+                    || self.child_of.get(stack).ok().map(Relationship::get) != Some(pane)
+                    || diff.is_some_and(|source| source.dirty)
+                {
+                    continue;
+                }
+                return Some(FilePageTarget {
                     stack,
                     pane,
                     navigate: true,
                 });
             }
         }
-        clean
+        None
     }
 
     /// The agent's follow-pane and every `file://` preview stack in it, with each
@@ -1920,7 +1921,7 @@ fn handle_agent_commands(
                     } = &request.origin
                 {
                     profile = Some(format!("{anchor:?}"));
-                    if let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor) {
+                    if let Some((browser_pane, _)) = writers.browse.claim_browser_pane(*anchor) {
                         pane = Some(browser_pane.to_bits().to_string());
                         new_stack = true;
                     } else if let Some(agent_pane) = writers.browse.agent_pane(*anchor) {
@@ -2117,6 +2118,7 @@ fn handle_agent_commands(
             | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
+            | ServiceAgentCommand::SetConversationTitle { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
             | ServiceAgentCommand::ResumeInAcp { .. } => {
                 continue;
@@ -2220,6 +2222,7 @@ fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
         | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. }
         | ServiceAgentCommand::PrepareWorktree { anchor, .. }
         | ServiceAgentCommand::RequestUserChoice { anchor, .. }
+        | ServiceAgentCommand::SetConversationTitle { anchor, .. }
         | ServiceAgentCommand::CreateWorktreeOnBranch { anchor, .. } => Some(*anchor),
         _ => None,
     }
@@ -2233,6 +2236,7 @@ fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
             | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
+            | ServiceAgentCommand::SetConversationTitle { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) {
         0
@@ -2252,6 +2256,7 @@ fn self_command_blocked_by_worktree_failure(
             | ServiceAgentCommand::ChooseWorkspaceAtPath { .. }
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
+            | ServiceAgentCommand::SetConversationTitle { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
@@ -2733,6 +2738,7 @@ struct WorkspacePickerContext<'w, 's> {
     chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
     page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
     cli_sessions: Query<'w, 's, &'static AgentSession>,
+    conversation_titles: Query<'w, 's, &'static mut crate::components::AgentConversationTitle>,
     proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
@@ -3097,7 +3103,7 @@ fn handle_agent_self_commands(
     mut regions: ResMut<AgentTerminalRegions>,
     mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
     mut tab_worktree: AgentTabWorktreeContext,
-    workspace_picker: WorkspacePickerContext,
+    mut workspace_picker: WorkspacePickerContext,
 ) {
     use vmux_service::protocol::{AgentCommandResult, ClientMessage};
     let Some(service) = service else {
@@ -3457,6 +3463,42 @@ fn handle_agent_self_commands(
                     }
                 }
             },
+            ServiceAgentCommand::SetConversationTitle { anchor, title } => {
+                match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                    None => AgentCommandResult::Error("agent pane not found".to_string()),
+                    Some((agent_entity, _)) => {
+                        let Some(session_entity) = ancestor_agent_session(
+                            agent_entity,
+                            &acp_sessions,
+                            &workspace_picker.page_sessions,
+                            &workspace_picker.cli_sessions,
+                            &ctx.child_of_q,
+                        ) else {
+                            service.0.send(ClientMessage::AgentCommandResponse {
+                                request_id: request.request_id,
+                                result: AgentCommandResult::Error(
+                                    "agent session not found".to_string(),
+                                ),
+                            });
+                            continue;
+                        };
+                        let title = title.trim().to_string();
+                        if title.is_empty() {
+                            AgentCommandResult::Error("conversation title is empty".to_string())
+                        } else if let Ok(mut current) =
+                            workspace_picker.conversation_titles.get_mut(session_entity)
+                        {
+                            current.0 = title;
+                            AgentCommandResult::Ok
+                        } else {
+                            commands
+                                .entity(session_entity)
+                                .insert(crate::components::AgentConversationTitle(title));
+                            AgentCommandResult::Ok
+                        }
+                    }
+                }
+            }
             ServiceAgentCommand::ChooseWorkspace { anchor }
             | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
@@ -9675,7 +9717,9 @@ mod tests {
         mut resolve: AgentBrowserResolve,
         mut out: ResMut<BrowserPaneClaimOutput>,
     ) {
-        out.0 = resolve.claim_browser_pane(input.anchor);
+        out.0 = resolve
+            .claim_browser_pane(input.anchor)
+            .map(|(pane, _)| pane);
     }
 
     fn spawn_stack_in_pane(app: &mut App, pane: Entity, url: &str) -> Entity {

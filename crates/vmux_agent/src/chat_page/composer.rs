@@ -1,8 +1,4 @@
-#[cfg(test)]
-use super::event::ChatBlock;
-use super::event::{
-    ChatItem, ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry, is_guardian_tool,
-};
+use super::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry, is_guardian_tool};
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
@@ -256,16 +252,13 @@ pub(crate) fn should_clear_draft_on_escape(
     !streaming && queue_empty && !draft_empty
 }
 
-pub(crate) fn chat_page_title(items: &[ChatItem], _status: &str, agent_name: &str) -> String {
-    items
-        .iter()
-        .filter_map(|item| match item {
-            ChatItem::User { text, .. } => Some(text.as_str()),
-            ChatItem::Turn(_) => None,
-        })
-        .map(normalize_chat_page_title)
-        .find(|title| !title.is_empty())
-        .unwrap_or_else(|| normalize_chat_page_title(agent_name))
+pub(crate) fn chat_page_title(generated_title: &str, agent_name: &str) -> String {
+    let title = normalize_chat_page_title(generated_title);
+    if title.is_empty() {
+        normalize_chat_page_title(agent_name)
+    } else {
+        title
+    }
 }
 
 pub(crate) fn tool_activity(name: &str) -> ToolActivity {
@@ -442,7 +435,7 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat_page::event::{ChatTurn, SlashCommandEntry};
+    use crate::chat_page::event::SlashCommandEntry;
 
     fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
         ResumableSessionEntry {
@@ -645,117 +638,30 @@ mod tests {
     }
 
     #[test]
-    fn chat_page_title_uses_first_prompt_as_stable_topic() {
-        let items = vec![
-            ChatItem::user("  Fix the\ndynamic   agent page title  "),
-            ChatItem::Turn(ChatTurn {
-                running: true,
-                ..Default::default()
-            }),
-            ChatItem::user("continue"),
-        ];
-
+    fn chat_page_title_uses_model_written_summary() {
         assert_eq!(
-            chat_page_title(&items, "streaming", "Codex"),
-            "Fix the dynamic agent page title"
+            chat_page_title("  Refine model-generated\n summaries  ", "Codex"),
+            "Refine model-generated summaries"
         );
-        assert_eq!(
-            chat_page_title(&items, "awaiting", "Codex"),
-            "Fix the dynamic agent page title"
-        );
-    }
-
-    #[test]
-    fn chat_page_title_does_not_include_activity_emoji() {
-        fn title(block: ChatBlock) -> String {
-            chat_page_title(
-                &[
-                    ChatItem::user("Ship dynamic titles"),
-                    ChatItem::Turn(ChatTurn {
-                        blocks: vec![block],
-                        running: true,
-                        ..Default::default()
-                    }),
-                ],
-                "streaming",
-                "Codex",
-            )
-        }
-
-        assert_eq!(
-            title(ChatBlock::Thinking("hmm".into())),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::ToolUse {
-                call_id: "1".into(),
-                name: "functions.exec_command".into(),
-                args: "{}".into(),
-                parent_call_id: None,
-            }),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::ToolUse {
-                call_id: "2".into(),
-                name: "search_files".into(),
-                args: "{}".into(),
-                parent_call_id: None,
-            }),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::Plan { steps: Vec::new() }),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::Diff {
-                call_id: "3".into(),
-                path: "page.rs".into(),
-                old_text: None,
-                new_text: String::new(),
-            }),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::Text("done soon".into())),
-            "Ship dynamic titles"
-        );
-        assert_eq!(
-            title(ChatBlock::Reconnect {
-                attempt: 2,
-                total: 5,
-            }),
-            "Ship dynamic titles"
-        );
+        assert_eq!(chat_page_title("", "Codex"), "Codex");
     }
 
     #[test]
     fn chat_page_title_falls_back_to_agent_and_truncates_topic() {
-        assert_eq!(chat_page_title(&[], "idle", "Codex"), "Codex");
+        assert_eq!(chat_page_title("", "Codex"), "Codex");
 
-        let items = vec![ChatItem::user(
-            "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10),
-        )];
-        let title = chat_page_title(&items, "idle", "Codex");
+        let generated = "a".repeat(CHAT_PAGE_TITLE_MAX_GRAPHEMES + 10);
+        let title = chat_page_title(&generated, "Codex");
         assert_eq!(title.graphemes(true).count(), CHAT_PAGE_TITLE_MAX_GRAPHEMES);
         assert!(title.ends_with('…'));
         assert_eq!(
-            chat_page_title(&[ChatItem::user("Fix \u{202E}\x1b title")], "idle", "Codex"),
+            chat_page_title("Fix \u{202E}\x1b title", "Codex"),
             "Fix title"
         );
         assert_eq!(
-            chat_page_title(
-                &[
-                    ChatItem::user("\u{202E}"),
-                    ChatItem::user("Keep 👩‍💻 and فارسی\u{200C}"),
-                ],
-                "errored",
-                "Codex"
-            ),
+            chat_page_title("Keep 👩‍💻 and فارسی\u{200C}", "Codex"),
             "Keep 👩‍💻 and فارسی\u{200C}"
         );
-        assert_eq!(chat_page_title(&[], "installing", "Codex"), "Codex");
     }
 
     #[test]

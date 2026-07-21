@@ -178,6 +178,7 @@ fn project_file_touches(
 #[derive(Default)]
 pub struct AcpProjector {
     messages: Vec<Message>,
+    hidden_tool_calls: HashSet<String>,
     file_touches: HashMap<String, FileTouchState>,
     file_touch_order: VecDeque<String>,
     finalized_file_touches: HashSet<String>,
@@ -399,6 +400,15 @@ impl AcpProjector {
 
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
         let call_id = tc.tool_call_id.to_string();
+        if is_conversation_title_tool(&tc.title) {
+            if !matches!(
+                tc.status,
+                ToolCallStatus::Completed | ToolCallStatus::Failed
+            ) {
+                self.hidden_tool_calls.insert(call_id);
+            }
+            return Vec::new();
+        }
         let subagent = subagent_block(
             &call_id,
             &tc.title,
@@ -455,6 +465,17 @@ impl AcpProjector {
     fn apply_tool_call_update(&mut self, update: ToolCallUpdate) -> Vec<Intent> {
         let call_id = update.tool_call_id.to_string();
         let title = update.fields.title.clone().unwrap_or_default();
+        if self.hidden_tool_calls.contains(&call_id) || is_conversation_title_tool(&title) {
+            if matches!(
+                update.fields.status,
+                Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
+            ) {
+                self.hidden_tool_calls.remove(&call_id);
+            } else {
+                self.hidden_tool_calls.insert(call_id);
+            }
+            return Vec::new();
+        }
         let subagent = subagent_block(
             &call_id,
             &title,
@@ -752,6 +773,14 @@ impl AcpProjector {
     }
 }
 
+pub(crate) fn is_conversation_title_tool(title: &str) -> bool {
+    title
+        .trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-', '.', ':'], "_")
+        == "mcp__vmux__set_conversation_title"
+}
+
 fn subagent_block(
     call_id: &str,
     title: &str,
@@ -983,7 +1012,7 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
         ContentChunk, Diff, SessionInfoUpdate, SessionUpdate, Terminal, TextContent, ToolCall,
-        ToolCallContent,
+        ToolCallContent, ToolCallUpdateFields,
     };
 
     fn chunk(text: &str) -> SessionUpdate {
@@ -1325,6 +1354,35 @@ mod tests {
                 r#"{"command":"echo hi","focus":true}"#.to_string(),
             ))
         );
+    }
+
+    #[test]
+    fn conversation_title_tool_stays_out_of_transcript() {
+        let mut p = AcpProjector::new();
+        let started = p.apply(SessionUpdate::ToolCall(ToolCall::new(
+            "title-1",
+            "mcp__vmux__set_conversation_title",
+        )));
+        let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "title-1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )));
+
+        assert!(started.is_empty());
+        assert!(completed.is_empty());
+        assert!(p.messages().is_empty());
+        assert!(p.tool_call_details("title-1").is_none());
+    }
+
+    #[test]
+    fn conversation_title_tool_requires_exact_vmux_identifier() {
+        assert!(is_conversation_title_tool(
+            "mcp__vmux__set_conversation_title"
+        ));
+        assert!(!is_conversation_title_tool(
+            "mcp__other__set_conversation_title"
+        ));
+        assert!(!is_conversation_title_tool("set_conversation_title"));
     }
 
     #[test]

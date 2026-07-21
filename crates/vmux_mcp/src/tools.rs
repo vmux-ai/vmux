@@ -496,6 +496,26 @@ fn request_user_choice_definition() -> ToolDefinition {
     }
 }
 
+fn set_conversation_title_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "set_conversation_title".into(),
+        description: "Set the agent conversation header to a concise model-written summary. Call as the first tool after every user message, before skills or other tools. Summarize the whole conversation in 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["title"],
+            "additionalProperties": false,
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                }
+            }
+        }),
+    }
+}
+
 fn resume_in_acp_definition() -> ToolDefinition {
     ToolDefinition {
         name: "resume_in_acp".into(),
@@ -757,6 +777,7 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
         defs.push(run_definition());
     }
     defs.push(request_user_choice_definition());
+    defs.push(set_conversation_title_definition());
     defs.push(select_workspace_definition());
     defs.push(create_worktree_definition());
     if !acp_terminals {
@@ -990,6 +1011,26 @@ pub fn dispatch_with_anchor(
             question: question.to_string(),
             options,
         }));
+    }
+    if name == "set_conversation_title" {
+        let anchor = anchor.ok_or(
+            "set_conversation_title requires an agent anchor (not available to this client)",
+        )?;
+        let title = arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .ok_or("set_conversation_title.title is empty")?;
+        if title.chars().count() > 120 {
+            return Err("set_conversation_title.title exceeds 120 characters".to_string());
+        }
+        return Ok(DispatchTarget::Command(
+            AgentCommand::SetConversationTitle {
+                anchor,
+                title: title.to_string(),
+            },
+        ));
     }
     if name == "select_workspace" || name == "choose_workspace" {
         let anchor = anchor
@@ -1453,6 +1494,7 @@ mod tests {
             "run",
             "read_terminal",
             "request_user_choice",
+            "set_conversation_title",
             "select_workspace",
             "create_worktree",
         ] {
@@ -1624,6 +1666,30 @@ mod tests {
             DispatchTarget::Command(AgentCommand::ResumeInAcp { anchor: got }) if got == anchor
         ));
         assert!(dispatch_from_tool_call("resume_in_acp", serde_json::json!({})).is_err());
+    }
+
+    #[test]
+    fn conversation_title_dispatches_model_summary_to_agent_session() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "set_conversation_title",
+            serde_json::json!({"title": "  Refine model-generated summaries  "}),
+            Some(anchor),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::SetConversationTitle { anchor: got, title })
+                if got == anchor && title == "Refine model-generated summaries"
+        ));
+        assert!(
+            dispatch_from_tool_call(
+                "set_conversation_title",
+                serde_json::json!({"title": "summary"})
+            )
+            .is_err()
+        );
     }
 
     #[test]

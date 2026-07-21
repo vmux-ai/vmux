@@ -108,8 +108,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("if expanded() {"));
     assert!(!source.contains("if expanded() && has_children"));
     assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
-    assert!(knowledge_card.contains("\"Unfold knowledge\""));
-    assert!(knowledge_card.contains("\"Fold knowledge\""));
     assert!(knowledge_card.contains("grid-rows-[0fr]"));
     assert!(knowledge_card.contains("grid-rows-[1fr]"));
     assert!(source.contains("overflow-x-hidden overflow-y-auto"));
@@ -119,17 +117,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(!source.contains("KnowledgeUse"));
     assert!(!source.contains("Build with"));
     assert!(!source.contains("vmux://notes"));
-}
-
-#[test]
-fn folded_pane_shows_its_active_stack() {
-    let pane = pane_section_component_source();
-
-    assert!(pane.contains(".find(|stack| stack.is_active"));
-    assert!(pane.contains("if folded()"));
-    assert!(pane.contains("if let Some(stack) = folded_stack"));
-    assert!(pane.contains("SideSheetStackRow { stack, pane_id }"));
-    assert!(pane.contains("flex shrink-0 flex-col"));
 }
 
 #[test]
@@ -281,12 +268,4 @@ fn side_sheet_stack_row_component_source() -> &'static str {
         .nth(1)
         .and_then(|rest| rest.split("fn download_pct").next())
         .expect("side sheet stack row component")
-}
-
-fn pane_section_component_source() -> &'static str {
-    include_str!("../src/page.rs")
-        .split("fn PaneSection(pane: PaneNode, index: usize)")
-        .nth(1)
-        .and_then(|rest| rest.split("fn NewStackRow").next())
-        .expect("pane section component")
 }

@@ -20,6 +20,8 @@ use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "Immediately after every user message, call mcp__vmux__set_conversation_title as the first tool of the turn, before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim. Update the title even when the user sends a short follow-up.";
+
 const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. For development work, first call select_workspace. Pass a path when the conversation identifies a local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. If it has no .git, vmux asks whether to initialize Git; declining keeps the plain workspace usable. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
 const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
 const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected workspace is a Git repository, but this tab is not isolated. Reading and inspection are allowed. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
@@ -749,6 +751,11 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
         )
     };
     let instructions = vmux_core::knowledge::append_agent_context(&instructions);
+    let instructions = if instructions.contains("mcp__vmux__set_conversation_title") {
+        instructions
+    } else {
+        format!("{instructions}\n\n{CONVERSATION_TITLE_STEER_PROMPT}")
+    };
     config.insert(
         "developer_instructions".to_string(),
         serde_json::Value::String(instructions),
@@ -1666,6 +1673,9 @@ mod tests {
                     .unwrap()
                     .contains("mcp__vmux__run")
             );
+            let instructions = config["developer_instructions"].as_str().unwrap();
+            assert!(instructions.contains("mcp__vmux__set_conversation_title"));
+            assert!(instructions.contains("first tool of the turn"));
         }
     }
 
