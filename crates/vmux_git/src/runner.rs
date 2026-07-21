@@ -161,7 +161,15 @@ pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
 }
 
 pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
-    let (stdout, stderr, ok) = git_read(root, &["status", "--porcelain=v2", "--branch"])?;
+    let (stdout, stderr, ok) = git_read(
+        root,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+        ],
+    )?;
     if !ok {
         return Err(GitError(stderr.trim().to_string()));
     }
@@ -188,7 +196,10 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
 /// reports as changed (modified/staged/untracked/renamed/deleted/conflicted).
 pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
     let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git_read(&root, &["status", "--porcelain=v2"])?;
+    let (stdout, stderr, ok) = git_read(
+        &root,
+        &["status", "--porcelain=v2", "--untracked-files=all"],
+    )?;
     if !ok {
         return Err(GitError(stderr.trim().to_string()));
     }
@@ -589,6 +600,15 @@ mod tests {
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
         stage(&file).unwrap();
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
+    }
+
+    #[test]
+    fn status_reports_nested_untracked_file() {
+        let repo = test_repo::init();
+        std::fs::create_dir(repo.path().join("nested")).unwrap();
+        let file = test_repo::write(repo.path(), "nested/new.txt", "new\n");
+
+        assert_eq!(status(&file).unwrap().file_status, FileStatus::Untracked);
     }
 
     #[test]
