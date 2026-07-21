@@ -12,6 +12,15 @@ use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 pub struct VibeStrategy;
 
+fn vibe_home() -> PathBuf {
+    std::env::var("VIBE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            PathBuf::from(home).join(".vibe")
+        })
+}
+
 impl AgentStrategy for VibeStrategy {
     fn kind(&self) -> AgentKind {
         AgentKind::Vibe
@@ -24,14 +33,7 @@ impl AgentStrategy for VibeStrategy {
 
 impl CliAgentStrategy for VibeStrategy {
     fn sessions_root(&self) -> PathBuf {
-        std::env::var("VIBE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_default();
-                PathBuf::from(home).join(".vibe")
-            })
-            .join("logs")
-            .join("session")
+        vibe_home().join("logs").join("session")
     }
 
     fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
@@ -157,13 +159,7 @@ const VMUX_HOOK_NAME: &str = "vmux-file-follow";
 const VMUX_TURN_END_HOOK_NAME: &str = "vmux-turn-end";
 
 fn vibe_hooks_path() -> PathBuf {
-    std::env::var("VIBE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            PathBuf::from(home).join(".vibe")
-        })
-        .join("hooks.toml")
+    vibe_home().join("hooks.toml")
 }
 
 /// Idempotently register vmux-managed hooks in `~/.vibe/hooks.toml`: an

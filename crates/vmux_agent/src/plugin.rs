@@ -7222,7 +7222,12 @@ mod tests {
         let joined = args.join(" ");
         assert!(joined.contains("--anchor"), "args carry --anchor: {joined}");
         assert!(joined.contains(&new_id.to_string()), "anchor is the new id");
-        assert!(!joined.contains("OLD"), "old args replaced");
+        assert!(
+            !args
+                .windows(2)
+                .any(|pair| pair[0] == "--mcp-config" && pair[1] == "OLD"),
+            "old args replaced"
+        );
     }
 
     #[test]

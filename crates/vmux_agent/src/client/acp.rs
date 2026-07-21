@@ -748,7 +748,7 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
             crate::client::cli::codex::RUN_STEER_PROMPT
         )
     };
-    let instructions = vmux_core::knowledge::append_agent_skills(&instructions);
+    let instructions = vmux_core::knowledge::append_agent_context(&instructions);
     config.insert(
         "developer_instructions".to_string(),
         serde_json::Value::String(instructions),

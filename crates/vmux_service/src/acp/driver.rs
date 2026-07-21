@@ -1098,7 +1098,10 @@ If you invoke a required Skill tool, continue the original user request in the s
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
-    session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_skills_prompt())
+    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+        bevy::log::warn!("external agent Knowledge sync failed: {error}");
+    }
+    session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_context_prompt())
 }
 
 fn session_meta_for_agent_with_knowledge(
@@ -2128,7 +2131,8 @@ mod tests {
 
     #[test]
     fn claude_acp_disables_native_shell_and_steers_skill_continuation() {
-        let meta = session_meta_for_agent("claude").expect("Claude ACP metadata");
+        let meta = session_meta_for_agent_with_knowledge("claude", "memory context")
+            .expect("Claude ACP metadata");
         let options = &meta["claudeCode"]["options"];
 
         assert_eq!(
@@ -2145,6 +2149,7 @@ mod tests {
         let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
         assert!(prompt.contains("mcp__vmux__run"));
         assert!(prompt.contains("continue the original user request"));
+        assert!(prompt.contains("memory context"));
         assert!(session_meta_for_agent_with_knowledge("vibe-acp", "").is_none());
         assert_eq!(
             session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()["systemPrompt"]
