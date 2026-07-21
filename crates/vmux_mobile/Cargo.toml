@@ -32,3 +32,4 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
 vmux_remote = { path = "../vmux_remote" }
+vmux_chat_ui = { path = "../vmux_chat_ui" }

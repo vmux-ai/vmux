@@ -36,6 +36,7 @@ impl Plugin for TabPlugin {
             .register_type::<TabDirDecided>()
             .init_resource::<LastTabCloseAt>()
             .add_message::<CloseTabRequest>()
+            .add_message::<crate::NewAgentChatRequest>()
             .add_plugins(BinEventEmitterPlugin::<(TabsCommandEvent,)>::for_hosts(&[
                 "layout",
             ]))
@@ -148,6 +149,7 @@ pub fn tab_bundle() -> impl Bundle {
 #[allow(clippy::too_many_arguments)]
 fn handle_tab_commands(
     mut reader: MessageReader<AppCommand>,
+    mut new_agent_chats: MessageReader<crate::NewAgentChatRequest>,
     tabs: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_param: crate::stack::ActiveTabParam,
     tab_q: Query<Entity, With<Tab>>,
@@ -303,6 +305,28 @@ fn handle_tab_commands(
             },
             _ => continue,
         }
+    }
+
+    for request in new_agent_chats.read() {
+        let Some((space, startup_dir)) = effective_startup_dir
+            .as_deref()
+            .and_then(|effective| effective.0.clone())
+        else {
+            continue;
+        };
+        let name = format!("Tab {}", tabs.iter().count() + 1);
+        layout_requests.write(TabLayoutSpawnRequest {
+            space,
+            primary_window: *primary_window,
+            name: Some(name),
+            startup_dir,
+            content: TabLayoutSpawnContent::AgentPrompt {
+                url: "vmux://agent/".to_string(),
+                prompt: request.prompt.clone(),
+            },
+            clear_pending_stack: true,
+            focus: true,
+        });
     }
 }
 
@@ -675,6 +699,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<crate::NewAgentChatRequest>()
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -737,6 +762,32 @@ mod tests {
 
         let tab_count = app.world_mut().query::<&Tab>().iter(app.world()).count();
         assert_eq!(tab_count, 2, "expected two tabs after InNewTab");
+    }
+
+    #[test]
+    fn new_agent_chat_spawns_focused_tab_with_pending_prompt() {
+        let mut app = build_app();
+        build_main_and_tab(&mut app);
+
+        app.world_mut()
+            .resource_mut::<Messages<crate::NewAgentChatRequest>>()
+            .write(crate::NewAgentChatRequest {
+                prompt: "continue from my phone".to_string(),
+            });
+
+        app.update();
+
+        let collected = app.world().resource::<CollectedSpawns>();
+        assert_eq!(collected.0.len(), 1);
+        assert_eq!(collected.0[0].url, "vmux://agent/");
+        let prompts = app
+            .world_mut()
+            .query::<&vmux_core::agent::PendingAgentPrompt>()
+            .iter(app.world())
+            .map(|prompt| prompt.0.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(prompts, vec!["continue from my phone"]);
+        assert_eq!(app.world_mut().query::<&Tab>().iter(app.world()).count(), 2);
     }
 
     #[test]
@@ -1018,6 +1069,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<crate::NewAgentChatRequest>()
             .add_message::<CloseTabRequest>()
             .init_resource::<LastTabCloseAt>()
             .add_systems(
@@ -1139,6 +1191,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
             .add_message::<crate::TabLayoutSpawnRequest>()
+            .add_message::<crate::NewAgentChatRequest>()
             .add_message::<CloseTabRequest>()
             .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));

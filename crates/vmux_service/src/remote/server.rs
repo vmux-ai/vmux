@@ -16,10 +16,12 @@ use tokio::sync::{Mutex, broadcast};
 
 use crate::acp::{AcpInput, AcpSessionManager};
 use crate::agent::{AgentSessionManager, SessionInput};
+use crate::agent_broker::AgentBroker;
 use crate::message::Message;
 use crate::protocol::{ApprovalDecision, ServiceMessage};
 use crate::remote::{
-    ApprovalRequest, PromptRequest, RemoteApproval, RemoteEvent, RemoteSession, RemoteStatus,
+    ApprovalRequest, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent, RemoteSession,
+    RemoteStatus,
 };
 
 const MAX_PROMPT_BYTES: usize = 64 * 1024;
@@ -30,11 +32,13 @@ struct RemoteState {
     paired: Arc<AtomicBool>,
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
+    broker: AgentBroker,
 }
 
 pub fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
+    broker: AgentBroker,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let token = match ensure_token() {
@@ -49,6 +53,7 @@ pub fn spawn(
             paired: Arc::new(AtomicBool::new(crate::remote_paired_path().exists())),
             agents,
             acp,
+            broker,
         };
         let address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port());
         let listener = match tokio::net::TcpListener::bind(address).await {
@@ -70,10 +75,33 @@ fn router(state: RemoteState) -> Router {
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/{sid}/events", get(session_events))
         .route("/api/sessions/{sid}/messages", post(send_prompt))
+        .route("/api/chats", post(create_chat))
         .route("/api/sessions/{sid}/cancel", post(cancel))
         .route("/api/sessions/{sid}/approval", post(approve))
         .route_layer(middleware::from_fn_with_state(state.clone(), authorize));
     Router::new().merge(api).with_state(state)
+}
+
+async fn create_chat(
+    State(state): State<RemoteState>,
+    Json(request): Json<NewChatRequest>,
+) -> StatusCode {
+    let prompt = request.text.trim();
+    if prompt.is_empty() || prompt.len() > MAX_PROMPT_BYTES {
+        return StatusCode::BAD_REQUEST;
+    }
+    let command = crate::protocol::AgentCommand::NewAgentChat {
+        prompt: prompt.to_string(),
+    };
+    match state
+        .broker
+        .command(crate::protocol::AgentRequestId::new(), None, command)
+        .await
+    {
+        Ok(crate::protocol::AgentCommandResult::Ok) => StatusCode::ACCEPTED,
+        Ok(crate::protocol::AgentCommandResult::Error(_)) | Err(_) => StatusCode::BAD_GATEWAY,
+        Ok(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 async fn authorize(State(state): State<RemoteState>, request: Request, next: Next) -> Response {

@@ -10875,20 +10875,19 @@ dependencies = [
  "js-sys",
  "mockito",
  "notify 6.1.1",
- "pulldown-cmark",
  "reqwest",
  "rfd 0.15.4",
  "rkyv",
  "serde",
  "serde_json",
  "serial_test",
- "similar",
  "tempfile",
  "tokio",
  "toml",
  "unicode-segmentation",
  "url",
  "uuid",
+ "vmux_chat_ui",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -10940,6 +10939,15 @@ dependencies = [
  "vmux_terminal",
  "vmux_ui",
  "zip",
+]
+
+[[package]]
+name = "vmux_chat_ui"
+version = "0.0.27"
+dependencies = [
+ "dioxus",
+ "pulldown-cmark",
+ "similar",
 ]
 
 [[package]]
@@ -11178,6 +11186,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_render",
  "dioxus",
+ "gloo-timers",
  "js-sys",
  "libc",
  "moonshine-save",
@@ -11237,6 +11246,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "vmux_chat_ui",
  "vmux_remote",
 ]
 

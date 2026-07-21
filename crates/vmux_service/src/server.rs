@@ -113,8 +113,17 @@ pub async fn run_server(listener: UnixListener) {
         Arc::new(Mutex::new(HashMap::new()));
     let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
     let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
-    let remote_handle =
-        crate::remote::server::spawn(Arc::clone(&agent_manager), Arc::clone(&acp_manager));
+    let remote_broker = crate::agent_broker::AgentBroker::new(
+        agent_tx.clone(),
+        Arc::clone(&pending_commands),
+        Arc::clone(&pending_queries),
+        Arc::clone(&pending_tool_calls),
+    );
+    let remote_handle = crate::remote::server::spawn(
+        Arc::clone(&agent_manager),
+        Arc::clone(&acp_manager),
+        remote_broker,
+    );
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     init_started_at();

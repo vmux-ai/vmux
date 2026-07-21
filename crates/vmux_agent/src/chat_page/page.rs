@@ -24,6 +24,10 @@ use dioxus::prelude::*;
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use vmux_chat_ui::{
+    AssistantTurn, DiffBlock, PlanBlock, PlanItem, ReconnectBlock, SubagentActivity, TextBlock,
+    ThinkingBlock, ToolResultBlock, ToolUseBlock, TurnMeta, UserBubble, WorkingBlock,
+};
 use vmux_command::prompt_media::{
     inline_media_query, media_display_path, media_reference, replace_inline_media_query,
 };
@@ -1282,7 +1286,7 @@ pub fn Page(
         main {
             class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
             style: "--agent-accent:{theme_accent};",
-            style { dangerous_inner_html: MD_CSS }
+            style { dangerous_inner_html: CHAT_CSS }
             if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
                     MatrixRain {
@@ -1808,13 +1812,12 @@ fn render_item(
             context,
             attachments,
         } => rsx! {
-            div {
+            UserBubble {
                 key: "{key}",
-                class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm",
                 if let Some(context) = context {
-                    details { class: "disclosure user-context-panel rounded-xl border",
+                    details { class: "rounded-xl border border-violet-400/15 bg-violet-500/[0.035]",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "agent-themed-activity flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
+                            span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-violet-500/10 text-violet-300 ring-1 ring-inset ring-violet-500/20",
                                 svg {
                                     class: "h-3 w-3",
                                     view_box: "0 0 24 24",
@@ -1830,11 +1833,11 @@ fn render_item(
                             span { class: "text-[10px] text-muted-foreground", "{context.len()} bytes" }
                             {render_disclosure_icon()}
                         }
-                        pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
+                        pre { class: "mx-2 mb-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-500/[0.045] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground ring-1 ring-inset ring-zinc-500/15", "{context}" }
                     }
                 }
                 if !text.is_empty() {
-                    div { class: "whitespace-pre-wrap px-1.5", "{text}" }
+                    div { class: "whitespace-pre-wrap break-words px-1", "{text}" }
                 }
                 if !attachments.is_empty() {
                     div { class: "flex flex-wrap justify-end gap-2",
@@ -1920,7 +1923,7 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
     rsx! {
         div { key: "{key}", class: "flex max-w-[92%] flex-col gap-2 self-start",
             if !blocks.is_empty() {
-                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
+                AssistantTurn { standalone: false,
                     for (j , block , children) in blocks {
                         {render_block(
                             j,
@@ -1935,10 +1938,7 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
             if turn.running && !reconnecting {
                 WorkingIndicator {}
             } else if let Some(label) = duration_label {
-                div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground/70",
-                    span { class: "h-1.5 w-1.5 rounded-full bg-[color:var(--agent-accent)]" }
-                    span { class: "tabular-nums", "{label}" }
-                }
+                TurnMeta { label }
             }
         }
     }
@@ -1974,15 +1974,7 @@ fn WorkingIndicator() -> Element {
     let verb_text = verb();
     let elapsed_text = fmt_elapsed(elapsed());
     rsx! {
-        div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground",
-            span { class: "agent-working-label font-medium", "{verb_text}" }
-            span { class: "flex items-end gap-0.5 text-[color:var(--agent-accent)]",
-                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
-                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:120ms]" }
-                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:240ms]" }
-            }
-            span { class: "tabular-nums text-xs", "{elapsed_text}" }
-        }
+        WorkingBlock { verb: verb_text, elapsed: elapsed_text }
     }
 }
 
@@ -2200,7 +2192,6 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         }
     }
 }
-
 fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
     match activity {
         ToolActivity::Guardian => ActivityIcon::Guardian,
@@ -2563,7 +2554,6 @@ fn render_tool_args(args: &str) -> Element {
         },
     }
 }
-
 fn render_block(
     key: usize,
     block: &ChatBlock,
@@ -2572,199 +2562,109 @@ fn render_block(
     latest_tool: bool,
 ) -> Element {
     match block {
-        ChatBlock::Text(text) => rsx! {
-            div {
-                key: "{key}",
-                class: "chat-md px-0.5 text-sm leading-relaxed text-foreground/95",
-                dangerous_inner_html: md_to_html(text),
-            }
-        },
-        ChatBlock::Thinking(text) => rsx! {
-            div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
-                {render_activity_icon(ActivityIcon::Thinking)}
-                details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "Thinking" }
-                        {render_disclosure_icon()}
-                    }
-                    div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
+        ChatBlock::Text(text) => rsx! { TextBlock { key: "{key}", text: text.clone() } },
+        ChatBlock::Thinking(text) => {
+            rsx! {
+                ThinkingBlock {
+                    key: "{key}",
+                    text: text.clone(),
+                    open: latest_thinking,
+                    icon: Some(render_activity_icon(ActivityIcon::Thinking)),
                 }
             }
-        },
+        }
         ChatBlock::ToolUse { name, args, .. } => {
             let (icon, label) = tool_presentation(name, args);
+            let arguments = (!args.is_empty() && args != "{}").then(|| render_tool_args(args));
             rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
-                    {render_tool_activity_icon(name, args, icon)}
-                    div { class: "min-w-0",
-                        details { open: latest_tool, class: "disclosure text-sm text-muted-foreground",
-                            summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                                span { class: "font-medium", "{label}" }
-                                {render_disclosure_icon()}
-                            }
-                            div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                            if !args.is_empty() && args != "{}" {
-                                {render_tool_args(args)}
-                            }
-                        }
-                        if !children.is_empty() {
-                            div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
-                                for (child_key , child) in children {
-                                    {render_tool_child(*child_key, child)}
-                                }
-                            }
+                ToolUseBlock {
+                    key: "{key}",
+                    name: name.clone(),
+                    args: args.clone(),
+                    open: latest_tool,
+                    label: Some(label.into_owned()),
+                    icon: Some(render_tool_activity_icon(name, args, icon)),
+                    arguments,
+                if !children.is_empty() {
+                    div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
+                        for (child_key , child) in children {
+                            {render_tool_child(*child_key, child)}
                         }
                     }
                 }
             }
+            }
         }
-        ChatBlock::Subagent(subagent) => {
-            let status_label = subagent_status_label(&subagent.status);
-            let status_class = subagent_status_class(&subagent.status);
-            let title = if subagent.title.is_empty() {
-                "Subagent".to_string()
-            } else {
-                subagent.title.replace('_', " ")
-            };
-            let action = subagent.action.replace('_', " ");
-            let child_threads = subagent.child_thread_ids.join(", ");
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
-                    {render_activity_icon(ActivityIcon::Subagent)}
-                    div { class: "min-w-0",
-                        details { open: subagent.status == "in_progress", class: "disclosure text-sm text-muted-foreground",
-                            summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                                span { class: "font-medium text-foreground/85", "{title}" }
-                                span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                                {render_disclosure_icon()}
-                            }
-                            div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
-                                span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
-                                if !subagent.action.is_empty() {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{action}" }
-                                }
-                                if let Some(agent_name) = &subagent.agent_name {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{agent_name}" }
-                                }
-                                if let Some(model) = &subagent.model {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 font-mono text-foreground/60", "{model}" }
-                                }
-                                if let Some(effort) = &subagent.reasoning_effort {
-                                    span { class: "rounded-full bg-foreground/[0.055] px-2 py-0.5 text-foreground/60", "{effort}" }
-                                }
-                            }
-                            if let Some(prompt) = &subagent.prompt {
-                                div { class: "mt-2 rounded-lg bg-foreground/[0.025] p-2 text-xs leading-relaxed text-foreground/75 ring-1 ring-inset ring-foreground/10",
-                                    div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", "Prompt" }
-                                    div { class: "whitespace-pre-wrap", "{prompt}" }
-                                }
-                            }
-                            div { class: "mt-2 grid gap-1 text-[10px] text-muted-foreground/75",
-                                if let Some(thread_id) = &subagent.thread_id {
-                                    div { span { class: "font-semibold", "Thread " } code { class: "font-mono", "{thread_id}" } }
-                                }
-                                if let Some(parent_thread_id) = &subagent.parent_thread_id {
-                                    div { span { class: "font-semibold", "Parent " } code { class: "font-mono", "{parent_thread_id}" } }
-                                }
-                                if !child_threads.is_empty() {
-                                    div { span { class: "font-semibold", "Children " } code { class: "break-all font-mono", "{child_threads}" } }
-                                }
-                                div { span { class: "font-semibold", "Call " } code { class: "font-mono", "{subagent.call_id}" } }
-                            }
-                            if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
-                                details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
-                                    summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                                        span { class: "font-medium", "Raw event" }
-                                        {render_disclosure_icon()}
-                                    }
-                                    pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
-                                }
-                            }
-                        }
-                        if !children.is_empty() {
-                            div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
-                                for (child_key , child) in children {
-                                    {render_tool_child(*child_key, child)}
-                                }
-                            }
+        ChatBlock::Subagent(subagent) => rsx! {
+            SubagentActivity {
+                key: "{key}",
+                title: subagent.title.clone(),
+                status: subagent.status.clone(),
+                provider: subagent.provider.clone(),
+                action: subagent.action.clone(),
+                agent_name: subagent.agent_name.clone(),
+                model: subagent.model.clone(),
+                reasoning_effort: subagent.reasoning_effort.clone(),
+                prompt: subagent.prompt.clone(),
+                thread_id: subagent.thread_id.clone(),
+                parent_thread_id: subagent.parent_thread_id.clone(),
+                child_thread_ids: subagent.child_thread_ids.clone(),
+                call_id: subagent.call_id.clone(),
+                raw_input: subagent.raw_input.clone(),
+                icon: Some(render_activity_icon(ActivityIcon::Subagent)),
+                if !children.is_empty() {
+                    div { class: "ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
+                        for (child_key , child) in children {
+                            {render_tool_child(*child_key, child)}
                         }
                     }
                 }
             }
-        }
-        ChatBlock::Plan { steps } => {
-            let n = steps.len();
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
-                    {render_activity_icon(ActivityIcon::Plan)}
-                    details { open: true, class: "disclosure min-w-0 text-sm",
-                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium text-foreground/80", "Plan" }
-                            span { class: "text-xs text-muted-foreground", "{n} tasks" }
-                            {render_disclosure_icon()}
-                        }
-                        ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
-                            for (i , step) in steps.iter().enumerate() {
-                                li { key: "{i}", class: "flex items-start gap-2 text-xs",
-                                    span { class: "mt-px {plan_glyph_class(&step.status)}", "{plan_glyph(&step.status)}" }
-                                    span { class: plan_text_class(&step.status), "{step.content}" }
-                                }
-                            }
-                        }
-                    }
-                }
+        },
+        ChatBlock::Plan { steps } => rsx! {
+            PlanBlock {
+                key: "{key}",
+                icon: Some(render_activity_icon(ActivityIcon::Plan)),
+                steps: steps.iter().map(|step| PlanItem {
+                    content: step.content.clone(),
+                    status: step.status.clone(),
+                }).collect()
             }
-        }
+        },
         ChatBlock::Diff {
             path,
             old_text,
             new_text,
             ..
-        } => {
-            let old = old_text.as_deref().unwrap_or("");
-            let lines: Vec<(String, &'static str)> =
-                similar::TextDiff::from_lines(old, new_text.as_str())
-                    .iter_all_changes()
-                    .filter_map(|c| match c.tag() {
-                        similar::ChangeTag::Delete => Some((
-                            format!("- {}", c.value().trim_end_matches('\n')),
-                            "px-3 bg-red-500/10 text-red-300",
-                        )),
-                        similar::ChangeTag::Insert => Some((
-                            format!("+ {}", c.value().trim_end_matches('\n')),
-                            "px-3 bg-emerald-500/10 text-emerald-300",
-                        )),
-                        similar::ChangeTag::Equal => None,
-                    })
-                    .collect();
-            let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
-            rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
-                    {render_file_activity_icon(path, true)}
-                    details { class: "disclosure min-w-0 text-sm text-muted-foreground",
-                        summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium", "Edited " }
-                            code { class: "truncate font-mono text-xs text-foreground/70", "{fname}" }
-                            {render_disclosure_icon()}
-                        }
-                        div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
-                            div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
-                                for (i , (line , cls)) in lines.iter().enumerate() {
-                                    div { key: "{i}", class: "{cls}", "{line}" }
-                                }
-                            }
-                        }
-                    }
-                }
+        } => rsx! {
+            DiffBlock {
+                key: "{key}",
+                path: path.clone(),
+                old_text: old_text.clone(),
+                new_text: new_text.clone(),
+                icon: Some(render_file_activity_icon(path, true)),
             }
-        }
+        },
         ChatBlock::ToolResult {
             content, is_error, ..
-        } => render_standalone_tool_result(key, content, *is_error),
+        } => rsx! {
+            ToolResultBlock {
+                key: "{key}",
+                content: content.clone(),
+                is_error: *is_error,
+                icon: Some(render_activity_icon(if *is_error {
+                    ActivityIcon::Error
+                } else {
+                    ActivityIcon::Output
+                })),
+            }
+        },
         ChatBlock::Reconnect { attempt, total } => rsx! {
-            div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-amber-500/[0.035]",
-                {render_activity_icon(ActivityIcon::Reconnect)}
-                span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
+            ReconnectBlock {
+                key: "{key}",
+                attempt: *attempt,
+                total: *total,
+                icon: Some(render_activity_icon(ActivityIcon::Reconnect)),
             }
         },
     }
@@ -2774,122 +2674,48 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
     match block {
         ChatBlock::ToolUse { name, args, .. } => {
             let (_, label) = tool_presentation(name, args);
+            let arguments = (!args.is_empty() && args != "{}").then(|| render_tool_args(args));
             rsx! {
-                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "{label}" }
-                        {render_disclosure_icon()}
-                    }
-                    div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
-                    if !args.is_empty() && args != "{}" {
-                        {render_tool_args(args)}
-                    }
+                ToolUseBlock {
+                    key: "{key}",
+                    name: name.clone(),
+                    args: args.clone(),
+                    compact: true,
+                    label: Some(label.into_owned()),
+                    arguments,
                 }
             }
         }
-        ChatBlock::Subagent(subagent) => {
-            let status_label = subagent_status_label(&subagent.status);
-            let status_class = subagent_status_class(&subagent.status);
-            rsx! {
-                details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
-                    summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "{subagent.title}" }
-                        span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                        {render_disclosure_icon()}
-                    }
-                    div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
-                        span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
-                        if let Some(agent_name) = &subagent.agent_name {
-                            span { class: "rounded-full bg-foreground/[0.055] px-1.5 py-0.5", "{agent_name}" }
-                        }
-                    }
-                    if let Some(prompt) = &subagent.prompt {
-                        div { class: "mt-1.5 whitespace-pre-wrap rounded-lg bg-foreground/[0.025] p-2 text-[11px] leading-relaxed ring-1 ring-inset ring-foreground/10", "{prompt}" }
-                    }
-                }
+        ChatBlock::Subagent(subagent) => rsx! {
+            SubagentActivity {
+                key: "{key}",
+                title: subagent.title.clone(),
+                status: subagent.status.clone(),
+                provider: subagent.provider.clone(),
+                action: subagent.action.clone(),
+                agent_name: subagent.agent_name.clone(),
+                model: subagent.model.clone(),
+                reasoning_effort: subagent.reasoning_effort.clone(),
+                prompt: subagent.prompt.clone(),
+                thread_id: subagent.thread_id.clone(),
+                parent_thread_id: subagent.parent_thread_id.clone(),
+                child_thread_ids: subagent.child_thread_ids.clone(),
+                call_id: subagent.call_id.clone(),
+                raw_input: subagent.raw_input.clone(),
+                compact: true,
             }
-        }
+        },
         ChatBlock::ToolResult {
             content, is_error, ..
-        } => render_nested_tool_result(key, content, *is_error),
+        } => rsx! {
+            ToolResultBlock {
+                key: "{key}",
+                content: content.clone(),
+                is_error: *is_error,
+                compact: true,
+            }
+        },
         _ => rsx! {},
-    }
-}
-
-fn subagent_status_label(status: &str) -> &'static str {
-    match status {
-        "in_progress" => "Running",
-        "completed" => "Done",
-        "failed" => "Failed",
-        _ => "Pending",
-    }
-}
-
-fn subagent_status_class(status: &str) -> &'static str {
-    match status {
-        "in_progress" => "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-        "completed" => "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-        "failed" => "bg-red-500/10 text-red-700 dark:text-red-300",
-        _ => "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    }
-}
-
-fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Element {
-    let tone = if is_error {
-        "text-red-600 dark:text-red-300"
-    } else {
-        "text-teal-700/80 dark:text-teal-300/80"
-    };
-    let panel = if is_error {
-        "bg-red-500/[0.045] ring-red-500/15"
-    } else {
-        "bg-teal-500/[0.035] ring-teal-500/10"
-    };
-    let label = if is_error { "Error" } else { "Output" };
-    rsx! {
-        details { key: "{key}", class: "disclosure text-xs {tone}",
-            summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
-                span { class: "font-medium", "{label}" }
-                {render_disclosure_icon()}
-            }
-            pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
-        }
-    }
-}
-
-fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> Element {
-    let tone = if is_error {
-        "text-red-600 dark:text-red-300"
-    } else {
-        "text-teal-700/80 dark:text-teal-300/80"
-    };
-    let panel = if is_error {
-        "bg-red-500/[0.045] ring-red-500/15"
-    } else {
-        "bg-teal-500/[0.035] ring-teal-500/10"
-    };
-    let row = if is_error {
-        "hover:bg-red-500/[0.035]"
-    } else {
-        "hover:bg-teal-500/[0.035]"
-    };
-    let label = if is_error { "Error" } else { "Output" };
-    let icon = if is_error {
-        ActivityIcon::Error
-    } else {
-        ActivityIcon::Output
-    };
-    rsx! {
-        div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
-            {render_activity_icon(icon)}
-            details { class: "disclosure min-w-0 text-sm {tone}",
-                summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                    span { class: "font-medium", "{label}" }
-                    {render_disclosure_icon()}
-                }
-                pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
-            }
-        }
     }
 }
 
@@ -2939,96 +2765,8 @@ fn fmt_elapsed(secs: u32) -> String {
     }
 }
 
-fn plan_glyph(status: &str) -> &'static str {
-    match status {
-        "completed" => "✓",
-        "in_progress" => "◐",
-        _ => "○",
-    }
-}
-
-fn plan_glyph_class(status: &str) -> &'static str {
-    match status {
-        "completed" => "text-emerald-500",
-        "in_progress" => "text-amber-500",
-        _ => "text-muted-foreground",
-    }
-}
-
-fn plan_text_class(status: &str) -> &'static str {
-    match status {
-        "completed" => "text-muted-foreground line-through",
-        "in_progress" => "text-foreground",
-        _ => "text-muted-foreground",
-    }
-}
-
-/// Render assistant markdown to HTML, dropping any raw HTML the agent emits (markdown only —
-/// never inject arbitrary markup into the page).
-fn md_to_html(src: &str) -> String {
-    use pulldown_cmark::{Event, Options, Parser, html};
-    let mut opts = Options::empty();
-    opts.insert(Options::ENABLE_STRIKETHROUGH);
-    opts.insert(Options::ENABLE_TABLES);
-    let parser = Parser::new_ext(src, opts)
-        .filter(|event| !matches!(event, Event::Html(_) | Event::InlineHtml(_)));
-    let mut out = String::new();
-    html::push_html(&mut out, parser);
-    out
-}
-
-/// Scoped styling for markdown rendered via `dangerous_inner_html` (Tailwind can't see generated
-/// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
-/// light and dark.
-const MD_CSS: &str = r#"
-@keyframes agent-status-breathe{0%,100%{opacity:0.58;transform:scale(0.82)}50%{opacity:1;transform:scale(1)}}
-@keyframes agent-working-hop{0%,60%,100%{opacity:0.42;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-.agent-status-dot{animation:agent-status-breathe 1.8s ease-in-out infinite;will-change:opacity,transform}
-.agent-working-dot{animation:agent-working-hop 900ms ease-in-out infinite;will-change:opacity,transform}
-.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);pointer-events:none}
+const CHAT_CSS: &str = r#"
+.agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);filter:blur(16px);pointer-events:none}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-header{border-color:color-mix(in srgb,var(--agent-accent) 12%,transparent)}
-.chat-user-bubble,.chat-assistant-turn{content-visibility:auto;contain-intrinsic-size:auto 160px;contain:layout paint style;transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
-.chat-user-bubble{border-color:color-mix(in srgb,var(--agent-accent) 18%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 19%,transparent),color-mix(in srgb,var(--agent-accent) 9%,transparent) 58%,color-mix(in srgb,var(--agent-accent) 4%,transparent));box-shadow:0 10px 32px color-mix(in srgb,var(--agent-accent) 9%,transparent)}
-.chat-user-bubble:hover{border-color:color-mix(in srgb,var(--agent-accent) 30%,transparent);box-shadow:0 14px 38px color-mix(in srgb,var(--agent-accent) 14%,transparent);transform:translateY(-1px)}
-.chat-assistant-turn{border-color:color-mix(in srgb,var(--agent-accent) 9%,rgba(127,127,127,0.08));background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 5%,transparent),rgba(127,127,127,0.025) 55%,transparent);box-shadow:0 10px 35px rgba(0,0,0,0.035)}
-.chat-assistant-turn::before{content:"";position:absolute;inset:0 auto 0 0;width:2px;background:linear-gradient(180deg,color-mix(in srgb,var(--agent-accent) 82%,transparent),color-mix(in srgb,var(--agent-accent) 52%,transparent),color-mix(in srgb,var(--agent-accent) 28%,transparent));opacity:0.75}
-.chat-assistant-turn:hover{border-color:color-mix(in srgb,var(--agent-accent) 17%,transparent);box-shadow:0 14px 40px color-mix(in srgb,var(--agent-accent) 5%,rgba(0,0,0,0.055))}
-.chat-assistant-turn .disclosure>summary{transition:color 160ms ease}
-.chat-assistant-turn .disclosure>summary:hover{color:color-mix(in srgb,currentColor 68%,var(--agent-accent))}
-.agent-themed-activity{color:var(--agent-accent);background:color-mix(in srgb,var(--agent-accent) 11%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 18%,transparent)}
-.python-activity-icon{background:linear-gradient(145deg,rgba(55,118,171,0.15),rgba(255,212,59,0.11));color:#3776ab;box-shadow:inset 0 0 0 1px rgba(55,118,171,0.3)}
-.agent-working-label{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor)}
-.agent-row-hover:hover{background:color-mix(in srgb,var(--agent-accent) 4%,transparent)}
-.agent-code-panel,.user-context-content{background:color-mix(in srgb,var(--agent-accent) 4%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--agent-accent) 11%,transparent)}
-.agent-context-tree{border-color:color-mix(in srgb,var(--agent-accent) 22%,transparent)}
-.agent-turn-meta{color:color-mix(in srgb,var(--agent-accent) 72%,currentColor);border-color:color-mix(in srgb,var(--agent-accent) 13%,transparent);background:color-mix(in srgb,var(--agent-accent) 7%,transparent)}
-.agent-turn-meta-dot{background:var(--agent-accent)}
-.user-context-panel{border-color:color-mix(in srgb,var(--agent-accent) 14%,transparent);background:color-mix(in srgb,var(--agent-accent) 5%,rgba(127,127,127,0.025))}
-.user-context-panel>summary:hover{color:color-mix(in srgb,currentColor 65%,var(--agent-accent))}
-.chat-md{line-height:1.6;word-break:break-word}
-.chat-md>*:first-child{margin-top:0}
-.chat-md>*:last-child{margin-bottom:0}
-.chat-md h1,.chat-md h2,.chat-md h3,.chat-md h4{font-weight:600;line-height:1.3;margin:0.9em 0 0.35em}
-.chat-md h1{font-size:1.35em}
-.chat-md h2{font-size:1.2em}
-.chat-md h3{font-size:1.05em}
-.chat-md h4{font-size:1em}
-.chat-md p{margin:0.5em 0}
-.chat-md ul,.chat-md ol{margin:0.4em 0;padding-left:1.4em}
-.chat-md ul{list-style:disc}
-.chat-md ol{list-style:decimal}
-.chat-md li{margin:0.15em 0}
-.chat-md li>ul,.chat-md li>ol{margin:0.15em 0}
-.chat-md strong{font-weight:600}
-.chat-md em{font-style:italic}
-.chat-md a{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor);text-decoration-color:color-mix(in srgb,var(--agent-accent) 45%,transparent);text-underline-offset:0.16em}
-.chat-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.88em;background:color-mix(in srgb,var(--agent-accent) 10%,transparent);border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.1em 0.35em;border-radius:0.4em}
-.chat-md pre{background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 7%,transparent),color-mix(in srgb,var(--agent-accent) 3%,transparent));border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.7em 0.9em;border-radius:0.7em;overflow-x:auto;margin:0.6em 0}
-.chat-md pre code{background:none;border:0;padding:0;font-size:0.85em}
-.chat-md blockquote{border-left:2px solid color-mix(in srgb,var(--agent-accent) 48%,transparent);padding-left:0.8em;margin:0.5em 0;opacity:0.85}
-.chat-md hr{border:0;border-top:1px solid rgba(127,127,127,0.25);margin:0.9em 0}
-.chat-md table{border-collapse:collapse;margin:0.5em 0;font-size:0.95em}
-.chat-md th,.chat-md td{border:1px solid rgba(127,127,127,0.3);padding:0.3em 0.6em;text-align:left}
-@media (prefers-reduced-motion:reduce){.agent-chat-caret,.agent-status-dot,.agent-working-dot{animation:none}.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
 "#;

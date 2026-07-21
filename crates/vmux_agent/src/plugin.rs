@@ -180,6 +180,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<vmux_layout::pane::SpawnCounter>()
             .add_message::<AgentCommandRequest>()
             .add_message::<vmux_layout::bookmark::BookmarkOp>()
+            .add_message::<vmux_layout::NewAgentChatRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
@@ -1768,6 +1769,7 @@ fn handle_agent_commands(
     mut stack_writers: (
         MessageWriter<vmux_layout::OpenInNewStackRequest>,
         MessageWriter<vmux_layout::ExtensionInstallRequest>,
+        MessageWriter<vmux_layout::NewAgentChatRequest>,
     ),
     mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
@@ -2109,6 +2111,12 @@ fn handle_agent_commands(
                     }
                     None => AgentCommandResult::Error("invalid bookmark command".to_string()),
                 }
+            }
+            ServiceAgentCommand::NewAgentChat { prompt } => {
+                stack_writers.2.write(vmux_layout::NewAgentChatRequest {
+                    prompt: prompt.clone(),
+                });
+                AgentCommandResult::Ok
             }
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }

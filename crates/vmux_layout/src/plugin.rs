@@ -23,8 +23,8 @@ use crate::window::WindowPlugin;
 use crate::worktree::WorktreePlugin;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
-    LayoutSpawnRequest, LayoutStartupSet, NewStackContext, Open, OpenInNewStackRequest,
-    TabLayoutSpawnRequest, reconcile, settings,
+    LayoutSpawnRequest, LayoutStartupSet, NewAgentChatRequest, NewStackContext, Open,
+    OpenInNewStackRequest, TabLayoutSpawnRequest, reconcile, settings,
 };
 
 /// Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,
@@ -39,6 +39,7 @@ impl Plugin for LayoutPlugin {
             .init_resource::<crate::UpdateState>()
             .add_message::<LayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
+            .add_message::<NewAgentChatRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()

@@ -9,6 +9,7 @@ use crate::event::{
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use vmux_core::event::extension::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
@@ -889,17 +890,10 @@ fn SideSheetView(
 
 #[component]
 fn RemotePanel(remote: RemoteStateEvent) -> Element {
-    let mut show_pairing = use_signal(|| !remote.paired);
+    let mut show_pairing = use_signal(|| false);
+    let mut pairing_generation = use_signal(|| 0_u64);
+    let mut pairing_started_paired = use_signal(|| false);
     let mut copied = use_signal(|| false);
-    let paired = remote.paired;
-    let phase = remote.phase;
-    use_effect(move || {
-        if !paired {
-            show_pairing.set(true);
-        } else if phase != RemotePhase::Enabled {
-            show_pairing.set(false);
-        }
-    });
     let active = remote.phase == RemotePhase::Enabled;
     let transitioning = remote.phase == RemotePhase::Starting;
     let status = match remote.phase {
@@ -909,7 +903,11 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
         RemotePhase::Enabled => "On",
         RemotePhase::Error => "Needs attention",
     };
-    let qr = if active && show_pairing() && !remote.pairing_deep_link.is_empty() {
+    let qr = if active
+        && show_pairing()
+        && (!remote.paired || pairing_started_paired())
+        && !remote.pairing_deep_link.is_empty()
+    {
         pairing_qr_svg(&remote.pairing_deep_link)
     } else {
         None
@@ -965,6 +963,10 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     aria_label: "Toggle Remote",
                     aria_pressed: remote.enabled,
                     onclick: move |_| {
+                        if remote.enabled {
+                            pairing_generation.set(pairing_generation().wrapping_add(1));
+                            show_pairing.set(false);
+                        }
                         let _ = try_cef_bin_emit_rkyv(&RemoteCommandEvent {
                             enabled: !remote.enabled,
                         });
@@ -997,42 +999,66 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     div { class: "h-full w-full rounded-full bg-emerald-400" }
                 }
             } else if active {
-                div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
-                    div {
-                        class: "min-w-0 flex-1 truncate font-mono text-[9px] text-muted-foreground",
-                        title: "{remote.pairing_url}",
-                        "{remote.pairing_url}"
-                    }
-                    button {
-                        r#type: "button",
-                        class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
-                        onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&RemoteCopyEvent);
-                            copied.set(true);
-                        },
-                        if copied() { "Copied" } else { "Copy" }
-                    }
-                }
                 if let Some(svg) = qr {
+                    div { class: "mt-2 flex items-center justify-between gap-2",
+                        div { class: "text-[10px] font-semibold text-foreground", "Connect a device" }
+                        button {
+                            r#type: "button",
+                            class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                            onclick: move |_| {
+                                pairing_generation.set(pairing_generation().wrapping_add(1));
+                                show_pairing.set(false);
+                            },
+                            "Close"
+                        }
+                    }
                     div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
                         div { class: "overflow-hidden rounded-sm", dangerous_inner_html: "{svg}" }
                         div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
                         div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux Remote and pairs automatically" }
                     }
-                    div { class: "mt-1.5 text-[9px] leading-4 text-muted-foreground",
-                        "Or paste the URL above into the mobile app."
+                    div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
+                        div {
+                            class: "min-w-0 flex-1 truncate font-mono text-[9px] text-muted-foreground",
+                            title: "{remote.pairing_url}",
+                            "{remote.pairing_url}"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&RemoteCopyEvent);
+                                copied.set(true);
+                            },
+                            if copied() { "Copied" } else { "Copy" }
+                        }
                     }
-                } else if remote.paired {
+                    div { class: "mt-1.5 text-[9px] leading-4 text-muted-foreground",
+                        "Pairing details hide automatically after 2 minutes."
+                    }
+                } else {
                     div { class: "mt-2 flex items-center gap-2",
-                        div { class: "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-400",
-                            span { class: "size-1.5 rounded-full bg-emerald-400" }
-                            "Phone paired"
+                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-400" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
+                            span { class: if remote.paired { "size-1.5 rounded-full bg-emerald-400" } else { "size-1.5 rounded-full bg-foreground/25" } }
+                            if remote.paired { "Phone paired" } else { "No phone paired" }
                         }
                         button {
                             r#type: "button",
                             class: "text-[10px] font-semibold text-foreground hover:opacity-70",
-                            onclick: move |_| show_pairing.set(true),
-                            "Pair another"
+                            onclick: move |_| {
+                                copied.set(false);
+                                pairing_started_paired.set(remote.paired);
+                                let generation = pairing_generation().wrapping_add(1);
+                                pairing_generation.set(generation);
+                                show_pairing.set(true);
+                                spawn(async move {
+                                    TimeoutFuture::new(120_000).await;
+                                    if pairing_generation() == generation {
+                                        show_pairing.set(false);
+                                    }
+                                });
+                            },
+                            "Connect device"
                         }
                     }
                 }

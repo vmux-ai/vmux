@@ -252,6 +252,11 @@ pub enum AgentCommand {
         anchor: ProcessId,
         title: String,
     },
+    /// Open a focused desktop tab with the default agent and submit its first prompt.
+    /// Appended to preserve existing positional enum discriminants.
+    NewAgentChat {
+        prompt: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -434,6 +439,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         }
         AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
             Err("select_workspace.path is empty")
+        }
+        AgentCommand::NewAgentChat { prompt } if prompt.trim().is_empty() => {
+            Err("new_agent_chat.prompt is empty")
         }
         _ => Ok(()),
     }
@@ -1095,6 +1103,23 @@ mod tests {
             }),
             Err("terminal_send.text is empty")
         );
+    }
+
+    #[test]
+    fn new_agent_chat_requires_prompt_and_roundtrips() {
+        assert_eq!(
+            validate_agent_command(&AgentCommand::NewAgentChat {
+                prompt: "  ".to_string(),
+            }),
+            Err("new_agent_chat.prompt is empty")
+        );
+        let command = AgentCommand::NewAgentChat {
+            prompt: "continue from my phone".to_string(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
+        let back: AgentCommand =
+            rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(back, command);
     }
 
     #[test]

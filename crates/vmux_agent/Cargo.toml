@@ -12,7 +12,6 @@ path = "src/lib.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 rkyv = { workspace = true }
-similar = "2"
 unicode-segmentation = "1"
 vmux_command = { path = "../vmux_command" }
 vmux_terminal = { path = "../vmux_terminal" }
@@ -49,9 +48,9 @@ vmux_space = { path = "../vmux_space" }
 dioxus = { workspace = true }
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
-pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
-vmux_ui = { path = "../vmux_ui", default-features = false }
+vmux_chat_ui = { path = "../vmux_chat_ui" }
 vmux_core = { path = "../vmux_core" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window",
