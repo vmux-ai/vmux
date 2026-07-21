@@ -9650,8 +9650,10 @@ dependencies = [
  "clap",
  "predicates",
  "serde_json",
+ "tempfile",
  "tokio",
  "vmux_mcp",
+ "vmux_profile",
  "vmux_service_client",
 ]
 
@@ -9930,7 +9932,9 @@ dependencies = [
 name = "vmux_profile"
 version = "0.0.28"
 dependencies = [
+ "serde",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

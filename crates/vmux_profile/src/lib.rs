@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod registry;
+
 pub const fn build_profile() -> &'static str {
     env!("VMUX_BUILD_PROFILE")
 }

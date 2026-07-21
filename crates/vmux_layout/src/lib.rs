@@ -18,6 +18,8 @@ pub mod extensions_page;
 pub mod page;
 pub mod protocol;
 pub mod reconcile;
+#[cfg(target_arch = "wasm32")]
+pub mod registry_page;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod snapshot;
 pub mod start;

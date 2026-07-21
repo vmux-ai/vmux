@@ -15,6 +15,9 @@ use vmux_core::event::extension::{
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
+use vmux_core::registry::{
+    REGISTRY_SNAPSHOT_EVENT, RegistryCategory, RegistryItem, RegistrySnapshot, RegistryStatus,
+};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -92,6 +95,14 @@ pub fn Page() -> Element {
         use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
             knowledge_state_received.set(true);
             knowledge_state.set(data);
+        });
+
+    let mut registry_state = use_signal(RegistrySnapshot::default);
+    let mut registry_state_received = use_signal(|| false);
+    let _registry_listener =
+        use_bin_event_listener::<RegistrySnapshot, _>(REGISTRY_SNAPSHOT_EVENT, move |data| {
+            registry_state_received.set(true);
+            registry_state.set(data);
         });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
@@ -232,6 +243,8 @@ pub fn Page() -> Element {
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
                             knowledge_loaded: knowledge_state_received(),
+                            registry: registry_state(),
+                            registry_loaded: registry_state_received(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -816,6 +829,8 @@ fn SideSheetView(
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_loaded: bool,
+    registry: RegistrySnapshot,
+    registry_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
     let active_page = panes
@@ -870,6 +885,7 @@ fn SideSheetView(
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
                 KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
+                RegistryCard { pane_id, registry, loaded: registry_loaded }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
@@ -1163,6 +1179,166 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
             }
         }
     }
+}
+
+fn open_registry(pane_id: u64) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_registry".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path: String::new(),
+    });
+}
+
+#[component]
+fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Element {
+    let mut folded = use_signal(|| false);
+    let root = compact_registry_path(&registry.root);
+    rsx! {
+        div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            div { class: "flex items-center transition-colors hover:bg-glass-hover",
+                button {
+                    r#type: "button",
+                    title: "Open Registry",
+                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
+                    onclick: move |_| open_registry(pane_id),
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        Icon { class: "h-3.5 w-3.5",
+                            path { d: "M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" }
+                        }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "flex items-center gap-1.5",
+                            div { class: "text-ui font-semibold text-foreground", "Registry" }
+                            if registry.updates > 0 {
+                                span { class: "rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300", "{registry.updates} updates" }
+                            }
+                            if registry.conflicts > 0 {
+                                span { class: "rounded-full bg-ansi-1/15 px-1.5 py-0.5 text-[9px] font-medium text-ansi-1", "{registry.conflicts} conflicts" }
+                            }
+                        }
+                        div { class: "truncate text-[10px] text-muted-foreground",
+                            if loaded {
+                                "{registry.installed} installed · {root}"
+                            } else {
+                                "Scanning local tools…"
+                            }
+                        }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    aria_label: if folded() { "Unfold registry" } else { "Fold registry" },
+                    title: if folded() { "Unfold registry" } else { "Fold registry" },
+                    class: if folded() {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    onclick: move |_| folded.set(!folded()),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                }
+            }
+            div { class: if folded() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "border-t border-foreground/10 p-1.5",
+                        if !loaded {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Scanning…" }
+                        } else if registry.categories.iter().all(|category| category.items.is_empty()) {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No installed tools" }
+                        } else {
+                            div { class: "flex flex-col gap-0.5",
+                                for category in registry.categories.iter().filter(|category| !category.items.is_empty()) {
+                                    RegistryCategoryRow { key: "{category.provider.id()}", category: category.clone(), pane_id }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn RegistryCategoryRow(category: RegistryCategory, pane_id: u64) -> Element {
+    let mut expanded = use_signal(|| false);
+    let updates = category
+        .items
+        .iter()
+        .filter(|item| item.status == RegistryStatus::Outdated)
+        .count();
+    let conflicts = category
+        .items
+        .iter()
+        .filter(|item| item.status == RegistryStatus::Conflict)
+        .count();
+    rsx! {
+        div { class: "flex flex-col gap-0.5",
+            button {
+                r#type: "button",
+                class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                onclick: move |_| expanded.set(!expanded()),
+                Icon { class: "h-3 w-3 shrink-0",
+                    path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                }
+                span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{category.provider.title()}" }
+                if updates > 0 {
+                    span { class: "text-[9px] text-amber-300", "↑{updates}" }
+                }
+                if conflicts > 0 {
+                    span { class: "text-[9px] text-ansi-1", "!{conflicts}" }
+                }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{category.items.len()}" }
+            }
+            if expanded() {
+                div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
+                    for item in category.items.iter() {
+                        RegistryItemRow { key: "{item.id}", item: item.clone(), pane_id }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn RegistryItemRow(item: RegistryItem, pane_id: u64) -> Element {
+    let status_class = match item.status {
+        RegistryStatus::Installed => "bg-emerald-400",
+        RegistryStatus::Outdated => "bg-amber-400",
+        RegistryStatus::Conflict | RegistryStatus::Failed => "bg-ansi-1",
+        RegistryStatus::Missing => "bg-muted-foreground/40",
+        RegistryStatus::Available => "bg-cyan-400/60",
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            title: "{item.detail}",
+            class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            onclick: move |_| open_registry(pane_id),
+            span { class: "size-1.5 shrink-0 rounded-full {status_class}" }
+            span { class: "min-w-0 flex-1 truncate text-ui", "{item.name}" }
+            if item.managed {
+                span { class: "text-[9px] text-cyan-300/80", "managed" }
+            }
+            if let Some(version) = item.version.as_ref() {
+                span { class: "max-w-20 truncate text-[9px] text-muted-foreground/60", "{version}" }
+            }
+        }
+    }
+}
+
+fn compact_registry_path(path: &str) -> String {
+    path.rfind("/.vmux/")
+        .map(|index| format!("~{}", &path[index..]))
+        .unwrap_or_else(|| path.to_string())
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the
