@@ -133,7 +133,7 @@ enum ActivityKind {
 #[component]
 pub fn UserBubble(children: Element) -> Element {
     rsx! {
-        div { class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm",
+        div { class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]",
             {children}
         }
     }
@@ -147,7 +147,7 @@ pub fn AssistantTurn(#[props(default = true)] standalone: bool, children: Elemen
         "w-full"
     };
     rsx! {
-        div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3 {placement}",
+        div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto] {placement}",
             {children}
         }
     }

@@ -2311,13 +2311,16 @@ mod native_tests {
     #[test]
     fn chat_page_bounds_gpu_work_without_losing_motion() {
         let page = include_str!("chat_page/page.rs");
+        let shared = include_str!("../../vmux_chat_ui/src/lib.rs");
         assert!(!page.contains("agent-chat-glow"));
-        assert!(!page.contains("backdrop-blur"));
+        assert!(!shared.contains("shadow-violet-950/5 backdrop-blur"));
+        assert!(!shared.contains("shadow-black/5 backdrop-blur"));
         assert!(!page.contains("blur-["));
-        assert!(page.contains("content-visibility:auto"));
+        assert!(!shared.contains("blur-["));
+        assert!(shared.contains("[content-visibility:auto]"));
+        assert!(shared.contains("[contain:layout_paint_style]"));
         assert!(page.contains("PromptComposer {"));
-        assert!(page.contains("agent-working-hop"));
-        assert!(page.contains("prefers-reduced-motion:reduce"));
+        assert!(shared.contains("motion-safe:animate-pulse"));
         assert!(page.contains("CHAT_HISTORY_PAGE_EVENT"));
         assert!(page.contains("request_chat_history"));
         assert!(page.contains("WorkingIndicator {}"));
