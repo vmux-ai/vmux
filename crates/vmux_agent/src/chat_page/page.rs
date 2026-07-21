@@ -9,15 +9,16 @@ use crate::chat_page::composer::{
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
-    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock,
-    ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue, ChatEscape,
-    ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS, latest_tool_location,
+    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
+    ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
+    ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
+    ChatCreateWorktree, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
+    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands, WORKING_VERBS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -35,7 +36,7 @@ use vmux_ui::components::prompt_composer::{
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
-use vmux_ui::file_icon::type_icon;
+use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
@@ -202,6 +203,31 @@ fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<St
     history
 }
 
+fn composer_activity_counts(items: &[ChatItem]) -> (usize, usize) {
+    let mut subagents = 0usize;
+    let mut tasks = 0usize;
+    for item in items {
+        let ChatItem::Turn(turn) = item else {
+            continue;
+        };
+        for block in &turn.blocks {
+            match block {
+                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
+                    subagents += 1;
+                }
+                ChatBlock::Plan { steps } => {
+                    tasks += steps
+                        .iter()
+                        .filter(|step| step.status != "completed")
+                        .count();
+                }
+                _ => {}
+            }
+        }
+    }
+    (subagents, tasks)
+}
+
 fn file_extension_label(name: &str) -> String {
     std::path::Path::new(name)
         .extension()
@@ -333,7 +359,7 @@ fn install_global_prompt_input(
             if let Some(direction) = direction {
                 approval_sel.set(move_selection(approval_sel(), 3, direction));
             } else if let Some((call_id, _, _)) = active_approval {
-                let index = choice_number_index(&key, 3).unwrap_or_else(|| approval_sel());
+                let index = choice_number_index(&key, 3).unwrap_or(approval_sel());
                 if let Some(decision) = approval_decision_for_index(index)
                     && send_approval(call_id, decision)
                 {
@@ -429,6 +455,7 @@ pub fn Page(
     let mut media_loading = use_signal(|| false);
     let mut current_model_id = use_signal(String::new);
     let mut current_model = use_signal(String::new);
+    let mut composer_context = use_signal(ComposerContext::default);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
@@ -567,6 +594,10 @@ pub fn Page(
         current_model.set(state.current_model_name.clone());
         menu_sel.set(0);
     });
+    let _composer_context =
+        use_bin_event_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
+            composer_context.set(context.clone())
+        });
     let _sess =
         use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
             sessions.set(s.sessions.clone());
@@ -782,7 +813,7 @@ pub fn Page(
                 && !e.modifiers().alt();
             if numbered || entered {
                 e.prevent_default();
-                let index = choice_number_index(&key, 3).unwrap_or_else(|| approval_sel());
+                let index = choice_number_index(&key, 3).unwrap_or(approval_sel());
                 if let Some(decision) = approval_decision_for_index(index)
                     && send_approval(call_id, decision)
                 {
@@ -1027,6 +1058,210 @@ pub fn Page(
         }
     });
 
+    let context = composer_context();
+    let model_name = current_model();
+    let (active_subagents, active_tasks) = composer_activity_counts(&items.read());
+    let queued_count = queued.read().len();
+    let workspace_label = if context.workspace_selected && !context.workspace_name.is_empty() {
+        context.workspace_name.clone()
+    } else {
+        "Select workspace".to_string()
+    };
+    let access_label = if context.auto_allow_count == 0 {
+        "Ask".to_string()
+    } else {
+        format!("Ask · {} allowed", context.auto_allow_count)
+    };
+    let workspace_title = if context.cwd.is_empty() {
+        "Create or select workspace".to_string()
+    } else {
+        format!("Create or select workspace · {}", context.cwd)
+    };
+    let branch_title = if context.branch.is_empty() {
+        "Git repository".to_string()
+    } else {
+        format!("Branch {}", context.branch)
+    };
+    let worktree_title = if context.base_ref.is_empty() {
+        "Linked worktree".to_string()
+    } else {
+        format!("Worktree from {}", context.base_ref)
+    };
+    let run_label = match status().as_str() {
+        "streaming" => "Running",
+        "awaiting" => "Approval",
+        "installing" => "Starting",
+        "errored" => "Error",
+        _ => "Ready",
+    };
+    let composer_footer = rsx! {
+        div { class: "flex min-w-0 items-center justify-between gap-2 border-t border-foreground/[0.08] px-1.5 pb-0.5 pt-1.5",
+            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+                if !model_name.is_empty() {
+                    button {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+                        title: "Change model",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            draft.set("/model ".to_string());
+                            menu_sel.set(0);
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
+                            path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
+                        }
+                        span { class: "truncate", "{model_name}" }
+                        svg {
+                            class: "h-3 w-3 shrink-0 opacity-50",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            path { d: "m8 10 4 4 4-4" }
+                        }
+                    }
+                }
+                span {
+                    class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
+                    title: "Tools ask before protected actions; Allow always is remembered per tool",
+                    svg {
+                        class: "h-3.5 w-3.5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M12 3 5 6v5c0 4.8 2.9 8.2 7 10 4.1-1.8 7-5.2 7-10V6l-7-3Z" }
+                        path { d: "m9 12 2 2 4-4" }
+                    }
+                    "{access_label}"
+                }
+                if context.can_manage_workspace {
+                    button {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
+                        title: "{workspace_title}",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&ChatSelectWorkspace);
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
+                        }
+                        span { class: "truncate", "{workspace_label}" }
+                    }
+                } else if !context.cwd.is_empty() {
+                    span {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
+                        title: "{context.cwd}",
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
+                        }
+                        span { class: "truncate", "{workspace_label}" }
+                    }
+                }
+                if context.is_git_repo {
+                    span {
+                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground",
+                        title: "{branch_title}",
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "6", cy: "5", r: "2" }
+                            circle { cx: "6", cy: "19", r: "2" }
+                            circle { cx: "18", cy: "12", r: "2" }
+                            path { d: "M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3" }
+                            path { d: "M6 7v10" }
+                        }
+                        span { class: "truncate", if context.branch.is_empty() { "Git" } else { "{context.branch}" } }
+                    }
+                    if context.is_worktree {
+                        span {
+                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
+                            title: "{worktree_title}",
+                            "Worktree"
+                        }
+                    } else if context.can_manage_workspace {
+                        button {
+                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-medium text-muted-foreground transition hover:bg-violet-500/[0.08] hover:text-violet-600 dark:hover:text-violet-300",
+                            title: "Create or select a worktree for this workspace",
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&ChatCreateWorktree);
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            "+ Worktree"
+                        }
+                    }
+                    if context.uncommitted > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "● {context.uncommitted}" }
+                    }
+                    if context.ahead > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "↑{context.ahead}" }
+                    }
+                } else if context.workspace_selected {
+                    span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+                }
+            }
+            div { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground",
+                span { class: "flex h-7 items-center gap-1.5 rounded-lg px-2",
+                    span { class: "h-1.5 w-1.5 rounded-full {status_dot_class(&status())}" }
+                    "{run_label}"
+                }
+                if active_subagents > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg bg-violet-500/[0.07] px-2 text-violet-600 dark:text-violet-300", title: "Active subagents",
+                        svg {
+                            class: "h-3.5 w-3.5",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "9", cy: "8", r: "3" }
+                            path { d: "M3.5 19a5.5 5.5 0 0 1 11 0" }
+                            circle { cx: "17", cy: "9", r: "2.5" }
+                            path { d: "M15.5 14.5A4.5 4.5 0 0 1 21 19" }
+                        }
+                        "{active_subagents}"
+                    }
+                }
+                if active_tasks > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg px-2", title: "Open plan tasks", "{active_tasks} tasks" }
+                }
+                if queued_count > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg px-2", title: "Queued prompts", "{queued_count} queued" }
+                }
+            }
+        }
+    };
+
     rsx! {
         main {
             class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
@@ -1045,11 +1280,6 @@ pub fn Page(
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
                     "{header_name}"
-                }
-                if !current_model().is_empty() {
-                    span { class: "min-w-0 truncate rounded-md bg-foreground/[0.06] px-2 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                        "{current_model}"
-                    }
                 }
             }
             div {
@@ -1177,11 +1407,11 @@ pub fn Page(
                                             onclick: {
                                                 let call_id = call_id.clone();
                                                 move |_| {
-                                                    if let Some(decision) = approval_decision_for_index(index) {
-                                                        if send_approval(call_id.clone(), decision) {
-                                                            approval.set(None);
-                                                            approval_sel.set(0);
-                                                        }
+                                                    if let Some(decision) = approval_decision_for_index(index)
+                                                        && send_approval(call_id.clone(), decision)
+                                                    {
+                                                        approval.set(None);
+                                                        approval_sel.set(0);
                                                     }
                                                 }
                                             },
@@ -1412,6 +1642,7 @@ pub fn Page(
                         accent_bg: agent_accent.accent_bg.to_string(),
                         accent_color: theme_accent.clone(),
                         accent_gradient: agent_accent.grad.to_string(),
+                        footer: Some(composer_footer),
                         action: prompt_action,
                         action_title: prompt_action_title.to_string(),
                         action_enabled: prompt_action_enabled,
@@ -1668,26 +1899,24 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
         }
     });
     rsx! {
-        div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3",
-            for (j , block , children) in blocks {
-                {render_block(
-                    j,
-                    block,
-                    &children,
-                    should_expand_thinking(j, block_count),
-                    latest_tool_index == Some(j),
-                )}
+        div { key: "{key}", class: "flex max-w-[92%] flex-col gap-2 self-start",
+            div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
+                for (j , block , children) in blocks {
+                    {render_block(
+                        j,
+                        block,
+                        &children,
+                        should_expand_thinking(j, block_count),
+                        latest_tool_index == Some(j),
+                    )}
+                }
             }
             if turn.running && !reconnecting {
                 WorkingIndicator {}
-            }
-            if !turn.running && let Some(label) = duration_label {
-                div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 pt-0.5 text-[11px] text-muted-foreground/70",
-                    span {}
-                    span { class: "agent-turn-meta inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 tabular-nums",
-                        span { class: "agent-turn-meta-dot h-1.5 w-1.5 rounded-full" }
-                        "{label}"
-                    }
+            } else if let Some(label) = duration_label {
+                div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground/70",
+                    span { class: "h-1.5 w-1.5 rounded-full bg-[color:var(--agent-accent)]" }
+                    span { class: "tabular-nums", "{label}" }
                 }
             }
         }
@@ -1724,18 +1953,14 @@ fn WorkingIndicator() -> Element {
     let verb_text = verb();
     let elapsed_text = fmt_elapsed(elapsed());
     rsx! {
-        div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
-            span { class: "agent-themed-activity flex h-6 w-6 items-center justify-center rounded-lg",
-                span { class: "flex items-end gap-0.5",
-                    span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
-                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:120ms]" }
-                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:240ms]" }
-                }
+        div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground",
+            span { class: "agent-working-label font-medium", "{verb_text}" }
+            span { class: "flex items-end gap-0.5 text-[color:var(--agent-accent)]",
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:120ms]" }
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:240ms]" }
             }
-            div { class: "flex items-baseline gap-2",
-                span { class: "agent-working-label font-medium", "{verb_text}" }
-                span { class: "tabular-nums text-xs", "{elapsed_text}" }
-            }
+            span { class: "tabular-nums text-xs", "{elapsed_text}" }
         }
     }
 }
@@ -1753,6 +1978,8 @@ enum ActivityIcon {
     Worktree,
     Search,
     Image,
+    Screenshot,
+    OpenPage,
     Command,
     Browser,
     Guardian,
@@ -1792,12 +2019,7 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
             "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
         ],
         ActivityIcon::WriteFile => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
-        ActivityIcon::Layout => &[
-            "M4 4h6v6H4Z",
-            "M14 4h6v6h-6Z",
-            "M4 14h6v6H4Z",
-            "M14 14h6v6h-6Z",
-        ],
+        ActivityIcon::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
         ActivityIcon::Worktree => &[
             "M6 3v12",
             "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
@@ -1809,6 +2031,15 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
             "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
             "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
             "m21 15-5-5L5 21",
+        ],
+        ActivityIcon::Screenshot => &[
+            "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
+            "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+        ],
+        ActivityIcon::OpenPage => &[
+            "M14 3h7v7",
+            "m21 3-9 9",
+            "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
         ],
         ActivityIcon::Command => &["m4 17 6-6-6-6", "M12 19h8"],
         ActivityIcon::Browser => &[
@@ -1900,6 +2131,12 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         }
         ActivityIcon::Search => "bg-cyan-500/10 text-cyan-600 ring-cyan-500/20 dark:text-cyan-300",
         ActivityIcon::Image => "bg-pink-500/10 text-pink-600 ring-pink-500/20 dark:text-pink-300",
+        ActivityIcon::Screenshot => {
+            "bg-fuchsia-500/10 text-fuchsia-600 ring-fuchsia-500/20 dark:text-fuchsia-300"
+        }
+        ActivityIcon::OpenPage => {
+            "bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-300"
+        }
         ActivityIcon::Command => {
             "bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-300"
         }
@@ -1951,6 +2188,8 @@ fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
         ToolActivity::Layout => ActivityIcon::Layout,
         ToolActivity::Worktree => ActivityIcon::Worktree,
         ToolActivity::Image => ActivityIcon::Image,
+        ToolActivity::Screenshot => ActivityIcon::Screenshot,
+        ToolActivity::OpenPage => ActivityIcon::OpenPage,
         ToolActivity::Browser => ActivityIcon::Browser,
         ToolActivity::Search => ActivityIcon::Search,
         ToolActivity::Command => ActivityIcon::Command,
@@ -1991,6 +2230,9 @@ fn file_path_from_text(text: &str) -> Option<String> {
     text.split_whitespace()
         .map(|token| token.trim_matches(['"', '\'', ',', ':', ';', '(', ')']))
         .find(|token| {
+            if token.contains("://") {
+                return false;
+            }
             let name = token.rsplit('/').next().unwrap_or(token);
             name.rsplit_once('.')
                 .is_some_and(|(_, ext)| !ext.is_empty() && ext.len() <= 12)
@@ -2020,10 +2262,15 @@ fn render_file_activity_icon(path: &str, write: bool) -> Element {
 
 fn render_tool_activity_icon(name: &str, args: &str, fallback: ActivityIcon) -> Element {
     let activity = tool_activity(name);
-    if matches!(activity, ToolActivity::ReadFile | ToolActivity::WriteFile)
-        && let Some(path) = tool_file_path(args)
+    if matches!(
+        activity,
+        ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
+    ) && let Some(path) = tool_file_path(args)
     {
         return render_file_activity_icon(&path, activity == ToolActivity::WriteFile);
+    }
+    if matches!(file_icon_kind(name, false), FileIcon::Logo(_)) {
+        return render_file_activity_icon(name, false);
     }
     render_activity_icon(fallback)
 }
@@ -2129,6 +2376,8 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
         ToolActivity::Layout => (icon, Cow::Borrowed("Managed layout")),
         ToolActivity::Worktree => (icon, Cow::Borrowed("Managed workspace")),
         ToolActivity::Image => (icon, Cow::Borrowed("Viewed image")),
+        ToolActivity::Screenshot => (icon, Cow::Borrowed("Captured screenshot")),
+        ToolActivity::OpenPage => (icon, Cow::Borrowed("Opened page")),
         ToolActivity::Browser => (icon, Cow::Borrowed("Used browser")),
         ToolActivity::Search => (icon, Cow::Borrowed("Searched files")),
         ToolActivity::Command => (icon, Cow::Borrowed("Ran commands")),
@@ -2146,10 +2395,7 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
 
 fn normalized_tool_args(args: &str) -> Option<serde_json::Value> {
     let mut value = serde_json::from_str::<serde_json::Value>(args).ok()?;
-    loop {
-        let serde_json::Value::Object(map) = &value else {
-            break;
-        };
+    while let serde_json::Value::Object(map) = &value {
         let Some(arguments) = map.get("arguments") else {
             break;
         };
@@ -2179,14 +2425,17 @@ fn tool_arg_is_path(key: &str, value: &str) -> bool {
 
 fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
     let label = tool_arg_label(&key);
+    let row_class = "relative flex min-w-0 items-center gap-3 py-1.5 pl-1 before:absolute before:-left-3 before:top-1/2 before:h-px before:w-2 before:bg-foreground/20";
+    let label_class =
+        "shrink-0 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground/80";
     match value {
         serde_json::Value::String(text) if tool_arg_is_path(&key, &text) => rsx! {
-            div { class: "flex min-w-0 items-center gap-2 rounded-lg bg-foreground/[0.035] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.07]",
+            div { class: "{row_class}",
                 {type_icon(&text, false, "h-4 w-4 shrink-0 opacity-85")}
-                div { class: "min-w-0 flex-1",
-                    div { class: "mb-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
-                    code { class: "block truncate font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
                 }
+                code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
             }
         },
         serde_json::Value::String(text)
@@ -2196,19 +2445,23 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
             ) || text.contains('\n') =>
         {
             rsx! {
-                div { class: "overflow-hidden rounded-lg bg-black/[0.18] ring-1 ring-inset ring-foreground/[0.09]",
-                    div { class: "flex items-center gap-1.5 border-b border-foreground/[0.07] px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65",
-                        span { class: "h-1.5 w-1.5 rounded-full bg-emerald-400/70" }
-                        "{label}"
+                div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                    if !key.is_empty() {
+                        div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
+                            span { class: "h-1.5 w-1.5 rounded-full bg-emerald-400/70" }
+                            "{label}"
+                        }
                     }
-                    pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11px] leading-relaxed text-foreground/78", "{text}" }
+                    pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words border-l border-foreground/20 py-1 pl-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
                 }
             }
         }
         serde_json::Value::String(text) => rsx! {
-            div { class: "flex min-w-0 items-baseline justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
-                span { class: "shrink-0 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
-                code { class: "min-w-0 truncate text-right font-mono text-[11px] text-foreground/78", title: "{text}", "{text}" }
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
             }
         },
         serde_json::Value::Bool(value) => {
@@ -2218,22 +2471,28 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
                 "bg-foreground/[0.04] text-muted-foreground ring-foreground/10"
             };
             rsx! {
-                div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
-                    span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                div { class: "{row_class}",
+                    if !key.is_empty() {
+                        span { class: "{label_class}", "{label}" }
+                    }
                     span { class: "rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset {tone}", "{value}" }
                 }
             }
         }
         serde_json::Value::Number(value) => rsx! {
-            div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
-                span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
-                code { class: "font-mono text-[11px] tabular-nums text-cyan-600 dark:text-cyan-300", "{value}" }
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                code { class: "ml-auto font-mono text-[11px] tabular-nums text-cyan-600 dark:text-cyan-300", "{value}" }
             }
         },
         serde_json::Value::Array(values) => rsx! {
-            div { class: "rounded-lg bg-foreground/[0.025] p-2 ring-1 ring-inset ring-foreground/[0.06]",
-                div { class: "mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
-                div { class: "flex flex-col gap-1.5",
+            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                if !key.is_empty() {
+                    div { class: "mb-1 {label_class}", "{label}" }
+                }
+                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
                     for (index , value) in values.into_iter().enumerate() {
                         {render_tool_arg(format!("{}", index + 1), value)}
                     }
@@ -2241,11 +2500,11 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
             }
         },
         serde_json::Value::Object(values) => rsx! {
-            div { class: "rounded-lg bg-foreground/[0.025] p-2 ring-1 ring-inset ring-foreground/[0.06]",
+            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
                 if !key.is_empty() {
-                    div { class: "mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                    div { class: "mb-1 {label_class}", "{label}" }
                 }
-                div { class: "flex flex-col gap-1.5",
+                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
                     for (child_key , child_value) in values {
                         {render_tool_arg(child_key, child_value)}
                     }
@@ -2253,9 +2512,11 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
             }
         },
         serde_json::Value::Null => rsx! {
-            div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
-                span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
-                span { class: "text-[10px] italic text-muted-foreground/60", "None" }
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                span { class: "ml-auto text-[10px] italic text-muted-foreground/70", "None" }
             }
         },
     }
@@ -2270,14 +2531,14 @@ fn render_tool_args(args: &str) -> Element {
     match value {
         serde_json::Value::Object(map) if map.is_empty() => rsx! {},
         serde_json::Value::Object(map) => rsx! {
-            div { class: "mt-2 flex flex-col gap-1.5", aria_label: "Tool arguments",
+            div { class: "ml-1 mt-2 flex flex-col border-l border-foreground/20 pl-3", aria_label: "Tool arguments",
                 for (key , value) in map {
                     {render_tool_arg(key, value)}
                 }
             }
         },
         value => rsx! {
-            div { class: "mt-2", {render_tool_arg(String::new(), value)} }
+            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3", {render_tool_arg(String::new(), value)} }
         },
     }
 }

@@ -5,6 +5,7 @@
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 pub const CHAT_HISTORY_PAGE_EVENT: &str = "chat_history_page";
+pub const COMPOSER_CONTEXT_EVENT: &str = "composer_context";
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
@@ -71,6 +72,32 @@ pub struct ChatSnapshot {
     pub handoff_message_count: u32,
     pub choice_question: String,
     pub choice_options: Vec<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ComposerContext {
+    pub cwd: String,
+    pub workspace_name: String,
+    pub workspace_selected: bool,
+    pub is_git_repo: bool,
+    pub is_worktree: bool,
+    pub branch: String,
+    pub base_ref: String,
+    pub uncommitted: u32,
+    pub ahead: u32,
+    pub can_manage_workspace: bool,
+    pub auto_allow_count: u32,
 }
 
 #[derive(
@@ -219,6 +246,30 @@ pub struct ChatCancelQueuedPrompt {
     rkyv::Deserialize,
 )]
 pub struct ChatEscape;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatSelectWorkspace;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatCreateWorktree;
 
 /// Bin-event id: native → page, the resumable-session list (answer to [`ResumeListRequest`]).
 pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";

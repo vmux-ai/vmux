@@ -50,6 +50,8 @@ pub(crate) enum ToolActivity {
     Layout,
     Worktree,
     Image,
+    Screenshot,
+    OpenPage,
     Browser,
     Search,
     Command,
@@ -270,7 +272,11 @@ pub(crate) fn tool_activity(name: &str) -> ToolActivity {
     let lower = name.to_ascii_lowercase();
     if is_guardian_tool(name) {
         ToolActivity::Guardian
-    } else if lower.contains("read_file") || lower.contains("read file") {
+    } else if lower.contains("read_file")
+        || lower.contains("read file")
+        || lower.contains("open_file")
+        || lower.contains("open file")
+    {
         ToolActivity::ReadFile
     } else if matches!(lower.as_str(), "edit" | "write")
         || lower.contains("editing file")
@@ -294,6 +300,10 @@ pub(crate) fn tool_activity(name: &str) -> ToolActivity {
         || lower.contains("delete_space")
     {
         ToolActivity::Layout
+    } else if lower.contains("screenshot") {
+        ToolActivity::Screenshot
+    } else if lower.contains("open_page") || lower.contains("open page") {
+        ToolActivity::OpenPage
     } else if lower.contains("view_image") || lower.contains("view image") {
         ToolActivity::Image
     } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
@@ -756,6 +766,9 @@ mod tests {
         assert_eq!(tool_activity("read_layout"), ToolActivity::Layout);
         assert_eq!(tool_activity("create_worktree"), ToolActivity::Worktree);
         assert_eq!(tool_activity("view_image"), ToolActivity::Image);
+        assert_eq!(tool_activity("vmux_screenshot"), ToolActivity::Screenshot);
+        assert_eq!(tool_activity("vmux_open_page"), ToolActivity::OpenPage);
+        assert_eq!(tool_activity("vmux_open_file"), ToolActivity::ReadFile);
         assert_eq!(tool_activity("browser_navigate"), ToolActivity::Browser);
         assert_eq!(tool_activity("search_files"), ToolActivity::Search);
         assert_eq!(tool_activity("exec_command"), ToolActivity::Command);

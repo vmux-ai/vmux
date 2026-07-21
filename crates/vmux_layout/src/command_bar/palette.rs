@@ -365,7 +365,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     } else if is_start && q.trim().is_empty() {
         Vec::new()
     } else if start_prompt_mode {
-        start_page_results(&pages, &q)
+        start_page_results(&pages, &work_dirs, &recent_files, &q)
     } else {
         let history = history_suggestions();
         let r = filter_results(

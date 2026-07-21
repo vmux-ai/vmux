@@ -4536,7 +4536,11 @@ mod tests {
             .world()
             .get::<PaneSplit>(browser)
             .expect("newest non-agent (browser) leaf must split for the new terminal type");
-        assert_eq!(split.direction, PaneSplitDirection::Row, "wide => Row");
+        assert_eq!(
+            split.direction,
+            PaneSplitDirection::Column,
+            "first terminal stacks below the browser"
+        );
         assert!(
             app.world().get::<PaneSplit>(agent).is_none(),
             "agent pane untouched"

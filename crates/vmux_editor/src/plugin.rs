@@ -2957,7 +2957,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     title: "Files",
     keywords: &["file", "open"],
     icon: Some(vmux_core::BuiltinIcon::Files),
-    command_bar: false,
+    command_bar: true,
 };
 
 /// Wires the file editor: buffer loading, filesystem watching, image and theme sends, LSP

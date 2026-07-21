@@ -299,7 +299,7 @@ mod tests {
     fn start_shows_agents_as_result_rows() {
         let source = include_str!("palette.rs");
 
-        assert!(source.contains("start_page_results(&pages, &q)"));
+        assert!(source.contains("start_page_results(&pages, &work_dirs, &recent_files, &q)"));
         assert!(source.contains("agent_page_url(item)"));
         assert!(!source.contains("start-agent-select"));
     }

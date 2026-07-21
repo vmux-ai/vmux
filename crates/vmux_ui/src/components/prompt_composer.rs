@@ -63,6 +63,7 @@ pub fn PromptComposer(
     accent_bg: String,
     accent_color: String,
     accent_gradient: String,
+    #[props(default)] footer: Option<Element>,
     #[props(default)] action: PromptComposerAction,
     action_title: String,
     action_enabled: bool,
@@ -127,9 +128,11 @@ pub fn PromptComposer(
     rsx! {
         style { dangerous_inner_html: PROMPT_COMPOSER_CSS }
         PromptBox {
+            vertical: true,
             class: "vmux-prompt-composer",
             style: "--vmux-prompt-accent:{accent_color};",
-            button {
+            div { class: "relative z-10 flex w-full items-center",
+                button {
                 class: "relative z-10 ml-0.5 flex h-8 w-8 shrink-0 self-center items-center justify-center rounded-lg text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
                 title: "Attach files (/upload)",
                 onmousedown: move |event| event.prevent_default(),
@@ -145,7 +148,7 @@ pub fn PromptComposer(
                     path { d: "M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" }
                 }
             }
-            div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
+                div { class: "relative z-10 flex min-w-0 flex-1 flex-wrap items-center gap-1 px-2",
                 for attachment in attachments.iter().cloned() {
                     div {
                         key: "{attachment.key}",
@@ -243,7 +246,7 @@ pub fn PromptComposer(
                     }
                 }
             }
-            button {
+                button {
                 class: "{action_class}",
                 disabled: !action_enabled,
                 title: "{action_title}",
@@ -273,6 +276,10 @@ pub fn PromptComposer(
                         path { d: "M5 12l7-7 7 7" }
                     }
                 }
+                }
+            }
+            if let Some(footer) = footer {
+                div { class: "relative z-10 w-full", {footer} }
             }
         }
     }

@@ -124,6 +124,19 @@ pub fn resolve_placement(
         return Placement::AddTab { pane: same.pane };
     }
 
+    if kind == PageKind::Terminal
+        && leaves.iter().all(|leaf| {
+            leaf.kinds.contains(&PageKind::Agent)
+                || (leaf.kinds.len() == 1 && leaf.kinds.contains(&PageKind::Browser))
+        })
+        && let Some(browser) = newest_leaf_with_kind(leaves, PageKind::Browser)
+    {
+        return Placement::Spiral {
+            anchor: browser.pane,
+            axis: PaneSplitDirection::Column,
+        };
+    }
+
     if let Some(anchor) = newest_nonagent_leaf(leaves) {
         return Placement::Spiral {
             anchor: anchor.pane,
@@ -312,6 +325,22 @@ mod tests {
             Placement::Spiral {
                 anchor: e(3),
                 axis: PaneSplitDirection::Row
+            }
+        );
+    }
+
+    #[test]
+    fn first_terminal_splits_browser_into_top_and_bottom() {
+        let leaves = [
+            leaf(1, &[PageKind::Agent], 1, (800.0, 900.0)),
+            leaf(2, &[PageKind::Browser], 10, (900.0, 400.0)),
+        ];
+        let got = resolve_placement("vmux://terminal/", None, &leaves, e(1));
+        assert_eq!(
+            got,
+            Placement::Spiral {
+                anchor: e(2),
+                axis: PaneSplitDirection::Column
             }
         );
     }

@@ -477,7 +477,7 @@ fn select_workspace_definition() -> ToolDefinition {
 fn request_user_choice_definition() -> ToolDefinition {
     ToolDefinition {
         name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. Use this for ambiguous worktree selection or other short user decisions. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
+        description: "Show a native multiple-choice question in the agent conversation. When the user asks for options, alternatives, or things to choose or play with, use this instead of returning a plain Markdown list. Also use it for ambiguous worktree selection and other short user decisions. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
