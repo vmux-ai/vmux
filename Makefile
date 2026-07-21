@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup
+.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -149,6 +149,23 @@ cleanup:
 	rm -rf "$$dev/logs"; \
 	rm -f "$$base/services/"vmux-dev.* "$$base/services/"vmux-dev-*; \
 	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + spaces + dev browser profiles)"
+
+cleanup-local:
+	@pkill -f "/Applications/Vmux.app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
+	@pkill -f "target/release/Vmux .*app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
+	@sleep 1
+	@case "$$(uname -s)" in \
+		Darwin) base="$$HOME/Library/Application Support/Vmux" ;; \
+		*) base="$${TMPDIR:-/tmp}/Vmux" ;; \
+	esac; stamp="$$(date +%Y%m%d-%H%M%S)"; \
+	if [ -f "$$base/store.ron" ]; then \
+		mv "$$base/store.ron" "$$base/store.ron.cleanup-$$stamp"; \
+		echo "cleanup-local: backed up layout to $$base/store.ron.cleanup-$$stamp"; \
+	fi; \
+	rm -f "$$base/store.version"; \
+	rm -f "$$base/profiles/"*/session.ron; \
+	rm -f "$$base/services/"vmux-local.* "$$base/services/"vmux-local-*; \
+	echo "cleanup-local: reset local/release layout (kept settings and browser profiles)"
 
 # Website
 build-website-css:
