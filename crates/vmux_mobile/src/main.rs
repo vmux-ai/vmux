@@ -243,6 +243,94 @@ fn select_remote_media_entry(
     selected.set(0);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn start_new_chat(
+    api: Signal<Option<Api>>,
+    mut sessions: Signal<Vec<RemoteSession>>,
+    current: Signal<Option<RemoteSession>>,
+    messages: Signal<Vec<Message>>,
+    live_delta: Signal<String>,
+    status: Signal<RemoteStatus>,
+    approval: Signal<Option<RemoteApproval>>,
+    connected: Signal<bool>,
+    stream_generation: Signal<u64>,
+    mut draft: Signal<String>,
+    mut error: Signal<String>,
+    mut creating: Signal<bool>,
+) {
+    let text = draft.peek().trim().to_string();
+    let Some(client) = api() else { return };
+    if text.is_empty() || creating() {
+        return;
+    }
+    let known = sessions
+        .read()
+        .iter()
+        .map(|session| session.sid.clone())
+        .collect::<std::collections::HashSet<_>>();
+    creating.set(true);
+    error.set(String::new());
+    spawn(async move {
+        match client
+            .post_json("/api/chats", &NewChatRequest { text })
+            .await
+        {
+            Ok(()) => {
+                for _ in 0..40 {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    if let Ok(next) = client.sessions().await {
+                        let created = next
+                            .iter()
+                            .find(|session| !known.contains(&session.sid))
+                            .cloned();
+                        sessions.set(next);
+                        if let Some(created) = created {
+                            draft.set(String::new());
+                            creating.set(false);
+                            open_session(
+                                client,
+                                created,
+                                current,
+                                messages,
+                                live_delta,
+                                status,
+                                approval,
+                                connected,
+                                stream_generation,
+                            );
+                            return;
+                        }
+                    }
+                }
+                error.set("The desktop opened the chat, but its stack did not appear.".to_string());
+            }
+            Err(ApiError::Unauthorized) => {
+                error.set("Pairing expired. Pair with the Mac again.".to_string());
+            }
+            Err(ApiError::Message(message)) => error.set(message),
+        }
+        creating.set(false);
+    });
+}
+
+fn leave_session(
+    mut current: Signal<Option<RemoteSession>>,
+    mut messages: Signal<Vec<Message>>,
+    mut live_delta: Signal<String>,
+    mut status: Signal<RemoteStatus>,
+    mut approval: Signal<Option<RemoteApproval>>,
+    mut connected: Signal<bool>,
+    mut generation: Signal<u64>,
+) {
+    generation.set(generation().wrapping_add(1));
+    current.set(None);
+    messages.set(Vec::new());
+    live_delta.set(String::new());
+    status.set(RemoteStatus::Idle);
+    approval.set(None);
+    connected.set(false);
+}
+
 #[component]
 fn App() -> Element {
     let mut auth = use_signal(|| AuthState::Loading);
@@ -250,9 +338,9 @@ fn App() -> Element {
     let mut error = use_signal(String::new);
     let mut api = use_signal(|| None::<Api>);
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
-    let mut current = use_signal(|| None::<RemoteSession>);
-    let mut messages = use_signal(Vec::<Message>::new);
-    let mut live_delta = use_signal(String::new);
+    let current = use_signal(|| None::<RemoteSession>);
+    let messages = use_signal(Vec::<Message>::new);
+    let live_delta = use_signal(String::new);
     let status = use_signal(|| RemoteStatus::Idle);
     let mut approval = use_signal(|| None::<RemoteApproval>);
     let mut draft = use_signal(String::new);
@@ -263,15 +351,13 @@ fn App() -> Element {
     let mut media_selected = use_signal(|| 0_usize);
     let mut attachment_sid = use_signal(String::new);
     let connected = use_signal(|| false);
-    let mut drawer = use_signal(|| false);
     let mut stream_generation = use_signal(|| 0_u64);
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
-    let mut new_chat_open = use_signal(|| false);
     let mut new_chat_draft = use_signal(String::new);
-    let mut new_chat_error = use_signal(String::new);
-    let mut creating_chat = use_signal(|| false);
+    let new_chat_error = use_signal(String::new);
+    let creating_chat = use_signal(|| false);
 
     use_effect(move || {
         let _ = messages.read().len();
@@ -351,22 +437,8 @@ fn App() -> Element {
         match client.sessions().await {
             Ok(next) => {
                 api.set(Some(client.clone()));
-                sessions.set(next.clone());
+                sessions.set(next);
                 auth.set(AuthState::Paired);
-                if let Some(first) = next.first().cloned() {
-                    open_session(
-                        client,
-                        first,
-                        current,
-                        messages,
-                        live_delta,
-                        status,
-                        approval,
-                        connected,
-                        drawer,
-                        stream_generation,
-                    );
-                }
             }
             Err(ApiError::Unauthorized) => {
                 clear_credentials();
@@ -417,22 +489,8 @@ fn App() -> Element {
                     save_credentials(&credentials);
                     pair_url.set(pairing_url(&credentials));
                     api.set(Some(client.clone()));
-                    sessions.set(next.clone());
+                    sessions.set(next);
                     auth.set(AuthState::Paired);
-                    if let Some(first) = next.first().cloned() {
-                        open_session(
-                            client,
-                            first,
-                            current,
-                            messages,
-                            live_delta,
-                            status,
-                            approval,
-                            connected,
-                            drawer,
-                            stream_generation,
-                        );
-                    }
                 }
                 Err(ApiError::Unauthorized) => {
                     error.set("Pairing token was rejected.".to_string());
@@ -458,23 +516,7 @@ fn App() -> Element {
             };
             match client.sessions().await {
                 Ok(next) => {
-                    sessions.set(next.clone());
-                    if current().is_none()
-                        && let Some(first) = next.first().cloned()
-                    {
-                        open_session(
-                            client,
-                            first,
-                            current,
-                            messages,
-                            live_delta,
-                            status,
-                            approval,
-                            connected,
-                            drawer,
-                            stream_generation,
-                        );
-                    }
+                    sessions.set(next);
                 }
                 Err(ApiError::Unauthorized) => {
                     clear_credentials();
@@ -506,6 +548,54 @@ fn App() -> Element {
                 on_value: move |value| pair_url.set(value),
                 on_pair: move |_| {
                     pending_pair_url.set(Some(pair_url()));
+                },
+            }
+        };
+    }
+
+    if current().is_none() {
+        return rsx! {
+            AppHead {}
+            MobileStartPage {
+                sessions: sessions(),
+                draft: new_chat_draft(),
+                error: new_chat_error(),
+                creating: creating_chat(),
+                on_draft: move |value| new_chat_draft.set(value),
+                on_submit: move |_| start_new_chat(
+                    api,
+                    sessions,
+                    current,
+                    messages,
+                    live_delta,
+                    status,
+                    approval,
+                    connected,
+                    stream_generation,
+                    new_chat_draft,
+                    new_chat_error,
+                    creating_chat,
+                ),
+                on_open: move |session| {
+                    let Some(client) = api() else { return };
+                    open_session(
+                        client,
+                        session,
+                        current,
+                        messages,
+                        live_delta,
+                        status,
+                        approval,
+                        connected,
+                        stream_generation,
+                    );
+                },
+                on_disconnect: move |_| {
+                    clear_credentials();
+                    stream_generation.set(stream_generation().wrapping_add(1));
+                    api.set(None);
+                    sessions.set(Vec::new());
+                    auth.set(AuthState::Unpaired);
                 },
             }
         };
@@ -563,9 +653,26 @@ fn App() -> Element {
             header { class: "flex shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl",
                 button {
                     class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-lg text-zinc-300 active:bg-white/10",
-                    onclick: move |_| drawer.set(true),
-                    aria_label: "Open sessions",
-                    "☰"
+                    onclick: move |_| leave_session(
+                        current,
+                        messages,
+                        live_delta,
+                        status,
+                        approval,
+                        connected,
+                        stream_generation,
+                    ),
+                    aria_label: "Back to stacks",
+                    svg {
+                        class: "h-5 w-5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "m15 18-6-6 6-6" }
+                    }
                 }
                 div { class: "min-w-0 flex-1",
                     if let Some(session) = current_value.as_ref() {
@@ -589,7 +696,7 @@ fn App() -> Element {
             main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5",
                 if messages().is_empty() && live_delta().is_empty() {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-zinc-600",
-                        if current_value.is_some() { "No messages yet." } else { "Open the menu to start a new chat." }
+                        "No messages yet."
                     }
                 }
                 div { class: "mx-auto flex w-full max-w-3xl flex-col",
@@ -803,158 +910,114 @@ fn App() -> Element {
             }
         }
 
-        if drawer() {
-            div {
-                class: "fixed inset-0 z-50 bg-black/65 backdrop-blur-sm",
-                onclick: move |_| drawer.set(false),
-                aside {
-                    class: "flex h-full w-[88%] max-w-sm flex-col border-r border-white/10 bg-[#111114] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-2xl",
-                    onclick: move |event| event.stop_propagation(),
-                    div { class: "flex h-14 shrink-0 items-center border-b border-white/10 px-4",
-                        span { class: "text-sm font-semibold", "Sessions" }
-                        span { class: "ml-2 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-zinc-400", "{sessions().len()}" }
-                        button {
-                            class: "ml-auto rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
-                            onclick: move |_| {
-                                clear_credentials();
-                                let next = stream_generation().wrapping_add(1);
-                                stream_generation.set(next);
-                                api.set(None);
-                                sessions.set(Vec::new());
-                                current.set(None);
-                                messages.set(Vec::new());
-                                live_delta.set(String::new());
-                                drawer.set(false);
-                                auth.set(AuthState::Unpaired);
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct MobileStartPageProps {
+    sessions: Vec<RemoteSession>,
+    draft: String,
+    error: String,
+    creating: bool,
+    on_draft: EventHandler<String>,
+    on_submit: EventHandler<()>,
+    on_open: EventHandler<RemoteSession>,
+    on_disconnect: EventHandler<()>,
+}
+
+#[component]
+fn MobileStartPage(props: MobileStartPageProps) -> Element {
+    let can_submit = !props.creating && !props.draft.trim().is_empty();
+    let submit_from_key = props.on_submit;
+    let submit_from_action = props.on_submit;
+    let on_open = props.on_open;
+
+    rsx! {
+        div { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100",
+            header { class: "flex shrink-0 items-center gap-2 px-5 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]",
+                span { class: "text-sm font-semibold", "Vmux" }
+                span { class: "ml-auto h-2 w-2 rounded-full bg-emerald-400" }
+                span { class: "text-[11px] text-zinc-500", "Mac connected" }
+                button {
+                    class: "ml-2 rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
+                    r#type: "button",
+                    onclick: move |_| props.on_disconnect.call(()),
+                    "Disconnect"
+                }
+            }
+            main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]",
+                div { class: "mx-auto flex w-full max-w-3xl flex-col pt-20",
+                    div { class: "flex flex-col items-center gap-2 text-center",
+                        h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-5xl font-semibold leading-none tracking-tight text-transparent", "vmux" }
+                        p { class: "text-sm text-zinc-500", "One prompt. Anything, done." }
+                    }
+                    div { class: "mt-8 w-full",
+                        PromptComposer {
+                            value: props.draft.clone(),
+                            placeholder: "Search or ask…".to_string(),
+                            accent_color: "#a78bfa".to_string(),
+                            accent_gradient: "from-violet-500 to-violet-700".to_string(),
+                            tone: PromptBoxTone::Dark,
+                            autofocus: true,
+                            show_attach: false,
+                            action: PromptComposerAction::Send,
+                            action_title: if props.creating { "Starting…".to_string() } else { "Start chat".to_string() },
+                            action_enabled: can_submit,
+                            on_input: move |value| props.on_draft.call(value),
+                            on_keydown: move |event: KeyboardEvent| {
+                                if event.key() == Key::Enter && !event.modifiers().shift() {
+                                    event.prevent_default();
+                                    submit_from_key.call(());
+                                }
                             },
-                            "Disconnect"
+                            on_paste: move |_| {},
+                            on_attach: move |_| {},
+                            on_remove_attachment: move |_| {},
+                            on_action: move |_| submit_from_action.call(()),
+                        }
+                        if !props.error.is_empty() {
+                            div { class: "mt-3 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200", "{props.error}" }
                         }
                     }
-                    button {
-                        class: "mx-2 mt-2 flex h-11 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-semibold text-black active:scale-[0.99]",
-                        r#type: "button",
-                        onclick: move |_| {
-                            new_chat_error.set(String::new());
-                            new_chat_open.set(true);
-                        },
-                        "+ New chat"
-                    }
-                    if new_chat_open() {
-                        form {
-                            class: "mx-2 mt-2 rounded-2xl border border-white/10 bg-black/20 p-3",
-                            onsubmit: move |event| {
-                                event.prevent_default();
-                                let text = new_chat_draft().trim().to_string();
-                                let Some(client) = api() else { return };
-                                if text.is_empty() || creating_chat() {
-                                    return;
-                                }
-                                let known = sessions()
-                                    .into_iter()
-                                    .map(|session| session.sid)
-                                    .collect::<std::collections::HashSet<_>>();
-                                creating_chat.set(true);
-                                new_chat_error.set(String::new());
-                                spawn(async move {
-                                    match client.post_json("/api/chats", &NewChatRequest { text }).await {
-                                        Ok(()) => {
-                                            for _ in 0..40 {
-                                                tokio::time::sleep(Duration::from_millis(250)).await;
-                                                if let Ok(next) = client.sessions().await {
-                                                    let created = next
-                                                        .iter()
-                                                        .find(|session| !known.contains(&session.sid))
-                                                        .cloned();
-                                                    sessions.set(next);
-                                                    if let Some(created) = created {
-                                                        new_chat_draft.set(String::new());
-                                                        new_chat_open.set(false);
-                                                        creating_chat.set(false);
-                                                        open_session(
-                                                            client,
-                                                            created,
-                                                            current,
-                                                            messages,
-                                                            live_delta,
-                                                            status,
-                                                            approval,
-                                                            connected,
-                                                            drawer,
-                                                            stream_generation,
-                                                        );
-                                                        return;
-                                                    }
-                                                }
-                                            }
-                                            new_chat_error.set("The desktop opened the chat, but its session did not appear.".to_string());
-                                        }
-                                        Err(ApiError::Unauthorized) => {
-                                            new_chat_error.set("Pairing expired. Pair with the Mac again.".to_string());
-                                        }
-                                        Err(ApiError::Message(message)) => new_chat_error.set(message),
-                                    }
-                                    creating_chat.set(false);
-                                });
-                            },
-                            textarea {
-                                class: "min-h-24 w-full resize-none rounded-xl border border-white/10 bg-zinc-950 px-3 py-3 text-base leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
-                                rows: "3",
-                                autofocus: true,
-                                placeholder: "What should the agent do?",
-                                value: "{new_chat_draft}",
-                                oninput: move |event| new_chat_draft.set(event.value()),
+                    section { class: "mt-12",
+                        div { class: "mb-3 flex items-center gap-2 px-1",
+                            h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500", "Stacks" }
+                            span { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-zinc-500", "{props.sessions.len()}" }
+                        }
+                        div { class: "flex flex-col gap-2",
+                            if props.sessions.is_empty() {
+                                div { class: "rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600", "No open stacks" }
                             }
-                            if !new_chat_error().is_empty() {
-                                div { class: "mt-2 text-xs leading-5 text-red-300", "{new_chat_error}" }
-                            }
-                            div { class: "mt-3 flex gap-2",
+                            for session in props.sessions.iter().cloned() {
                                 button {
-                                    class: "h-10 flex-1 rounded-xl bg-white/10 text-sm font-semibold text-zinc-300 active:scale-[0.99]",
+                                    key: "{session.sid}",
+                                    class: "flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-white/[0.065]",
                                     r#type: "button",
-                                    disabled: creating_chat(),
-                                    onclick: move |_| new_chat_open.set(false),
-                                    "Cancel"
-                                }
-                                button {
-                                    class: "h-10 flex-1 rounded-xl bg-white text-sm font-semibold text-black active:scale-[0.99] disabled:opacity-40",
-                                    r#type: "submit",
-                                    disabled: creating_chat() || new_chat_draft().trim().is_empty(),
-                                    if creating_chat() { "Starting…" } else { "Start chat" }
-                                }
-                            }
-                        }
-                    }
-                    div { class: "min-h-0 flex-1 overflow-y-auto p-2",
-                        if sessions().is_empty() {
-                            div { class: "px-3 py-8 text-center text-sm text-zinc-600", "No active sessions" }
-                        }
-                        for session in sessions() {
-                            button {
-                                key: "{session.sid}",
-                                class: if session.sid == selected_sid { "mb-1 block w-full rounded-xl bg-white/[0.08] px-3 py-3 text-left" } else { "mb-1 block w-full rounded-xl px-3 py-3 text-left active:bg-white/[0.06]" },
-                                onclick: {
-                                    let next = session.clone();
-                                    move |_| {
-                                        let Some(client) = api() else { return };
-                                        open_session(
-                                            client,
-                                            next.clone(),
-                                            current,
-                                            messages,
-                                            live_delta,
-                                            status,
-                                            approval,
-                                            connected,
-                                            drawer,
-                                            stream_generation,
-                                        );
-                                    }
-                                },
-                                div { class: "flex items-center gap-2",
+                                    onclick: {
+                                        let next = session.clone();
+                                        move |_| on_open.call(next.clone())
+                                    },
                                     span { class: status_dot(&session.status) }
-                                    span { class: "min-w-0 flex-1 truncate text-sm font-medium", "{session.name}" }
+                                    div { class: "min-w-0 flex-1",
+                                        div { class: "truncate text-sm font-medium text-zinc-200", "{session.name}" }
+                                        div { class: "mt-1 truncate text-[11px] text-zinc-600",
+                                            "{session.runtime} · {cwd_name(&session.cwd)}"
+                                            if let Some(model) = session.model.as_ref() {
+                                                " · {model}"
+                                            }
+                                        }
+                                    }
+                                    svg {
+                                        class: "h-4 w-4 shrink-0 text-zinc-700",
+                                        view_box: "0 0 24 24",
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "2",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                        path { d: "m9 18 6-6-6-6" }
+                                    }
                                 }
-                                div { class: "mt-1.5 truncate pl-3.5 text-[11px] text-zinc-600", "{session.runtime} · {cwd_name(&session.cwd)}" }
                             }
                         }
                     }
@@ -1150,7 +1213,6 @@ fn open_session(
     mut status: Signal<RemoteStatus>,
     mut approval: Signal<Option<RemoteApproval>>,
     mut connected: Signal<bool>,
-    mut drawer: Signal<bool>,
     mut generation: Signal<u64>,
 ) {
     let sid = session.sid.clone();
@@ -1160,7 +1222,6 @@ fn open_session(
     status.set(session.status.clone());
     approval.set(session.approval.clone());
     connected.set(false);
-    drawer.set(false);
     let next_generation = generation().wrapping_add(1);
     generation.set(next_generation);
     spawn(async move {
