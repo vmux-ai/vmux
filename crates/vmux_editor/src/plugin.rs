@@ -2942,13 +2942,20 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
-                    reconcile_file_watches.before(load_file_buffers),
-                    load_file_buffers,
-                    send_initial_meta,
-                    send_initial_text_meta,
-                    send_initial_dir,
-                    sync_media_allowlist,
-                    send_initial_media.after(sync_media_allowlist),
+                    (
+                        reconcile_file_watches,
+                        drain_file_changes,
+                        reload_changed_files,
+                        load_file_buffers,
+                    )
+                        .chain(),
+                    send_initial_meta.after(load_file_buffers),
+                    send_initial_text_meta.after(load_file_buffers),
+                    send_initial_dir.after(load_file_buffers),
+                    sync_media_allowlist.after(load_file_buffers),
+                    send_initial_media
+                        .after(load_file_buffers)
+                        .after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
                     apply_file_view_mode_requests.before(send_file_view_mode),
@@ -2961,7 +2968,6 @@ impl Plugin for EditorPlugin {
                     reapply_keymap_on_change,
                     apply_lsp_folds,
                     persist_folds,
-                    (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
             .add_systems(Update, (mark_note_dirty, send_note.after(mark_note_dirty)))
@@ -3062,9 +3068,9 @@ mod edit_flow_tests {
             Update,
             (
                 reconcile_file_watches,
-                load_file_buffers,
                 drain_file_changes,
                 reload_changed_files,
+                load_file_buffers,
             )
                 .chain(),
         );
@@ -3103,12 +3109,7 @@ mod edit_flow_tests {
             notify::Event::new(notify::EventKind::Any).add_path(parent)
         ))
         .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while app.world().get::<EditState>(entity).is_none() && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            app.update();
-        }
+        app.update();
 
         assert_eq!(
             app.world()
