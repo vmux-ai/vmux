@@ -90,7 +90,6 @@ mod component {
         next_prompt_typed_count,
     };
 
-    const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
     type PromptTimerCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
     #[component]
@@ -130,12 +129,11 @@ mod component {
             "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
         };
         let caret_class = if terminal {
-            format!("vmux-prompt-caret ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}")
+            format!("ml-px inline-block h-3.5 w-1.5 animate-pulse align-middle {accent_bg}")
         } else {
-            format!("vmux-prompt-caret relative top-px ml-px h-4 w-1.5 shrink-0 {accent_bg}")
+            format!("relative top-px ml-px h-4 w-1.5 shrink-0 animate-pulse {accent_bg}")
         };
         rsx! {
-            style { dangerous_inner_html: PROMPT_CARET_CSS }
             div {
                 class: "{ghost_class}",
                 span { class: if terminal { "" } else { "min-w-0 truncate" }, "{shown}" }

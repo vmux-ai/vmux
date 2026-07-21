@@ -265,6 +265,22 @@ impl AcpShared {
         }
     }
 
+    pub fn resolve_approval(&self, call_id: &str) -> bool {
+        let mut approval = self.approval.lock().unwrap();
+        if approval
+            .as_ref()
+            .is_none_or(|pending| pending.call_id != call_id)
+        {
+            return false;
+        }
+        *approval = None;
+        self.emit(ServiceMessage::AgentApprovalResolved {
+            sid: self.sid.clone(),
+            call_id: call_id.to_string(),
+        });
+        true
+    }
+
     fn publish_agent_info(&self, name: String) {
         *self.agent_name.lock().unwrap() = Some(name.clone());
         self.emit(ServiceMessage::AcpAgentInfo {
@@ -670,9 +686,15 @@ pub async fn run(
                                 SelectedPermissionOutcome::new(id),
                             ),
                             None => RequestPermissionOutcome::Cancelled,
-                    };
+                        };
                     return responder.respond(RequestPermissionResponse::new(outcome));
                 }
+                let (tx, rx) = oneshot::channel();
+                perm_shared
+                    .pending_perms
+                    .lock()
+                    .unwrap()
+                    .insert(call_id.clone(), tx);
                 *perm_shared.approval.lock().unwrap() = Some(RemoteApproval {
                     call_id: call_id.clone(),
                     name: name.clone(),
@@ -684,12 +706,6 @@ pub async fn run(
                     name,
                     args_json,
                 });
-                let (tx, rx) = oneshot::channel();
-                perm_shared
-                    .pending_perms
-                    .lock()
-                    .unwrap()
-                    .insert(call_id, tx);
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
                 *perm_shared.approval.lock().unwrap() = None;
                 let outcome = match pick_permission_option(&req.options, decision) {
@@ -2351,6 +2367,25 @@ mod tests {
         shared.rebind_cwd(target.path().to_path_buf()).unwrap();
 
         assert_eq!(shared.cwd(), target.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn approval_resolution_is_broadcast_immediately() {
+        let (shared, mut receiver) =
+            test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+        *shared.approval.lock().unwrap() = Some(RemoteApproval {
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args_json: "{}".into(),
+        });
+
+        assert!(shared.resolve_approval("call-1"));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(ServiceMessage::AgentApprovalResolved { sid, call_id })
+                if sid == "s1" && call_id == "call-1"
+        ));
+        assert!(shared.approval.lock().unwrap().is_none());
     }
 
     #[test]

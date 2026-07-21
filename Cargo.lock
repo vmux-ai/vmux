@@ -10943,9 +10943,10 @@ dependencies = [
 
 [[package]]
 name = "vmux_chat_ui"
-version = "0.0.27"
+version = "0.0.28"
 dependencies = [
  "dioxus",
+ "dioxus-primitives",
  "pulldown-cmark",
  "similar",
 ]
@@ -11237,7 +11238,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_mobile"
-version = "0.0.27"
+version = "0.0.28"
 dependencies = [
  "dioxus",
  "futures-util",
@@ -11259,7 +11260,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_remote"
-version = "0.0.27"
+version = "0.0.28"
 dependencies = [
  "serde",
  "serde_json",
@@ -11300,6 +11301,7 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "futures-util",
+ "image",
  "libc",
  "mockito",
  "objc2-foundation 0.3.2",
@@ -11458,6 +11460,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "time",
+ "vmux_chat_ui",
  "vmux_core",
  "wasm-bindgen",
  "web-sys",

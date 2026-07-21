@@ -902,6 +902,10 @@ pub enum ServiceMessage {
         name: String,
         args_json: String,
     },
+    AgentApprovalResolved {
+        sid: String,
+        call_id: String,
+    },
     AgentToolCall {
         request_id: AgentRequestId,
         sid: String,
@@ -1722,6 +1726,10 @@ mod tests {
                 call_id: "c".into(),
                 name: "n".into(),
                 args_json: "{}".into(),
+            },
+            ServiceMessage::AgentApprovalResolved {
+                sid: "s".into(),
+                call_id: "c".into(),
             },
             ServiceMessage::AgentToolCall {
                 request_id: AgentRequestId::new(),

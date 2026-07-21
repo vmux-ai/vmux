@@ -86,7 +86,12 @@ impl AcpSessionManager {
 
     pub fn input(&self, sid: &str, input: AcpInput) -> bool {
         match self.sessions.get(sid) {
-            Some(handle) => handle.input_tx.send(input).is_ok(),
+            Some(handle) => {
+                if let AcpInput::Approve { call_id, .. } = &input {
+                    handle.shared.resolve_approval(call_id);
+                }
+                handle.input_tx.send(input).is_ok()
+            }
             None => false,
         }
     }
