@@ -2,8 +2,8 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, choice_number_index, edit_prompt, filter_models, filter_sessions,
-    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
+    approval_decision_for_index, chat_page_title, choice_number_index, edit_prompt, filter_models,
+    filter_sessions, is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
     prompt_history_direction, resume_menu_state, selector_mode, should_clear_draft_on_escape,
     should_expand_thinking, should_fetch_resume, tool_activity,
 };
@@ -11,13 +11,13 @@ use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
     CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock,
-    ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue,
-    ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue, ChatEscape,
+    ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
     ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
     QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
     ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    SlashCommandEntry, SlashCommands, WORKING_VERBS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -271,6 +271,8 @@ fn install_global_prompt_input(
     draft: Signal<String>,
     slash_cmds: Signal<Vec<SlashCommandEntry>>,
     choice_options: Signal<Vec<String>>,
+    mut approval: Signal<Option<(String, String, String)>>,
+    mut approval_sel: Signal<usize>,
 ) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
         let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID) else {
@@ -301,6 +303,8 @@ fn install_global_prompt_input(
                 }
         };
         let key = event.key();
+        let active_approval = approval.peek().clone();
+        let approval_open = active_approval.is_some();
         let choice_len = choice_options.peek().len();
         let choice_open = choice_len > 0;
         let direction = if event.meta_key() || event.alt_key() {
@@ -318,6 +322,27 @@ fn install_global_prompt_input(
                 && !event.ctrl_key()
                 && !event.alt_key()
                 && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
+        let approval_key = direction.is_some()
+            || (!event.meta_key()
+                && !event.ctrl_key()
+                && !event.alt_key()
+                && (key == "Enter" || choice_number_index(&key, 3).is_some()));
+        if approval_open && approval_key {
+            event.prevent_default();
+            event.stop_propagation();
+            if let Some(direction) = direction {
+                approval_sel.set(move_selection(approval_sel(), 3, direction));
+            } else if let Some((call_id, _, _)) = active_approval {
+                let index = choice_number_index(&key, 3).unwrap_or_else(|| approval_sel());
+                if let Some(decision) = approval_decision_for_index(index)
+                    && send_approval(call_id, decision)
+                {
+                    approval.set(None);
+                    approval_sel.set(0);
+                }
+            }
+            return;
+        }
         if (choice_open && choice_key) || direction.is_some() || (selector_open && selector_key) {
             event.prevent_default();
             event.stop_propagation();
@@ -376,14 +401,13 @@ pub fn Page(
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
+    let mut approval_sel = use_signal(|| 0usize);
     let mut agent_name = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
-    let mut workspace_selection_pending = use_signal(|| false);
-    let mut workspace_picker_open = use_signal(|| false);
     let mut choice_question = use_signal(String::new);
     let mut choice_options = use_signal(Vec::<String>::new);
     let mut draft = use_signal(String::new);
@@ -409,7 +433,9 @@ pub fn Page(
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
 
-    use_effect(move || install_global_prompt_input(draft, slash_cmds, choice_options));
+    use_effect(move || {
+        install_global_prompt_input(draft, slash_cmds, choice_options, approval, approval_sel)
+    });
     use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
 
     use_effect(move || {
@@ -456,23 +482,27 @@ pub fn Page(
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
-        workspace_selection_pending.set(snap.workspace_selection_pending);
         if choice_options.peek().as_slice() != snap.choice_options.as_slice() {
             menu_sel.set(0);
         }
         choice_question.set(snap.choice_question.clone());
         choice_options.set(snap.choice_options.clone());
-        if !snap.workspace_selection_pending {
-            workspace_picker_open.set(false);
-        }
         if snap.status == "awaiting" {
+            let changed = approval
+                .peek()
+                .as_ref()
+                .is_none_or(|(call_id, _, _)| call_id != &snap.approval_call_id);
             approval.set(Some((
                 snap.approval_call_id.clone(),
                 snap.approval_name.clone(),
                 snap.approval_args_json.clone(),
             )));
+            if changed {
+                approval_sel.set(0);
+            }
         } else {
             approval.set(None);
+            approval_sel.set(0);
         }
     });
     let _history =
@@ -665,6 +695,10 @@ pub fn Page(
     let session_menu_open = resume_query.is_some();
     let model_menu_open = model_query.is_some();
     let media_menu_open = media_query.is_some();
+    let latest_tool = {
+        let items = items.read();
+        latest_tool_location(&items)
+    };
     let resume_state = resume_query.map(|_| {
         resume_menu_state(
             resume_requested(),
@@ -722,10 +756,42 @@ pub fn Page(
     } else {
         "Send (Enter)"
     };
-    let choice_pending = !choice_options.read().is_empty();
+    let choice_pending = !choice_options.read().is_empty() || approval.read().is_some();
     let prompt_action_enabled = !choice_pending
         && (prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty());
     let prompt_keydown = move |e: KeyboardEvent| {
+        let active_approval = { approval.peek().clone() };
+        if let Some((call_id, _, _)) = active_approval {
+            let key = e.key().to_string();
+            if !e.modifiers().meta()
+                && !e.modifiers().alt()
+                && let Some(direction) = menu_direction(&key, e.modifiers().ctrl())
+            {
+                e.prevent_default();
+                approval_sel.set(move_selection(approval_sel(), 3, direction));
+                return;
+            }
+            let numbered = !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt()
+                && choice_number_index(&key, 3).is_some();
+            let entered = e.key() == Key::Enter
+                && !e.modifiers().shift()
+                && !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt();
+            if numbered || entered {
+                e.prevent_default();
+                let index = choice_number_index(&key, 3).unwrap_or_else(|| approval_sel());
+                if let Some(decision) = approval_decision_for_index(index)
+                    && send_approval(call_id, decision)
+                {
+                    approval.set(None);
+                    approval_sel.set(0);
+                }
+                return;
+            }
+        }
         let pending_choices = choice_options.peek().clone();
         if !pending_choices.is_empty() {
             let key = e.key().to_string();
@@ -1039,7 +1105,14 @@ pub fn Page(
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
-                        {render_item(loaded_start() as usize + i, item, attachment_previews)}
+                        {render_item(
+                            loaded_start() as usize + i,
+                            item,
+                            attachment_previews,
+                            latest_tool
+                                .filter(|(item_index, _)| *item_index == i)
+                                .map(|(_, block_index)| block_index),
+                        )}
                         if !handoff_source().is_empty()
                             && is_handoff_boundary(
                                 loaded_start() as usize + i,
@@ -1096,31 +1169,27 @@ pub fn Page(
                                         }
                                     }
                                 }
-                                div { class: "flex justify-end gap-2",
-                                    button {
-                                        class: "rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/10",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 0)
-                                        },
-                                        "Deny"
+                                div { class: "flex flex-col gap-1.5",
+                                    for (index , label) in ["Allow", "Allow always", "Deny"].into_iter().enumerate() {
+                                        button {
+                                            key: "approval-option-{index}",
+                                            class: if approval_sel() == index { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                                            onclick: {
+                                                let call_id = call_id.clone();
+                                                move |_| {
+                                                    if let Some(decision) = approval_decision_for_index(index) {
+                                                        if send_approval(call_id.clone(), decision) {
+                                                            approval.set(None);
+                                                            approval_sel.set(0);
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
+                                            span { class: "min-w-0 flex-1", "{label}" }
+                                        }
                                     }
-                                    button {
-                                        class: "rounded-lg bg-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/20",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 2)
-                                        },
-                                        "Allow always"
-                                    }
-                                    button {
-                                        class: "rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 1)
-                                        },
-                                        "Allow"
-                                    }
+                                    div { class: "mt-1 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–3 · Enter" }
                                 }
                             }
                         }
@@ -1251,54 +1320,6 @@ pub fn Page(
                                 }
                             }
                             div { class: "mt-2.5 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–9 · Enter" }
-                        }
-                    }
-                    if workspace_selection_pending() {
-                        div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-background/95 p-2.5 pl-3.5 shadow-sm",
-                            div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.07] text-foreground/55 ring-1 ring-inset ring-foreground/10",
-                                svg {
-                                    class: "h-4 w-4",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                }
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "text-sm font-medium text-foreground", "Choose repository folder" }
-                                div { class: "truncate text-xs text-muted-foreground", "Select the local Git repository the agent should use." }
-                            }
-                            button {
-                                class: if workspace_picker_open() { "flex h-8 shrink-0 cursor-default items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 text-xs font-medium text-muted-foreground/60" } else { "flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-2.5 text-xs font-medium text-background transition hover:opacity-85 active:scale-[0.98]" },
-                                disabled: workspace_picker_open(),
-                                onclick: move |_| {
-                                    if workspace_picker_open() {
-                                        return;
-                                    }
-                                    workspace_picker_open.set(true);
-                                    if try_cef_bin_emit_rkyv(&ChatChooseWorkspace).is_err() {
-                                        workspace_picker_open.set(false);
-                                    }
-                                },
-                                svg {
-                                    class: "h-3.5 w-3.5",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                }
-                                if workspace_picker_open() {
-                                    span { "Choosing…" }
-                                } else {
-                                    span { "Choose folder" }
-                                }
-                            }
                         }
                     }
                     if transition_preview.read().is_empty() && !queued.read().is_empty() {
@@ -1521,14 +1542,15 @@ fn do_submit(
     history_scratch.set(String::new());
 }
 
-fn send_approval(call_id: String, decision: u8) {
-    let _ = try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision });
+fn send_approval(call_id: String, decision: u8) -> bool {
+    try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision }).is_ok()
 }
 
 fn render_item(
     key: usize,
     item: &ChatItem,
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+    latest_tool_block: Option<usize>,
 ) -> Element {
     match item {
         ChatItem::User {
@@ -1573,7 +1595,7 @@ fn render_item(
                 }
             }
         },
-        ChatItem::Turn(turn) => render_turn(key, turn),
+        ChatItem::Turn(turn) => render_turn(key, turn, latest_tool_block),
     }
 }
 
@@ -1612,7 +1634,7 @@ fn render_user_attachment(
     }
 }
 
-fn render_turn(key: usize, turn: &ChatTurn) -> Element {
+fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
     let block_count = turn.blocks.len();
     let blocks = turn
@@ -1648,7 +1670,13 @@ fn render_turn(key: usize, turn: &ChatTurn) -> Element {
     rsx! {
         div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3",
             for (j , block , children) in blocks {
-                {render_block(j, block, &children, should_expand_thinking(j, block_count))}
+                {render_block(
+                    j,
+                    block,
+                    &children,
+                    should_expand_thinking(j, block_count),
+                    latest_tool_index == Some(j),
+                )}
             }
             if turn.running && !reconnecting {
                 WorkingIndicator {}
@@ -2258,7 +2286,8 @@ fn render_block(
     key: usize,
     block: &ChatBlock,
     children: &[(usize, &ChatBlock)],
-    latest: bool,
+    latest_thinking: bool,
+    latest_tool: bool,
 ) -> Element {
     match block {
         ChatBlock::Text(text) => rsx! {
@@ -2271,7 +2300,7 @@ fn render_block(
         ChatBlock::Thinking(text) => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 {render_activity_icon(ActivityIcon::Thinking)}
-                details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
+                details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "Thinking" }
                         {render_disclosure_icon()}
@@ -2286,7 +2315,7 @@ fn render_block(
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
                     {render_tool_activity_icon(name, args, icon)}
                     div { class: "min-w-0",
-                        details { class: "disclosure text-sm text-muted-foreground",
+                        details { open: latest_tool, class: "disclosure text-sm text-muted-foreground",
                             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                                 span { class: "font-medium", "{label}" }
                                 {render_disclosure_icon()}

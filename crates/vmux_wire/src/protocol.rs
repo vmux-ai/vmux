@@ -425,7 +425,7 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
             Err("request_user_choice requires a question and 2 to 9 non-empty options")
         }
         AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
-            Err("choose_workspace.path is empty")
+            Err("select_workspace.path is empty")
         }
         _ => Ok(()),
     }

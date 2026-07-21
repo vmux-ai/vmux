@@ -20,9 +20,9 @@ use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected repository. For development work, first call request_user_choice with these options in this order: Local repository, Remote repository, Create repository. Only after the user answers, bind the resulting local checkout with choose_workspace. Pass a path when the conversation identifies one; vmux opens the folder picker only when it cannot resolve that path. Remote repositories must be cloned and new repositories initialized before choose_workspace. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. For development work, first call select_workspace. Pass a path when the conversation identifies a local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. If it has no .git, vmux asks whether to initialize Git; declining keeps the plain workspace usable. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
 const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
-const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The repository is selected, but this tab is not isolated. Reading and inspection are allowed. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
+const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected workspace is a Git repository, but this tab is not isolated. Reading and inspection are allowed. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpWorkspaceState {
@@ -1079,12 +1079,11 @@ mod tests {
     fn unbound_workspace_context_requires_picker_before_project_work() {
         let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
-        assert!(context.contains("Local repository, Remote repository, Create repository"));
-        assert!(context.contains("request_user_choice"));
-        assert!(context.contains("choose_workspace"));
+        assert!(context.contains("select_workspace"));
+        assert!(context.contains("Any directory can be a workspace"));
+        assert!(context.contains("initialize Git"));
         assert!(context.contains("Do not search the user's home directory"));
         assert!(context.contains("folder picker"));
-        assert!(context.contains("Remote repositories must be cloned"));
     }
 
     #[test]

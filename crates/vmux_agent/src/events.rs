@@ -7,11 +7,6 @@ pub use vmux_service::agent_events::{
 };
 
 #[derive(Event, Clone, Copy)]
-pub struct WorkspacePickerStartRequest {
-    pub webview: Entity,
-}
-
-#[derive(Event, Clone, Copy)]
 pub struct AgentChoiceSelected {
     pub webview: Entity,
     pub index: usize,

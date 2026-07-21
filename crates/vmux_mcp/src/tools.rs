@@ -444,7 +444,7 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description: "Call immediately before the first edit, write, test, build, or other project mutation, after repository selection is complete. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
+        description: "Call immediately before the first edit, write, test, build, or other project mutation, after a Git workspace is selected. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -459,10 +459,10 @@ fn create_worktree_definition() -> ToolDefinition {
     }
 }
 
-fn choose_workspace_definition() -> ToolDefinition {
+fn select_workspace_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "choose_workspace".into(),
-        description: "Bind the repository selected by the user after request_user_choice has asked, in order: Local repository, Remote repository, or Create repository. Pass path when the conversation already identifies a valid local checkout; vmux tries it first and opens the native folder picker only when the path is absent or invalid. Remote repositories must be cloned and new repositories initialized before calling this tool. This binds the repository only; call create_worktree later, immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory for repositories. Do not call for general questions or self-contained terminal demonstrations."
+        name: "select_workspace".into(),
+        description: "Start the Create or select workspace flow. Pass path when the conversation already identifies a valid local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. vmux treats it as Git only when the selected directory contains .git; otherwise vmux asks whether to initialize a Git repository. A non-Git workspace remains usable when the user declines. For a Git workspace, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory for workspaces. Do not call for general questions or self-contained terminal demonstrations."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -477,7 +477,7 @@ fn choose_workspace_definition() -> ToolDefinition {
 fn request_user_choice_definition() -> ToolDefinition {
     ToolDefinition {
         name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. Use this for the required repository-source question before choose_workspace and for ambiguous worktree selection. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
+        description: "Show a native multiple-choice question in the agent conversation. Use this for ambiguous worktree selection or other short user decisions. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -757,7 +757,7 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
         defs.push(run_definition());
     }
     defs.push(request_user_choice_definition());
-    defs.push(choose_workspace_definition());
+    defs.push(select_workspace_definition());
     defs.push(create_worktree_definition());
     if !acp_terminals {
         defs.push(read_terminal_definition());
@@ -991,9 +991,9 @@ pub fn dispatch_with_anchor(
             options,
         }));
     }
-    if name == "choose_workspace" {
+    if name == "select_workspace" || name == "choose_workspace" {
         let anchor = anchor
-            .ok_or("choose_workspace requires an agent anchor (not available to this client)")?;
+            .ok_or("select_workspace requires an agent anchor (not available to this client)")?;
         if let Some(path) = arguments
             .get("path")
             .and_then(Value::as_str)
@@ -1453,7 +1453,7 @@ mod tests {
             "run",
             "read_terminal",
             "request_user_choice",
-            "choose_workspace",
+            "select_workspace",
             "create_worktree",
         ] {
             assert!(
@@ -1629,35 +1629,31 @@ mod tests {
     #[test]
     fn workspace_tools_dispatch_with_anchor_and_branch() {
         let anchor = vmux_service::protocol::ProcessId::new();
-        let choose_definition = choose_workspace_definition();
+        let select_definition = select_workspace_definition();
         let choice_definition = request_user_choice_definition();
         assert!(
-            choose_definition
+            select_definition
                 .description
                 .contains("Do not call for general questions")
         );
         assert!(
-            choose_definition
+            select_definition
                 .description
                 .contains("Do not search the user's home directory")
         );
-        assert!(choose_definition.description.contains("Local repository"));
-        assert!(choose_definition.description.contains("folder picker"));
+        assert!(select_definition.description.contains("Any directory"));
+        assert!(select_definition.description.contains("folder picker"));
+        assert!(select_definition.description.contains("contains .git"));
         assert!(
-            choose_definition
-                .description
-                .contains("binds the repository only")
-        );
-        assert!(
-            choose_definition
+            select_definition
                 .description
                 .contains("returns immediately")
         );
         assert!(choice_definition.description.contains("Ctrl+N/Ctrl+P"));
         let choose =
-            dispatch_with_anchor("choose_workspace", serde_json::json!({}), Some(anchor)).unwrap();
+            dispatch_with_anchor("select_workspace", serde_json::json!({}), Some(anchor)).unwrap();
         let choose_path = dispatch_with_anchor(
-            "choose_workspace",
+            "select_workspace",
             serde_json::json!({"path": "/repo"}),
             Some(anchor),
         )
@@ -1677,8 +1673,8 @@ mod tests {
         let choice = dispatch_with_anchor(
             "request_user_choice",
             serde_json::json!({
-                "question": "Repository?",
-                "options": ["Local repository", "Remote repository", "Create repository"]
+                "question": "Worktree?",
+                "options": ["Create new worktree", "/repo/.worktrees/feature"]
             }),
             Some(anchor),
         )
@@ -1709,7 +1705,7 @@ mod tests {
         assert!(matches!(
             choice,
             DispatchTarget::Command(AgentCommand::RequestUserChoice { anchor: got, question, options })
-                if got == anchor && question == "Repository?" && options.len() == 3
+                if got == anchor && question == "Worktree?" && options.len() == 2
         ));
     }
 

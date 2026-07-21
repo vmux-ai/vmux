@@ -147,6 +147,21 @@ pub fn repo_root_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.root)
 }
 
+/// Initialize a Git repository in an existing directory.
+pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
+    let dir = dir
+        .canonicalize()
+        .map_err(|error| GitError(format!("invalid workspace directory: {error}")))?;
+    if !dir.is_dir() {
+        return Err(GitError("workspace path is not a directory".to_string()));
+    }
+    let (stdout, stderr, ok) = git(&dir, &["init", "--quiet"])?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    checkout_info(&dir).map(|info| info.root)
+}
+
 /// The absolute common Git directory shared by a repository's main and linked worktrees.
 pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.common_dir)
@@ -564,6 +579,16 @@ mod tests {
         let wt_info = repo_info(&wt).expect("worktree is a repo");
         assert!(wt_info.is_worktree);
         assert_eq!(wt_info.branch, "vmux/feat");
+    }
+
+    #[test]
+    fn repository_init_makes_the_selected_directory_a_checkout() {
+        let workspace = tempfile::tempdir().unwrap();
+
+        let root = repository_init(workspace.path()).unwrap();
+
+        assert_eq!(root, workspace.path().canonicalize().unwrap());
+        assert!(workspace.path().join(".git").is_dir());
     }
 
     #[test]

@@ -27,12 +27,12 @@ use crate::chat_page::event::{
     CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT, CHAT_MEDIA_ENTRIES_EVENT,
     CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatHistoryPage,
-    ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
-    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
-    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    ChatChoiceSelected, ChatClearQueue, ChatEscape, ChatHistoryPage, ChatHistoryRequest,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item_count};
@@ -41,9 +41,7 @@ use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{AgentMessages, AgentSession, PromptQueue};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::events::{
-    AgentApprovalReply, AgentChoiceSelected, ApprovalDecision, WorkspacePickerStartRequest,
-};
+use crate::events::{AgentApprovalReply, AgentChoiceSelected, ApprovalDecision};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context};
 #[cfg(not(target_arch = "wasm32"))]
@@ -179,7 +177,6 @@ impl Plugin for AgentChatPagePlugin {
                 ResumeSession,
                 RuntimeSwitchRequest,
                 SelectModel,
-                ChatChooseWorkspace,
             )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
@@ -197,7 +194,6 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_clear_queue)
             .add_observer(on_chat_cancel_queued_prompt)
             .add_observer(on_chat_escape)
-            .add_observer(on_chat_choose_workspace)
             .add_observer(on_chat_choice_selected)
             .add_observer(on_chat_history_request)
             .add_observer(on_chat_pick_files)
@@ -634,13 +630,6 @@ fn on_chat_attachment_preview_request(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn on_chat_choose_workspace(trigger: On<BinReceive<ChatChooseWorkspace>>, mut commands: Commands) {
-    commands.trigger(WorkspacePickerStartRequest {
-        webview: trigger.event().webview,
-    });
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
@@ -753,7 +742,6 @@ fn sync_chat_to_ready_views(
         Option<&ImportedConversation>,
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
-    workspace_selections: Query<(), With<crate::plugin::PendingWorkspaceSelection>>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -781,7 +769,6 @@ fn sync_chat_to_ready_views(
                 meta,
                 queue,
                 imported,
-                workspace_selections.contains(webview),
                 choices.get(webview).ok(),
             ),
         ));
@@ -920,7 +907,6 @@ fn snapshot_of(
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
-    workspace_selection_pending: bool,
     choice: Option<&crate::plugin::PendingAgentChoice>,
 ) -> ChatSnapshot {
     let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
@@ -984,7 +970,6 @@ fn snapshot_of(
                 u32::try_from(grouped_item_count(&imported.messages, &[])).unwrap_or(u32::MAX)
             })
             .unwrap_or_default(),
-        workspace_selection_pending,
         choice_question: choice
             .map(|choice| choice.question.clone())
             .unwrap_or_default(),
@@ -1034,7 +1019,6 @@ fn push_chat_to_page(
     >,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
-    workspace_selections: Query<(), With<crate::plugin::PendingWorkspaceSelection>>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -1060,7 +1044,6 @@ fn push_chat_to_page(
                 meta,
                 queue,
                 imported,
-                workspace_selections.contains(webview),
                 choices.get(webview).ok(),
             ),
         ));
@@ -1922,12 +1905,10 @@ mod native_tests {
             None,
             &PromptQueue::default(),
             Some(&imported),
-            true,
             None,
         );
 
         assert_eq!(snapshot.handoff_message_count, 2);
-        assert!(snapshot.workspace_selection_pending);
     }
 
     #[test]
@@ -1944,7 +1925,6 @@ mod native_tests {
             None,
             &PromptQueue::default(),
             None,
-            false,
             None,
         );
 
@@ -2284,21 +2264,6 @@ mod native_tests {
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
         assert!(source.contains("max-h-80 max-w-full object-contain"));
-    }
-
-    #[test]
-    fn workspace_selection_waits_for_inline_user_action() {
-        let page = include_str!("chat_page/page.rs");
-        let card = page
-            .find("if workspace_selection_pending()")
-            .expect("workspace card");
-        let composer = page.find("PromptComposer {").expect("composer");
-
-        assert!(card < composer);
-        assert!(page.contains("Choose repository folder"));
-        assert!(page.contains("Choose folder"));
-        assert!(page.contains("try_cef_bin_emit_rkyv(&ChatChooseWorkspace)"));
-        assert!(include_str!("chat_page.rs").contains("WorkspacePickerStartRequest"));
     }
 
     #[test]

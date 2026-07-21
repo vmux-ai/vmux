@@ -151,6 +151,7 @@ pub fn Page() -> Element {
         listener_ready(spaces_state_received(), &spaces_error),
     );
     let radius_px = state.radius;
+    let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
     use_effect(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document())
             && let Some(root) = doc.document_element()
@@ -182,6 +183,10 @@ pub fn Page() -> Element {
         let Some((pane_id, stack_index)) = target else {
             return;
         };
+        if last_scrolled_stack() == Some((pane_id, stack_index)) {
+            return;
+        }
+        last_scrolled_stack.set(Some((pane_id, stack_index)));
         if let Some(el) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.get_element_by_id(&format!("sidesheet-stack-{pane_id}-{stack_index}")))

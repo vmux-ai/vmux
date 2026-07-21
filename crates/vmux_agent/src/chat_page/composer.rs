@@ -60,6 +60,15 @@ pub(crate) fn should_expand_thinking(block_index: usize, block_count: usize) -> 
     block_index + 1 == block_count
 }
 
+pub(crate) fn approval_decision_for_index(index: usize) -> Option<u8> {
+    match index {
+        0 => Some(1),
+        1 => Some(2),
+        2 => Some(0),
+        _ => None,
+    }
+}
+
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     let Some(token) = draft.strip_prefix('/') else {
         return SelectorMode::None;
@@ -453,6 +462,14 @@ mod tests {
     fn thinking_expands_only_until_the_next_block() {
         assert!(should_expand_thinking(0, 1));
         assert!(!should_expand_thinking(0, 2));
+    }
+
+    #[test]
+    fn approval_selector_maps_allow_always_and_deny() {
+        assert_eq!(approval_decision_for_index(0), Some(1));
+        assert_eq!(approval_decision_for_index(1), Some(2));
+        assert_eq!(approval_decision_for_index(2), Some(0));
+        assert_eq!(approval_decision_for_index(3), None);
     }
 
     #[test]

@@ -41,7 +41,7 @@ use crate::events::{
     BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin,
     NavAwaitingSnapshot, RecordStartRequest, RecordStartResponse, RecordStopRequest,
     RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
-    WorkspacePickerStartRequest, snapshot_response_to_query_result,
+    snapshot_response_to_query_result,
 };
 use crate::session::{
     self, AgentSession, AgentSessionDirty, AgentSessionExited, AgentSessionToEntity,
@@ -56,9 +56,8 @@ const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
 const WORKSPACE_SELECTION_REQUESTED: &str = "Workspace selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
 const WORKSPACE_SELECTION_PENDING: &str = "Workspace selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-const REPOSITORY_SOURCE_QUESTION: &str = "Which repository should this task use?";
-const REPOSITORY_SOURCE_OPTIONS: [&str; 3] =
-    ["Local repository", "Remote repository", "Create repository"];
+const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
+const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
 
 /// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
 /// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
@@ -210,7 +209,6 @@ impl Plugin for AgentPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
-            .add_observer(start_workspace_picker)
             .add_observer(handle_agent_choice_selected)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
@@ -2703,24 +2701,22 @@ pub(crate) struct PendingAgentContinuation(String);
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PendingAgentChoice {
     session_entity: Entity,
-    tab_entity: Option<Entity>,
+    action: PendingAgentChoiceAction,
     pub(crate) question: String,
     pub(crate) options: Vec<String>,
 }
 
-#[derive(Component, Clone, Copy)]
-struct RepositorySourceSelected;
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PendingAgentChoiceAction {
+    Resume,
+    InitializeGit {
+        tab_entity: Entity,
+        workspace: PathBuf,
+    },
+}
 
 #[derive(Component, Clone, Copy)]
 pub(crate) struct RepositoryNeedsWorktree;
-
-#[derive(Component, Clone, Copy)]
-pub(crate) struct PendingWorkspaceSelection {
-    tab_entity: Entity,
-    agent_entity: Entity,
-    session_entity: Entity,
-    picker_started: bool,
-}
 
 #[derive(Component)]
 struct PendingWorkspacePicker {
@@ -2732,10 +2728,8 @@ struct PendingWorkspacePicker {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct WorkspacePickerContext<'w, 's> {
-    selections: Query<'w, 's, &'static PendingWorkspaceSelection>,
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
-    repository_sources: Query<'w, 's, (), With<RepositorySourceSelected>>,
     chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
     page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
     cli_sessions: Query<'w, 's, &'static AgentSession>,
@@ -2745,6 +2739,7 @@ struct WorkspacePickerContext<'w, 's> {
 fn handle_agent_choice_selected(
     trigger: On<AgentChoiceSelected>,
     choices: Query<&PendingAgentChoice>,
+    tabs: Query<(), With<vmux_layout::tab::Tab>>,
     mut commands: Commands,
 ) {
     let event = trigger.event();
@@ -2754,33 +2749,37 @@ fn handle_agent_choice_selected(
     let Some(selected) = choice.options.get(event.index) else {
         return;
     };
-    let continuation = if choice.tab_entity.is_some() {
-        format!(
-            "VMUX REPOSITORY SOURCE SELECTED: The user selected \"{selected}\". Continue repository setup in this same conversation. Obtain or create the local checkout, then call choose_workspace before project work."
-        )
-    } else {
-        format!(
+    let continuation = match &choice.action {
+        PendingAgentChoiceAction::Resume => format!(
             "VMUX USER CHOICE: For \"{}\", the user selected \"{}\". Continue the original request in this same conversation.",
             choice.question, selected
-        )
+        ),
+        PendingAgentChoiceAction::InitializeGit {
+            tab_entity,
+            workspace,
+        } => {
+            if !tabs.contains(*tab_entity) {
+                failed_workspace_continuation("The workspace tab no longer exists")
+            } else if event.index == 0 {
+                match vmux_git::worktree::repository_init(workspace) {
+                    Ok(root) => {
+                        commands.entity(*tab_entity).insert(RepositoryNeedsWorktree);
+                        git_workspace_ready_continuation(&root)
+                    }
+                    Err(error) => git_initialization_failed_continuation(workspace, &error.0),
+                }
+            } else {
+                plain_workspace_ready_continuation(workspace)
+            }
+        }
     };
     commands
         .entity(choice.session_entity)
         .insert(PendingAgentContinuation(continuation));
-    if let Some(tab_entity) = choice.tab_entity {
-        commands.entity(tab_entity).insert(RepositorySourceSelected);
-    }
     commands
         .entity(event.webview)
         .remove::<PendingAgentChoice>()
         .remove::<crate::chat_page::ChatSynced>();
-}
-
-fn repository_source_choice(options: &[String]) -> bool {
-    options
-        .iter()
-        .map(String::as_str)
-        .eq(REPOSITORY_SOURCE_OPTIONS)
 }
 
 fn workspace_picker_task(
@@ -2795,6 +2794,7 @@ fn workspace_picker_task(
         .unwrap_or_else(|| PathBuf::from("/"));
     IoTaskPool::get().spawn(async move {
         let selected = rfd::AsyncFileDialog::new()
+            .set_title("Create or select workspace")
             .set_directory(initial_dir)
             .pick_folder()
             .await
@@ -2819,28 +2819,6 @@ fn workspace_path_task(
     })
 }
 
-fn start_workspace_picker(
-    trigger: On<WorkspacePickerStartRequest>,
-    mut selections: Query<&mut PendingWorkspaceSelection>,
-    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let Ok(mut selection) = selections.get_mut(webview) else {
-        return;
-    };
-    if selection.picker_started {
-        return;
-    }
-    selection.picker_started = true;
-    commands.spawn(PendingWorkspacePicker {
-        tab_entity: selection.tab_entity,
-        agent_entity: selection.agent_entity,
-        session_entity: selection.session_entity,
-        task: workspace_picker_task(proxy.as_deref()),
-    });
-}
-
 fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
     if vmux_layout::worktree::is_generated_tab_name(&tab.name)
@@ -2851,9 +2829,23 @@ fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execu
     }
 }
 
-fn workspace_ready_continuation(path: &Path) -> String {
+fn git_workspace_ready_continuation(path: &Path) -> String {
     format!(
-        "VMUX REPOSITORY SELECTION COMPLETED: Repository {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
+        "VMUX WORKSPACE SELECTION COMPLETED: Git workspace {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
+        path.display()
+    )
+}
+
+fn plain_workspace_ready_continuation(path: &Path) -> String {
+    format!(
+        "VMUX WORKSPACE SELECTION COMPLETED: Workspace {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
+        path.display()
+    )
+}
+
+fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
+    format!(
+        "VMUX GIT INITIALIZATION FAILED: {error}. Workspace {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
         path.display()
     )
 }
@@ -2956,16 +2948,20 @@ fn activate_selected_workspace(
     tab_entity: Entity,
     agent_entity: Entity,
     selected: &Path,
-    _managed_root: &Path,
     tabs: &mut Query<&mut vmux_layout::tab::Tab>,
     acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
-) -> Result<(PathBuf, Option<ClientMessage>), String> {
-    vmux_git::worktree::checkout_info(selected).map_err(|_| {
-        "selected directory is not a Git repository; initialize it before choosing it".to_string()
-    })?;
-    let needs_worktree = !vmux_git::worktree::is_linked_worktree(selected);
+) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
+    let kind = if selected.join(".git").exists() {
+        vmux_git::worktree::checkout_info(selected)
+            .map_err(|error| format!("selected workspace has invalid Git metadata: {}", error.0))?;
+        SelectedWorkspaceKind::Git {
+            needs_worktree: !vmux_git::worktree::is_linked_worktree(selected),
+        }
+    } else {
+        SelectedWorkspaceKind::Plain
+    };
     let rebind = activate_agent_directory(
         tab_entity,
         agent_entity,
@@ -2976,10 +2972,21 @@ fn activate_selected_workspace(
         child_of,
         commands,
     )?;
-    if needs_worktree {
+    if matches!(
+        kind,
+        SelectedWorkspaceKind::Git {
+            needs_worktree: true
+        }
+    ) {
         commands.entity(tab_entity).insert(RepositoryNeedsWorktree);
     }
-    Ok((selected.to_path_buf(), rebind))
+    Ok((selected.to_path_buf(), rebind, kind))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectedWorkspaceKind {
+    Plain,
+    Git { needs_worktree: bool },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3114,16 +3121,10 @@ fn handle_agent_self_commands(
         std::collections::HashMap::new();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
-        .selections
+        .pickers
         .iter()
-        .map(|selection| selection.tab_entity)
+        .map(|picker| picker.tab_entity)
         .collect();
-    workspace_picker_tabs.extend(
-        workspace_picker
-            .pickers
-            .iter()
-            .map(|picker| picker.tab_entity),
-    );
     let mut requests: Vec<_> = reader.read().collect();
     requests.sort_by_key(|request| self_command_priority(&request.command));
     for request in requests {
@@ -3419,7 +3420,7 @@ fn handle_agent_self_commands(
                 options,
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
-                Some((agent_entity, pane)) => {
+                Some((agent_entity, _)) => {
                     let Some(session_entity) = ancestor_agent_session(
                         agent_entity,
                         &acp_sessions,
@@ -3438,13 +3439,11 @@ fn handle_agent_self_commands(
                     if workspace_picker.choices.get(agent_entity).is_ok() {
                         AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                     } else if workspace_picker.chat_views.contains(agent_entity) {
-                        let tab_entity = repository_source_choice(options)
-                            .then(|| ancestor_self_tab(pane, &tab_worktree.tabs, &ctx.child_of_q));
                         commands
                             .entity(agent_entity)
                             .insert(PendingAgentChoice {
                                 session_entity,
-                                tab_entity: tab_entity.flatten(),
+                                action: PendingAgentChoiceAction::Resume,
                                 question: question.clone(),
                                 options: options.clone(),
                             })
@@ -3487,24 +3486,7 @@ fn handle_agent_self_commands(
                             });
                             continue;
                         };
-                        if tab_worktree.workspaces.get(tab_entity).is_err()
-                            && !workspace_picker.repository_sources.contains(tab_entity)
-                            && workspace_picker.chat_views.contains(agent_entity)
-                        {
-                            if workspace_picker.choices.get(agent_entity).is_err() {
-                                commands
-                                    .entity(agent_entity)
-                                    .insert(PendingAgentChoice {
-                                        session_entity,
-                                        tab_entity: Some(tab_entity),
-                                        question: REPOSITORY_SOURCE_QUESTION.to_string(),
-                                        options: REPOSITORY_SOURCE_OPTIONS
-                                            .into_iter()
-                                            .map(str::to_string)
-                                            .collect(),
-                                    })
-                                    .remove::<crate::chat_page::ChatSynced>();
-                            }
+                        if workspace_picker.choices.get(agent_entity).is_ok() {
                             AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                         } else if !workspace_picker_tabs.insert(tab_entity) {
                             AgentCommandResult::Text(WORKSPACE_SELECTION_PENDING.to_string())
@@ -3522,17 +3504,6 @@ fn handle_agent_self_commands(
                                     workspace_picker.proxy.as_deref(),
                                 ),
                             });
-                            AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
-                        } else if workspace_picker.chat_views.contains(agent_entity) {
-                            commands
-                                .entity(agent_entity)
-                                .insert(PendingWorkspaceSelection {
-                                    tab_entity,
-                                    agent_entity,
-                                    session_entity,
-                                    picker_started: false,
-                                })
-                                .remove::<crate::chat_page::ChatSynced>();
                             AgentCommandResult::Text(WORKSPACE_SELECTION_REQUESTED.to_string())
                         } else {
                             commands.spawn(PendingWorkspacePicker {
@@ -3591,7 +3562,7 @@ fn handle_agent_self_commands(
                             service.0.send(ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
                                 result: AgentCommandResult::Error(
-                                    "No repository selected. Complete choose_workspace first."
+                                    "No Git workspace selected. Complete select_workspace and initialize Git first."
                                         .to_string(),
                                 ),
                             });
@@ -3888,7 +3859,7 @@ fn handle_agent_self_commands(
                                 service.0.send(ClientMessage::AgentCommandResponse {
                                     request_id: request.request_id,
                                     result: AgentCommandResult::Error(
-                                        "No project selected. Call choose_workspace first."
+                                        "No workspace selected. Call select_workspace first."
                                             .to_string(),
                                     ),
                                 });
@@ -3954,65 +3925,92 @@ fn handle_agent_self_commands(
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    workspace_selections: Query<(), With<PendingWorkspaceSelection>>,
+    chat_views: Query<(), With<crate::chat_page::AgentChatView>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
     mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
     child_of: Query<&ChildOf>,
-    managed_root: Option<Res<vmux_layout::worktree::ManagedWorktreeRoot>>,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
         return;
     };
-    let managed_root = managed_root.as_deref().cloned().unwrap_or_default().0;
     for (picker_entity, mut picker) in &mut pickers {
         let Some(selected) = future::block_on(future::poll_once(&mut picker.task)) else {
             continue;
         };
         let continuation = match selected {
-            None => failed_workspace_continuation("The user cancelled workspace selection"),
+            None => Some(failed_workspace_continuation(
+                "The user cancelled workspace selection",
+            )),
             Some(selected) => match selected.canonicalize() {
                 Ok(selected) if selected.is_dir() => {
                     if tabs.get(picker.tab_entity).is_err() {
-                        failed_workspace_continuation("The workspace tab no longer exists")
+                        Some(failed_workspace_continuation(
+                            "The workspace tab no longer exists",
+                        ))
                     } else {
                         match activate_selected_workspace(
                             picker.tab_entity,
                             picker.agent_entity,
                             &selected,
-                            &managed_root,
                             &mut tabs,
                             &mut acp_sessions,
                             &child_of,
                             &mut commands,
                         ) {
-                            Ok((execution_dir, rebind)) => {
+                            Ok((execution_dir, rebind, kind)) => {
                                 if let Some(message) = rebind {
                                     service.0.send(message);
                                 }
-                                workspace_ready_continuation(&execution_dir)
+                                match kind {
+                                    SelectedWorkspaceKind::Git { .. } => {
+                                        Some(git_workspace_ready_continuation(&execution_dir))
+                                    }
+                                    SelectedWorkspaceKind::Plain
+                                        if chat_views.contains(picker.agent_entity) =>
+                                    {
+                                        commands
+                                            .entity(picker.agent_entity)
+                                            .insert(PendingAgentChoice {
+                                                session_entity: picker.session_entity,
+                                                action: PendingAgentChoiceAction::InitializeGit {
+                                                    tab_entity: picker.tab_entity,
+                                                    workspace: execution_dir,
+                                                },
+                                                question: INITIALIZE_GIT_QUESTION.to_string(),
+                                                options: INITIALIZE_GIT_OPTIONS
+                                                    .into_iter()
+                                                    .map(str::to_string)
+                                                    .collect(),
+                                            })
+                                            .remove::<crate::chat_page::ChatSynced>();
+                                        None
+                                    }
+                                    SelectedWorkspaceKind::Plain => Some(format!(
+                                        "VMUX WORKSPACE SELECTION COMPLETED: Workspace {} is ready without Git. Ask the user: \"Initialize Git repository?\" If yes, initialize Git in this exact workspace, then call create_worktree before mutation. If no, continue the original request without a worktree.",
+                                        execution_dir.display()
+                                    )),
+                                }
                             }
-                            Err(error) => failed_workspace_continuation(&format!(
+                            Err(error) => Some(failed_workspace_continuation(&format!(
                                 "The selected workspace could not be prepared: {error}"
-                            )),
+                            ))),
                         }
                     }
                 }
-                Ok(_) => failed_workspace_continuation("The selected workspace is not a directory"),
-                Err(error) => failed_workspace_continuation(&format!(
-                    "The selected workspace directory is invalid: {error}"
+                Ok(_) => Some(failed_workspace_continuation(
+                    "The selected workspace is not a directory",
                 )),
+                Err(error) => Some(failed_workspace_continuation(&format!(
+                    "The selected workspace directory is invalid: {error}"
+                ))),
             },
         };
-        commands
-            .entity(picker.session_entity)
-            .insert(PendingAgentContinuation(continuation));
-        if workspace_selections.contains(picker.agent_entity) {
+        if let Some(continuation) = continuation {
             commands
-                .entity(picker.agent_entity)
-                .remove::<PendingWorkspaceSelection>()
-                .remove::<crate::chat_page::ChatSynced>();
+                .entity(picker.session_entity)
+                .insert(PendingAgentContinuation(continuation));
         }
         commands.entity(picker_entity).despawn();
     }
@@ -5714,48 +5712,31 @@ mod tests {
 
     #[test]
     fn workspace_selection_continuations_resume_original_request() {
-        let ready = workspace_ready_continuation(Path::new("/repo/dashboard"));
+        let ready = git_workspace_ready_continuation(Path::new("/repo/dashboard"));
+        let plain = plain_workspace_ready_continuation(Path::new("/tmp/demo"));
         let cancelled = failed_workspace_continuation("The user cancelled workspace selection");
 
         assert!(ready.contains("same conversation"));
-        assert!(ready.contains("Repository /repo/dashboard is ready"));
+        assert!(ready.contains("Git workspace /repo/dashboard is ready"));
         assert!(ready.contains("Immediately before the first edit"));
         assert!(ready.contains("create_worktree"));
+        assert!(plain.contains("Workspace /tmp/demo is ready without Git"));
+        assert!(plain.contains("Do not call create_worktree"));
         assert!(cancelled.contains("Do not retry automatically"));
     }
 
     #[test]
-    fn repository_source_choice_requires_exact_order() {
-        let ordered = REPOSITORY_SOURCE_OPTIONS
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
-        let reordered = [
-            "Remote repository".to_string(),
-            "Local repository".to_string(),
-            "Create repository".to_string(),
-        ];
-
-        assert!(repository_source_choice(&ordered));
-        assert!(!repository_source_choice(&reordered));
-    }
-
-    #[test]
-    fn selected_agent_choice_resumes_session_and_unlocks_repository_selection() {
+    fn selected_agent_choice_resumes_session() {
         let mut app = App::new();
         app.add_observer(handle_agent_choice_selected);
         let session = app.world_mut().spawn_empty().id();
-        let tab = app.world_mut().spawn_empty().id();
         let webview = app
             .world_mut()
             .spawn(PendingAgentChoice {
                 session_entity: session,
-                tab_entity: Some(tab),
-                question: REPOSITORY_SOURCE_QUESTION.into(),
-                options: REPOSITORY_SOURCE_OPTIONS
-                    .into_iter()
-                    .map(str::to_string)
-                    .collect(),
+                action: PendingAgentChoiceAction::Resume,
+                question: "Mode?".into(),
+                options: vec!["Fast".into(), "Safe".into()],
             })
             .id();
 
@@ -5767,9 +5748,53 @@ mod tests {
             .world()
             .get::<PendingAgentContinuation>(session)
             .unwrap();
-        assert!(continuation.0.contains("Remote repository"));
-        assert!(app.world().get::<RepositorySourceSelected>(tab).is_some());
+        assert!(continuation.0.contains("Safe"));
         assert!(app.world().get::<PendingAgentChoice>(webview).is_none());
+    }
+
+    #[test]
+    fn initialize_git_choice_marks_workspace_for_worktree_creation() {
+        let workspace = tempfile::tempdir().unwrap();
+        let workspace_path = workspace.path().canonicalize().unwrap();
+        let mut app = App::new();
+        app.add_observer(handle_agent_choice_selected);
+        let session = app.world_mut().spawn_empty().id();
+        let tab = app
+            .world_mut()
+            .spawn(vmux_layout::tab::Tab {
+                name: "Workspace".into(),
+                startup_dir: Some(workspace_path.to_string_lossy().into_owned()),
+            })
+            .id();
+        let webview = app
+            .world_mut()
+            .spawn(PendingAgentChoice {
+                session_entity: session,
+                action: PendingAgentChoiceAction::InitializeGit {
+                    tab_entity: tab,
+                    workspace: workspace_path.clone(),
+                },
+                question: INITIALIZE_GIT_QUESTION.into(),
+                options: INITIALIZE_GIT_OPTIONS
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            })
+            .id();
+
+        app.world_mut()
+            .trigger(AgentChoiceSelected { webview, index: 0 });
+        app.update();
+
+        assert!(workspace_path.join(".git").is_dir());
+        assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_some());
+        assert!(
+            app.world()
+                .get::<PendingAgentContinuation>(session)
+                .unwrap()
+                .0
+                .contains("call create_worktree")
+        );
     }
 
     #[test]
@@ -5951,7 +5976,6 @@ mod tests {
         vmux_git::worktree::worktree_add(&project_dir, &external, "feature/existing", "main")
             .unwrap();
         let external = external.canonicalize().unwrap();
-        let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
 
@@ -5964,7 +5988,6 @@ mod tests {
             .id();
         let linked_agent = app.world_mut().spawn(ChildOf(linked_tab)).id();
         let external_for_system = external.clone();
-        let managed_root_for_system = managed_root.path().to_path_buf();
         let linked_execution = app
             .world_mut()
             .run_system_once(
@@ -5976,7 +5999,6 @@ mod tests {
                         linked_tab,
                         linked_agent,
                         &external_for_system,
-                        &managed_root_for_system,
                         &mut tabs,
                         &mut sessions,
                         &child_of,
@@ -6022,7 +6044,6 @@ mod tests {
             .id();
         let managed_agent = app.world_mut().spawn(ChildOf(managed_tab)).id();
         let project_for_system = project_dir.clone();
-        let managed_root_for_system = managed_root.path().to_path_buf();
         let managed_execution = app
             .world_mut()
             .run_system_once(
@@ -6034,7 +6055,6 @@ mod tests {
                         managed_tab,
                         managed_agent,
                         &project_for_system,
-                        &managed_root_for_system,
                         &mut tabs,
                         &mut sessions,
                         &child_of,
@@ -6073,12 +6093,11 @@ mod tests {
     }
 
     #[test]
-    fn selected_workspace_rejects_non_git_directory() {
+    fn selected_workspace_binds_non_git_directory_without_worktree() {
         use bevy::ecs::system::RunSystemOnce;
 
         let directory = tempfile::tempdir().unwrap();
         let selected = directory.path().canonicalize().unwrap();
-        let managed_root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         let tab = app
@@ -6089,8 +6108,9 @@ mod tests {
             })
             .id();
         let agent = app.world_mut().spawn(ChildOf(tab)).id();
+        let selected_for_system = selected.clone();
 
-        let error = app
+        let (execution_dir, _, kind) = app
             .world_mut()
             .run_system_once(
                 move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
@@ -6100,8 +6120,7 @@ mod tests {
                     activate_selected_workspace(
                         tab,
                         agent,
-                        &selected,
-                        managed_root.path(),
+                        &selected_for_system,
                         &mut tabs,
                         &mut sessions,
                         &child_of,
@@ -6110,9 +6129,18 @@ mod tests {
                 },
             )
             .unwrap()
-            .unwrap_err();
+            .unwrap();
 
-        assert!(error.contains("not a Git repository"));
+        assert_eq!(execution_dir, selected);
+        assert_eq!(kind, SelectedWorkspaceKind::Plain);
+        assert_eq!(
+            app.world()
+                .get::<vmux_layout::tab::TabWorkspace>(tab)
+                .unwrap()
+                .project_dir,
+            selected.to_string_lossy()
+        );
+        assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_none());
     }
 
     #[test]
@@ -9139,44 +9167,6 @@ mod tests {
                 .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
             "run terminal spawn requests must materialize before the next agent command frame"
         );
-    }
-
-    #[test]
-    fn workspace_picker_waits_for_inline_user_action_without_blocking() {
-        let source = include_str!("plugin.rs");
-        let start = source
-            .find("fn handle_agent_self_commands(")
-            .expect("agent command handler");
-        let end = source[start..]
-            .find("fn drain_workspace_picker_tasks(")
-            .expect("picker drain");
-        let handler = &source[start..start + end];
-        let task_start = source
-            .find("fn workspace_picker_task(")
-            .expect("picker task");
-        let task_end = source[task_start..]
-            .find("fn start_workspace_picker(")
-            .expect("picker start observer");
-        let task = &source[task_start..task_start + task_end];
-        let selection_start = source
-            .find("struct PendingWorkspaceSelection")
-            .expect("pending workspace selection");
-        let selection_end = source[selection_start..]
-            .find("struct PendingWorkspacePicker")
-            .expect("pending workspace picker");
-        let selection = &source[selection_start..selection_start + selection_end];
-
-        assert!(!handler.contains("rfd::FileDialog::new().pick_folder()"));
-        assert!(handler.contains("PendingWorkspaceSelection"));
-        assert!(handler.contains("workspace_picker.chat_views.contains(agent_entity)"));
-        assert!(handler.contains("WORKSPACE_SELECTION_REQUESTED"));
-        assert!(!selection.contains("request_id"));
-        assert!(selection.contains("session_entity"));
-        assert!(selection.contains("picker_started"));
-        assert!(task.contains("rfd::AsyncFileDialog::new()"));
-        assert!(task.contains(".set_directory(initial_dir)"));
-        assert!(task.contains("IoTaskPool::get().spawn"));
-        assert!(task.contains("WinitUserEvent::WakeUp"));
     }
 
     #[test]

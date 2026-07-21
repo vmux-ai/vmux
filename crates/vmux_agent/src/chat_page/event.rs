@@ -69,7 +69,6 @@ pub struct ChatSnapshot {
     pub handoff_truncated: bool,
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
-    pub workspace_selection_pending: bool,
     pub choice_question: String,
     pub choice_options: Vec<String>,
 }
@@ -121,19 +120,6 @@ pub struct ChatSubmit {
     pub text: String,
     pub attachments: Vec<ChatSubmitAttachment>,
 }
-
-/// Page → native: open the workspace folder picker requested by the agent.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatChooseWorkspace;
 
 /// Page → native: answer the active agent-authored multiple-choice prompt.
 #[derive(
@@ -513,6 +499,18 @@ pub(crate) fn is_guardian_tool(name: &str) -> bool {
 }
 
 impl ChatTurn {
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn latest_top_level_tool_index(&self) -> Option<usize> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, block)| match block {
+                ChatBlock::ToolUse { .. } if self.parent_tool_index(index).is_none() => Some(index),
+                _ => None,
+            })
+    }
+
     pub(crate) fn parent_tool_index(&self, index: usize) -> Option<usize> {
         let mut parent = self.direct_parent_index(index)?;
         for _ in 0..self.blocks.len() {
@@ -570,6 +568,20 @@ impl ChatTurn {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)> {
+    items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(item_index, item)| match item {
+            ChatItem::Turn(turn) => turn
+                .latest_top_level_tool_index()
+                .map(|block_index| (item_index, block_index)),
+            ChatItem::User { .. } => None,
+        })
+}
+
 /// The curated verbs the running-turn header cycles through (owned by the shared contract, not
 /// the view). The page picks one at random every few seconds while streaming.
 pub const WORKING_VERBS: &[&str] = &[
@@ -609,7 +621,6 @@ mod tests {
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
             handoff_message_count: 2,
-            workspace_selection_pending: true,
             choice_question: "Repository?".into(),
             choice_options: vec!["Local".into(), "Remote".into(), "Create".into()],
             queued: vec![
@@ -641,7 +652,6 @@ mod tests {
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);
         assert_eq!(back.handoff_message_count, 2);
-        assert!(back.workspace_selection_pending);
         assert_eq!(back.choice_question, "Repository?");
         assert_eq!(back.choice_options.len(), 3);
     }
@@ -784,6 +794,67 @@ mod tests {
         assert_eq!(turn.parent_tool_index(1), Some(0));
         assert_eq!(turn.parent_tool_index(2), Some(0));
         assert_eq!(turn.parent_tool_index(3), Some(0));
+    }
+
+    #[test]
+    fn latest_top_level_tool_ignores_results_and_nested_tools() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: "first".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                    parent_call_id: None,
+                },
+                ChatBlock::ToolResult {
+                    call_id: "first".into(),
+                    content: "done".into(),
+                    is_error: false,
+                },
+                ChatBlock::ToolUse {
+                    call_id: "nested".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                    parent_call_id: Some("first".into()),
+                },
+                ChatBlock::ToolUse {
+                    call_id: "second".into(),
+                    name: "run".into(),
+                    args: "{}".into(),
+                    parent_call_id: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.latest_top_level_tool_index(), Some(3));
+    }
+
+    #[test]
+    fn latest_tool_location_selects_only_the_newest_turn_tool() {
+        let tool = |call_id: &str| ChatBlock::ToolUse {
+            call_id: call_id.into(),
+            name: "run".into(),
+            args: "{}".into(),
+            parent_call_id: None,
+        };
+        let items = vec![
+            ChatItem::Turn(ChatTurn {
+                blocks: vec![tool("old")],
+                ..Default::default()
+            }),
+            ChatItem::User {
+                text: "next".into(),
+                context: None,
+                attachments: Vec::new(),
+            },
+            ChatItem::Turn(ChatTurn {
+                blocks: vec![ChatBlock::Text("working".into()), tool("new")],
+                ..Default::default()
+            }),
+        ];
+
+        assert_eq!(latest_tool_location(&items), Some((2, 1)));
     }
 
     #[test]
