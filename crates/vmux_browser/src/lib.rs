@@ -366,9 +366,7 @@ fn on_webview_ready_send_theme(
     let entity = trigger.event_target();
     webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
-        let payload = ThemeEvent {
-            radius: settings.layout.radius,
-        };
+        let payload = theme_event(&settings);
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
     // CEF / modal must never carry a stale zoom (e.g. from a previous
@@ -382,6 +380,22 @@ fn on_webview_ready_send_theme(
     }
 }
 
+fn theme_event(settings: &AppSettings) -> ThemeEvent {
+    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
+    ThemeEvent {
+        radius: settings.layout.radius,
+        catalog: external_locale_catalog(&locale),
+        locale,
+    }
+}
+
+fn external_locale_catalog(locale: &str) -> Option<String> {
+    let directory = vmux_core::profile::config_dir().join("locales");
+    [locale, locale.split('-').next().unwrap_or(locale)]
+        .into_iter()
+        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+}
+
 fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefColorMode {
     match mode {
         vmux_setting::ColorScheme::Light => bevy_cef::prelude::CefColorMode::Light,
@@ -393,10 +407,20 @@ fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefCo
 fn sync_appearance_to_cef(
     settings: Res<AppSettings>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
+    browsers: Option<NonSend<Browsers>>,
+    ready: Query<Entity, With<PageReady>>,
+    mut commands: Commands,
 ) {
     let mode = map_color_scheme(settings.appearance.mode);
     if scheme.0 != mode {
         scheme.0 = mode;
+    }
+    let Some(browsers) = browsers else { return };
+    let payload = theme_event(&settings);
+    for entity in &ready {
+        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
+        }
     }
 }
 

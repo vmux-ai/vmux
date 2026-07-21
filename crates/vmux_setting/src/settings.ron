@@ -8,6 +8,10 @@
             padding: 8.0,
         ),
     ),
+    appearance: (
+        mode: device,
+        locale: "system",
+    ),
     shortcuts: (
         leader: (key: "b", ctrl: true),
         chord_timeout_ms: 1000,

@@ -13,6 +13,8 @@ pub mod file_icon;
 
 pub mod icon;
 
+pub mod i18n;
+
 pub mod prompt_ghost;
 
 pub mod theme;

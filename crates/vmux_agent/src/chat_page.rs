@@ -2531,14 +2531,12 @@ mod native_tests {
     #[test]
     fn composer_supports_history_uploads_and_clipboard_media() {
         let source = include_str!("chat_page/page.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
         let media_options = include_str!("../../vmux_ui/src/components/prompt_media_options.rs");
         assert!(source.contains("prompt_history_direction"));
         assert!(source.contains("move_prompt_history"));
         assert!(source.contains("ChatPickFiles"));
         assert!(source.contains("ChatPasteMedia"));
         assert!(source.contains("preview_data_url"));
-        assert!(composer.contains("Remove attachment"));
         assert!(source.contains("attachments_to_submit"));
         assert!(source.contains("ChatMediaListRequest"));
         assert!(source.contains("select_media_entry"));

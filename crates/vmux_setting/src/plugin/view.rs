@@ -9,6 +9,7 @@ use vmux_layout::{
     stack::FocusedStack,
     warm_page::WarmPage,
 };
+use vmux_ui::i18n::{register_catalog, requested_locale, translate_for};
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
@@ -138,15 +139,18 @@ pub(crate) fn broadcast_settings_to_views(
 }
 
 pub(crate) fn broadcast_schema_to_views(
+    settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsSchemaSent>)>,
+    sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsSchemaSent>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    if pending.is_empty() {
+    if pending.is_empty() && (!settings.is_changed() || sent.is_empty()) {
         return;
     }
+    let locale = requested_locale(Some(&settings.appearance.locale));
     let payload = SettingsSchemaEvent {
-        json: serde_json::to_string(&build_settings_schema()).unwrap_or_default(),
+        json: serde_json::to_string(&build_settings_schema_for(&locale)).unwrap_or_default(),
     };
     for entity in &pending {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -158,6 +162,18 @@ pub(crate) fn broadcast_schema_to_views(
             &payload,
         ));
         commands.entity(entity).insert(SettingsSchemaSent);
+    }
+    if settings.is_changed() {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SETTINGS_SCHEMA_EVENT,
+                &payload,
+            ));
+        }
     }
 }
 
@@ -258,56 +274,67 @@ pub(crate) fn handle_open_settings_command(
     }
 }
 
+#[cfg(test)]
 fn build_settings_schema() -> SettingsSchema {
+    build_settings_schema_for("en-US")
+}
+
+fn build_settings_schema_for(locale: &str) -> SettingsSchema {
+    let directory = vmux_core::profile::config_dir().join("locales");
+    if let Some(source) = [locale, locale.split('-').next().unwrap_or(locale)]
+        .into_iter()
+        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+    {
+        let _ = register_catalog(locale, &source);
+    }
+    let t = |id| translate_for(locale, id);
     SettingsSchema {
         sections: vec![
             SectionSpec {
                 id: "appearance".to_string(),
-                title: "Appearance".to_string(),
+                title: t("schema-appearance"),
                 description: None,
-                synthetic_keys: vec!["mode".to_string()],
+                synthetic_keys: vec!["mode".to_string(), "locale".to_string()],
                 root_path: "appearance".to_string(),
             },
             SectionSpec {
                 id: "general".to_string(),
-                title: "General".to_string(),
+                title: t("schema-general"),
                 description: None,
                 synthetic_keys: vec!["auto_update".to_string()],
                 root_path: String::new(),
             },
             SectionSpec {
                 id: "layout".to_string(),
-                title: "Layout".to_string(),
-                description: Some("Window CEF shell, panes, sidebar, and focus ring.".to_string()),
+                title: t("schema-layout"),
+                description: Some(t("schema-layout-detail")),
                 synthetic_keys: vec![],
                 root_path: "layout".to_string(),
             },
             SectionSpec {
                 id: "agent".to_string(),
-                title: "Agent".to_string(),
-                description: Some("Agent behavior and tool permissions.".to_string()),
+                title: t("schema-agent"),
+                description: Some(t("schema-agent-detail")),
                 synthetic_keys: vec![],
                 root_path: "agent".to_string(),
             },
             SectionSpec {
                 id: "shortcuts".to_string(),
-                title: "Shortcuts".to_string(),
-                description: Some(
-                    "Read-only view. Edit settings.ron directly to change bindings.".to_string(),
-                ),
+                title: t("schema-shortcuts"),
+                description: Some(t("schema-shortcuts-detail")),
                 synthetic_keys: vec![],
                 root_path: "shortcuts".to_string(),
             },
             SectionSpec {
                 id: "terminal".to_string(),
-                title: "Terminal".to_string(),
+                title: t("schema-terminal"),
                 description: None,
                 synthetic_keys: vec![],
                 root_path: "terminal".to_string(),
             },
             SectionSpec {
                 id: "browser".to_string(),
-                title: "Browser".to_string(),
+                title: t("schema-browser"),
                 description: None,
                 synthetic_keys: vec![],
                 root_path: "browser".to_string(),
@@ -317,31 +344,39 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "appearance.mode",
                 FieldSpec {
-                    label: Some("Mode".into()),
-                    hint: Some("Color scheme for web pages. Device follows your system.".into()),
+                    label: Some(t("schema-mode")),
+                    hint: Some(t("schema-mode-detail")),
                     widget: Some(WidgetKind::Select),
                     options: vec![
                         SelectOption {
                             value: "device".into(),
-                            label: "Device".into(),
+                            label: t("schema-device"),
                         },
                         SelectOption {
                             value: "light".into(),
-                            label: "Light".into(),
+                            label: t("schema-light"),
                         },
                         SelectOption {
                             value: "dark".into(),
-                            label: "Dark".into(),
+                            label: t("schema-dark"),
                         },
                     ],
                     ..Default::default()
                 },
             ),
             field(
+                "appearance.locale",
+                FieldSpec {
+                    label: Some(t("schema-language")),
+                    hint: Some(t("schema-language-detail")),
+                    ..Default::default()
+                },
+            ),
+            field(
                 "auto_update",
                 FieldSpec {
-                    label: Some("Auto-update".into()),
-                    hint: Some("Check for and install updates on launch and every hour.".into()),
+                    label: Some(t("schema-auto-update")),
+                    hint: Some(t("schema-auto-update-detail")),
                     ..Default::default()
                 },
             ),
@@ -355,8 +390,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "browser.startup_url",
                 FieldSpec {
-                    label: Some("Startup URL".into()),
-                    hint: Some("Empty opens the command bar prompt.".into()),
+                    label: Some(t("schema-startup-url")),
+                    hint: Some(t("schema-startup-url-detail")),
                     placeholder: Some("https://example.com".into()),
                     ..Default::default()
                 },
@@ -364,8 +399,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "browser.search_engine",
                 FieldSpec {
-                    label: Some("Search engine".into()),
-                    hint: Some("Used for web searches from Start and the command bar.".into()),
+                    label: Some(t("schema-search-engine")),
+                    hint: Some(t("schema-search-engine-detail")),
                     widget: Some(WidgetKind::Select),
                     options: vec![
                         SelectOption {
@@ -407,7 +442,7 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "layout.window",
                 FieldSpec {
-                    label: Some("Window".into()),
+                    label: Some(t("schema-window")),
                     order: vec!["padding".into()],
                     ..Default::default()
                 },
@@ -415,7 +450,7 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "layout.pane",
                 FieldSpec {
-                    label: Some("Pane".into()),
+                    label: Some(t("schema-pane")),
                     order: vec!["gap".into(), "radius".into()],
                     ..Default::default()
                 },
@@ -423,14 +458,14 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "layout.side_sheet",
                 FieldSpec {
-                    label: Some("Side sheet".into()),
+                    label: Some(t("schema-side-sheet")),
                     ..Default::default()
                 },
             ),
             field(
                 "layout.focus_ring",
                 FieldSpec {
-                    label: Some("Focus ring".into()),
+                    label: Some(t("schema-focus-ring")),
                     order: vec!["width".into(), "color".into()],
                     ..Default::default()
                 },
@@ -453,8 +488,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "agent.allow_run_placement_override",
                 FieldSpec {
-                    label: Some("Allow run placement override".into()),
-                    hint: Some("Let agents choose run pane mode, direction, and anchor.".into()),
+                    label: Some(t("schema-run-placement")),
+                    hint: Some(t("schema-run-placement-detail")),
                     ..Default::default()
                 },
             ),
@@ -472,8 +507,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "shortcuts.leader",
                 FieldSpec {
-                    label: Some("Leader".into()),
-                    hint: Some("Prefix key for chord shortcuts.".into()),
+                    label: Some(t("schema-leader")),
+                    hint: Some(t("schema-leader-detail")),
                     widget: Some(WidgetKind::LeaderKbd),
                     ..Default::default()
                 },
@@ -481,15 +516,15 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "shortcuts.chord_timeout_ms",
                 FieldSpec {
-                    label: Some("Chord timeout".into()),
-                    hint: Some("Milliseconds before a chord prefix expires.".into()),
+                    label: Some(t("schema-chord-timeout")),
+                    hint: Some(t("schema-chord-timeout-detail")),
                     ..Default::default()
                 },
             ),
             field(
                 "shortcuts.bindings",
                 FieldSpec {
-                    label: Some("Bindings".into()),
+                    label: Some(t("schema-bindings")),
                     widget: Some(WidgetKind::BindingsList),
                     ..Default::default()
                 },
@@ -509,16 +544,16 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "terminal.confirm_close",
                 FieldSpec {
-                    label: Some("Confirm close".into()),
-                    hint: Some("Prompt before closing a terminal with a running process.".into()),
+                    label: Some(t("schema-confirm-close")),
+                    hint: Some(t("schema-confirm-close-detail")),
                     ..Default::default()
                 },
             ),
             field(
                 "terminal.default_theme",
                 FieldSpec {
-                    label: Some("Default theme".into()),
-                    hint: Some("Name of the active theme from the themes list.".into()),
+                    label: Some(t("schema-default-theme")),
+                    hint: Some(t("schema-default-theme-detail")),
                     placeholder: Some("default".into()),
                     ..Default::default()
                 },
@@ -543,6 +578,21 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+
+    #[test]
+    fn schema_uses_requested_locale() {
+        let schema = build_settings_schema_for("ja");
+        let appearance = schema
+            .sections
+            .iter()
+            .find(|section| section.id == "appearance")
+            .unwrap();
+        assert_eq!(appearance.title, "外観");
+        assert_eq!(
+            schema.field("appearance.locale").unwrap().label.as_deref(),
+            Some("言語")
+        );
     }
 }
 

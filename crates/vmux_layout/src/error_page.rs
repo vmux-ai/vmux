@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ui::hooks::use_theme;
+use vmux_ui::i18n::translate;
 
 #[component]
 pub fn Page() -> Element {
@@ -13,7 +14,7 @@ pub fn Page() -> Element {
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.clone())
     };
-    let title = lookup("title").unwrap_or_else(|| "Error".to_string());
+    let title = lookup("title").unwrap_or_else(|| translate("error-title"));
     let message = lookup("message").unwrap_or_default();
     let url = lookup("url").unwrap_or_default();
 

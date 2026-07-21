@@ -3,6 +3,7 @@
 use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -34,7 +35,12 @@ pub fn Page() -> Element {
         .iter()
         .find(|space| space.is_active)
         .map(|space| space.name.clone())
-        .unwrap_or_else(|| "Space 1".to_string());
+        .unwrap_or_else(|| {
+            translate_with(
+                "spaces-default-name",
+                &[("number", TranslationValue::Number(1))],
+            )
+        });
     let selected_space_id = spaces.get(sel).map(|space| space.id.clone());
     let selected_space_deletable = count > 1 && spaces.get(sel).is_some();
 
@@ -72,14 +78,14 @@ pub fn Page() -> Element {
             },
             div { class: "flex items-center justify-between border-b border-border px-5 py-4",
                 div { class: "min-w-0",
-                    h1 { class: "text-lg font-semibold", "Spaces" }
+                    h1 { class: "text-lg font-semibold", {translate("spaces-title")} }
                     div { class: "mt-1 truncate text-xs text-muted-foreground", "{active_name}" }
                 }
                 div { class: "flex shrink-0 items-center gap-2",
                     input {
                         class: "w-44 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-cyan-400/50",
                         r#type: "text",
-                        placeholder: "New space name",
+                        placeholder: translate("spaces-new-placeholder"),
                         value: "{new_name}",
                         oninput: move |e| new_name.set(e.value()),
                         onkeydown: move |e| {
@@ -96,13 +102,13 @@ pub fn Page() -> Element {
                             emit_command("new", None, Some(new_space_name(&new_name(), count)));
                             new_name.set(String::new());
                         },
-                        "New"
+                        {translate("common-new")}
                     }
                 }
             }
             div { class: "min-h-0 flex-1 overflow-y-auto p-3",
                 if spaces.is_empty() {
-                    div { class: "flex h-full items-center justify-center text-sm text-muted-foreground", "No spaces" }
+                    div { class: "flex h-full items-center justify-center text-sm text-muted-foreground", {translate("spaces-empty")} }
                 } else {
                     div { class: "flex flex-col gap-2",
                         for (index, space) in spaces.iter().enumerate() {
@@ -123,7 +129,10 @@ pub fn Page() -> Element {
 fn new_space_name(typed: &str, count: usize) -> String {
     let trimmed = typed.trim();
     if trimmed.is_empty() {
-        format!("Space {}", count + 1)
+        translate_with(
+            "spaces-default-name",
+            &[("number", TranslationValue::Number((count + 1) as i64))],
+        )
     } else {
         trimmed.to_string()
     }
@@ -146,11 +155,10 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
     } else {
         "flex cursor-pointer items-center justify-between rounded-lg border border-border bg-card px-3 py-3 transition-colors hover:border-cyan-400/40 hover:bg-foreground/[0.04]"
     };
-    let tab_label = if space.tab_count == 1 {
-        "1 tab".to_string()
-    } else {
-        format!("{} tabs", space.tab_count)
-    };
+    let tab_label = translate_with(
+        "spaces-tabs",
+        &[("count", TranslationValue::Number(space.tab_count as i64))],
+    );
 
     rsx! {
         div {
@@ -162,7 +170,7 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                 div { class: "flex min-w-0 items-center gap-2",
                     span { class: "truncate text-sm font-medium text-foreground", "{space.name}" }
                     if space.is_active {
-                        span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-300", "active" }
+                        span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-300", {translate("common-active")} }
                     }
                 }
                 div { class: "mt-1 truncate text-xs text-muted-foreground", "{space.profile}" }
@@ -172,8 +180,8 @@ fn SpaceRowView(space: SpaceRow, selected: bool, deletable: bool) -> Element {
                 if deletable {
                     button {
                         class: "flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground",
-                        title: "Delete space",
-                        "aria-label": "Delete space",
+                        title: translate("spaces-delete"),
+                        "aria-label": translate("spaces-delete"),
                         onclick: move |e| {
                             e.stop_propagation();
                             emit_command("delete", Some(delete_id.clone()), None);

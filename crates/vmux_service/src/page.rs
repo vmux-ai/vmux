@@ -3,6 +3,7 @@
 use crate::event::*;
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
@@ -39,16 +40,15 @@ pub fn Page() -> Element {
                 div { class: "flex items-center gap-3",
                     div { class: "flex items-center gap-2 text-foreground",
                         ServiceIcon {}
-                        h1 { class: "text-lg font-semibold", "Background Services" }
+                        h1 { class: "text-lg font-semibold", {translate("services-title")} }
                     }
                     StatusBadge { connected: data.connected }
                     if has_processes {
                         {
-                            let label = if process_count == 1 {
-                                format!("{process_count} process")
-                            } else {
-                                format!("{process_count} processes")
-                            };
+                            let label = translate_with(
+                                "services-processes",
+                                &[("count", TranslationValue::Number(process_count as i64))],
+                            );
                             rsx! { span { class: "text-xs text-muted-foreground", "{label}" } }
                         }
                     }
@@ -60,7 +60,7 @@ pub fn Page() -> Element {
                             e.stop_propagation();
                             let _ = try_cef_bin_emit_rkyv(&ProcessKillAllEvent { kill_all: true });
                         },
-                        "Kill All"
+                        {translate("services-kill-all")}
                     }
                 }
             }
@@ -68,16 +68,17 @@ pub fn Page() -> Element {
             if !data.connected {
                 div { class: "flex flex-1 items-center justify-center",
                     div { class: "text-center text-muted-foreground",
-                        p { class: "text-sm", "Service is not running" }
+                        p { class: "text-sm", {translate("services-not-running")} }
                         p { class: "mt-1 text-xs opacity-60",
-                            "Start with: "
+                            {translate("services-start-with")}
+                            " "
                             code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs", "Vmux service" }
                         }
                     }
                 }
             } else if !has_processes {
                 div { class: "flex flex-1 items-center justify-center",
-                    p { class: "text-sm text-muted-foreground", "No active processes" }
+                    p { class: "text-sm text-muted-foreground", {translate("services-empty")} }
                 }
             } else {
                 // Search filter
@@ -85,7 +86,7 @@ pub fn Page() -> Element {
                     input {
                         class: "w-full rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm text-foreground placeholder-muted-foreground outline-none focus:border-cyan-400/50",
                         r#type: "text",
-                        placeholder: "Filter processes...",
+                        placeholder: translate("services-filter"),
                         value: "{search}",
                         oninput: move |e: Event<FormData>| search.set(e.value()),
                     }
@@ -93,7 +94,7 @@ pub fn Page() -> Element {
 
                 if filtered.is_empty() {
                     div { class: "flex flex-1 items-center justify-center",
-                        p { class: "text-sm text-muted-foreground", "No matching processes" }
+                        p { class: "text-sm text-muted-foreground", {translate("services-no-match")} }
                     }
                 } else {
                     div { class: "flex flex-col gap-3",
@@ -132,9 +133,9 @@ fn ServiceIcon() -> Element {
 #[component]
 fn StatusBadge(connected: bool) -> Element {
     let (color, text) = if connected {
-        ("bg-green-500", "Connected")
+        ("bg-green-500", translate("services-connected"))
     } else {
-        ("bg-red-500", "Disconnected")
+        ("bg-red-500", translate("services-disconnected"))
     };
 
     rsx! {
@@ -194,7 +195,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                     }
                     if process.attached {
                         span { class: "rounded-full bg-blue-500/20 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400",
-                            "attached"
+                            {translate("services-attached")}
                         }
                     }
                 }
@@ -203,7 +204,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
                     button {
                         class: "rounded px-1.5 py-0.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: onkill,
-                        "Kill"
+                        {translate("services-kill")}
                     }
                 }
             }
@@ -212,12 +213,12 @@ fn ProcessCard(process: ProcessEntry) -> Element {
             div { class: "grid grid-cols-2 gap-x-4 gap-y-1 text-xs",
                 MetaRow { label: "PID", value: process.pid.to_string() }
                 MetaRow { label: "CPU", value: format!("{:.0}%", process.cpu_percent) }
-                MetaRow { label: "Memory", value: format_mem(process.mem_bytes) }
-                MetaRow { label: "Size", value: format!("{}x{}", process.cols, process.rows) }
+                MetaRow { label: translate("services-memory"), value: format_mem(process.mem_bytes) }
+                MetaRow { label: translate("services-size"), value: format!("{}x{}", process.cols, process.rows) }
                 if !process.cwd.is_empty() {
                     MetaRow { label: "CWD", value: process.cwd.clone() }
                 }
-                MetaRow { label: "Shell", value: process.shell.clone() }
+                MetaRow { label: translate("services-shell"), value: process.shell.clone() }
             }
 
             // Terminal preview

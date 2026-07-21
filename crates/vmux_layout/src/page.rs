@@ -22,6 +22,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
+use vmux_ui::i18n::translate;
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -363,19 +364,19 @@ fn HeaderView(
                 if let Some(err) = stacks_error {
                     span { class: "text-ui text-destructive", "{err}" }
                 } else {
-                    NavButton { label: "Back", command: "prev_page", disabled: !can_go_back,
+                    NavButton { label: translate("layout-back"), command: "prev_page", disabled: !can_go_back,
                         Icon { class: "h-4 w-4",
                             path { d: "M19 12H5" }
                             path { d: "M12 19l-7-7 7-7" }
                         }
                     }
-                    NavButton { label: "Forward", command: "next_page", disabled: !can_go_forward,
+                    NavButton { label: translate("layout-forward"), command: "next_page", disabled: !can_go_forward,
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "M12 5l7 7-7 7" }
                         }
                     }
-                    NavButton { label: "Reload", command: "reload", disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
+                    NavButton { label: translate("layout-reload"), command: "reload", disabled: active_row.as_ref().is_none_or(|t| t.url.is_empty()),
                         span {
                             key: "{reload_key}",
                             class: if reload_key > 0 { "inline-flex animate-spin-once" } else { "inline-flex" },
@@ -392,8 +393,8 @@ fn HeaderView(
                     if show_bookmark {
                         button {
                             r#type: "button",
-                            aria_label: if is_bookmarked { "Remove bookmark" } else { "Bookmark this page" },
-                            title: if is_bookmarked { "Remove bookmark (\u{2318}D)" } else { "Bookmark this page (\u{2318}D)" },
+                            aria_label: if is_bookmarked { translate("layout-remove-bookmark") } else { translate("layout-bookmark-page") },
+                            title: if is_bookmarked { format!("{} (\u{2318}D)", translate("layout-remove-bookmark")) } else { format!("{} (\u{2318}D)", translate("layout-bookmark-page")) },
                             class: if is_bookmarked {
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground transition-colors hover:bg-glass-hover"
                             } else {
@@ -418,8 +419,8 @@ fn HeaderView(
                         }
                         button {
                             r#type: "button",
-                            aria_label: if is_pinned { "Unpin this page" } else { "Pin this page" },
-                            title: if is_pinned { "Unpin this page" } else { "Pin this page" },
+                            aria_label: if is_pinned { translate("layout-unpin-page") } else { translate("layout-pin-page") },
+                            title: if is_pinned { translate("layout-unpin-page") } else { translate("layout-pin-page") },
                             class: if is_pinned {
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-foreground transition-colors hover:bg-glass-hover"
                             } else {
@@ -473,7 +474,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
             }
             button {
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
-                title: "Manage extensions",
+                title: translate("layout-manage-extensions"),
                 onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
                 Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
@@ -494,7 +495,11 @@ fn url_row_cef(_bg_color: Option<&str>) -> (String, String) {
 fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> Element {
     let has_content = active_row.as_ref().is_some_and(|t| !t.url.is_empty());
     let address_value = active_row.as_ref().map(format_address).unwrap_or_default();
-    let placeholder = if has_content { "" } else { "New Stack" };
+    let placeholder = if has_content {
+        String::new()
+    } else {
+        translate("layout-new-stack")
+    };
     let placeholder_class = if bg_color.is_some() {
         "placeholder:opacity-50"
     } else {
@@ -542,7 +547,7 @@ fn StackIcon(icon: PageIcon, url: String, title: String) -> Element {
 
 #[component]
 fn NavButton(
-    label: &'static str,
+    label: String,
     command: &'static str,
     #[props(default)] disabled: bool,
     children: Element,
@@ -555,8 +560,8 @@ fn NavButton(
     rsx! {
         button {
             r#type: "button",
-            aria_label: label,
-            title: label,
+            aria_label: "{label}",
+            title: "{label}",
             disabled,
             class,
             onclick: move |_| {
@@ -654,8 +659,8 @@ fn Tab(tab: TabRow) -> Element {
             }
             button {
                 r#type: "button",
-                aria_label: "Close tab",
-                title: "Close tab",
+                aria_label: translate("layout-close-tab"),
+                title: translate("layout-close-tab"),
                 class: "{close_class}",
                 onmousedown: move |evt| {
                     evt.prevent_default();
@@ -682,14 +687,14 @@ fn Tab(tab: TabRow) -> Element {
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks("add", bookmark_metadata.clone(), None),
                     attributes: vec![],
-                    "Bookmark"
+                    {translate("layout-bookmark")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: move |_: String| add_to_bookmarks("pin_url", pin_metadata.clone(), None),
                     attributes: vec![],
-                    "Pin"
+                    {translate("layout-pin")}
                 }
             }
         }
@@ -701,8 +706,8 @@ fn NewTabButton() -> Element {
     rsx! {
         button {
             r#type: "button",
-            aria_label: "New tab",
-            title: "New tab",
+            aria_label: translate("layout-new-tab"),
+            title: translate("layout-new-tab"),
             class: "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
                 let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
@@ -733,7 +738,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
             if let Some(user) = user {
                 div {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
-                    title: "Team",
+                    title: translate("layout-team"),
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
                             command: "open".to_string(),
@@ -787,7 +792,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     if overflow > 0 {
                         div {
                             class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
-                            title: "Team",
+                            title: translate("layout-team"),
                             onclick: move |_| {
                                 let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
                                     command: "open".to_string(),

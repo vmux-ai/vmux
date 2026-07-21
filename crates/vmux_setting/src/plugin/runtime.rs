@@ -48,10 +48,25 @@ pub enum ColorScheme {
     Device,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AppearanceSettings {
     #[serde(default)]
     pub mode: ColorScheme,
+    #[serde(default = "default_locale_setting")]
+    pub locale: String,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            mode: ColorScheme::Device,
+            locale: default_locale_setting(),
+        }
+    }
+}
+
+fn default_locale_setting() -> String {
+    "system".to_string()
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -1984,14 +1999,16 @@ mod tests {
     fn appearance_absent_falls_back_to_device() {
         let s = parse_settings("()").expect("parse empty");
         assert_eq!(s.appearance.mode, ColorScheme::Device);
+        assert_eq!(s.appearance.locale, "system");
     }
 
     #[test]
     fn appearance_round_trips_through_ron() {
         let s = parse_settings("(appearance: (mode: light))").expect("parse light");
         assert_eq!(s.appearance.mode, ColorScheme::Light);
-        let s = parse_settings("(appearance: (mode: dark))").expect("parse dark");
+        let s = parse_settings("(appearance: (mode: dark, locale: \"ja\"))").expect("parse dark");
         assert_eq!(s.appearance.mode, ColorScheme::Dark);
+        assert_eq!(s.appearance.locale, "ja");
     }
 
     #[test]
@@ -2000,15 +2017,18 @@ mod tests {
         assert!(!sparse_settings_ron(&s).unwrap().contains("appearance"));
         let mut s = s;
         s.appearance.mode = ColorScheme::Dark;
+        s.appearance.locale = "ja".to_string();
         let out = sparse_settings_ron(&s).unwrap();
         assert!(
             out.contains("appearance"),
             "changed appearance persisted: {out}"
         );
         assert!(out.contains("dark"), "mode value persisted: {out}");
+        assert!(out.contains("ja"), "locale value persisted: {out}");
         assert_eq!(
             parse_settings(&out).unwrap().appearance.mode,
             ColorScheme::Dark
         );
+        assert_eq!(parse_settings(&out).unwrap().appearance.locale, "ja");
     }
 }

@@ -43,6 +43,7 @@ use vmux_ui::components::prompt_composer::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -621,15 +622,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
 
     let placeholder = if space_switch {
-        "Switch space\u{2026}"
+        translate("command-switch-space")
     } else {
         match variant {
-            PaletteVariant::Start => "Search or ask\u{2026}",
+            PaletteVariant::Start => translate("command-search-ask"),
             PaletteVariant::Modal => {
                 if is_new_tab {
-                    "Search or type a URL, or select Terminal..."
+                    translate("command-new-tab-placeholder")
                 } else {
-                    "Type a URL, search tabs, or > for commands..."
+                    translate("command-placeholder")
                 }
             }
         }
@@ -1079,12 +1080,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     completion: ghost_text.clone(),
                     attachments: start_prompt_attachments,
                     show_examples: q.is_empty() && ghost_text.is_empty(),
-                    placeholder: "Type / for commands or @ for media".to_string(),
+                    placeholder: translate("command-composer-placeholder"),
                     accent_bg: start_accent.accent_bg.to_string(),
                     accent_color: format!("rgb({})", start_accent.rain_rgb),
                     accent_gradient: start_accent.grad.to_string(),
                     footer: Some(start_composer_footer),
-                    action_title: "Send (Enter)".to_string(),
+                    action_title: translate("command-send"),
                     action_enabled: start_action_enabled,
                     on_input: move |value| {
                         start_agent_menu_open.set(false);
@@ -1297,9 +1298,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 div { class: result_content_row_class(),
                                     span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
                                     if path.is_empty() {
-                                        span { class: "text-sm text-foreground", "Terminal" }
+                                        span { class: "text-sm text-foreground", {translate("command-terminal")} }
                                     } else {
-                                        span { class: "shrink-0 text-sm text-foreground", "Open in Terminal" }
+                                        span { class: "shrink-0 text-sm text-foreground", {translate("command-open-terminal")} }
                                         span { class: result_terminal_path_class(), "{path}" }
                                     }
                                 }
@@ -1319,7 +1320,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     }
                                 }
                                 span { class: result_trailing_slot_class(),
-                                    if location.is_empty() { "Stack" } else { "{location}" }
+                                    if location.is_empty() { {translate("command-stack")} } else { "{location}" }
                                 }
                             },
                             ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
@@ -1330,12 +1331,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     div { class: "flex min-w-0 items-center gap-2",
                                         span { class: result_primary_text_class(), "{name}" }
                                         if *is_active {
-                                            span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", "active" }
+                                            span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", {translate("common-active")} }
                                         }
                                     }
                                     span { class: result_secondary_text_class(), "{profile}" }
                                 }
-                                span { class: result_trailing_slot_class(), "{tab_count} tabs" }
+                                span { class: result_trailing_slot_class(), {translate_with("command-tabs", &[("count", TranslationValue::Number(*tab_count as i64))])} }
                             },
                             ResultItem::Command { name, shortcut, .. } => rsx! {
                                 div { class: result_content_row_class(),
@@ -1388,9 +1389,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         && agent_page_url(item).is_some()
                                         && !agent_page_matches_query(item, &q)
                                     {
-                                        "Prompt"
+                                        {translate("command-prompt")}
                                     } else if shortcut.is_empty() {
-                                        "New tab"
+                                        {translate("command-new-tab")}
                                     } else {
                                         span { class: result_shortcut_badge_class(), "{shortcut}" }
                                     }
@@ -1403,11 +1404,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         path { d: "m21 21-4.3-4.3" }
                                     }
                                     if url.is_empty() {
-                                        span { class: "text-sm text-foreground", "Search" }
+                                        span { class: "text-sm text-foreground", {translate("command-search")} }
                                     } else if looks_like_url(url) {
-                                        span { class: result_primary_text_class(), "Open \"{url}\"" }
+                                        span { class: result_primary_text_class(), {translate_with("command-open-value", &[("value", TranslationValue::String(url))])} }
                                     } else {
-                                        span { class: result_primary_text_class(), "Search \"{url}\"" }
+                                        span { class: result_primary_text_class(), {translate_with("command-search-value", &[("value", TranslationValue::String(url))])} }
                                     }
                                 }
                                 if !url.is_empty() {

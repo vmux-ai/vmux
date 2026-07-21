@@ -10,8 +10,9 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-use crate::page_model::{PkgAction, pkg_action, pkg_status_class, pkg_status_label};
+use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
 
 fn request_catalog(query: String, refresh: bool) {
     let _ = try_cef_bin_emit_rkyv(&LspCatalogRequest {
@@ -25,7 +26,7 @@ fn request_catalog(query: String, refresh: bool) {
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut packages = use_signal(Vec::<LspPackage>::new);
     let mut query = use_signal(String::new);
     let mut progress = use_signal(HashMap::<String, LspInstallProgress>::new);
@@ -67,8 +68,9 @@ pub fn Page() -> Element {
         });
 
     use_effect(move || {
+        locale();
         if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title("Language Servers");
+            doc.set_title(&translate("lsp-title"));
         }
         request_catalog(String::new(), false);
     });
@@ -77,10 +79,10 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             ManagerHeader {
-                title: "Language Servers",
+                title: translate("lsp-title"),
                 count: visible.len(),
                 search_value: query(),
-                search_placeholder: "Search language servers, linters, formatters…",
+                search_placeholder: translate("lsp-search"),
                 onsearch: move |event: FormEvent| {
                     let value = event.value();
                     query.set(value.clone());
@@ -94,17 +96,17 @@ pub fn Page() -> Element {
                             loading.set(true);
                             request_catalog(query(), true);
                         },
-                        "Refresh"
+                        {translate("common-refresh")}
                     }
                 },
             }
             ManagerList {
                 if loading() && visible.is_empty() {
-                    ManagerSpinner { detail: "Loading catalog…" }
+                    ManagerSpinner { detail: translate("lsp-loading") }
                 } else if visible.is_empty() {
                     ManagerEmpty {
-                        title: "No matching language servers",
-                        detail: "Try another language, linter, or formatter.",
+                        title: translate("lsp-empty"),
+                        detail: translate("lsp-empty-detail"),
                     }
                 }
                 for package in visible.iter() {
@@ -136,6 +138,7 @@ fn render_package(
     }
     let icon_path = language_icon_path(&item.languages);
     let show_icon = icon_path.is_some();
+    let status_label = localized_status(item.status);
     rsx! {
         ManagerRow {
             show_icon,
@@ -155,7 +158,7 @@ fn render_package(
                 }
             },
             actions: rsx! {
-                span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{pkg_status_label(item.status)}" }
+                span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{status_label}" }
                 {render_action(action, &action_name, item.requires.as_deref())}
             },
         }
@@ -202,6 +205,19 @@ fn language_icon_path(languages: &[String]) -> Option<String> {
     })
 }
 
+fn localized_status(status: LspPkgStatus) -> String {
+    let id = match status {
+        LspPkgStatus::Available => "lsp-status-available",
+        LspPkgStatus::OnPath => "lsp-status-on-path",
+        LspPkgStatus::Installing => "lsp-status-installing",
+        LspPkgStatus::Installed => "lsp-status-installed",
+        LspPkgStatus::Outdated => "lsp-status-outdated",
+        LspPkgStatus::Running => "lsp-status-running",
+        LspPkgStatus::Failed => "lsp-status-failed",
+    };
+    translate(id)
+}
+
 fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Element {
     let install_name = name.to_string();
     let update_name = name.to_string();
@@ -213,7 +229,7 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: install_name.clone() });
                 },
-                "Install"
+                {translate("common-install")}
             }
         },
         PkgAction::Update => rsx! {
@@ -222,7 +238,7 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&LspUpdateRequest { name: update_name.clone() });
                 },
-                "Update"
+                {translate("common-update")}
             }
         },
         PkgAction::Uninstall => rsx! {
@@ -231,12 +247,14 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&LspUninstallRequest { name: uninstall_name.clone() });
                 },
-                "Uninstall"
+                {translate("common-uninstall")}
             }
         },
         PkgAction::None => match requires {
             Some(tool) => {
-                rsx! { span { class: "text-[10px] text-muted-foreground/60", "needs {tool}" } }
+                let detail =
+                    translate_with("lsp-needs", &[("tool", TranslationValue::String(tool))]);
+                rsx! { span { class: "text-[10px] text-muted-foreground/60", "{detail}" } }
             }
             None => rsx! {},
         },

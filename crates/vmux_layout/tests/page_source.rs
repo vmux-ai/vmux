@@ -2,7 +2,7 @@
 fn tab_close_button_captures_mouse_down_before_click() {
     let tab = tab_component_source();
     let close_button = tab
-        .split("aria_label: \"Close tab\"")
+        .split("aria_label: translate(\"layout-close-tab\")")
         .nth(1)
         .and_then(|rest| rest.split("Icon { class: \"h-2.5 w-2.5\"").next())
         .expect("tab close button");
@@ -16,7 +16,7 @@ fn tab_close_button_captures_mouse_down_before_click() {
 fn tab_close_button_requests_tab_close() {
     let tab = tab_component_source();
     let close_button = tab
-        .split("aria_label: \"Close tab\"")
+        .split("aria_label: translate(\"layout-close-tab\")")
         .nth(1)
         .and_then(|rest| rest.split("Icon { class: \"h-2.5 w-2.5\"").next())
         .expect("tab close button");
@@ -31,7 +31,10 @@ fn tab_hover_area_switches_tab() {
     let tab_root = tab
         .split("div {\n            class: \"{tab_class}\"")
         .nth(1)
-        .and_then(|rest| rest.split("aria_label: \"Close tab\"").next())
+        .and_then(|rest| {
+            rest.split("aria_label: translate(\"layout-close-tab\")")
+                .next()
+        })
         .expect("tab root");
 
     assert!(tab_root.contains("onclick: move |_|"));

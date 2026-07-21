@@ -16,6 +16,7 @@ use vmux_ui::components::select::{
 };
 use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 
 #[component]
@@ -41,7 +42,7 @@ pub fn Page() -> Element {
     if s.is_null() {
         return rsx! {
             div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
-                "Loading settings…"
+                {translate("settings-loading")}
             }
         };
     }
@@ -57,7 +58,7 @@ pub fn Page() -> Element {
         div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
             aside { class: "hidden w-56 shrink-0 border-r border-border px-4 py-6 lg:block",
                 div { class: "mb-4 px-2",
-                    div { class: "text-base font-semibold tracking-tight", "Settings" }
+                    div { class: "text-base font-semibold tracking-tight", {translate("settings-title")} }
                     div { class: "mt-0.5 text-[11px] text-muted-foreground", "settings.ron" }
                 }
                 nav { class: "flex flex-col gap-0.5",
@@ -74,9 +75,9 @@ pub fn Page() -> Element {
             main { class: "min-w-0 flex-1 overflow-y-auto",
                 div { class: "mx-auto max-w-3xl px-6 py-8 lg:px-10",
                     div { class: "mb-8 lg:hidden",
-                        h1 { class: "text-xl font-semibold tracking-tight", "Settings" }
+                        h1 { class: "text-xl font-semibold tracking-tight", {translate("settings-title")} }
                         p { class: "mt-1 text-sm text-muted-foreground",
-                            "Stored in ~/.vmux/settings.ron"
+                            {translate("settings-stored")}
                         }
                     }
                     div { class: "flex flex-col gap-8",
@@ -171,7 +172,7 @@ fn compute_sections(top: &Map<String, Value>, schema: &SettingsSchema) -> Vec<Pr
     if !leftover_scalars.is_empty() {
         let synthetic = PreparedSection {
             id: "general-extra".to_string(),
-            title: "Other".to_string(),
+            title: translate("settings-other"),
             description: None,
             root_path: String::new(),
             value: Value::Object(leftover_scalars),
@@ -252,7 +253,7 @@ fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
 
     rsx! {
         Row {
-            label: "Software Update".to_string(),
+            label: translate("settings-software-update"),
             hint: Some(hint),
             control: rsx! {
                 Button {
@@ -269,35 +270,55 @@ fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
     }
 }
 
-fn update_check_presentation(status: &UpdateCheckStatus) -> (&'static str, String, bool) {
+fn update_check_presentation(status: &UpdateCheckStatus) -> (String, String, bool) {
     match status {
         UpdateCheckStatus::Idle => (
-            "Check for Updates",
-            "Checks automatically on launch and every hour when Auto-update is enabled."
-                .to_string(),
+            translate("settings-check-updates"),
+            translate("settings-check-updates-hint"),
             false,
         ),
         UpdateCheckStatus::Unavailable => (
-            "Unavailable",
-            "Updater is not included in this build.".to_string(),
+            translate("settings-update-unavailable"),
+            translate("settings-update-unavailable-hint"),
             true,
         ),
-        UpdateCheckStatus::Checking => ("Checking…", "Checking for updates…".to_string(), true),
-        UpdateCheckStatus::UpToDate => ("Check Again", "Vmux is up to date.".to_string(), false),
-        UpdateCheckStatus::Downloading { version } => {
-            ("Downloading…", format!("Downloading Vmux {version}…"), true)
-        }
-        UpdateCheckStatus::Installing { version } => {
-            ("Installing…", format!("Installing Vmux {version}…"), true)
-        }
+        UpdateCheckStatus::Checking => (
+            translate("settings-update-checking"),
+            translate("settings-update-checking-hint"),
+            true,
+        ),
+        UpdateCheckStatus::UpToDate => (
+            translate("settings-update-check-again"),
+            translate("settings-update-current"),
+            false,
+        ),
+        UpdateCheckStatus::Downloading { version } => (
+            translate("settings-update-downloading"),
+            translate_with(
+                "settings-update-downloading-hint",
+                &[("version", TranslationValue::String(version))],
+            ),
+            true,
+        ),
+        UpdateCheckStatus::Installing { version } => (
+            translate("settings-update-installing"),
+            translate_with(
+                "settings-update-installing-hint",
+                &[("version", TranslationValue::String(version))],
+            ),
+            true,
+        ),
         UpdateCheckStatus::Ready { version } => (
-            "Update Ready",
-            format!("Vmux {version} is ready. Restart to apply it."),
+            translate("settings-update-ready"),
+            translate_with(
+                "settings-update-ready-hint",
+                &[("version", TranslationValue::String(version))],
+            ),
             true,
         ),
         UpdateCheckStatus::Failed => (
-            "Try Again",
-            "Unable to check for updates.".to_string(),
+            translate("settings-update-try-again"),
+            translate("settings-update-failed"),
             false,
         ),
     }
@@ -475,7 +496,12 @@ fn ArrayItemCard(
         .get("name")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .unwrap_or_else(|| format!("Item {}", index + 1));
+        .unwrap_or_else(|| {
+            translate_with(
+                "settings-item-number",
+                &[("number", TranslationValue::Number((index + 1) as i64))],
+            )
+        });
     let item_path = format!("{parent_path}[{index}]");
     rsx! {
         div { class: "rounded-xl border border-border bg-muted/30 p-4",
@@ -484,7 +510,7 @@ fn ArrayItemCard(
                     div { class: "truncate text-sm font-semibold text-foreground", "{title}" }
                 }
                 span { class: "rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
-                    "Item"
+                    {translate("settings-item")}
                 }
             }
             div { class: "flex flex-col divide-y divide-border/60",
@@ -770,7 +796,7 @@ fn ChordEditor(path: String, text: String) -> Element {
     });
 
     if recording() {
-        let preview = feedback().unwrap_or_else(|| "Press a key…".to_string());
+        let preview = feedback().unwrap_or_else(|| translate("settings-press-key"));
         rsx! {
             button {
                 r#type: "button",
@@ -802,7 +828,7 @@ fn ChordEditor(path: String, text: String) -> Element {
                         "super_key": mods.contains(Modifiers::META),
                     });
                     emit_update(&path_for_capture, combo);
-                    feedback.set(Some("Saved".to_string()));
+                    feedback.set(Some(translate("settings-saved")));
                     recording.set(false);
                 },
                 onblur: move |_| {
@@ -817,7 +843,7 @@ fn ChordEditor(path: String, text: String) -> Element {
             button {
                 r#type: "button",
                 class: "inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-foreground/40 hover:bg-muted/70",
-                title: "Click to record a new key combo",
+                title: translate("settings-record-key"),
                 onclick: move |_| {
                     feedback.set(None);
                     recording.set(true);

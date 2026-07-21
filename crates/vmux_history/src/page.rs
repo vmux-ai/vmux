@@ -8,6 +8,7 @@ use crate::event::{
 use dioxus::prelude::*;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -121,14 +122,14 @@ pub fn Page() -> Element {
             header { class: "p-3 border-b border-border flex gap-2 items-center",
                 input {
                     class: "flex-1 bg-muted px-3 py-2 rounded text-sm outline-none",
-                    placeholder: "Search history",
+                    placeholder: translate("history-search"),
                     value: "{query.read()}",
                     oninput: on_input,
                 }
                 button {
                     class: "px-3 py-2 text-xs bg-destructive text-destructive-foreground rounded",
                     onclick: move |_| confirm_open.set(true),
-                    "Clear all"
+                    {translate("history-clear-all")}
                 }
             }
             main { class: "flex-1 overflow-y-auto p-3 text-sm",
@@ -177,13 +178,13 @@ pub fn Page() -> Element {
         if *confirm_open.read() {
             div { class: "fixed inset-0 bg-scrim-strong flex items-center justify-center z-50",
                 div { class: "bg-card border border-border p-6 rounded max-w-sm",
-                    h3 { class: "text-lg mb-2", "Clear all history?" }
-                    p { class: "text-sm text-muted-foreground mb-4", "This cannot be undone." }
+                    h3 { class: "text-lg mb-2", {translate("history-clear-confirm")} }
+                    p { class: "text-sm text-muted-foreground mb-4", {translate("history-clear-warning")} }
                     div { class: "flex gap-2 justify-end",
                         button {
                             class: "px-3 py-1 text-sm bg-muted rounded",
                             onclick: move |_| confirm_open.set(false),
-                            "Cancel"
+                            {translate("history-cancel")}
                         }
                         button {
                             class: "px-3 py-1 text-sm bg-destructive text-destructive-foreground rounded",
@@ -192,7 +193,7 @@ pub fn Page() -> Element {
                                 entries.write().clear();
                                 confirm_open.set(false);
                             },
-                            "Clear all"
+                            {translate("history-clear-all")}
                         }
                     }
                 }
@@ -209,10 +210,16 @@ fn group_by_day(entries: &[HistoryEntry]) -> Vec<(String, Vec<HistoryEntry>)> {
         let day = e.visit_created_at / 86_400_000;
         if current_day != Some(day) {
             let label = match now_day - day {
-                0 => "Today".to_string(),
-                1 => "Yesterday".to_string(),
-                d if d < 7 => format!("{} days ago", d),
-                _ => format!("Day -{}", now_day - day),
+                0 => translate("history-today"),
+                1 => translate("history-yesterday"),
+                d if d < 7 => translate_with(
+                    "history-days-ago",
+                    &[("count", TranslationValue::Number(d))],
+                ),
+                _ => translate_with(
+                    "history-day-offset",
+                    &[("count", TranslationValue::Number(now_day - day))],
+                ),
             };
             out.push((label, Vec::new()));
             current_day = Some(day);
