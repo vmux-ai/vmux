@@ -620,7 +620,7 @@ fn PairScreen(props: PairScreenProps) -> Element {
                         inputmode: "url",
                         autocomplete: "off",
                         autocapitalize: "none",
-                        placeholder: "https://mac.tailnet.ts.net/#token=…",
+                        placeholder: "http://127.0.0.1:54821/#token=…",
                         value: "{props.value}",
                         oninput: move |event| props.on_value.call(event.value()),
                     }

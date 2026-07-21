@@ -77,12 +77,23 @@ fn router(state: RemoteState) -> Router {
 }
 
 async fn authorize(State(state): State<RemoteState>, request: Request, next: Next) -> Response {
+    if !remote_enabled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if request_token(request.headers()).is_some_and(|token| secure_eq(token, &state.token)) {
         mark_paired(&state.paired);
         next.run(request).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
     }
+}
+
+fn remote_enabled() -> bool {
+    remote_enabled_at(&crate::remote_state_path())
+}
+
+fn remote_enabled_at(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled")
 }
 
 fn request_token(headers: &HeaderMap) -> Option<&str> {
@@ -194,26 +205,38 @@ async fn session_events(
     ];
     let live_state = state.clone();
     let live_sid = sid.clone();
-    let live = stream::unfold(receiver, move |mut receiver| {
-        let state = live_state.clone();
+    let disconnect_check = tokio::time::interval(Duration::from_secs(1));
+    let live = stream::unfold((receiver, disconnect_check), move |stream_state| {
+        let remote_state = live_state.clone();
         let sid = live_sid.clone();
         async move {
+            let (mut receiver, mut disconnect_check) = stream_state;
             loop {
-                match receiver.recv().await {
-                    Ok(message) => {
-                        if let Some(event) = service_event(&state, &sid, message).await {
-                            return Some((remote_sse(event), receiver));
+                tokio::select! {
+                    _ = disconnect_check.tick() => {
+                        if !remote_enabled() {
+                            return None;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                        if let Some(messages) = session_messages(&state, &sid).await {
-                            return Some((
-                                remote_sse(RemoteEvent::Snapshot { messages }),
-                                receiver,
-                            ));
+                    message = receiver.recv() => match message {
+                        Ok(message) => {
+                            if let Some(event) = service_event(&remote_state, &sid, message).await {
+                                return Some((
+                                    remote_sse(event),
+                                    (receiver, disconnect_check),
+                                ));
+                            }
                         }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => return None,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            if let Some(messages) = session_messages(&remote_state, &sid).await {
+                                return Some((
+                                    remote_sse(RemoteEvent::Snapshot { messages }),
+                                    (receiver, disconnect_check),
+                                ));
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    },
                 }
             }
         }
@@ -372,5 +395,16 @@ mod tests {
         let mut bearer = HeaderMap::new();
         bearer.insert(AUTHORIZATION, "Bearer secret".parse().unwrap());
         assert_eq!(request_token(&bearer), Some("secret"));
+    }
+
+    #[test]
+    fn remote_state_requires_enabled_marker() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("remote-state");
+        assert!(!remote_enabled_at(&path));
+        std::fs::write(&path, b"disabled\n").unwrap();
+        assert!(!remote_enabled_at(&path));
+        std::fs::write(&path, b"enabled\n").unwrap();
+        assert!(remote_enabled_at(&path));
     }
 }

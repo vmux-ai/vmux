@@ -49,6 +49,6 @@ pub enum Command {
         anchor: Option<String>,
     },
     Service(service::ServiceArgs),
-    /// Expose active agent chats to a paired phone over Tailscale
+    /// Expose active agent chats to a local mobile client
     Remote(remote::RemoteArgs),
 }
