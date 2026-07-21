@@ -75,7 +75,9 @@ impl CliAgentStrategy for CodexStrategy {
         args.push("-c".into());
         args.push(format!(
             "developer_instructions={}",
-            quote_toml(&vmux_core::knowledge::append_agent_skills(RUN_STEER_PROMPT))
+            quote_toml(&vmux_core::knowledge::append_agent_context(
+                RUN_STEER_PROMPT
+            ))
         ));
         args.push("-c".into());
         args.push("features.hooks=true".into());

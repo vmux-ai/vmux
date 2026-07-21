@@ -52,6 +52,9 @@ entire rendered block activates editing, and clicks within the active block keep
 ```text
 ~/.vmux/knowledge/
   welcome.md
+  memories/claude/projects/<project>/
+  memories/codex/local/
+  memories/codex/extensions/
   projects/
   skills/<slug>/SKILL.md
   meetings/
@@ -77,6 +80,18 @@ follow-up.
 vmux injects a deterministic skill catalog and up to 24 KiB of skill bodies into supported CLI and
 ACP instruction surfaces. Additional skills remain discoverable by path. vmux never writes a
 managed `AGENTS.md` into user projects.
+
+## Agent Memories
+
+At startup and before building agent context, vmux copies previously unseen Markdown memories from
+Claude Code and Codex into `~/.vmux/knowledge/memories/`. Claude project memories preserve their
+encoded project directory. Codex local and extension memories remain separate. Existing Knowledge
+files are never overwritten, so the imported copy becomes user-owned after migration.
+
+Every ACP session receives the complete migrated memory set through its appended system prompt.
+Claude and Codex CLI sessions receive the same context through their native appended-instruction
+surfaces. Vibe CLI receives a vmux-managed block in the user-level `~/.vibe/AGENTS.md`; vmux never
+writes agent instruction files into project directories and preserves user-authored Vibe content.
 
 ## Safety
 

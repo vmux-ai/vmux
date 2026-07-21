@@ -12,6 +12,15 @@ use crate::{AgentKind, AgentVariant, AssistantBlock, McpServerConfig, Message};
 
 pub struct VibeStrategy;
 
+fn vibe_home() -> PathBuf {
+    std::env::var("VIBE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            PathBuf::from(home).join(".vibe")
+        })
+}
+
 impl AgentStrategy for VibeStrategy {
     fn kind(&self) -> AgentKind {
         AgentKind::Vibe
@@ -24,14 +33,7 @@ impl AgentStrategy for VibeStrategy {
 
 impl CliAgentStrategy for VibeStrategy {
     fn sessions_root(&self) -> PathBuf {
-        std::env::var("VIBE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_default();
-                PathBuf::from(home).join(".vibe")
-            })
-            .join("logs")
-            .join("session")
+        vibe_home().join("logs").join("session")
     }
 
     fn build_args(&self, _mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String> {
@@ -74,6 +76,7 @@ impl CliAgentStrategy for VibeStrategy {
 
     fn prepare_launch(&self, mcp: &McpServerConfig) {
         ensure_vibe_hooks(&mcp.command);
+        ensure_vibe_knowledge_instructions();
     }
 
     fn discover_session(
@@ -157,13 +160,58 @@ const VMUX_HOOK_NAME: &str = "vmux-file-follow";
 const VMUX_TURN_END_HOOK_NAME: &str = "vmux-turn-end";
 
 fn vibe_hooks_path() -> PathBuf {
-    std::env::var("VIBE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            PathBuf::from(home).join(".vibe")
-        })
-        .join("hooks.toml")
+    vibe_home().join("hooks.toml")
+}
+
+const VMUX_KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
+const VMUX_KNOWLEDGE_END: &str = "<!-- vmux-knowledge:end -->";
+
+fn ensure_vibe_knowledge_instructions() {
+    let path = vibe_home().join("AGENTS.md");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let knowledge = vmux_core::knowledge::agent_memories_prompt();
+    let Some(updated) = merge_vibe_knowledge_instructions(&existing, &knowledge) else {
+        bevy::log::warn!("vibe AGENTS.md contains an incomplete vmux Knowledge block");
+        return;
+    };
+    if updated == existing {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = std::fs::write(&path, updated) {
+        bevy::log::warn!("vibe Knowledge instructions write failed: {error}");
+    }
+}
+
+fn merge_vibe_knowledge_instructions(existing: &str, knowledge: &str) -> Option<String> {
+    let without_managed = match existing.find(VMUX_KNOWLEDGE_START) {
+        Some(start) => {
+            let end = existing[start..]
+                .find(VMUX_KNOWLEDGE_END)
+                .map(|offset| start + offset + VMUX_KNOWLEDGE_END.len())?;
+            let before = &existing[..start];
+            let after = existing[end..]
+                .strip_prefix('\n')
+                .unwrap_or(&existing[end..]);
+            format!("{before}{after}")
+        }
+        None => existing.to_string(),
+    };
+    if knowledge.is_empty() {
+        return Some(without_managed);
+    }
+    let separator = if without_managed.is_empty() || without_managed.ends_with("\n\n") {
+        ""
+    } else if without_managed.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+    Some(format!(
+        "{without_managed}{separator}{VMUX_KNOWLEDGE_START}\n{knowledge}\n{VMUX_KNOWLEDGE_END}\n"
+    ))
 }
 
 /// Idempotently register vmux-managed hooks in `~/.vibe/hooks.toml`: an
@@ -518,6 +566,27 @@ mod tests {
         let merged = merged_skill_paths(Some("[\"/existing\"]"), Path::new("/knowledge"));
         let paths: Vec<String> = serde_json::from_str(&merged).unwrap();
         assert_eq!(paths, vec!["/existing", "/knowledge"]);
+    }
+
+    #[test]
+    fn vibe_knowledge_block_preserves_user_instructions_and_updates_in_place() {
+        let first = merge_vibe_knowledge_instructions("user rules\n", "memory one").unwrap();
+        assert!(first.starts_with("user rules\n\n"));
+        assert!(first.contains("memory one"));
+        let second = merge_vibe_knowledge_instructions(&first, "memory two").unwrap();
+        assert!(second.starts_with("user rules\n\n"));
+        assert!(!second.contains("memory one"));
+        assert!(second.contains("memory two"));
+        assert_eq!(second.matches(VMUX_KNOWLEDGE_START).count(), 1);
+        assert_eq!(
+            merge_vibe_knowledge_instructions(&second, "").unwrap(),
+            "user rules\n\n"
+        );
+    }
+
+    #[test]
+    fn vibe_knowledge_block_refuses_incomplete_managed_section() {
+        assert!(merge_vibe_knowledge_instructions(VMUX_KNOWLEDGE_START, "memory").is_none());
     }
 
     #[test]

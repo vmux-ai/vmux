@@ -48,6 +48,9 @@ impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
         let vault = vault_dir();
         if ensure_vault(&vault).is_ok() {
+            if let Err(error) = vmux_core::knowledge::migrate_external_memories() {
+                bevy::log::warn!("knowledge memory migration failed: {error}");
+            }
             let (tx, rx) = mpsc::channel();
             match notify::recommended_watcher(move |result| {
                 let _ = tx.send(result);

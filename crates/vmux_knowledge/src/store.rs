@@ -7,7 +7,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 use vmux_core::knowledge::{KnowledgeEntry, KnowledgeTreeEvent, markdown_metadata};
 
-const DIRECTORIES: [&str; 4] = ["skills", "projects", "meetings", "handbook"];
+const DIRECTORIES: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
 const LEGACY_DIRECTORIES: [&str; 4] = ["decisions", "runbooks", "research", "templates"];
 const MAX_DEPTH: usize = 16;
 const MAX_ENTRIES: usize = 2_048;
