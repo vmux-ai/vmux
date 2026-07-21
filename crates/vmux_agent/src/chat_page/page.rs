@@ -35,6 +35,7 @@ use vmux_ui::components::prompt_composer::{
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
@@ -1719,6 +1720,9 @@ enum ActivityIcon {
     Awaiting,
     Python,
     ReadFile,
+    WriteFile,
+    Layout,
+    Worktree,
     Search,
     Image,
     Command,
@@ -1758,6 +1762,19 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
             "M12 7v14",
             "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
             "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
+        ],
+        ActivityIcon::WriteFile => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+        ActivityIcon::Layout => &[
+            "M4 4h6v6H4Z",
+            "M14 4h6v6h-6Z",
+            "M4 14h6v6H4Z",
+            "M14 14h6v6h-6Z",
+        ],
+        ActivityIcon::Worktree => &[
+            "M6 3v12",
+            "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+            "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+            "M6 15c0 3 2 5 5 5h4",
         ],
         ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
         ActivityIcon::Image => &[
@@ -1844,6 +1861,15 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         | ActivityIcon::Awaiting => "agent-themed-activity",
         ActivityIcon::Python => unreachable!(),
         ActivityIcon::ReadFile => "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300",
+        ActivityIcon::WriteFile => {
+            "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
+        }
+        ActivityIcon::Layout => {
+            "bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-300"
+        }
+        ActivityIcon::Worktree => {
+            "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+        }
         ActivityIcon::Search => "bg-cyan-500/10 text-cyan-600 ring-cyan-500/20 dark:text-cyan-300",
         ActivityIcon::Image => "bg-pink-500/10 text-pink-600 ring-pink-500/20 dark:text-pink-300",
         ActivityIcon::Command => {
@@ -1893,6 +1919,9 @@ fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
     match activity {
         ToolActivity::Guardian => ActivityIcon::Guardian,
         ToolActivity::ReadFile => ActivityIcon::ReadFile,
+        ToolActivity::WriteFile => ActivityIcon::WriteFile,
+        ToolActivity::Layout => ActivityIcon::Layout,
+        ToolActivity::Worktree => ActivityIcon::Worktree,
         ToolActivity::Image => ActivityIcon::Image,
         ToolActivity::Browser => ActivityIcon::Browser,
         ToolActivity::Search => ActivityIcon::Search,
@@ -1905,6 +1934,70 @@ fn language_activity_icon(value: &str) -> Option<ActivityIcon> {
     let lower = value.to_ascii_lowercase();
     (lower.contains(".py") || lower == "py" || lower.contains("python"))
         .then_some(ActivityIcon::Python)
+}
+
+fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["path", "file_path", "filename", "file"] {
+                if let Some(path) = map.get(key).and_then(serde_json::Value::as_str)
+                    && !path.trim().is_empty()
+                {
+                    return Some(path.to_string());
+                }
+            }
+            map.values().find_map(file_path_from_value)
+        }
+        serde_json::Value::Array(values) => values.iter().find_map(file_path_from_value),
+        serde_json::Value::String(text) => file_path_from_text(text),
+        _ => None,
+    }
+}
+
+fn file_path_from_text(text: &str) -> Option<String> {
+    for marker in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
+        if let Some(path) = text.lines().find_map(|line| line.strip_prefix(marker)) {
+            return Some(path.trim().to_string());
+        }
+    }
+    text.split_whitespace()
+        .map(|token| token.trim_matches(['"', '\'', ',', ':', ';', '(', ')']))
+        .find(|token| {
+            let name = token.rsplit('/').next().unwrap_or(token);
+            name.rsplit_once('.')
+                .is_some_and(|(_, ext)| !ext.is_empty() && ext.len() <= 12)
+        })
+        .map(ToOwned::to_owned)
+}
+
+fn tool_file_path(args: &str) -> Option<String> {
+    serde_json::from_str(args)
+        .ok()
+        .and_then(|value| file_path_from_value(&value))
+        .or_else(|| file_path_from_text(args))
+}
+
+fn render_file_activity_icon(path: &str, write: bool) -> Element {
+    let tone = if write {
+        "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
+    } else {
+        "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300"
+    };
+    rsx! {
+        span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset {tone}", aria_hidden: "true",
+            {type_icon(path, false, "h-4 w-4")}
+        }
+    }
+}
+
+fn render_tool_activity_icon(name: &str, args: &str, fallback: ActivityIcon) -> Element {
+    let activity = tool_activity(name);
+    if matches!(activity, ToolActivity::ReadFile | ToolActivity::WriteFile)
+        && let Some(path) = tool_file_path(args)
+    {
+        return render_file_activity_icon(&path, activity == ToolActivity::WriteFile);
+    }
+    render_activity_icon(fallback)
 }
 
 fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
@@ -2004,6 +2097,9 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
     match activity {
         ToolActivity::Guardian => (icon, Cow::Borrowed("Guardian Review")),
         ToolActivity::ReadFile => (icon, Cow::Borrowed("Read files")),
+        ToolActivity::WriteFile => (icon, Cow::Borrowed("Editing files")),
+        ToolActivity::Layout => (icon, Cow::Borrowed("Managed layout")),
+        ToolActivity::Worktree => (icon, Cow::Borrowed("Managed workspace")),
         ToolActivity::Image => (icon, Cow::Borrowed("Viewed image")),
         ToolActivity::Browser => (icon, Cow::Borrowed("Used browser")),
         ToolActivity::Search => (icon, Cow::Borrowed("Searched files")),
@@ -2017,6 +2113,144 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
                     .replace('_', " "),
             ),
         ),
+    }
+}
+
+fn normalized_tool_args(args: &str) -> Option<serde_json::Value> {
+    let mut value = serde_json::from_str::<serde_json::Value>(args).ok()?;
+    loop {
+        let serde_json::Value::Object(map) = &value else {
+            break;
+        };
+        let Some(arguments) = map.get("arguments") else {
+            break;
+        };
+        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
+            value = arguments.clone();
+        } else {
+            break;
+        }
+    }
+    Some(value)
+}
+
+fn tool_arg_label(key: &str) -> String {
+    let mut label = key.replace('_', " ");
+    if let Some(first) = label.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    label
+}
+
+fn tool_arg_is_path(key: &str, value: &str) -> bool {
+    matches!(
+        key,
+        "path" | "file" | "file_path" | "cwd" | "dir" | "directory" | "workdir"
+    ) || value.starts_with('/')
+}
+
+fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
+    let label = tool_arg_label(&key);
+    match value {
+        serde_json::Value::String(text) if tool_arg_is_path(&key, &text) => rsx! {
+            div { class: "flex min-w-0 items-center gap-2 rounded-lg bg-foreground/[0.035] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.07]",
+                {type_icon(&text, false, "h-4 w-4 shrink-0 opacity-85")}
+                div { class: "min-w-0 flex-1",
+                    div { class: "mb-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                    code { class: "block truncate font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
+                }
+            }
+        },
+        serde_json::Value::String(text)
+            if matches!(
+                key.as_str(),
+                "cmd" | "command" | "script" | "patch" | "text" | "content"
+            ) || text.contains('\n') =>
+        {
+            rsx! {
+                div { class: "overflow-hidden rounded-lg bg-black/[0.18] ring-1 ring-inset ring-foreground/[0.09]",
+                    div { class: "flex items-center gap-1.5 border-b border-foreground/[0.07] px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65",
+                        span { class: "h-1.5 w-1.5 rounded-full bg-emerald-400/70" }
+                        "{label}"
+                    }
+                    pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words px-3 py-2.5 font-mono text-[11px] leading-relaxed text-foreground/78", "{text}" }
+                }
+            }
+        }
+        serde_json::Value::String(text) => rsx! {
+            div { class: "flex min-w-0 items-baseline justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
+                span { class: "shrink-0 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                code { class: "min-w-0 truncate text-right font-mono text-[11px] text-foreground/78", title: "{text}", "{text}" }
+            }
+        },
+        serde_json::Value::Bool(value) => {
+            let tone = if value {
+                "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+            } else {
+                "bg-foreground/[0.04] text-muted-foreground ring-foreground/10"
+            };
+            rsx! {
+                div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
+                    span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                    span { class: "rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset {tone}", "{value}" }
+                }
+            }
+        }
+        serde_json::Value::Number(value) => rsx! {
+            div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
+                span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                code { class: "font-mono text-[11px] tabular-nums text-cyan-600 dark:text-cyan-300", "{value}" }
+            }
+        },
+        serde_json::Value::Array(values) => rsx! {
+            div { class: "rounded-lg bg-foreground/[0.025] p-2 ring-1 ring-inset ring-foreground/[0.06]",
+                div { class: "mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                div { class: "flex flex-col gap-1.5",
+                    for (index , value) in values.into_iter().enumerate() {
+                        {render_tool_arg(format!("{}", index + 1), value)}
+                    }
+                }
+            }
+        },
+        serde_json::Value::Object(values) => rsx! {
+            div { class: "rounded-lg bg-foreground/[0.025] p-2 ring-1 ring-inset ring-foreground/[0.06]",
+                if !key.is_empty() {
+                    div { class: "mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                }
+                div { class: "flex flex-col gap-1.5",
+                    for (child_key , child_value) in values {
+                        {render_tool_arg(child_key, child_value)}
+                    }
+                }
+            }
+        },
+        serde_json::Value::Null => rsx! {
+            div { class: "flex items-center justify-between gap-3 rounded-lg bg-foreground/[0.03] px-2.5 py-2 ring-1 ring-inset ring-foreground/[0.06]",
+                span { class: "text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/65", "{label}" }
+                span { class: "text-[10px] italic text-muted-foreground/60", "None" }
+            }
+        },
+    }
+}
+
+fn render_tool_args(args: &str) -> Element {
+    let Some(value) = normalized_tool_args(args) else {
+        return rsx! {
+            pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{args}" }
+        };
+    };
+    match value {
+        serde_json::Value::Object(map) if map.is_empty() => rsx! {},
+        serde_json::Value::Object(map) => rsx! {
+            div { class: "mt-2 flex flex-col gap-1.5", aria_label: "Tool arguments",
+                for (key , value) in map {
+                    {render_tool_arg(key, value)}
+                }
+            }
+        },
+        value => rsx! {
+            div { class: "mt-2", {render_tool_arg(String::new(), value)} }
+        },
     }
 }
 
@@ -2050,7 +2284,7 @@ fn render_block(
             let (icon, label) = tool_presentation(name, args);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
-                    {render_activity_icon(icon)}
+                    {render_tool_activity_icon(name, args, icon)}
                     div { class: "min-w-0",
                         details { class: "disclosure text-sm text-muted-foreground",
                             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
@@ -2059,7 +2293,7 @@ fn render_block(
                             }
                             div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                             if !args.is_empty() && args != "{}" {
-                                pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
+                                {render_tool_args(args)}
                             }
                         }
                         if !children.is_empty() {
@@ -2193,10 +2427,9 @@ fn render_block(
                     })
                     .collect();
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
-            let icon = language_activity_icon(path).unwrap_or(ActivityIcon::Diff);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
-                    {render_activity_icon(icon)}
+                    {render_file_activity_icon(path, true)}
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "Edited " }
@@ -2238,7 +2471,7 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                     }
                     div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                     if !args.is_empty() && args != "{}" {
-                        pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
+                        {render_tool_args(args)}
                     }
                 }
             }

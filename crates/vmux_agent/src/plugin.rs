@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
@@ -176,6 +177,7 @@ impl Plugin for AgentPlugin {
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .init_resource::<NavAwaitingSnapshot>()
+            .init_resource::<vmux_layout::active_panes::ActivePanes>()
             .init_resource::<vmux_layout::pane::SpawnCounter>()
             .add_message::<AgentCommandRequest>()
             .add_message::<vmux_layout::bookmark::BookmarkOp>()
@@ -187,6 +189,7 @@ impl Plugin for AgentPlugin {
             .add_message::<BrowserSnapshotRequest>()
             .add_message::<BrowserSnapshotResponse>()
             .add_message::<BrowserScrollRequest>()
+            .add_message::<vmux_editor::GlobalSearchRequest>()
             .add_message::<vmux_layout::active_panes::ActivatePane>()
             .add_message::<RecordStartRequest>()
             .add_message::<RecordStartResponse>()
@@ -271,6 +274,7 @@ impl Plugin for AgentPlugin {
                     handle_resume_in_acp,
                     handle_agent_commands,
                     handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                    handle_agent_file_search,
                 )
                     .chain()
                     .in_set(WriteAppCommands)
@@ -979,6 +983,7 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     pane_children: Query<'w, 's, &'static Children, With<Pane>>,
     stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
+    active: Res<'w, vmux_layout::active_panes::ActivePanes>,
 }
 
 impl AgentBrowserResolve<'_, '_> {
@@ -1042,13 +1047,19 @@ impl AgentBrowserResolve<'_, '_> {
     fn claim_browser_pane(&mut self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
         let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
+        let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
+        let stack = self
+            .active
+            .get(&profile)
+            .filter(|active| active.pane == Some(pane))
+            .and_then(|active| active.stack);
         self.activate
             .write(vmux_layout::active_panes::ActivatePane {
-                profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
+                profile,
                 active: vmux_layout::active_panes::ActiveStack {
                     tab: None,
                     pane: Some(pane),
-                    stack: None,
+                    stack,
                     kind,
                 },
             });
@@ -1068,8 +1079,23 @@ impl AgentBrowserResolve<'_, '_> {
             return pane.clone();
         }
         let anchor = (*anchor)?;
-        self.claim_browser_pane(anchor)
-            .map(|p| p.to_bits().to_string())
+        let pane = self.claim_browser_pane(anchor)?;
+        let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
+        if let Some(stack) = self
+            .active
+            .get(&profile)
+            .filter(|active| active.pane == Some(pane))
+            .and_then(|active| active.stack)
+        {
+            return Some(vmux_service::protocol::format_id(
+                vmux_service::protocol::NodeKind::Stack,
+                stack.to_bits(),
+            ));
+        }
+        Some(vmux_service::protocol::format_id(
+            vmux_service::protocol::NodeKind::Pane,
+            pane.to_bits(),
+        ))
     }
 
     /// Same as `resolve_pane` but reads the anchor from a command's origin, for
@@ -1111,6 +1137,8 @@ pub(crate) struct AgentFileResolve<'w, 's> {
             Option<&'static vmux_git::GitDiffSource>,
         ),
     >,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
     tabs: Query<'w, 's, (), With<vmux_layout::tab::Tab>>,
 }
 
@@ -1161,12 +1189,66 @@ impl AgentFileResolve<'_, '_> {
         }
     }
 
+    fn stack_has_file_page(&self, stack: Entity) -> bool {
+        self.file_pages.iter().any(|(_, child_of, metadata, _)| {
+            child_of.get() == stack && metadata.url.starts_with("file:")
+        })
+    }
+
+    fn pane_has_only_file_stacks(&self, pane: Entity) -> bool {
+        let Ok(children) = self.pane_children.get(pane) else {
+            return false;
+        };
+        let mut found = false;
+        for stack in children
+            .iter()
+            .filter(|stack| self.stack_q.contains(*stack))
+        {
+            found = true;
+            if !self.stack_has_file_page(stack) {
+                return false;
+            }
+        }
+        found
+    }
+
+    fn file_panes_for(&self, agent_pane: Entity) -> Vec<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let Some(agent_tab) = self.ancestor_tab(agent_pane) else {
+            return Vec::new();
+        };
+        let agent_parent = self.child_of.get(agent_pane).ok().map(Relationship::get);
+        let mut panes = Vec::new();
+        for (_, page_child, metadata, _) in self.file_pages.iter() {
+            if !metadata.url.starts_with("file:") {
+                continue;
+            }
+            let stack = page_child.get();
+            let Ok(pane_child) = self.child_of.get(stack) else {
+                continue;
+            };
+            let pane = pane_child.get();
+            if pane == agent_pane
+                || self.ancestor_tab(pane) != Some(agent_tab)
+                || !self.pane_has_only_file_stacks(pane)
+                || panes.contains(&pane)
+            {
+                continue;
+            }
+            panes.push(pane);
+        }
+        panes.sort_by_key(|pane| {
+            let direct = self.child_of.get(*pane).ok().map(Relationship::get) == agent_parent;
+            !direct
+        });
+        panes
+    }
+
     /// The agent's existing `file://` follow-page (the page entity) and its leaf
     /// pane: a sibling pane (same parent split) hosting a file page. `None` if
     /// the agent has no file pane yet.
     fn file_page_for(&self, agent_pane: Entity) -> Option<(Entity, Entity)> {
-        use bevy::ecs::relationship::Relationship;
-        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        let pane = self.file_panes_for(agent_pane).into_iter().next()?;
         for (page, page_co, meta, _) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
                 continue;
@@ -1174,13 +1256,7 @@ impl AgentFileResolve<'_, '_> {
             let Ok(pane_co) = self.child_of.get(page_co.get()) else {
                 continue;
             };
-            let pane = pane_co.get();
-            if pane == agent_pane {
-                continue;
-            }
-            if let Ok(parent_co) = self.child_of.get(pane)
-                && parent_co.get() == agent_parent
-            {
+            if pane_co.get() == pane {
                 return Some((page, pane));
             }
         }
@@ -1188,8 +1264,7 @@ impl AgentFileResolve<'_, '_> {
     }
 
     fn file_page_target(&self, agent_pane: Entity, url: &str) -> Option<FilePageTarget> {
-        use bevy::ecs::relationship::Relationship;
-        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        let panes = self.file_panes_for(agent_pane);
         let mut clean = None;
         for (_, page_co, meta, diff) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
@@ -1200,9 +1275,7 @@ impl AgentFileResolve<'_, '_> {
                 continue;
             };
             let pane = pane_co.get();
-            if pane == agent_pane
-                || self.child_of.get(pane).ok().map(|c| c.get()) != Some(agent_parent)
-            {
+            if !panes.contains(&pane) {
                 continue;
             }
             let dirty = diff.is_some_and(|source| source.dirty);
@@ -1232,9 +1305,7 @@ impl AgentFileResolve<'_, '_> {
         &self,
         agent_pane: Entity,
     ) -> Option<(Entity, Vec<(Entity, Entity, String)>)> {
-        use bevy::ecs::relationship::Relationship;
-        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
-        let mut follow_pane = None;
+        let follow_pane = self.file_panes_for(agent_pane).into_iter().next()?;
         let mut stacks = Vec::new();
         for (page, page_co, meta, _) in self.file_pages.iter() {
             if !meta.url.starts_with("file:") {
@@ -1245,16 +1316,12 @@ impl AgentFileResolve<'_, '_> {
                 continue;
             };
             let pane = pane_co.get();
-            if pane == agent_pane {
+            if pane != follow_pane {
                 continue;
             }
-            if self.child_of.get(pane).ok().map(|c| c.get()) != Some(agent_parent) {
-                continue;
-            }
-            follow_pane = Some(pane);
             stacks.push((stack, page, meta.url.clone()));
         }
-        follow_pane.map(|p| (p, stacks))
+        Some((follow_pane, stacks))
     }
 }
 
@@ -1416,6 +1483,41 @@ fn handle_agent_file_touch(
                     });
             }
         }
+    }
+}
+
+fn handle_agent_file_search(
+    mut reader: MessageReader<AgentCommandRequest>,
+    mut writer: MessageWriter<vmux_editor::GlobalSearchRequest>,
+) {
+    for request in reader.read() {
+        let ServiceAgentCommand::FileSearch {
+            root,
+            query,
+            matches,
+            ..
+        } = &request.command
+        else {
+            continue;
+        };
+        let Some(target_path) = matches.first().map(|result| PathBuf::from(&result.path)) else {
+            continue;
+        };
+        writer.write(vmux_editor::GlobalSearchRequest {
+            target_path,
+            root: root.clone(),
+            query: query.clone(),
+            matches: matches
+                .iter()
+                .map(|result| vmux_core::event::ExplorerSearchMatch {
+                    path: result.path.clone(),
+                    line: result.line,
+                    col: result.col,
+                    end_col: result.end_col,
+                    preview: result.preview.clone(),
+                })
+                .collect(),
+        });
     }
 }
 
@@ -1701,6 +1803,7 @@ fn handle_agent_commands(
         };
         let result = match &request.command {
             ServiceAgentCommand::FileTouched { .. } => AgentCommandResult::Ok,
+            ServiceAgentCommand::FileSearch { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::TurnEnded { .. } => AgentCommandResult::Ok,
             ServiceAgentCommand::AppCommand { id, args_json } => {
                 let args: serde_json::Value = if args_json.is_empty() {
@@ -1810,14 +1913,18 @@ fn handle_agent_commands(
             }
             ServiceAgentCommand::BrowserNavigate { url, pane } => {
                 let mut pane = pane.clone();
+                let mut new_stack = false;
+                let mut profile = None;
                 if pane.is_none()
                     && let CommandOrigin::Agent {
                         anchor: Some(anchor),
                         ..
                     } = &request.origin
                 {
+                    profile = Some(format!("{anchor:?}"));
                     if let Some(browser_pane) = writers.browse.claim_browser_pane(*anchor) {
                         pane = Some(browser_pane.to_bits().to_string());
+                        new_stack = true;
                     } else if let Some(agent_pane) = writers.browse.agent_pane(*anchor) {
                         writers.open_beside.write(vmux_layout::OpenBesideRequest {
                             pane: agent_pane,
@@ -1843,6 +1950,8 @@ fn handle_agent_commands(
                     url: url.clone(),
                     pane,
                     request_id: Some(request.request_id.0),
+                    new_stack,
+                    profile,
                 });
                 continue;
             }
@@ -4241,6 +4350,7 @@ fn handle_agent_queries(
                 browser_snapshot_writer.write(BrowserSnapshotRequest {
                     request_id: request.request_id.0,
                     pane: browse.resolve_pane(pane, anchor),
+                    webview: None,
                 });
             }
             AgentQuery::BrowserScroll {
@@ -6464,6 +6574,111 @@ mod tests {
             .drain()
             .count();
         assert_eq!(beside, 0);
+    }
+
+    #[test]
+    fn file_read_replaces_clean_follow_stack_across_nested_split() {
+        let mut app = file_touch_test_app();
+        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
+        let root = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Row,
+                },
+                ChildOf(tab),
+            ))
+            .id();
+        let agent_pane = app.world_mut().spawn((Pane, ChildOf(root))).id();
+        let agent_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(agent_pane)))
+            .id();
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
+        let nested = app
+            .world_mut()
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Column,
+                },
+                ChildOf(root),
+            ))
+            .id();
+        app.world_mut().spawn((Pane, ChildOf(nested)));
+        let file_pane = app.world_mut().spawn((Pane, ChildOf(nested))).id();
+        let file_stack = app
+            .world_mut()
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(file_pane)))
+            .id();
+        app.world_mut().spawn((
+            vmux_core::PageMetadata {
+                url: "file:///repo/old.rs".into(),
+                ..default()
+            },
+            vmux_git::GitDiffSource::default(),
+            ChildOf(file_stack),
+        ));
+        send_file_read(&mut app, anchor, "/repo/new.rs");
+
+        app.update();
+
+        let opens: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_core::PageOpenRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(opens.len(), 1);
+        assert!(matches!(
+            opens[0].target,
+            vmux_core::PageOpenTarget::Stack(stack) if stack == file_stack
+        ));
+        assert_eq!(opens[0].url, "file:///repo/new.rs");
+    }
+
+    #[test]
+    fn file_search_forwards_results_to_editor() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<AgentCommandRequest>()
+            .add_message::<vmux_editor::GlobalSearchRequest>()
+            .add_systems(Update, handle_agent_file_search);
+        let anchor = ProcessId::new();
+        app.world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .write(AgentCommandRequest {
+                request_id: AgentRequestId::new(),
+                origin: CommandOrigin::Agent {
+                    sid: None,
+                    anchor: Some(anchor),
+                },
+                command: ServiceAgentCommand::FileSearch {
+                    anchor,
+                    root: "/repo".into(),
+                    query: "needle".into(),
+                    matches: vec![vmux_service::protocol::FileSearchMatch {
+                        path: "/repo/src/main.rs".into(),
+                        line: 9,
+                        col: 4,
+                        end_col: 10,
+                        preview: "let needle = true;".into(),
+                    }],
+                },
+            });
+
+        app.update();
+
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<vmux_editor::GlobalSearchRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].target_path, PathBuf::from("/repo/src/main.rs"));
+        assert_eq!(requests[0].query, "needle");
+        assert_eq!(requests[0].matches[0].line, 9);
     }
 
     #[test]
@@ -9580,6 +9795,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_layout::active_panes::ActivatePane>()
+            .init_resource::<vmux_layout::active_panes::ActivePanes>()
             .init_resource::<BrowserPaneClaimOutput>()
             .add_systems(Update, claim_browser_pane_test_system);
         let split = app

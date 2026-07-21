@@ -89,6 +89,7 @@ pub struct ScreenshotResponse {
 pub struct BrowserSnapshotRequest {
     pub request_id: [u8; 16],
     pub pane: Option<String>,
+    pub webview: Option<Entity>,
 }
 
 #[derive(Message, Clone)]

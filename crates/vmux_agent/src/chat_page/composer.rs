@@ -46,6 +46,9 @@ pub(crate) enum ResumeMenuState {
 pub(crate) enum ToolActivity {
     Guardian,
     ReadFile,
+    WriteFile,
+    Layout,
+    Worktree,
     Image,
     Browser,
     Search,
@@ -260,6 +263,28 @@ pub(crate) fn tool_activity(name: &str) -> ToolActivity {
         ToolActivity::Guardian
     } else if lower.contains("read_file") || lower.contains("read file") {
         ToolActivity::ReadFile
+    } else if matches!(lower.as_str(), "edit" | "write")
+        || lower.contains("editing file")
+        || lower.contains("edited file")
+        || lower.contains("write file")
+        || lower.contains("apply_patch")
+        || lower.contains("edit_file")
+        || lower.contains("write_file")
+        || lower.contains("multi_edit")
+    {
+        ToolActivity::WriteFile
+    } else if lower.contains("worktree")
+        || lower.contains("workspace")
+        || lower.contains("repository")
+    {
+        ToolActivity::Worktree
+    } else if lower.contains("layout")
+        || lower.contains("list_spaces")
+        || lower.contains("create_space")
+        || lower.contains("rename_space")
+        || lower.contains("delete_space")
+    {
+        ToolActivity::Layout
     } else if lower.contains("view_image") || lower.contains("view image") {
         ToolActivity::Image
     } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
@@ -710,6 +735,9 @@ mod tests {
     fn tool_activity_classifies_timeline_icons() {
         assert_eq!(tool_activity("guardian_review"), ToolActivity::Guardian);
         assert_eq!(tool_activity("read_file"), ToolActivity::ReadFile);
+        assert_eq!(tool_activity("apply_patch"), ToolActivity::WriteFile);
+        assert_eq!(tool_activity("read_layout"), ToolActivity::Layout);
+        assert_eq!(tool_activity("create_worktree"), ToolActivity::Worktree);
         assert_eq!(tool_activity("view_image"), ToolActivity::Image);
         assert_eq!(tool_activity("browser_navigate"), ToolActivity::Browser);
         assert_eq!(tool_activity("search_files"), ToolActivity::Search);

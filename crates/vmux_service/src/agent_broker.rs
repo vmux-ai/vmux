@@ -5,7 +5,8 @@ use tokio::sync::{Mutex, broadcast, oneshot};
 
 use crate::protocol::{
     AGENT_COMMAND_TIMEOUT, AGENT_QUERY_TIMEOUT, AGENT_TOOL_TIMEOUT, AgentCommand,
-    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ProcessId, ServiceMessage,
+    AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, BROWSER_NAVIGATE_TIMEOUT,
+    ProcessId, ServiceMessage,
 };
 
 pub type PendingCommands = Arc<Mutex<HashMap<AgentRequestId, oneshot::Sender<AgentCommandResult>>>>;
@@ -18,6 +19,13 @@ fn query_timeout(query: &AgentQuery) -> std::time::Duration {
     match query {
         AgentQuery::RecordStop { .. } => crate::protocol::RECORD_STOP_TIMEOUT,
         _ => AGENT_QUERY_TIMEOUT,
+    }
+}
+
+fn command_timeout(command: &AgentCommand) -> std::time::Duration {
+    match command {
+        AgentCommand::BrowserNavigate { .. } => BROWSER_NAVIGATE_TIMEOUT,
+        _ => AGENT_COMMAND_TIMEOUT,
     }
 }
 
@@ -55,6 +63,7 @@ impl AgentBroker {
         }
         let (tx, rx) = oneshot::channel::<AgentCommandResult>();
         self.pending_commands.lock().await.insert(request_id, tx);
+        let timeout = command_timeout(&command);
 
         if self
             .agent_tx
@@ -69,7 +78,7 @@ impl AgentBroker {
             return Err(NO_SUBSCRIBER.to_string());
         }
 
-        match tokio::time::timeout(AGENT_COMMAND_TIMEOUT, rx).await {
+        match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(result)) => Ok(result),
             _ => {
                 self.pending_commands.lock().await.remove(&request_id);
@@ -177,6 +186,21 @@ mod tests {
         };
         assert_eq!(query_timeout(&stop), crate::protocol::RECORD_STOP_TIMEOUT);
         assert_eq!(query_timeout(&AgentQuery::GetSettings), AGENT_QUERY_TIMEOUT);
+    }
+
+    #[test]
+    fn browser_navigate_gets_longer_timeout() {
+        let navigate = AgentCommand::BrowserNavigate {
+            url: "https://example.com".into(),
+            pane: None,
+        };
+        assert_eq!(command_timeout(&navigate), BROWSER_NAVIGATE_TIMEOUT);
+        assert_eq!(
+            command_timeout(&AgentCommand::OpenInNewStack {
+                url: "https://example.com".into(),
+            }),
+            AGENT_COMMAND_TIMEOUT
+        );
     }
 
     #[tokio::test]

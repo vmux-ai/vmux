@@ -86,6 +86,8 @@ pub const EXPLORER_CLOSE_EDITOR_EVENT: &str = "explorer_close_editor";
 pub const EXPLORER_PANEL_TOGGLE_EVENT: &str = "explorer_panel_toggle";
 pub const EXPLORER_PANEL_WIDTH_EVENT: &str = "explorer_panel_width";
 pub const EXPLORER_GOTO_EVENT: &str = "explorer_goto";
+pub const EXPLORER_SEARCH_EVENT: &str = "explorer_search";
+pub const EXPLORER_SEARCH_OPEN_EVENT: &str = "explorer_search_open";
 pub const TERMINAL_PAGE_URL: &str = "vmux://terminal/";
 
 #[derive(
@@ -1177,6 +1179,60 @@ pub struct ExplorerPanelWidth {
 pub struct ExplorerGoto {
     pub path: String,
     pub line: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerSearchMatch {
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+    pub end_col: u32,
+    pub preview: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerSearchEvent {
+    pub root: String,
+    pub query: String,
+    pub matches: Vec<ExplorerSearchMatch>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExplorerSearchOpen {
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+    pub end_col: u32,
 }
 
 #[cfg(test)]

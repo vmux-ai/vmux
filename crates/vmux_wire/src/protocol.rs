@@ -57,6 +57,15 @@ pub enum FileTouchKind {
     Edit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct FileSearchMatch {
+    pub path: String,
+    pub line: u32,
+    pub col: u32,
+    pub end_col: u32,
+    pub preview: String,
+}
+
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AgentCommand {
     AppCommand {
@@ -229,6 +238,12 @@ pub enum AgentCommand {
         task: Option<String>,
         create: bool,
     },
+    FileSearch {
+        anchor: ProcessId,
+        root: String,
+        query: String,
+        matches: Vec<FileSearchMatch>,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -239,6 +254,8 @@ pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 pub const RECORD_STOP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub const AGENT_COMMAND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+pub const BROWSER_NAVIGATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 pub const AGENT_TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 

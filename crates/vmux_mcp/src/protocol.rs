@@ -235,6 +235,7 @@ async fn grep_result(
     let mut first_cols: std::collections::HashMap<String, (u32, u32)> =
         std::collections::HashMap::new();
     let mut lines_out: Vec<String> = Vec::new();
+    let mut search_matches = Vec::new();
     let mut capped = false;
     for line in std::io::BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
@@ -259,24 +260,32 @@ async fn grep_result(
             .and_then(|l| l.get("text"))
             .and_then(Value::as_str)
             .unwrap_or("");
+        let first_match = data
+            .get("submatches")
+            .and_then(|s| s.as_array())
+            .and_then(|a| a.first());
+        let cols = first_match.map(|sm| {
+            let start = sm.get("start").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let end = sm.get("end").and_then(Value::as_u64).unwrap_or(0) as usize;
+            (byte_to_utf16(raw, start), byte_to_utf16(raw, end))
+        });
         if !first_line.contains_key(path) {
             first_line.insert(path.to_string(), lineno);
-            if let Some(sm) = data
-                .get("submatches")
-                .and_then(|s| s.as_array())
-                .and_then(|a| a.first())
-            {
-                let s = sm.get("start").and_then(Value::as_u64).unwrap_or(0) as usize;
-                let e = sm.get("end").and_then(Value::as_u64).unwrap_or(0) as usize;
-                first_cols.insert(
-                    path.to_string(),
-                    (byte_to_utf16(raw, s), byte_to_utf16(raw, e)),
-                );
+            if let Some(cols) = cols {
+                first_cols.insert(path.to_string(), cols);
             }
             order.push(path.to_string());
         }
         if lines_out.len() < GREP_MAX_LINES {
             lines_out.push(format!("{path}:{lineno}: {}", raw.trim_end()));
+            let (col, end_col) = cols.unwrap_or((0, 0));
+            search_matches.push((
+                path.to_string(),
+                lineno,
+                col,
+                end_col,
+                raw.trim_end().to_string(),
+            ));
         }
         if lines_out.len() >= GREP_MAX_LINES || order.len() >= GREP_MAX_FILES {
             capped = true;
@@ -304,10 +313,9 @@ async fn grep_result(
     }
 
     if let Some(anchor) = anchor {
-        for file in order.iter().take(GREP_MAX_FILES) {
-            let Ok(abs) = std::fs::canonicalize(file) else {
-                continue;
-            };
+        if let Some(file) = order.first()
+            && let Ok(abs) = std::fs::canonicalize(file)
+        {
             let _ = run_agent_command(
                 AgentCommand::FileTouched {
                     anchor,
@@ -316,6 +324,33 @@ async fn grep_result(
                     col: first_cols.get(file).map(|c| c.0),
                     end_col: first_cols.get(file).map(|c| c.1),
                     kind: FileTouchKind::Read,
+                },
+                Some(anchor),
+            )
+            .await;
+        }
+        let matches = search_matches
+            .into_iter()
+            .filter_map(|(path, line, col, end_col, preview)| {
+                let path = std::fs::canonicalize(path).ok()?;
+                Some(vmux_service::protocol::FileSearchMatch {
+                    path: path.to_string_lossy().into_owned(),
+                    line,
+                    col,
+                    end_col,
+                    preview,
+                })
+            })
+            .collect::<Vec<_>>();
+        if !matches.is_empty() {
+            let root = std::fs::canonicalize(search_path)
+                .unwrap_or_else(|_| std::path::PathBuf::from(search_path));
+            let _ = run_agent_command(
+                AgentCommand::FileSearch {
+                    anchor,
+                    root: root.to_string_lossy().into_owned(),
+                    query: query.to_string(),
+                    matches,
                 },
                 Some(anchor),
             )

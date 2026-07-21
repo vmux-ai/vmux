@@ -7,7 +7,7 @@ use vmux_layout::Browser;
 use vmux_layout::active_panes::ActivePanes;
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::{Stack, active_stack_in_pane};
-use vmux_layout::target::{active_webview_for_tab, parse_pane_target};
+use vmux_layout::target::active_webview_for_tab;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_scrolls(
@@ -18,21 +18,36 @@ pub(crate) fn run_scrolls(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     pane_children: Query<&Children, With<Pane>>,
+    stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut snap_writer: MessageWriter<BrowserSnapshotRequest>,
 ) {
     for request in reader.read() {
-        let target = match request.pane.as_deref() {
-            Some(s) => parse_pane_target(s, &panes),
-            None => active.local().pane.filter(|p| panes.contains(*p)),
-        };
-        let webview = target
-            .and_then(|pane| {
-                active_webview_for_tab(
-                    active_stack_in_pane(pane, &pane_children, &stack_ts),
+        let webview = request
+            .pane
+            .as_deref()
+            .and_then(|target| vmux_layout::target::parse_browser_target(target, &panes, &stacks))
+            .and_then(|target| {
+                vmux_layout::target::webview_for_target(
+                    target,
+                    &pane_children,
+                    &stack_ts,
                     &browsers,
                     &terminals,
                 )
+            })
+            .or_else(|| {
+                active
+                    .local()
+                    .pane
+                    .filter(|p| panes.contains(*p))
+                    .and_then(|pane| {
+                        active_webview_for_tab(
+                            active_stack_in_pane(pane, &pane_children, &stack_ts),
+                            &browsers,
+                            &terminals,
+                        )
+                    })
             })
             .or_else(|| {
                 crate::browser_snapshot::most_recent_browser(&browsers, &terminals, &stack_ts)
@@ -51,6 +66,7 @@ pub(crate) fn run_scrolls(
         snap_writer.write(BrowserSnapshotRequest {
             request_id: request.request_id,
             pane: request.pane.clone(),
+            webview,
         });
     }
 }

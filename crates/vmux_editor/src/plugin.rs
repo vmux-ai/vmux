@@ -170,6 +170,23 @@ impl Default for SharedFileViewMode {
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FileViewModeRequest(pub FileViewMode);
 
+#[derive(Message, Clone, Debug, PartialEq, Eq)]
+pub struct GlobalSearchRequest {
+    pub target_path: PathBuf,
+    pub root: String,
+    pub query: String,
+    pub matches: Vec<ExplorerSearchMatch>,
+}
+
+#[derive(Component, Clone)]
+struct GlobalSearchState(ExplorerSearchEvent);
+
+#[derive(Component)]
+struct GlobalSearchDirty;
+
+#[derive(Resource, Default)]
+struct PendingGlobalSearch(Vec<GlobalSearchRequest>);
+
 #[derive(Component)]
 struct FileViewModeSent;
 
@@ -207,6 +224,11 @@ type ChangedNoteEditor = (With<FileView>, With<EditState>, Changed<EditState>);
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
+type GlobalSearchDirtyReady = (
+    With<GlobalSearchState>,
+    With<GlobalSearchDirty>,
+    With<vmux_core::page::PageReady>,
+);
 type ChromeUnsentReady = (
     With<FileView>,
     Without<ExplorerChromeSent>,
@@ -2849,6 +2871,87 @@ fn on_explorer_goto(
     });
 }
 
+fn apply_global_search_requests(
+    mut reader: MessageReader<GlobalSearchRequest>,
+    views: Query<(Entity, &FileView)>,
+    mut pending: ResMut<PendingGlobalSearch>,
+    mut chrome: ResMut<ExplorerChrome>,
+    mut commands: Commands,
+) {
+    pending.0.extend(reader.read().cloned());
+    if !pending.0.is_empty() && !chrome.visible {
+        chrome.visible = true;
+        for (entity, _) in &views {
+            commands.entity(entity).remove::<ExplorerChromeSent>();
+        }
+    }
+    let mut remaining = Vec::new();
+    for request in pending.0.drain(..) {
+        let Some((entity, _)) = views
+            .iter()
+            .find(|(_, view)| view.path == request.target_path)
+        else {
+            remaining.push(request);
+            continue;
+        };
+        commands.entity(entity).insert((
+            GlobalSearchState(ExplorerSearchEvent {
+                root: request.root,
+                query: request.query,
+                matches: request.matches,
+            }),
+            GlobalSearchDirty,
+        ));
+    }
+    pending.0 = remaining;
+}
+
+fn emit_global_search(
+    q: Query<(Entity, &GlobalSearchState), GlobalSearchDirtyReady>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, search) in &q {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            EXPLORER_SEARCH_EVENT,
+            &search.0,
+        ));
+        commands.entity(entity).remove::<GlobalSearchDirty>();
+    }
+}
+
+fn on_explorer_search_open(
+    trigger: On<BinReceive<ExplorerSearchOpen>>,
+    mut views: Query<(&mut FileView, &mut FileViewport, &mut PageMetadata)>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let Ok((mut view, mut viewport, mut metadata)) = views.get_mut(entity) else {
+        return;
+    };
+    navigate_file_view(
+        entity,
+        PathBuf::from(&request.path),
+        request.line.saturating_sub(1),
+        &mut view,
+        &mut viewport,
+        &mut metadata,
+        &mut manager,
+        &mut commands,
+    );
+    commands.entity(entity).insert(PendingGoto {
+        line: request.line.saturating_sub(1),
+        utf16_col: request.col,
+        select_end_col: Some(request.end_col),
+    });
+}
+
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "files",
     title: "Files",
@@ -2897,9 +3000,11 @@ impl Plugin for EditorPlugin {
                 request_id: 0,
             })
             .init_resource::<ExplorerChromeSynced>()
+            .init_resource::<PendingGlobalSearch>()
             .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_message::<FileViewModeRequest>()
+            .add_message::<GlobalSearchRequest>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -2934,6 +3039,7 @@ impl Plugin for EditorPlugin {
                 ExplorerPanelSetVisible,
                 ExplorerPanelWidth,
                 ExplorerGoto,
+                ExplorerSearchOpen,
             )>::default())
             .add_systems(
                 Update,
@@ -2984,6 +3090,8 @@ impl Plugin for EditorPlugin {
                     mark_outline_dirty,
                     emit_outline_markdown,
                     clear_outline_on_file_change,
+                    apply_global_search_requests,
+                    emit_global_search.after(apply_global_search_requests),
                 ),
             )
             .add_observer(reset_file_sent_markers_on_page_ready)
@@ -3014,7 +3122,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_explorer_panel_set_visible)
             .add_observer(on_explorer_panel_width)
             .add_observer(on_explorer_close_editor)
-            .add_observer(on_explorer_goto);
+            .add_observer(on_explorer_goto)
+            .add_observer(on_explorer_search_open);
     }
 }
 
