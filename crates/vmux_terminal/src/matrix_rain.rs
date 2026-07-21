@@ -232,8 +232,9 @@ fn start_rain(
             let head_row = *drop;
             let y = head_row * FONT_PX;
             if y >= 0.0 {
-                let ch = pick_glyph(&glyphs, &word_chars, i, head_row).to_string();
-                let _ = ctx.fill_text(&ch, x, y);
+                let mut buffer = [0; 4];
+                let ch = pick_glyph(&glyphs, &word_chars, i, head_row);
+                let _ = ctx.fill_text(ch.encode_utf8(&mut buffer), x, y);
             }
             if y > h && js_sys::Math::random() < reset_chance {
                 *drop = 0.0;
