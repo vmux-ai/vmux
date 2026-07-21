@@ -3,11 +3,11 @@ common-close = Kapat
 common-install = Yükle
 common-uninstall = Kaldır
 common-update = Güncelle
-common-retry = Yeniden Dene
+common-retry = Yeniden dene
 common-refresh = Yenile
-common-remove = Kaldır
+common-remove = Sil
 common-enable = Etkinleştir
-common-disable = Devre Dışı Bırak
+common-disable = Devre dışı bırak
 common-new = Yeni
 common-active = etkin
 common-running = çalışıyor
@@ -15,44 +15,44 @@ common-done = tamamlandı
 common-failed = Başarısız
 common-installed = Yüklendi
 common-items = { $count ->
-    [one] { $count } öge
-   *[other] { $count } öge
+    [one] { $count } öğe
+   *[other] { $count } öğe
 }
-start-title = Başlangıç
-start-tagline = Tek komut. Her şey, tamam.
+start-title = Başlat
+start-tagline = Tek prompt. Her şey hazır.
 
 agents-title = Ajanlar
-agents-search = ACP ve CLI ajanlarını ara…
+agents-search = ACP ve CLI ajanlarında ara…
 agents-empty = Eşleşen ajan yok
-agents-empty-detail = Bir ad, çalışma zamanı veya ACP/CLI deneyin.
+agents-empty-detail = Ad, çalışma zamanı ya da ACP/CLI deneyin.
 agents-install-failed = Yükleme başarısız
 agents-updating = Güncelleniyor…
 agents-retrying = Yeniden deneniyor…
 agents-preparing = Hazırlanıyor…
 
 extensions-title = Uzantılar
-extensions-search = Yüklü veya Chrome Web Mağazası'nda ara…
+extensions-search = Yüklü uzantılarda veya Chrome Web Store’da ara…
 extensions-relaunch = Uygulamak için yeniden başlat
 extensions-empty = Yüklü uzantı yok
 extensions-no-match = Eşleşen uzantı yok
-extensions-empty-detail = Yukarıdan Chrome Web Mağazası'nı arayın ve Return tuşuna basın.
+extensions-empty-detail = Yukarıdan Chrome Web Store’da arama yapıp Return tuşuna basın.
 extensions-no-match-detail = Başka bir ad veya uzantı kimliği deneyin.
 extensions-on = Açık
 extensions-off = Kapalı
 extensions-enable-confirm = { $name } etkinleştirilsin mi?
-extensions-enable-permissions = { $name } etkinleştir ve izin ver:
+extensions-enable-permissions = { $name } etkinleştirilsin ve şunlara izin verilsin:
 
 lsp-title = Dil Sunucuları
-lsp-search = Dil sunucuları, linter'lar, formatlayıcılar ara…
+lsp-search = Dil sunucuları, linter’lar, biçimlendiricilerde ara…
 lsp-loading = Katalog yükleniyor…
 lsp-empty = Eşleşen dil sunucusu yok
-lsp-empty-detail = Başka bir dil, linter veya formatlayıcı deneyin.
-lsp-needs = { $tool } gerekli
-lsp-status-available = Mevcut
-lsp-status-on-path = PATH'te
+lsp-empty-detail = Başka bir dil, linter veya biçimlendirici deneyin.
+lsp-needs = { $tool } gerekiyor
+lsp-status-available = Kullanılabilir
+lsp-status-on-path = PATH’te
 lsp-status-installing = Yükleniyor…
 lsp-status-installed = Yüklendi
-lsp-status-outdated = Güncelleme mevcut
+lsp-status-outdated = Güncelleme var
 lsp-status-running = Çalışıyor
 lsp-status-failed = Başarısız
 
@@ -72,24 +72,24 @@ team-agents = { $count ->
     [one] Siz ve 1 ajan
    *[other] Siz ve { $count } ajan
 }
-team-empty = Henüz kimse yok
+team-empty = Burada henüz kimse yok
 team-you = Siz
 team-agent = Ajan
 
-services-title = Arka Plan Hizmetleri
+services-title = Arka Plan Servisleri
 services-processes = { $count ->
-    [one] 1 süreç
-   *[other] { $count } süreç
+    [one] 1 işlem
+   *[other] { $count } işlem
 }
 services-kill-all = Tümünü Sonlandır
-services-not-running = Hizmet çalışmıyor
+services-not-running = Servis çalışmıyor
 services-start-with = Şununla başlat:
-services-empty = Etkin süreç yok
-services-filter = Süreçleri filtrele…
-services-no-match = Eşleşen süreç yok
+services-empty = Etkin işlem yok
+services-filter = İşlemleri filtrele…
+services-no-match = Eşleşen işlem yok
 services-connected = Bağlı
-services-disconnected = Bağlantı Kesildi
-services-attached = ekli
+services-disconnected = Bağlantı kesildi
+services-attached = bağlı
 services-kill = Sonlandır
 services-memory = Bellek
 services-size = Boyut
@@ -109,16 +109,16 @@ history-day-offset = Gün -{ $count }
 
 settings-title = Ayarlar
 settings-loading = Ayarlar yükleniyor…
-settings-stored = ~/.vmux/settings.ron dosyasında saklandı
+settings-stored = ~/.vmux/settings.ron içinde saklanır
 settings-other = Diğer
-settings-software-update = Yazılım Güncellemesi
-settings-check-updates = Güncellemeleri Kontrol Et
-settings-check-updates-hint = Otomatik güncelleme etkinken başlangıçta ve her saatte bir otomatik olarak kontrol eder.
+settings-software-update = Yazılım Güncelleme
+settings-check-updates = Güncellemeleri Denetle
+settings-check-updates-hint = Otomatik güncelleme açıkken başlangıçta ve her saat otomatik denetler.
 settings-update-unavailable = Kullanılamıyor
-settings-update-unavailable-hint = Güncelleyici bu yapıya dahil değil.
-settings-update-checking = Kontrol ediliyor…
-settings-update-checking-hint = Güncellemeler kontrol ediliyor…
-settings-update-check-again = Tekrar Kontrol Et
+settings-update-unavailable-hint = Güncelleyici bu derlemeye dahil değil.
+settings-update-checking = Denetleniyor…
+settings-update-checking-hint = Güncellemeler denetleniyor…
+settings-update-check-again = Yeniden Denetle
 settings-update-current = Vmux güncel.
 settings-update-downloading = İndiriliyor…
 settings-update-downloading-hint = Vmux { $version } indiriliyor…
@@ -127,92 +127,92 @@ settings-update-installing-hint = Vmux { $version } yükleniyor…
 settings-update-ready = Güncelleme Hazır
 settings-update-ready-hint = Vmux { $version } hazır. Uygulamak için yeniden başlatın.
 settings-update-try-again = Tekrar Dene
-settings-update-failed = Güncellemeler kontrol edilemiyor.
-settings-item = Öge
-settings-item-number = Öge { $number }
+settings-update-failed = Güncellemeler denetlenemedi.
+settings-item = Öğe
+settings-item-number = Öğe { $number }
 settings-press-key = Bir tuşa basın…
 settings-saved = Kaydedildi
-settings-record-key = Yeni tuş kombinasyonu kaydetmek için tıklayın
+settings-record-key = Yeni bir tuş kombinasyonu kaydetmek için tıklayın
 
 tray-open-window = Pencereyi Aç
 tray-close-window = Pencereyi Kapat
 tray-pause-recording = Kaydı Duraklat
 tray-resume-recording = Kaydı Sürdür
 tray-finish-recording = Kaydı Bitir
-tray-quit = Vmux'tan Çık
+tray-quit = Vmux’tan Çık
 
 composer-attach-files = Dosya ekle (/upload)
 composer-remove-attachment = Eki kaldır
 
 layout-back = Geri
 layout-forward = İleri
-layout-reload = Yenile
+layout-reload = Yeniden yükle
 layout-bookmark-page = Bu sayfayı yer imlerine ekle
 layout-remove-bookmark = Yer imini kaldır
 layout-pin-page = Bu sayfayı sabitle
 layout-unpin-page = Bu sayfanın sabitlemesini kaldır
 layout-manage-extensions = Uzantıları yönet
-layout-new-stack = Yeni Yığın
+layout-new-stack = Yeni yığın
 layout-close-tab = Sekmeyi kapat
-layout-bookmark = Yer İmi
+layout-bookmark = Yer imi
 layout-pin = Sabitle
 layout-new-tab = Yeni sekme
 layout-team = Ekip
 
 command-switch-space = Alan değiştir…
 command-search-ask = Ara veya sor…
-command-new-tab-placeholder = Ara veya URL girin ya da Terminal'i seçin…
-command-placeholder = URL girin, sekmelerde arayın veya komutlar için >…
-command-composer-placeholder = Komutlar için / veya medya için @ yazın
+command-new-tab-placeholder = Ara, URL yaz veya Terminal’i seç…
+command-placeholder = URL yazın, sekmelerde arayın veya komutlar için > yazın…
+command-composer-placeholder = Komutlar için /, medya için @ yazın
 command-send = Gönder (Enter)
 command-terminal = Terminal
-command-open-terminal = Terminal'de Aç
+command-open-terminal = Terminal’de aç
 command-stack = Yığın
 command-tabs = { $count ->
     [one] 1 sekme
    *[other] { $count } sekme
 }
-command-prompt = Komut İstemi
+command-prompt = Prompt
 command-new-tab = Yeni sekme
 command-search = Ara
-command-open-value = "{ $value }" aç
-command-search-value = "{ $value }" ara
+command-open-value = “{ $value }” aç
+command-search-value = “{ $value }” ara
 
 schema-appearance = Görünüm
 schema-general = Genel
-schema-layout = Düzen
+schema-layout = Yerleşim
 schema-layout-detail = Pencere, bölmeler, kenar çubuğu ve odak halkası.
 schema-agent = Ajan
 schema-agent-detail = Ajan davranışı ve araç izinleri.
 schema-shortcuts = Kısayollar
-schema-shortcuts-detail = Salt okunur görünüm. Bağlantıları değiştirmek için settings.ron'u doğrudan düzenleyin.
+schema-shortcuts-detail = Salt okunur görünüm. Kısayolları değiştirmek için settings.ron dosyasını doğrudan düzenleyin.
 schema-terminal = Terminal
 schema-browser = Tarayıcı
 schema-mode = Mod
-schema-mode-detail = Web sayfaları için renk şeması. Cihaz sisteminizi izler.
-schema-device = Cihaz
+schema-mode-detail = Web sayfaları için renk düzeni. Aygıt, sistem ayarınızı izler.
+schema-device = Aygıt
 schema-light = Açık
 schema-dark = Koyu
 schema-language = Dil
-schema-language-detail = Sistem, en-US, ja veya eşleşen ~/.vmux/locales/<tag>.ftl kataloğu olan herhangi bir BCP 47 etiketi kullanın.
-schema-auto-update = Otomatik Güncelleme
-schema-auto-update-detail = Başlangıçta ve her saatte bir güncellemeleri kontrol edin ve yükleyin.
-schema-startup-url = Başlangıç URL'si
-schema-startup-url-detail = Boş bırakmak komut çubuğunu açar.
+schema-language-detail = Sistem dilini, en-US, ja ya da eşleşen bir ~/.vmux/locales/<tag>.ftl kataloğu olan herhangi bir BCP 47 etiketini kullanın.
+schema-auto-update = Otomatik güncelleme
+schema-auto-update-detail = Başlangıçta ve her saat güncellemeleri denetleyip yükle.
+schema-startup-url = Başlangıç URL’si
+schema-startup-url-detail = Boş bırakılırsa komut çubuğu prompt’u açılır.
 schema-search-engine = Arama motoru
-schema-search-engine-detail = Başlangıç ve komut çubuğundan web aramaları için kullanılır.
+schema-search-engine-detail = Başlat ekranından ve komut çubuğundan yapılan web aramalarında kullanılır.
 schema-window = Pencere
 schema-pane = Bölme
 schema-side-sheet = Yan panel
 schema-focus-ring = Odak halkası
 schema-run-placement = Çalıştırma yerleşimini geçersiz kılmaya izin ver
-schema-run-placement-detail = Ajanların çalıştırma bölmesi modunu, yönünü ve çapasını seçmesine izin verin.
-schema-leader = Lider tuşu
-schema-leader-detail = Akort kısayolları için ön ek tuşu.
-schema-chord-timeout = Akort zaman aşımı
-schema-chord-timeout-detail = Akort ön ekinin sona ermesinden önceki milisaniye.
+schema-run-placement-detail = Ajanların çalıştırma bölmesi modunu, yönünü ve çapasını seçmesine izin ver.
+schema-leader = Leader
+schema-leader-detail = Chord kısayolları için önek tuşu.
+schema-chord-timeout = Chord zaman aşımı
+schema-chord-timeout-detail = Chord önekinin süresi dolmadan önce geçecek milisaniye.
 schema-bindings = Bağlantılar
 schema-confirm-close = Kapatmayı onayla
-schema-confirm-close-detail = Çalışan bir süreç içeren terminali kapatmadan önce sor.
+schema-confirm-close-detail = Çalışan işlemi olan bir terminali kapatmadan önce sor.
 schema-default-theme = Varsayılan tema
-schema-default-theme-detail = Temalar listesinden etkin temanın adı.
+schema-default-theme-detail = Tema listesindeki etkin temanın adı.

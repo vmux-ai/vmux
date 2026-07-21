@@ -1,67 +1,67 @@
-common-open = Otvoreno
+common-open = Otvori
 common-close = Zatvori
-common-install = Instalirajte
+common-install = Instaliraj
 common-uninstall = Deinstaliraj
-common-update = Ažuriranje
-common-retry = Pokušaj ponovo
+common-update = Ažuriraj
+common-retry = Pokušaj ponovno
 common-refresh = Osvježi
-common-remove = Ukloniti
+common-remove = Ukloni
 common-enable = Omogući
 common-disable = Onemogući
 common-new = Novo
-common-active = aktivan
-common-running = trčanje
-common-done = učinjeno
-common-failed = neuspješno
-common-installed = instalirano
+common-active = aktivno
+common-running = pokrenuto
+common-done = gotovo
+common-failed = Nije uspjelo
+common-installed = Instalirano
 common-items = { $count ->
     [one] { $count } stavka
-   *[other] { $count } stavke
+   *[other] { $count } stavki
 }
-start-title = Start
-start-tagline = Jedan upit. Bilo što, gotovo.
+start-title = Početak
+start-tagline = Jedan prompt. Sve riješeno.
 
 agents-title = Agenti
 agents-search = Pretraži ACP i CLI agente…
 agents-empty = Nema odgovarajućih agenata
-agents-empty-detail = Pokušajte s nazivom, vremenom izvođenja ili ACP/CLI.
+agents-empty-detail = Pokušaj s nazivom, runtimeom ili ACP/CLI.
 agents-install-failed = Instalacija nije uspjela
-agents-updating = Ažuriranje...
-agents-retrying = Ponovni pokušaj...
+agents-updating = Ažuriranje…
+agents-retrying = Ponovni pokušaj…
 agents-preparing = Priprema…
 
-extensions-title = Ekstenzije
-extensions-search = Pretraživanje instalirano ili Chrome Web Store…
-extensions-relaunch = Ponovno pokrenite za primjenu
+extensions-title = Proširenja
+extensions-search = Pretraži instalirana ili Chrome Web Store…
+extensions-relaunch = Ponovno pokreni za primjenu
 extensions-empty = Nema instaliranih proširenja
 extensions-no-match = Nema odgovarajućih proširenja
-extensions-empty-detail = Pretražite Chrome Web Store iznad i pritisnite Return.
-extensions-no-match-detail = Pokušajte s drugim imenom ili ID-om proširenja.
+extensions-empty-detail = Pretraži Chrome Web Store iznad i pritisni Enter.
+extensions-no-match-detail = Pokušaj s drugim nazivom ili ID-jem proširenja.
 extensions-on = Uključeno
 extensions-off = Isključeno
 extensions-enable-confirm = Omogućiti { $name }?
-extensions-enable-permissions = Omogućite { $name } i dopustite:
+extensions-enable-permissions = Omogući { $name } i dopusti:
 
 lsp-title = Jezični poslužitelji
-lsp-search = Pretražite jezične poslužitelje, lintere, formatere…
+lsp-search = Pretraži jezične poslužitelje, lintere, formattere…
 lsp-loading = Učitavanje kataloga…
 lsp-empty = Nema odgovarajućih jezičnih poslužitelja
-lsp-empty-detail = Pokušajte s drugim jezikom, linterom ili formatterom.
+lsp-empty-detail = Pokušaj s drugim jezikom, linterom ili formatterom.
 lsp-needs = treba { $tool }
-lsp-status-available = na raspolaganju
+lsp-status-available = Dostupno
 lsp-status-on-path = Na PATH
-lsp-status-installing = Instaliranje...
-lsp-status-installed = instalirano
-lsp-status-outdated = Ažuriranje dostupno
-lsp-status-running = Trčanje
-lsp-status-failed = neuspješno
+lsp-status-installing = Instaliranje…
+lsp-status-installed = Instalirano
+lsp-status-outdated = Dostupno ažuriranje
+lsp-status-running = Pokrenuto
+lsp-status-failed = Nije uspjelo
 
-spaces-title = Razmaci
-spaces-new-placeholder = Novo ime prostora
-spaces-empty = Nema razmaka
+spaces-title = Prostori
+spaces-new-placeholder = Naziv novog prostora
+spaces-empty = Nema prostora
 spaces-default-name = Prostor { $number }
 spaces-tabs = { $count ->
-    [one] 1 tab
+    [one] 1 kartica
    *[other] { $count } kartica
 }
 spaces-delete = Izbriši prostor
@@ -69,11 +69,11 @@ spaces-delete = Izbriši prostor
 team-title = Tim
 team-just-you = Samo ti u ovom prostoru
 team-agents = { $count ->
-    [one] Vi i 1 agent
-   *[other] Vi i { $count } agenti
+    [one] Ti i 1 agent
+   *[other] Ti i { $count } agenata
 }
 team-empty = Ovdje još nema nikoga
-team-you = ti
+team-you = Ti
 team-agent = Agent
 
 services-title = Pozadinske usluge
@@ -81,60 +81,60 @@ services-processes = { $count ->
     [one] 1 proces
    *[other] { $count } procesa
 }
-services-kill-all = Ubiti sve
-services-not-running = Usluga ne radi
-services-start-with = Počnite s:
+services-kill-all = Prisili završetak svih
+services-not-running = Usluga nije pokrenuta
+services-start-with = Pokreni s:
 services-empty = Nema aktivnih procesa
-services-filter = Filtrirajte procese...
+services-filter = Filtriraj procese…
 services-no-match = Nema odgovarajućih procesa
-services-connected = Povezan
-services-disconnected = Isključeno
-services-attached = u prilogu
-services-kill = ubiti
+services-connected = Povezano
+services-disconnected = Prekinuto
+services-attached = priključeno
+services-kill = Prisili završetak
 services-memory = Memorija
 services-size = Veličina
-services-shell = školjka
+services-shell = Ljuska
 
-error-title = Greška
+error-title = Pogreška
 
-history-search = Povijest pretraživanja
-history-clear-all = Obriši sve
-history-clear-confirm = Obrisati svu povijest?
+history-search = Pretraži povijest
+history-clear-all = Očisti sve
+history-clear-confirm = Očistiti cijelu povijest?
 history-clear-warning = Ovo se ne može poništiti.
 history-cancel = Odustani
 history-today = Danas
-history-yesterday = jučer
+history-yesterday = Jučer
 history-days-ago = Prije { $count } dana
 history-day-offset = Dan -{ $count }
 
-settings-title = postavke
+settings-title = Postavke
 settings-loading = Učitavanje postavki…
-settings-stored = Pohranjeno u ~/.vmux/settings.ron
-settings-other = ostalo
+settings-stored = Spremljeno u ~/.vmux/settings.ron
+settings-other = Ostalo
 settings-software-update = Ažuriranje softvera
-settings-check-updates = Provjerite ima li ažuriranja
-settings-check-updates-hint = Provjerava automatski pri pokretanju i svaki sat kada je omogućeno automatsko ažuriranje.
-settings-update-unavailable = Nedostupan
+settings-check-updates = Provjeri ažuriranja
+settings-check-updates-hint = Provjerava se automatski pri pokretanju i svaki sat kad je automatsko ažuriranje uključeno.
+settings-update-unavailable = Nedostupno
 settings-update-unavailable-hint = Ažuriranje nije uključeno u ovu verziju.
-settings-update-checking = Provjera...
-settings-update-checking-hint = Provjera ažuriranja...
-settings-update-check-again = Provjerite ponovno
-settings-update-current = Vmux je ažuriran.
-settings-update-downloading = Preuzimanje...
+settings-update-checking = Provjera…
+settings-update-checking-hint = Provjera ažuriranja…
+settings-update-check-again = Provjeri ponovno
+settings-update-current = Vmux je ažuran.
+settings-update-downloading = Preuzimanje…
 settings-update-downloading-hint = Preuzimanje Vmux { $version }…
-settings-update-installing = Instaliranje...
+settings-update-installing = Instaliranje…
 settings-update-installing-hint = Instaliranje Vmux { $version }…
-settings-update-ready = Ažuriranje spremno
-settings-update-ready-hint = Vmux { $version } je spreman. Ponovno pokrenite da biste ga primijenili.
-settings-update-try-again = Pokušajte ponovno
-settings-update-failed = Nije moguće provjeriti ima li ažuriranja.
+settings-update-ready = Ažuriranje je spremno
+settings-update-ready-hint = Vmux { $version } je spreman. Ponovno pokreni za primjenu.
+settings-update-try-again = Pokušaj ponovno
+settings-update-failed = Nije moguće provjeriti ažuriranja.
 settings-item = Stavka
 settings-item-number = Stavka { $number }
-settings-press-key = Pritisnite tipku...
+settings-press-key = Pritisni tipku…
 settings-saved = Spremljeno
-settings-record-key = Kliknite za snimanje nove kombinacije tipki
+settings-record-key = Klikni za snimanje nove kombinacije tipki
 
-tray-open-window = Otvoreni prozor
+tray-open-window = Otvori prozor
 tray-close-window = Zatvori prozor
 tray-pause-recording = Pauziraj snimanje
 tray-resume-recording = Nastavi snimanje
@@ -144,75 +144,75 @@ tray-quit = Zatvori Vmux
 composer-attach-files = Priloži datoteke (/upload)
 composer-remove-attachment = Ukloni privitak
 
-layout-back = natrag
+layout-back = Natrag
 layout-forward = Naprijed
 layout-reload = Ponovno učitaj
-layout-bookmark-page = Označite ovu stranicu
+layout-bookmark-page = Dodaj ovu stranicu u oznake
 layout-remove-bookmark = Ukloni oznaku
 layout-pin-page = Prikvači ovu stranicu
 layout-unpin-page = Otkvači ovu stranicu
-layout-manage-extensions = Upravljanje proširenjima
-layout-new-stack = Novi stog
+layout-manage-extensions = Upravljaj proširenjima
+layout-new-stack = Novi sloj
 layout-close-tab = Zatvori karticu
-layout-bookmark = Knjižna oznaka
-layout-pin = Pin
+layout-bookmark = Oznaka
+layout-pin = Prikvači
 layout-new-tab = Nova kartica
 layout-team = Tim
 
 command-switch-space = Promijeni prostor…
-command-search-ask = Traži ili pitaj…
-command-new-tab-placeholder = Pretražite ili upišite URL ili odaberite Terminal…
-command-placeholder = Upišite URL, pretražite kartice ili > za naredbe…
-command-composer-placeholder = Upišite / za naredbe ili @ za medije
+command-search-ask = Pretraži ili pitaj…
+command-new-tab-placeholder = Pretraži ili upiši URL, ili odaberi Terminal…
+command-placeholder = Upiši URL, pretraži kartice ili > za naredbe…
+command-composer-placeholder = Upiši / za naredbe ili @ za medije
 command-send = Pošalji (Enter)
 command-terminal = Terminal
-command-open-terminal = Otvorite u terminalu
-command-stack = Stog
+command-open-terminal = Otvori u Terminalu
+command-stack = Sloj
 command-tabs = { $count ->
-    [one] 1 tab
+    [one] 1 kartica
    *[other] { $count } kartica
 }
-command-prompt = Brz
+command-prompt = Prompt
 command-new-tab = Nova kartica
-command-search = Traži
+command-search = Pretraži
 command-open-value = Otvori “{ $value }”
-command-search-value = Traži “{ $value }”
+command-search-value = Pretraži “{ $value }”
 
 schema-appearance = Izgled
-schema-general = generalno
-schema-layout = Izgled
-schema-layout-detail = Prozor, okna, bočna traka i prsten za fokus.
+schema-general = Općenito
+schema-layout = Raspored
+schema-layout-detail = Prozor, okna, bočna traka i obrub fokusa.
 schema-agent = Agent
-schema-agent-detail = Ponašanje agenta i dopuštenja alata.
+schema-agent-detail = Ponašanje agenata i dopuštenja za alate.
 schema-shortcuts = Prečaci
-schema-shortcuts-detail = Prikaz samo za čitanje. Uredite settings.ron izravno za promjenu vezanja.
+schema-shortcuts-detail = Prikaz samo za čitanje. Za promjenu veza uredi settings.ron izravno.
 schema-terminal = Terminal
-schema-browser = preglednik
-schema-mode = Način rada
-schema-mode-detail = Shema boja za web stranice. Uređaj prati vaš sustav.
+schema-browser = Preglednik
+schema-mode = Način
+schema-mode-detail = Shema boja za web-stranice. Uređaj prati sustav.
 schema-device = Uređaj
-schema-light = svjetlo
-schema-dark = tamno
+schema-light = Svijetlo
+schema-dark = Tamno
 schema-language = Jezik
-schema-language-detail = Koristite sustav, en-US, ja ili bilo koju BCP 47 oznaku s odgovarajućim ~/.vmux/locales/<tag>.ftl katalogom.
+schema-language-detail = Koristi sustav, en-US, ja ili bilo koju BCP 47 oznaku s odgovarajućim ~/.vmux/locales/<tag>.ftl katalogom.
 schema-auto-update = Automatsko ažuriranje
-schema-auto-update-detail = Provjerite i instalirajte ažuriranja pri pokretanju i svaki sat.
-schema-startup-url = Pokretanje URL
-schema-startup-url-detail = Empty otvara prompt naredbene trake.
-schema-search-engine = tražilica
-schema-search-engine-detail = Koristi se za web pretraživanja iz Starta i naredbene trake.
+schema-auto-update-detail = Provjeri i instaliraj ažuriranja pri pokretanju i svaki sat.
+schema-startup-url = Početni URL
+schema-startup-url-detail = Ako je prazno, otvara se prompt naredbene trake.
+schema-search-engine = Tražilica
+schema-search-engine-detail = Koristi se za web-pretraživanja iz Početka i naredbene trake.
 schema-window = Prozor
 schema-pane = Okno
 schema-side-sheet = Bočni list
-schema-focus-ring = Prsten za fokus
+schema-focus-ring = Obrub fokusa
 schema-run-placement = Dopusti nadjačavanje položaja izvođenja
-schema-run-placement-detail = Dopustite agentima da odaberu način rada, smjer i sidro.
-schema-leader = Vođa
-schema-leader-detail = Tipka prefiksa za prečace akorda.
-schema-chord-timeout = Istek akorda
-schema-chord-timeout-detail = Milisekunde prije isteka prefiksa akorda.
-schema-bindings = Vezovi
-schema-confirm-close = Potvrdite zatvaranje
+schema-run-placement-detail = Dopusti agentima da odaberu način, smjer i sidro okna za izvođenje.
+schema-leader = Leader
+schema-leader-detail = Prefiksna tipka za chord prečace.
+schema-chord-timeout = Istek chorda
+schema-chord-timeout-detail = Milisekunde prije isteka chord prefiksa.
+schema-bindings = Veze
+schema-confirm-close = Potvrdi zatvaranje
 schema-confirm-close-detail = Pitaj prije zatvaranja terminala s pokrenutim procesom.
 schema-default-theme = Zadana tema
 schema-default-theme-detail = Naziv aktivne teme s popisa tema.

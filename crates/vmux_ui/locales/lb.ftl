@@ -1,218 +1,218 @@
-common-open = Oppen
+common-open = Opmaachen
 common-close = Zoumaachen
 common-install = Installéieren
-common-uninstall = Uninstalléieren
-common-update = Update
+common-uninstall = Deinstalléieren
+common-update = Aktualiséieren
 common-retry = Nach eng Kéier probéieren
-common-refresh = Erfrëschen
-common-remove = Ewechzehuelen
+common-refresh = Nei lueden
+common-remove = Ewechhuelen
 common-enable = Aktivéieren
 common-disable = Desaktivéieren
 common-new = Nei
 common-active = aktiv
-common-running = lafen
-common-done = gemaach
+common-running = leeft
+common-done = fäerdeg
 common-failed = Ausgefall
 common-installed = Installéiert
 common-items = { $count ->
-    [one] { $count } item
-   *[other] { $count } Artikelen
+    [one] { $count } Element
+   *[other] { $count } Elementer
 }
 start-title = Start
-start-tagline = Eng Ufro. Alles, gemaach.
+start-tagline = Eng Uweisung. Alles gemaach.
 
 agents-title = Agenten
-agents-search = Sich ACP an CLI Agenten ...
-agents-empty = Keng passende Agenten
-agents-empty-detail = Probéiert en Numm, Runtime oder ACP/CLI.
-agents-install-failed = Installatioun gescheitert
-agents-updating = Aktualiséieren…
-agents-retrying = Probéiert nach eng Kéier…
-agents-preparing = Preparéieren…
+agents-search = ACP- a CLI-Agenten sichen…
+agents-empty = Keng passend Agenten
+agents-empty-detail = Probéier en Numm, Runtime oder ACP/CLI.
+agents-install-failed = Installatioun ausgefall
+agents-updating = Gëtt aktualiséiert…
+agents-retrying = Gëtt nach eng Kéier probéiert…
+agents-preparing = Gëtt virbereet…
 
 extensions-title = Erweiderungen
-extensions-search = Sich installéiert oder Chrome Web Store...
-extensions-relaunch = Relancéiere fir ze bewerben
-extensions-empty = Keng Extensiounen installéiert
-extensions-no-match = Keng passende Extensiounen
-extensions-empty-detail = Sicht de Chrome Web Store uewen an dréckt op Return.
-extensions-no-match-detail = Probéiert en aneren Numm oder Extensioun ID.
-extensions-on = Op
-extensions-off = Off
+extensions-search = Installéiert Erweiderungen oder Chrome Web Store duerchsichen…
+extensions-relaunch = Neistarten, fir z’iwwerhuelen
+extensions-empty = Keng Erweiderungen installéiert
+extensions-no-match = Keng passend Erweiderungen
+extensions-empty-detail = Sicht uewen am Chrome Web Store an dréckt Enter.
+extensions-no-match-detail = Probéier en aneren Numm oder eng Erweiderungs-ID.
+extensions-on = Un
+extensions-off = Aus
 extensions-enable-confirm = { $name } aktivéieren?
-extensions-enable-permissions = Aktivéiert { $name } an erlaabt:
+extensions-enable-permissions = { $name } aktivéieren an erlaben:
 
-lsp-title = Sprooch Serveren
-lsp-search = Sicht Sproochserver, Linter, Formatter ...
-lsp-loading = Katalog lueden…
-lsp-empty = Keng passende Sproochserver
-lsp-empty-detail = Probéiert eng aner Sprooch, Linter oder Formater.
+lsp-title = Sproochserveren
+lsp-search = Sproochserveren, Linter a Formatter sichen…
+lsp-loading = Katalog gëtt gelueden…
+lsp-empty = Keng passend Sproochserveren
+lsp-empty-detail = Probéier eng aner Sprooch, e Linter oder e Formatter.
 lsp-needs = brauch { $tool }
 lsp-status-available = Verfügbar
-lsp-status-on-path = Op PATH
-lsp-status-installing = Installéiert…
+lsp-status-on-path = Am PATH
+lsp-status-installing = Gëtt installéiert…
 lsp-status-installed = Installéiert
-lsp-status-outdated = Update verfügbar
-lsp-status-running = Lafen
+lsp-status-outdated = Aktualiséierung verfügbar
+lsp-status-running = Leeft
 lsp-status-failed = Ausgefall
 
-spaces-title = Plaze
-spaces-new-placeholder = Neie Raumnumm
-spaces-empty = Keng Plazen
-spaces-default-name = Raum { $number }
+spaces-title = Beräicher
+spaces-new-placeholder = Numm vum neie Beräich
+spaces-empty = Keng Beräicher
+spaces-default-name = Beräich { $number }
 spaces-tabs = { $count ->
-    [one] 1 tabl
+    [one] 1 Tab
    *[other] { $count } Tabs
 }
-spaces-delete = Raum läschen
+spaces-delete = Beräich läschen
 
-team-title = Equipe
-team-just-you = Just Dir an dësem Raum
+team-title = Team
+team-just-you = Just du an dësem Beräich
 team-agents = { $count ->
-    [one] Dir an 1 Agent
-   *[other] Dir an { $count } Agenten
+    [one] Du an 1 Agent
+   *[other] Du an { $count } Agenten
 }
-team-empty = Hei nach keen
-team-you = Dir
+team-empty = Nach keen hei
+team-you = Du
 team-agent = Agent
 
-services-title = Hannergrond Services
+services-title = Hannergronddéngschter
 services-processes = { $count ->
     [one] 1 Prozess
    *[other] { $count } Prozesser
 }
-services-kill-all = Kill All
-services-not-running = Service leeft net
-services-start-with = Start mat:
+services-kill-all = All ofbriechen
+services-not-running = Déngscht leeft net
+services-start-with = Starten mat:
 services-empty = Keng aktiv Prozesser
-services-filter = Filterprozesser…
-services-no-match = Keng passende Prozesser
-services-connected = Ugeschloss
-services-disconnected = Deconnectéiert
-services-attached = befestegt
-services-kill = Kill
-services-memory = Erënnerung
+services-filter = Prozesser filteren…
+services-no-match = Keng passend Prozesser
+services-connected = Verbonnen
+services-disconnected = Net verbonnen
+services-attached = ugeschloss
+services-kill = Ofbriechen
+services-memory = Späicher
 services-size = Gréisst
 services-shell = Shell
 
 error-title = Feeler
 
-history-search = Sich Geschicht
+history-search = Verlaf sichen
 history-clear-all = Alles läschen
-history-clear-confirm = All Geschicht läschen?
-history-clear-warning = Dëst kann net réckgängeg gemaach ginn.
+history-clear-confirm = Ganze Verlaf läschen?
+history-clear-warning = Dat kann net réckgängeg gemaach ginn.
 history-cancel = Ofbriechen
 history-today = Haut
 history-yesterday = Gëschter
-history-days-ago = { $count } Deeg virun
+history-days-ago = Viru { $count } Deeg
 history-day-offset = Dag -{ $count }
 
 settings-title = Astellungen
-settings-loading = Lueden Astellunge…
+settings-loading = Astellunge ginn gelueden…
 settings-stored = Gespäichert an ~/.vmux/settings.ron
-settings-other = Aner
-settings-software-update = Software Update
-settings-check-updates = Check fir Updates
-settings-check-updates-hint = Kontrolléiert automatesch beim Start an all Stonn wann den Auto-Aktualiséierung aktivéiert ass.
+settings-other = Aneres
+settings-software-update = Software-Aktualiséierung
+settings-check-updates = No Aktualiséierunge sichen
+settings-check-updates-hint = Sicht automatesch beim Start an all Stonn, wann Auto-update aktivéiert ass.
 settings-update-unavailable = Net verfügbar
-settings-update-unavailable-hint = Updater ass net an dësem Build abegraff.
-settings-update-checking = Iwwerpréift…
-settings-update-checking-hint = Sicht no Updates…
-settings-update-check-again = Check erëm
+settings-update-unavailable-hint = Den Updater ass net an dësem Build dran.
+settings-update-checking = Gëtt gepréift…
+settings-update-checking-hint = Aktualiséierunge ginn iwwerpréift…
+settings-update-check-again = Nach eng Kéier préiwen
 settings-update-current = Vmux ass aktuell.
-settings-update-downloading = Eroflueden…
-settings-update-downloading-hint = Eroflueden Vmux { $version }...
-settings-update-installing = Installéiert…
-settings-update-installing-hint = Installéiert Vmux { $version }...
-settings-update-ready = Update Ready
-settings-update-ready-hint = Vmux { $version } ass prett. Restart fir et z'applizéieren.
-settings-update-try-again = Probéiert nach eng Kéier
-settings-update-failed = Kann net no Updates kucken.
-settings-item = Artikel
-settings-item-number = Artikel { $number }
-settings-press-key = Dréckt e Schlëssel ...
+settings-update-downloading = Gëtt erofgelueden…
+settings-update-downloading-hint = Vmux { $version } gëtt erofgelueden…
+settings-update-installing = Gëtt installéiert…
+settings-update-installing-hint = Vmux { $version } gëtt installéiert…
+settings-update-ready = Aktualiséierung prett
+settings-update-ready-hint = Vmux { $version } ass prett. Neistarten, fir se z’iwwerhuelen.
+settings-update-try-again = Nach eng Kéier probéieren
+settings-update-failed = Aktualiséierunge konnten net iwwerpréift ginn.
+settings-item = Element
+settings-item-number = Element { $number }
+settings-press-key = Dréck eng Tast…
 settings-saved = Gespäichert
-settings-record-key = Klickt fir en neie Schlësselkombinatioun opzehuelen
+settings-record-key = Klicken, fir eng nei Tastekombinatioun opzehuelen
 
-tray-open-window = Open Fënster
-tray-close-window = Zoumaachen Fënster
-tray-pause-recording = Paus Opnam
-tray-resume-recording = Resume Recording
-tray-finish-recording = Opnam fäerdeg
-tray-quit = Quit Vmux
+tray-open-window = Fënster opmaachen
+tray-close-window = Fënster zoumaachen
+tray-pause-recording = Opnam pauséieren
+tray-resume-recording = Opnam weiderféieren
+tray-finish-recording = Opnam ofschléissen
+tray-quit = Vmux ophalen
 
-composer-attach-files = Befestegt Dateien (/upload)
-composer-remove-attachment = Ewechzehuelen Unhang
+composer-attach-files = Dateien unhänken (/upload)
+composer-remove-attachment = Unhang ewechhuelen
 
-layout-back = Zréck
-layout-forward = Forward
-layout-reload = Reload
-layout-bookmark-page = Bookmark dës Säit
-layout-remove-bookmark = Lieszeeche läschen
-layout-pin-page = Pin dës Säit
-layout-unpin-page = Unpin dës Säit
-layout-manage-extensions = Verwalte Verlängerungen
+layout-back = Zeréck
+layout-forward = Vir
+layout-reload = Nei lueden
+layout-bookmark-page = Dës Säit als Lieszeeche späicheren
+layout-remove-bookmark = Lieszeechen ewechhuelen
+layout-pin-page = Dës Säit uheften
+layout-unpin-page = Dës Säit lassmaachen
+layout-manage-extensions = Erweiderunge verwalten
 layout-new-stack = Neie Stack
-layout-close-tab = Zoumaachen Tab
-layout-bookmark = Bookmark
-layout-pin = Pin
-layout-new-tab = Nei Tab
-layout-team = Equipe
+layout-close-tab = Tab zoumaachen
+layout-bookmark = Lieszeechen
+layout-pin = Uheften
+layout-new-tab = Neien Tab
+layout-team = Team
 
-command-switch-space = Raum wiesselen ...
-command-search-ask = Sichen oder froen ...
-command-new-tab-placeholder = Sicht oder tippt en URL, oder wielt Terminal ...
-command-placeholder = Typ eng URL, Sich Tabs oder > fir Kommandoen ...
-command-composer-placeholder = Typ / fir Kommandoen oder @ fir Medien
+command-switch-space = Beräich wiesselen…
+command-search-ask = Sichen oder froen…
+command-new-tab-placeholder = Sich oder URL aginn, oder Terminal auswielen…
+command-placeholder = URL aginn, Tabs sichen oder > fir Befeele benotzen…
+command-composer-placeholder = / fir Befeele oder @ fir Medien aginn
 command-send = Schécken (Enter)
 command-terminal = Terminal
-command-open-terminal = Open am Terminal
+command-open-terminal = Am Terminal opmaachen
 command-stack = Stack
 command-tabs = { $count ->
-    [one] 1 tabl
+    [one] 1 Tab
    *[other] { $count } Tabs
 }
-command-prompt = Prompt
-command-new-tab = Nei Tab
+command-prompt = Uweisung
+command-new-tab = Neien Tab
 command-search = Sichen
-command-open-value = Open "{ $value }"
-command-search-value = Sichen "{ $value }"
+command-open-value = „{ $value }“ opmaachen
+command-search-value = „{ $value }“ sichen
 
 schema-appearance = Ausgesinn
-schema-general = Général
+schema-general = Allgemeng
 schema-layout = Layout
-schema-layout-detail = Fënster, Fënstere, Sidebar, a Fokusring.
+schema-layout-detail = Fënster, Fënsterdeeler, Säiteleeschten a Fokusram.
 schema-agent = Agent
-schema-agent-detail = Agent Verhalen an Tool Permissiounen.
-schema-shortcuts = Ofkiirzungen
-schema-shortcuts-detail = Lies-nëmmen Vue. settings.ron direkt änneren fir Bindungen z'änneren.
+schema-agent-detail = Agent-Verhalen an Tool-Berechtegungen.
+schema-shortcuts = Tastaturkierzel
+schema-shortcuts-detail = Nëmme Liesusiicht. Änner d’Beleeungen direkt an settings.ron.
 schema-terminal = Terminal
 schema-browser = Browser
 schema-mode = Modus
-schema-mode-detail = Faarfschema fir Websäiten. Apparat follegt Äre System.
+schema-mode-detail = Faarfschema fir Websäiten. Apparat follegt dengem System.
 schema-device = Apparat
-schema-light = Liicht
-schema-dark = Däischter
+schema-light = Hell
+schema-dark = Donkel
 schema-language = Sprooch
-schema-language-detail = Benotzt System, en-US, ja, oder all BCP 47 Tag mat engem passenden ~/.vmux/locales/<tag>.ftl Katalog.
-schema-auto-update = Automatesch Update
-schema-auto-update-detail = Kontrolléiert an installéiert Updates beim Start an all Stonn.
-schema-startup-url = Startup URL
-schema-startup-url-detail = Empty mécht d'Kommandobar Prompt op.
-schema-search-engine = Sich-Moteur
-schema-search-engine-detail = Benotzt fir Websiche vu Start an der Kommandobar.
+schema-language-detail = Benotz System, en-US, ja oder all BCP 47-Tag mat engem passende ~/.vmux/locales/<tag>.ftl-Katalog.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Beim Start an all Stonn no Aktualiséierunge sichen an se installéieren.
+schema-startup-url = Start-URL
+schema-startup-url-detail = Eidel mécht d’Uweisungsfeld vun der Befehlsleeschten op.
+schema-search-engine = Sichmaschinn
+schema-search-engine-detail = Fir Websich vu Start an aus der Befehlsleeschten.
 schema-window = Fënster
-schema-pane = Pane
-schema-side-sheet = Säit Blat
-schema-focus-ring = Focus Ring
-schema-run-placement = Erlaabt Run Placement Iwwerschreiden
-schema-run-placement-detail = Loosst Agenten de Run Pane Modus, Richtung an Anker wielen.
+schema-pane = Fënsterdeel
+schema-side-sheet = Säitepanel
+schema-focus-ring = Fokusram
+schema-run-placement = Iwwerschreiwe vun der Ausféierungsplaz erlaben
+schema-run-placement-detail = Agenten däerfen Modus, Richtung an Anker vum Ausféierungs-Fënsterdeel wielen.
 schema-leader = Leader
-schema-leader-detail = Präfix Schlëssel fir Akkord Ofkiirzungen.
-schema-chord-timeout = Akkord Timeout
-schema-chord-timeout-detail = Millisekonne virun engem Akkord Präfix ofleeft.
-schema-bindings = Bindungen
-schema-confirm-close = Confirméieren zoumaachen
-schema-confirm-close-detail = Prompt ier Dir en Terminal mat engem lafende Prozess zoumaacht.
-schema-default-theme = Standard Thema
-schema-default-theme-detail = Numm vum aktiven Thema aus der Themen Lëscht.
+schema-leader-detail = Präfix-Tast fir Akkord-Kierzelen.
+schema-chord-timeout = Akkord-Timeout
+schema-chord-timeout-detail = Millisekonnen, bis en Akkord-Präfix ofleeft.
+schema-bindings = Beleeungen
+schema-confirm-close = Zoumaache bestätegen
+schema-confirm-close-detail = Nofroen, ier en Terminal mat lafendem Prozess zougemaach gëtt.
+schema-default-theme = Standard-Theme
+schema-default-theme-detail = Numm vum aktive Theme aus der Theme-Lëscht.

@@ -1,79 +1,79 @@
-common-open = Offen
+common-open = Öffnen
 common-close = Schließen
 common-install = Installieren
 common-uninstall = Deinstallieren
 common-update = Aktualisieren
-common-retry = Versuchen Sie es noch einmal
+common-retry = Erneut versuchen
 common-refresh = Aktualisieren
 common-remove = Entfernen
 common-enable = Aktivieren
 common-disable = Deaktivieren
 common-new = Neu
 common-active = aktiv
-common-running = laufen
-common-done = erledigt
+common-running = läuft
+common-done = fertig
 common-failed = Fehlgeschlagen
 common-installed = Installiert
 common-items = { $count ->
     [one] { $count } Element
    *[other] { $count } Elemente
 }
-start-title = Starten
-start-tagline = Eine Aufforderung. Alles klar, fertig.
+start-title = Start
+start-tagline = Ein Prompt. Alles erledigt.
 
 agents-title = Agenten
-agents-search = Durchsuchen Sie die Agenten ACP und CLI…
+agents-search = ACP- und CLI-Agenten suchen…
 agents-empty = Keine passenden Agenten
-agents-empty-detail = Versuchen Sie es mit einem Namen, einer Laufzeit oder ACP/CLI.
-agents-install-failed = Die Installation ist fehlgeschlagen
-agents-updating = Aktualisierung…
-agents-retrying = Erneuter Versuch…
-agents-preparing = Vorbereiten…
+agents-empty-detail = Versuchen Sie es mit Name, Laufzeit oder ACP/CLI.
+agents-install-failed = Installation fehlgeschlagen
+agents-updating = Wird aktualisiert…
+agents-retrying = Wird erneut versucht…
+agents-preparing = Wird vorbereitet…
 
 extensions-title = Erweiterungen
-extensions-search = Suche installiert oder Chrome Web Store…
-extensions-relaunch = Zur Bewerbung neu starten
+extensions-search = Installierte Erweiterungen oder Chrome Web Store durchsuchen…
+extensions-relaunch = Zum Anwenden neu starten
 extensions-empty = Keine Erweiterungen installiert
 extensions-no-match = Keine passenden Erweiterungen
-extensions-empty-detail = Suchen Sie oben nach Chrome Web Store und drücken Sie Return.
-extensions-no-match-detail = Versuchen Sie es mit einem anderen Namen oder einer anderen Durchwahl-ID.
-extensions-on = Auf
+extensions-empty-detail = Durchsuchen Sie oben den Chrome Web Store und drücken Sie die Eingabetaste.
+extensions-no-match-detail = Versuchen Sie einen anderen Namen oder eine andere Erweiterungs-ID.
+extensions-on = Ein
 extensions-off = Aus
 extensions-enable-confirm = { $name } aktivieren?
-extensions-enable-permissions = Aktivieren Sie { $name } und erlauben Sie:
+extensions-enable-permissions = { $name } aktivieren und erlauben:
 
 lsp-title = Sprachserver
-lsp-search = Durchsuchen Sie Sprachserver, Linters, Formatter ...
+lsp-search = Sprachserver, Linter, Formatter suchen…
 lsp-loading = Katalog wird geladen…
 lsp-empty = Keine passenden Sprachserver
-lsp-empty-detail = Probieren Sie eine andere Sprache, einen anderen Linter oder einen anderen Formatierer aus.
+lsp-empty-detail = Versuchen Sie es mit einer anderen Sprache, einem Linter oder Formatter.
 lsp-needs = benötigt { $tool }
 lsp-status-available = Verfügbar
-lsp-status-on-path = Am PATH
-lsp-status-installing = Installieren…
+lsp-status-on-path = Im PATH
+lsp-status-installing = Wird installiert…
 lsp-status-installed = Installiert
 lsp-status-outdated = Update verfügbar
-lsp-status-running = Laufen
+lsp-status-running = Läuft
 lsp-status-failed = Fehlgeschlagen
 
-spaces-title = Räume
-spaces-new-placeholder = Neuer Raumname
-spaces-empty = Keine Leerzeichen
-spaces-default-name = Speicherplatz { $number }
+spaces-title = Spaces
+spaces-new-placeholder = Name des neuen Space
+spaces-empty = Keine Spaces
+spaces-default-name = Space { $number }
 spaces-tabs = { $count ->
-    [one] 1 Registerkarte
-   *[other] { $count } Registerkarten
+    [one] 1 Tab
+   *[other] { $count } Tabs
 }
-spaces-delete = Leerzeichen löschen
+spaces-delete = Space löschen
 
 team-title = Team
-team-just-you = Nur du in diesem Raum
+team-just-you = Nur Sie in diesem Space
 team-agents = { $count ->
     [one] Sie und 1 Agent
    *[other] Sie und { $count } Agenten
 }
 team-empty = Noch niemand hier
-team-you = Du
+team-you = Sie
 team-agent = Agent
 
 services-title = Hintergrunddienste
@@ -81,65 +81,65 @@ services-processes = { $count ->
     [one] 1 Prozess
    *[other] { $count } Prozesse
 }
-services-kill-all = Töte alle
-services-not-running = Der Dienst läuft nicht
-services-start-with = Beginnen Sie mit:
+services-kill-all = Alle beenden
+services-not-running = Dienst läuft nicht
+services-start-with = Starten mit:
 services-empty = Keine aktiven Prozesse
 services-filter = Prozesse filtern…
 services-no-match = Keine passenden Prozesse
 services-connected = Verbunden
-services-disconnected = Nicht verbunden
-services-attached = beigefügt
-services-kill = Töte
-services-memory = Erinnerung
+services-disconnected = Getrennt
+services-attached = angehängt
+services-kill = Beenden erzwingen
+services-memory = Arbeitsspeicher
 services-size = Größe
-services-shell = Muschel
+services-shell = Shell
 
 error-title = Fehler
 
-history-search = Suchverlauf
+history-search = Verlauf durchsuchen
 history-clear-all = Alles löschen
 history-clear-confirm = Gesamten Verlauf löschen?
 history-clear-warning = Dies kann nicht rückgängig gemacht werden.
 history-cancel = Abbrechen
 history-today = Heute
 history-yesterday = Gestern
-history-days-ago = Vor { $count } Tagen
+history-days-ago = vor { $count } Tagen
 history-day-offset = Tag -{ $count }
 
 settings-title = Einstellungen
 settings-loading = Einstellungen werden geladen…
 settings-stored = Gespeichert in ~/.vmux/settings.ron
-settings-other = Andere
-settings-software-update = Software-Update
-settings-check-updates = Suchen Sie nach Updates
-settings-check-updates-hint = Prüft automatisch beim Start und jede Stunde, wenn die automatische Aktualisierung aktiviert ist.
+settings-other = Sonstiges
+settings-software-update = Softwareupdate
+settings-check-updates = Nach Updates suchen
+settings-check-updates-hint = Prüft beim Start und bei aktivierten automatischen Updates stündlich automatisch.
 settings-update-unavailable = Nicht verfügbar
 settings-update-unavailable-hint = Der Updater ist in diesem Build nicht enthalten.
-settings-update-checking = Überprüfen…
-settings-update-checking-hint = Suche nach Updates…
-settings-update-check-again = Überprüfen Sie es erneut
-settings-update-current = Vmux ist aktuell.
-settings-update-downloading = Herunterladen…
+settings-update-checking = Suche läuft…
+settings-update-checking-hint = Es wird nach Updates gesucht…
+settings-update-check-again = Erneut suchen
+settings-update-current = Vmux ist auf dem neuesten Stand.
+settings-update-downloading = Wird heruntergeladen…
 settings-update-downloading-hint = Vmux { $version } wird heruntergeladen…
-settings-update-installing = Installieren…
-settings-update-installing-hint = Installation von Vmux { $version }…
-settings-update-ready = Bereit für das Update
-settings-update-ready-hint = Vmux { $version } ist bereit. Starten Sie neu, um es anzuwenden.
-settings-update-try-again = Versuchen Sie es erneut
-settings-update-failed = Es kann nicht nach Updates gesucht werden.
-settings-item = Artikel
-settings-item-number = Artikel { $number }
-settings-press-key = Drücken Sie eine Taste…
+settings-update-installing = Wird installiert…
+settings-update-installing-hint = Vmux { $version } wird installiert…
+settings-update-ready = Update bereit
+settings-update-ready-hint = Vmux { $version } ist bereit. Zum Anwenden neu starten.
+settings-update-try-again = Erneut versuchen
+settings-update-failed = Updates konnten nicht geprüft werden.
+settings-item = Element
+settings-item-number = Element { $number }
+settings-press-key = Taste drücken…
 settings-saved = Gespeichert
-settings-record-key = Klicken Sie, um eine neue Tastenkombination aufzuzeichnen
+settings-record-key = Klicken, um eine neue Tastenkombination aufzunehmen
 
 tray-open-window = Fenster öffnen
 tray-close-window = Fenster schließen
 tray-pause-recording = Aufnahme pausieren
 tray-resume-recording = Aufnahme fortsetzen
-tray-finish-recording = Beenden Sie die Aufnahme
-tray-quit = Beenden Sie Vmux
+tray-finish-recording = Aufnahme beenden
+tray-quit = Vmux beenden
 
 composer-attach-files = Dateien anhängen (/upload)
 composer-remove-attachment = Anhang entfernen
@@ -147,72 +147,72 @@ composer-remove-attachment = Anhang entfernen
 layout-back = Zurück
 layout-forward = Vorwärts
 layout-reload = Neu laden
-layout-bookmark-page = Setzen Sie ein Lesezeichen für diese Seite
+layout-bookmark-page = Diese Seite als Lesezeichen speichern
 layout-remove-bookmark = Lesezeichen entfernen
-layout-pin-page = Pinne diese Seite
+layout-pin-page = Diese Seite anheften
 layout-unpin-page = Diese Seite lösen
 layout-manage-extensions = Erweiterungen verwalten
-layout-new-stack = Neuer Stapel
+layout-new-stack = Neuer Stack
 layout-close-tab = Tab schließen
 layout-bookmark = Lesezeichen
-layout-pin = Pin
+layout-pin = Anheften
 layout-new-tab = Neuer Tab
 layout-team = Team
 
-command-switch-space = Leerzeichen wechseln…
-command-search-ask = Suchen oder fragen Sie ...
-command-new-tab-placeholder = Suchen oder geben Sie einen URL ein oder wählen Sie „Terminal“ aus.
-command-placeholder = Geben Sie URL, Suchregisterkarten oder > für Befehle ein …
-command-composer-placeholder = Geben Sie / für Befehle oder @ für Medien ein
-command-send = Senden (Enter)
+command-switch-space = Space wechseln…
+command-search-ask = Suchen oder fragen…
+command-new-tab-placeholder = Suchen oder URL eingeben oder Terminal auswählen…
+command-placeholder = URL eingeben, Tabs suchen oder > für Befehle…
+command-composer-placeholder = / für Befehle oder @ für Medien eingeben
+command-send = Senden (Eingabetaste)
 command-terminal = Terminal
 command-open-terminal = Im Terminal öffnen
-command-stack = Stapel
+command-stack = Stack
 command-tabs = { $count ->
-    [one] 1 Registerkarte
-   *[other] { $count } Registerkarten
+    [one] 1 Tab
+   *[other] { $count } Tabs
 }
 command-prompt = Prompt
 command-new-tab = Neuer Tab
 command-search = Suchen
-command-open-value = Öffnen Sie „{ $value }“
-command-search-value = Suchen Sie nach „{ $value }“
+command-open-value = „{ $value }“ öffnen
+command-search-value = „{ $value }“ suchen
 
-schema-appearance = Aussehen
+schema-appearance = Darstellung
 schema-general = Allgemein
 schema-layout = Layout
-schema-layout-detail = Fenster, Fenster, Seitenleiste und Fokusring.
+schema-layout-detail = Fenster, Bereiche, Seitenleiste und Fokusring.
 schema-agent = Agent
-schema-agent-detail = Agentenverhalten und Toolberechtigungen.
-schema-shortcuts = Verknüpfungen
-schema-shortcuts-detail = Schreibgeschützte Ansicht. Bearbeiten Sie settings.ron direkt, um Bindungen zu ändern.
+schema-agent-detail = Verhalten des Agenten und Tool-Berechtigungen.
+schema-shortcuts = Tastenkürzel
+schema-shortcuts-detail = Schreibgeschützte Ansicht. Bearbeiten Sie settings.ron direkt, um Belegungen zu ändern.
 schema-terminal = Terminal
 schema-browser = Browser
 schema-mode = Modus
-schema-mode-detail = Farbschema für Webseiten. Das Gerät folgt Ihrem System.
+schema-mode-detail = Farbschema für Webseiten. „Gerät“ folgt Ihrem System.
 schema-device = Gerät
-schema-light = Licht
+schema-light = Hell
 schema-dark = Dunkel
 schema-language = Sprache
-schema-language-detail = Verwenden Sie system, en-US, ja oder ein beliebiges BCP 47-Tag mit einem passenden ~/.vmux/locales/<tag>.ftl-Katalog.
-schema-auto-update = Automatische Aktualisierung
-schema-auto-update-detail = Suchen Sie beim Start und stündlich nach Updates und installieren Sie diese.
-schema-startup-url = Start URL
-schema-startup-url-detail = „Leer“ öffnet die Eingabeaufforderung der Befehlsleiste.
+schema-language-detail = System verwenden, en-US, ja oder ein beliebiges BCP 47-Tag mit passendem ~/.vmux/locales/<tag>.ftl-Katalog.
+schema-auto-update = Automatische Updates
+schema-auto-update-detail = Beim Start und stündlich nach Updates suchen und sie installieren.
+schema-startup-url = Start-URL
+schema-startup-url-detail = Leer öffnet die Eingabeaufforderung der Befehlsleiste.
 schema-search-engine = Suchmaschine
 schema-search-engine-detail = Wird für Websuchen über Start und die Befehlsleiste verwendet.
 schema-window = Fenster
 schema-pane = Bereich
-schema-side-sheet = Seitenblech
+schema-side-sheet = Seitenpanel
 schema-focus-ring = Fokusring
-schema-run-placement = Überschreiben der Laufplatzierung zulassen
-schema-run-placement-detail = Lassen Sie Agenten den Ausführungsbereichsmodus, die Richtung und den Anker auswählen.
-schema-leader = Anführer
-schema-leader-detail = Präfixtaste für Akkordkürzel.
+schema-run-placement = Platzierung von Ausführungen überschreiben erlauben
+schema-run-placement-detail = Agenten dürfen Bereichsmodus, Richtung und Anker für Ausführungen wählen.
+schema-leader = Leader
+schema-leader-detail = Präfixtaste für Akkord-Tastenkürzel.
 schema-chord-timeout = Akkord-Timeout
-schema-chord-timeout-detail = Millisekunden, bevor ein Akkordpräfix abläuft.
-schema-bindings = Bindungen
+schema-chord-timeout-detail = Millisekunden, bevor ein Akkord-Präfix abläuft.
+schema-bindings = Belegungen
 schema-confirm-close = Schließen bestätigen
-schema-confirm-close-detail = Eingabeaufforderung vor dem Schließen eines Terminals mit einem laufenden Prozess.
-schema-default-theme = Standardthema
-schema-default-theme-detail = Name des aktiven Themes aus der Themesliste.
+schema-confirm-close-detail = Vor dem Schließen eines Terminals mit laufendem Prozess nachfragen.
+schema-default-theme = Standardtheme
+schema-default-theme-detail = Name des aktiven Themes aus der Theme-Liste.

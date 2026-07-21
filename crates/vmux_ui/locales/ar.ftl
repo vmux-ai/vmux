@@ -1,76 +1,76 @@
-common-open = مفتوح
+common-open = فتح
 common-close = إغلاق
 common-install = تثبيت
 common-uninstall = إلغاء التثبيت
 common-update = تحديث
-common-retry = أعد المحاولة
+common-retry = إعادة المحاولة
 common-refresh = تحديث
 common-remove = إزالة
-common-enable = تمكين
+common-enable = تفعيل
 common-disable = تعطيل
 common-new = جديد
 common-active = نشط
-common-running = تشغيل
+common-running = قيد التشغيل
 common-done = تم
 common-failed = فشل
-common-installed = تم التثبيت
+common-installed = مثبّت
 common-items = { $count ->
-    [one] { $count } عنصر
-   *[other] { $count } العناصر
+    [one] عنصر واحد
+   *[other] { $count } عناصر
 }
-start-title = ابدأ
-start-tagline = موجه واحد. أي شيء، تم.
+start-title = البدء
+start-tagline = موجّه واحد. وأنجز أي شيء.
 
 agents-title = الوكلاء
-agents-search = ابحث عن وكلاء ACP وCLI...
-agents-empty = لا يوجد وكلاء مطابقين
-agents-empty-detail = جرّب اسمًا أو وقت تشغيل أو ACP/CLI.
+agents-search = ابحث في وكلاء ACP وCLI…
+agents-empty = لا توجد وكلاء مطابقة
+agents-empty-detail = جرّب اسمًا أو بيئة تشغيل أو ACP/CLI.
 agents-install-failed = فشل التثبيت
 agents-updating = جارٍ التحديث…
-agents-retrying = جارٍ إعادة المحاولة...
+agents-retrying = جارٍ إعادة المحاولة…
 agents-preparing = جارٍ التحضير…
 
-extensions-title = ملحقات
-extensions-search = تم تثبيت البحث أو Chrome Web Store...
-extensions-relaunch = إعادة التشغيل للتطبيق
-extensions-empty = لم يتم تثبيت أي ملحقات
-extensions-no-match = لا توجد ملحقات مطابقة
-extensions-empty-detail = ابحث عن Chrome Web Store أعلاه ثم اضغط على Return.
-extensions-no-match-detail = جرّب اسمًا آخر أو معرف ملحق آخر.
-extensions-on = على
-extensions-off = إيقاف
-extensions-enable-confirm = هل تريد تمكين { $name }؟
-extensions-enable-permissions = تمكين { $name } والسماح بما يلي:
+extensions-title = الإضافات
+extensions-search = ابحث في المثبّتة أو في Chrome Web Store…
+extensions-relaunch = أعد التشغيل للتطبيق
+extensions-empty = لا توجد إضافات مثبّتة
+extensions-no-match = لا توجد إضافات مطابقة
+extensions-empty-detail = ابحث في Chrome Web Store أعلاه واضغط رجوع.
+extensions-no-match-detail = جرّب اسمًا آخر أو معرّف إضافة آخر.
+extensions-on = مفعّل
+extensions-off = معطّل
+extensions-enable-confirm = هل تريد تفعيل { $name }؟
+extensions-enable-permissions = فعّل { $name } واسمح بـ:
 
-lsp-title = خوادم اللغة
-lsp-search = بحث في خوادم اللغة، واللينترات، والمنسقات...
-lsp-loading = جارٍ تحميل الكتالوج…
-lsp-empty = لا توجد خوادم لغة مطابقة
-lsp-empty-detail = جرب لغة أخرى، أو Linter، أو Formater.
-lsp-needs = يحتاج { $tool }
+lsp-title = خوادم اللغات
+lsp-search = ابحث عن خوادم لغات أو مدقّقات أو منسّقات…
+lsp-loading = جارٍ تحميل الفهرس…
+lsp-empty = لا توجد خوادم لغات مطابقة
+lsp-empty-detail = جرّب لغة أو مدقّقًا أو منسّقًا آخر.
+lsp-needs = يتطلب { $tool }
 lsp-status-available = متاح
 lsp-status-on-path = على PATH
 lsp-status-installing = جارٍ التثبيت…
-lsp-status-installed = تم التثبيت
-lsp-status-outdated = التحديث متاح
-lsp-status-running = الجري
+lsp-status-installed = مثبّت
+lsp-status-outdated = يتوفر تحديث
+lsp-status-running = قيد التشغيل
 lsp-status-failed = فشل
 
-spaces-title = المساحات
-spaces-new-placeholder = اسم الفضاء الجديد
-spaces-empty = لا مسافات
-spaces-default-name = مساحة { $number }
+spaces-title = مساحات العمل
+spaces-new-placeholder = اسم مساحة العمل الجديدة
+spaces-empty = لا توجد مساحات عمل
+spaces-default-name = مساحة العمل { $number }
 spaces-tabs = { $count ->
-    [one] 1 علامة تبويب
-   *[other] { $count } علامات التبويب
+    [one] تبويب واحد
+   *[other] { $count } تبويبات
 }
-spaces-delete = احذف المساحة
+spaces-delete = حذف مساحة العمل
 
-team-title = فريق
-team-just-you = أنت فقط في هذا الفضاء
+team-title = الفريق
+team-just-you = أنت وحدك في مساحة العمل هذه
 team-agents = { $count ->
     [one] أنت ووكيل واحد
-   *[other] أنت ووكلاء { $count }
+   *[other] أنت و{ $count } وكلاء
 }
 team-empty = لا أحد هنا بعد
 team-you = أنت
@@ -78,141 +78,141 @@ team-agent = وكيل
 
 services-title = خدمات الخلفية
 services-processes = { $count ->
-    [one] 1 عملية
-   *[other] عمليات { $count }
+    [one] عملية واحدة
+   *[other] { $count } عمليات
 }
-services-kill-all = اقتل الكل
-services-not-running = الخدمة ليست قيد التشغيل
-services-start-with = ابدأ بـ:
+services-kill-all = إنهاء الكل قسرًا
+services-not-running = الخدمة لا تعمل
+services-start-with = البدء باستخدام:
 services-empty = لا توجد عمليات نشطة
-services-filter = عمليات التصفية…
+services-filter = تصفية العمليات…
 services-no-match = لا توجد عمليات مطابقة
 services-connected = متصل
 services-disconnected = غير متصل
 services-attached = مرفق
-services-kill = اقتل
+services-kill = إنهاء قسرًا
 services-memory = الذاكرة
 services-size = الحجم
-services-shell = شل
+services-shell = الصَدفة
 
 error-title = خطأ
 
-history-search = سجل البحث
+history-search = البحث في السجل
 history-clear-all = مسح الكل
-history-clear-confirm = هل تريد محو السجل بالكامل؟
-history-clear-warning = لا يمكن التراجع عن هذا.
+history-clear-confirm = هل تريد مسح السجل كله؟
+history-clear-warning = لا يمكن التراجع عن هذا الإجراء.
 history-cancel = إلغاء
 history-today = اليوم
 history-yesterday = أمس
-history-days-ago = { $count } قبل أيام
-history-day-offset = يوم -{ $count }
+history-days-ago = منذ { $count } أيام
+history-day-offset = اليوم -{ $count }
 
 settings-title = الإعدادات
 settings-loading = جارٍ تحميل الإعدادات…
-settings-stored = مخزنة في ~/.vmux/settings.ron
+settings-stored = محفوظة في ~/.vmux/settings.ron
 settings-other = أخرى
 settings-software-update = تحديث البرنامج
-settings-check-updates = التحقق من وجود تحديثات
-settings-check-updates-hint = يتم التحقق تلقائيًا عند التشغيل وكل ساعة يتم فيها تمكين التحديث التلقائي.
+settings-check-updates = التحقق من التحديثات
+settings-check-updates-hint = يتم التحقق تلقائيًا عند التشغيل وكل ساعة عند تفعيل التحديث التلقائي.
 settings-update-unavailable = غير متاح
-settings-update-unavailable-hint = لم يتم تضمين المحدث في هذا الإصدار.
+settings-update-unavailable-hint = أداة التحديث غير مضمنة في هذا الإصدار.
 settings-update-checking = جارٍ التحقق…
-settings-update-checking-hint = جارٍ التحقق من وجود تحديثات...
-settings-update-check-again = تحقق مرة أخرى
-settings-update-current = Vmux محدث.
+settings-update-checking-hint = جارٍ التحقق من التحديثات…
+settings-update-check-again = التحقق مجددًا
+settings-update-current = Vmux محدّث.
 settings-update-downloading = جارٍ التنزيل…
-settings-update-downloading-hint = جارٍ التنزيل Vmux { $version }...
+settings-update-downloading-hint = جارٍ تنزيل Vmux { $version }…
 settings-update-installing = جارٍ التثبيت…
-settings-update-installing-hint = جارٍ تثبيت Vmux { $version }...
+settings-update-installing-hint = جارٍ تثبيت Vmux { $version }…
 settings-update-ready = التحديث جاهز
 settings-update-ready-hint = Vmux { $version } جاهز. أعد التشغيل لتطبيقه.
-settings-update-try-again = حاول مرة أخرى
-settings-update-failed = غير قادر على التحقق من وجود تحديثات.
-settings-item = البند
+settings-update-try-again = حاول مجددًا
+settings-update-failed = تعذّر التحقق من التحديثات.
+settings-item = عنصر
 settings-item-number = العنصر { $number }
-settings-press-key = اضغط على مفتاح…
+settings-press-key = اضغط مفتاحًا…
 settings-saved = تم الحفظ
-settings-record-key = انقر لتسجيل مجموعة مفاتيح جديدة
+settings-record-key = انقر لتسجيل تركيبة مفاتيح جديدة
 
-tray-open-window = افتح النافذة
+tray-open-window = فتح النافذة
 tray-close-window = إغلاق النافذة
 tray-pause-recording = إيقاف التسجيل مؤقتًا
 tray-resume-recording = استئناف التسجيل
 tray-finish-recording = إنهاء التسجيل
-tray-quit = قم بإنهاء Vmux
+tray-quit = إنهاء Vmux
 
-composer-attach-files = إرفاق الملفات (/upload)
+composer-attach-files = إرفاق ملفات (/upload)
 composer-remove-attachment = إزالة المرفق
 
-layout-back = العودة
+layout-back = رجوع
 layout-forward = إلى الأمام
-layout-reload = إعادة تحميل
-layout-bookmark-page = قم بوضع إشارة مرجعية على هذه الصفحة
-layout-remove-bookmark = إزالة الإشارة المرجعية
-layout-pin-page = ثبت هذه الصفحة
-layout-unpin-page = قم بإزالة تثبيت هذه الصفحة
-layout-manage-extensions = إدارة الملحقات
-layout-new-stack = المكدس الجديد
-layout-close-tab = إغلاق علامة التبويب
-layout-bookmark = إشارة مرجعية
-layout-pin = دبوس
-layout-new-tab = علامة تبويب جديدة
-layout-team = فريق
+layout-reload = إعادة التحميل
+layout-bookmark-page = إضافة هذه الصفحة إلى المفضلة
+layout-remove-bookmark = إزالة من المفضلة
+layout-pin-page = تثبيت هذه الصفحة
+layout-unpin-page = إلغاء تثبيت هذه الصفحة
+layout-manage-extensions = إدارة الإضافات
+layout-new-stack = طبقة جديدة
+layout-close-tab = إغلاق التبويب
+layout-bookmark = إضافة إلى المفضلة
+layout-pin = تثبيت
+layout-new-tab = تبويب جديد
+layout-team = الفريق
 
-command-switch-space = تبديل المساحة…
-command-search-ask = ابحث أو اسأل...
-command-new-tab-placeholder = ابحث أو اكتب URL، أو حدد الوحدة الطرفية...
-command-placeholder = اكتب URL، أو علامات تبويب البحث، أو > للأوامر...
+command-switch-space = تبديل مساحة العمل…
+command-search-ask = ابحث أو اسأل…
+command-new-tab-placeholder = ابحث أو اكتب عنوان URL، أو اختر الطرفية…
+command-placeholder = اكتب عنوان URL أو ابحث في التبويبات، أو > للأوامر…
 command-composer-placeholder = اكتب / للأوامر أو @ للوسائط
 command-send = إرسال (Enter)
-command-terminal = المحطة
-command-open-terminal = فتح في المحطة الطرفية
-command-stack = كومة
+command-terminal = الطرفية
+command-open-terminal = فتح في الطرفية
+command-stack = طبقة
 command-tabs = { $count ->
-    [one] 1 علامة تبويب
-   *[other] { $count } علامات التبويب
+    [one] تبويب واحد
+   *[other] { $count } تبويبات
 }
-command-prompt = موجه
-command-new-tab = علامة تبويب جديدة
+command-prompt = موجّه
+command-new-tab = تبويب جديد
 command-search = بحث
-command-open-value = افتح "{ $value }"
-command-search-value = بحث عن "{ $value }"
+command-open-value = فتح “{ $value }”
+command-search-value = البحث عن “{ $value }”
 
 schema-appearance = المظهر
 schema-general = عام
 schema-layout = التخطيط
-schema-layout-detail = النافذة والأجزاء والشريط الجانبي وحلقة التركيز.
-schema-agent = وكيل
-schema-agent-detail = سلوك الوكيل وأذونات الأداة.
+schema-layout-detail = النافذة، الأجزاء، الشريط الجانبي، وإطار التركيز.
+schema-agent = الوكيل
+schema-agent-detail = سلوك الوكيل وأذونات الأدوات.
 schema-shortcuts = الاختصارات
-schema-shortcuts-detail = عرض للقراءة فقط. قم بتحرير settings.ron مباشرة لتغيير الارتباطات.
-schema-terminal = المحطة
+schema-shortcuts-detail = عرض للقراءة فقط. عدّل settings.ron مباشرة لتغيير الارتباطات.
+schema-terminal = الطرفية
 schema-browser = المتصفح
 schema-mode = الوضع
-schema-mode-detail = نظام الألوان لصفحات الويب. الجهاز يتبع نظامك.
+schema-mode-detail = نظام ألوان صفحات الويب. الجهاز يتبع نظامك.
 schema-device = الجهاز
-schema-light = ضوء
-schema-dark = الظلام
+schema-light = فاتح
+schema-dark = داكن
 schema-language = اللغة
-schema-language-detail = استخدم النظام، en-US، ja، أو أي علامة BCP 47 مع كتالوج ~/.vmux/locales/<tag>.ftl المطابق.
+schema-language-detail = استخدم لغة النظام أو en-US أو ja أو أي وسم BCP 47 مع فهرس ~/.vmux/locales/<tag>.ftl مطابق.
 schema-auto-update = التحديث التلقائي
-schema-auto-update-detail = التحقق من التحديثات وتثبيتها عند الإطلاق وكل ساعة.
-schema-startup-url = بدء التشغيل URL
-schema-startup-url-detail = فارغ يفتح موجه شريط الأوامر.
+schema-auto-update-detail = التحقق من التحديثات وتثبيتها عند التشغيل وكل ساعة.
+schema-startup-url = عنوان URL عند البدء
+schema-startup-url-detail = اتركه فارغًا لفتح موجّه شريط الأوامر.
 schema-search-engine = محرك البحث
-schema-search-engine-detail = يُستخدم لعمليات البحث على الويب من Start (ابدأ) وشريط الأوامر.
-schema-window = نافذة
+schema-search-engine-detail = يُستخدم لعمليات بحث الويب من شاشة البدء وشريط الأوامر.
+schema-window = النافذة
 schema-pane = جزء
-schema-side-sheet = ورقة جانبية
-schema-focus-ring = حلقة التركيز
+schema-side-sheet = اللوحة الجانبية
+schema-focus-ring = إطار التركيز
 schema-run-placement = السماح بتجاوز موضع التشغيل
-schema-run-placement-detail = اسمح للوكلاء باختيار وضع جزء التشغيل والاتجاه والارتساء.
-schema-leader = زعيم
-schema-leader-detail = مفتاح البادئة لاختصارات الوتر.
-schema-chord-timeout = مهلة الوتر
-schema-chord-timeout-detail = مللي ثانية قبل انتهاء صلاحية بادئة الوتر.
+schema-run-placement-detail = السماح للوكلاء باختيار وضع جزء التشغيل واتجاهه ومرساه.
+schema-leader = مفتاح بادئ
+schema-leader-detail = مفتاح تمهيدي لاختصارات التتابع.
+schema-chord-timeout = مهلة التتابع
+schema-chord-timeout-detail = عدد الملّي ثوانٍ قبل انتهاء صلاحية بادئة التتابع.
 schema-bindings = الارتباطات
 schema-confirm-close = تأكيد الإغلاق
-schema-confirm-close-detail = قم بالمطالبة قبل إغلاق الجهاز الطرفي بعملية قيد التشغيل.
-schema-default-theme = الموضوع الافتراضي
+schema-confirm-close-detail = طلب التأكيد قبل إغلاق طرفية تتضمن عملية قيد التشغيل.
+schema-default-theme = السمة الافتراضية
 schema-default-theme-detail = اسم السمة النشطة من قائمة السمات.

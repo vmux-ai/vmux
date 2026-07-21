@@ -1,218 +1,218 @@
 common-open = Vula
 common-close = Vala
 common-install = Faka
-common-uninstall = Susa
+common-uninstall = Khipha
 common-update = Buyekeza
 common-retry = Zama futhi
 common-refresh = Vuselela
 common-remove = Susa
-common-enable = Vumela
+common-enable = Nika amandla
 common-disable = Khubaza
 common-new = Okusha
-common-active = kusebenza
-common-running = kugijima
+common-active = kuyasebenza
+common-running = kuyaqhubeka
 common-done = kuqediwe
-common-failed = Yehlulekile
+common-failed = Kuhlulekile
 common-installed = Kufakiwe
 common-items = { $count ->
     [one] { $count } into
    *[other] { $count } izinto
 }
 start-title = Qala
-start-tagline = Isimemo esisodwa. Noma ini, kwenziwe.
+start-tagline = Umyalo owodwa. Konke kuyenzeka.
 
-agents-title = Amagents
-agents-search = Sesha amagents e-ACP ne-CLI…
-agents-empty = Alikho igent elifanayo
-agents-empty-detail = Zama igama, i-runtime, noma i-ACP/CLI.
-agents-install-failed = Ukufaka kwehlulekile
-agents-updating = Iyabuyekeza…
-agents-retrying = Iyazama futhi…
-agents-preparing = Ilungisa…
+agents-title = Ama-ejenti
+agents-search = Sesha ama-ejenti e-ACP nawe-CLI…
+agents-empty = Awekho ama-ejenti afanayo
+agents-empty-detail = Zama igama, indawo yokusebenza, noma i-ACP/CLI.
+agents-install-failed = Ukufaka kuhlulekile
+agents-updating = Kuyabuyekezwa…
+agents-retrying = Kuyazanywa futhi…
+agents-preparing = Kuyalungiswa…
 
 extensions-title = Izandiso
-extensions-search = Sesha izandiso ezifakiwe noma i-Chrome Web Store…
-extensions-relaunch = Qala kabusha ukuze kusebenze
+extensions-search = Sesha ezifakiwe noma i-Chrome Web Store…
+extensions-relaunch = Qalisa kabusha ukuze kusebenze
 extensions-empty = Azikho izandiso ezifakiwe
 extensions-no-match = Azikho izandiso ezifanayo
-extensions-empty-detail = Sesha i-Chrome Web Store ngenhla bese ucindezela Return.
+extensions-empty-detail = Sesha ku-Chrome Web Store ngenhla bese ucindezela u-Return.
 extensions-no-match-detail = Zama elinye igama noma i-ID yesandiso.
-extensions-on = Vuliwe
-extensions-off = Valiwe
-extensions-enable-confirm = Vumela { $name }?
-extensions-enable-permissions = Vumela { $name } unikeze:
+extensions-on = Kuvuliwe
+extensions-off = Kuvaliwe
+extensions-enable-confirm = Nika amandla i-{ $name }?
+extensions-enable-permissions = Nika amandla i-{ $name } bese uvumela:
 
-lsp-title = Amaserver Olimi
-lsp-search = Sesha amaserver olimi, izilinter, iziformathi…
-lsp-loading = Iyalayisha ikhathalogu…
-lsp-empty = Alikho iserver lolimi elifanayo
-lsp-empty-detail = Zama olunye ulimi, isilinter, noma isiformathi.
+lsp-title = Amaseva Olimi
+lsp-search = Sesha amaseva olimi, ama-linter, ama-formatter…
+lsp-loading = Kulayishwa ikhathalogi…
+lsp-empty = Awekho amaseva olimi afanayo
+lsp-empty-detail = Zama olunye ulimi, i-linter, noma i-formatter.
 lsp-needs = idinga { $tool }
 lsp-status-available = Iyatholakala
-lsp-status-on-path = Ku-PATH
-lsp-status-installing = Iyafaka…
+lsp-status-on-path = Iku-PATH
+lsp-status-installing = Kuyafakwa…
 lsp-status-installed = Kufakiwe
-lsp-status-outdated = Ibuyekezo litholakala
-lsp-status-running = Iyagijima
-lsp-status-failed = Yehlulekile
+lsp-status-outdated = Isibuyekezo siyatholakala
+lsp-status-running = Iyaqhubeka
+lsp-status-failed = Kuhlulekile
 
 spaces-title = Izindawo
 spaces-new-placeholder = Igama lendawo entsha
 spaces-empty = Azikho izindawo
 spaces-default-name = Indawo { $number }
 spaces-tabs = { $count ->
-    [one] 1 ithebhu
-   *[other] { $count } amathebu
+    [one] ithebhu engu-1
+   *[other] amathebhu angu-{ $count }
 }
 spaces-delete = Susa indawo
 
 team-title = Ithimba
-team-just-you = Wena wedwa kule ndawo
+team-just-you = Nguwe kuphela kule ndawo
 team-agents = { $count ->
-    [one] Wena ne-agent elilodwa
-   *[other] Wena namagents angu-{ $count }
+    [one] Wena ne-ejenti engu-1
+   *[other] Wena nama-ejenti angu-{ $count }
 }
-team-empty = Akakho muntu lapha
+team-empty = Akekho lapha okwamanje
 team-you = Wena
-team-agent = I-Agent
+team-agent = I-ejenti
 
 services-title = Amasevisi Angemuva
 services-processes = { $count ->
-    [one] 1 inqubo
-   *[other] { $count } izinqubo
+    [one] inqubo engu-1
+   *[other] izinqubo ezingu-{ $count }
 }
-services-kill-all = Bulala Konke
-services-not-running = Isevisi ayigijimi
-services-start-with = Qala nge:
+services-kill-all = Misa Zonke Ngempoqo
+services-not-running = Isevisi ayiqhubeki
+services-start-with = Qala ngo-:
 services-empty = Azikho izinqubo ezisebenzayo
 services-filter = Hlunga izinqubo…
 services-no-match = Azikho izinqubo ezifanayo
-services-connected = Ixhunyiwe
-services-disconnected = Ikaqhunyiwe
-services-attached = ixhunyiwe
-services-kill = Bulala
-services-memory = Inkumbulo
+services-connected = Kuxhunyiwe
+services-disconnected = Kunqanyuliwe
+services-attached = kunamathiselwe
+services-kill = Misa ngempoqo
+services-memory = Imemori
 services-size = Usayizi
-services-shell = I-Shell
+services-shell = Shell
 
 error-title = Iphutha
 
 history-search = Sesha umlando
 history-clear-all = Sula konke
-history-clear-confirm = Sula umlando wonke?
-history-clear-warning = Lokhu akukwazi ukubuyiswa.
+history-clear-confirm = Sula wonke umlando?
+history-clear-warning = Lokhu ngeke kubuyiselwe emuva.
 history-cancel = Khansela
 history-today = Namuhla
 history-yesterday = Izolo
-history-days-ago = Izinsuku ezingu-{ $count } ezedlule
+history-days-ago = Ezinsukwini ezingu-{ $count } ezedlule
 history-day-offset = Usuku -{ $count }
 
 settings-title = Izilungiselelo
-settings-loading = Iyalayisha izilungiselelo…
-settings-stored = Igcinwe ku-~/.vmux/settings.ron
+settings-loading = Kulayishwa izilungiselelo…
+settings-stored = Kugcinwe ku-~/.vmux/settings.ron
 settings-other = Okunye
-settings-software-update = Ibuyekezo Lesoftware
+settings-software-update = Isibuyekezo Sesofthiwe
 settings-check-updates = Hlola Izibuyekezo
-settings-check-updates-hint = Ihlola ngokuzenzekelayo uma kuqalisa nangehora ngalinye uma i-Auto-update ivuliwe.
-settings-update-unavailable = Ayitholakali
-settings-update-unavailable-hint = Isidluli sibuyekezo asifakiwe kulolu kuhlanganisa.
-settings-update-checking = Ihlola…
-settings-update-checking-hint = Ihlola izibuyekezo…
+settings-check-updates-hint = Ihlola ngokuzenzakalelayo uma kuqalwa futhi njalo ngehora uma i-Auto-update inikwe amandla.
+settings-update-unavailable = Akutholakali
+settings-update-unavailable-hint = Isibuyekezi asifakiwe kule build.
+settings-update-checking = Kuyahlolwa…
+settings-update-checking-hint = Kuhlolwa izibuyekezo…
 settings-update-check-again = Hlola Futhi
-settings-update-current = Vmux isibuyekeziwe.
-settings-update-downloading = Iyalanda…
-settings-update-downloading-hint = Iyalanda Vmux { $version }…
-settings-update-installing = Iyafaka…
-settings-update-installing-hint = Iyafaka Vmux { $version }…
-settings-update-ready = Ibuyekezo Lilungile
-settings-update-ready-hint = Vmux { $version } ilungile. Qala kabusha ukuze usebenzise.
+settings-update-current = I-Vmux isesikhathini.
+settings-update-downloading = Kuyalandwa…
+settings-update-downloading-hint = Kulandwa i-Vmux { $version }…
+settings-update-installing = Kuyafakwa…
+settings-update-installing-hint = Kufakwa i-Vmux { $version }…
+settings-update-ready = Isibuyekezo Silungile
+settings-update-ready-hint = I-Vmux { $version } isilungile. Qalisa kabusha ukuze sisebenze.
 settings-update-try-again = Zama Futhi
-settings-update-failed = Yehlulekile ukuhlola izibuyekezo.
+settings-update-failed = Ayikwazanga ukuhlola izibuyekezo.
 settings-item = Into
 settings-item-number = Into { $number }
-settings-press-key = Cindezela isihluthulelo…
-settings-saved = Kugcinwe
-settings-record-key = Chofoza ukurekhoda uhlanganiso lwesihluthulelo olusha
+settings-press-key = Cindezela ukhiye…
+settings-saved = Kugciniwe
+settings-record-key = Chofoza ukuze uqophe inhlanganisela entsha yokhiye
 
 tray-open-window = Vula Iwindi
 tray-close-window = Vala Iwindi
-tray-pause-recording = Misa Ukurekhoda
-tray-resume-recording = Qhubeka Nokurekhoda
-tray-finish-recording = Qeda Ukurekhoda
+tray-pause-recording = Misa Isiqophi Kancane
+tray-resume-recording = Qhubeka Nokuqopha
+tray-finish-recording = Qeda Ukuqopha
 tray-quit = Phuma ku-Vmux
 
-composer-attach-files = Namathelisa amafayela (/upload)
-composer-remove-attachment = Susa ukuphakanyiswa
+composer-attach-files = Namathisela amafayela (/upload)
+composer-remove-attachment = Susa okunamathiselwe
 
 layout-back = Emuva
 layout-forward = Phambili
 layout-reload = Layisha kabusha
-layout-bookmark-page = Beka uphawu kuleli khasi
-layout-remove-bookmark = Susa uphawu
+layout-bookmark-page = Faka leli khasi kumabhukhimakhi
+layout-remove-bookmark = Susa ibhukhimakhi
 layout-pin-page = Phina leli khasi
-layout-unpin-page = Susa iphini kuleli khasi
+layout-unpin-page = Susa ukuphina leli khasi
 layout-manage-extensions = Phatha izandiso
 layout-new-stack = Isitaki Esisha
 layout-close-tab = Vala ithebhu
-layout-bookmark = Uphawu
-layout-pin = Iphini
+layout-bookmark = Ibhukhimakhi
+layout-pin = Phina
 layout-new-tab = Ithebhu entsha
 layout-team = Ithimba
 
 command-switch-space = Shintsha indawo…
 command-search-ask = Sesha noma ubuze…
-command-new-tab-placeholder = Sesha noma ufake i-URL, noma ukhethe I-Terminal…
-command-placeholder = Faka i-URL, sesha amathebu, noma > ngemiyalo…
-command-composer-placeholder = Faka / ngemiyalo noma @ kwezomfani
+command-new-tab-placeholder = Sesha noma thayipha i-URL, noma khetha i-Terminal…
+command-placeholder = Thayipha i-URL, sesha amathebhu, noma > ukuze uthole imiyalo…
+command-composer-placeholder = Thayipha / ukuze uthole imiyalo noma @ ukuze uthole imidiya
 command-send = Thumela (Enter)
-command-terminal = I-Terminal
+command-terminal = Terminal
 command-open-terminal = Vula ku-Terminal
 command-stack = Isitaki
 command-tabs = { $count ->
-    [one] 1 ithebhu
-   *[other] { $count } amathebu
+    [one] ithebhu engu-1
+   *[other] amathebhu angu-{ $count }
 }
-command-prompt = Isimemo
+command-prompt = Umyalo
 command-new-tab = Ithebhu entsha
 command-search = Sesha
-command-open-value = Vula "{ $value }"
-command-search-value = Sesha "{ $value }"
+command-open-value = Vula “{ $value }”
+command-search-value = Sesha “{ $value }”
 
-schema-appearance = Ukubonakala
+schema-appearance = Ukubukeka
 schema-general = Okuvamile
-schema-layout = Isikhaka
-schema-layout-detail = Iwindi, izingcezu, umkhala, nendandatho yokugxila.
-schema-agent = I-Agent
-schema-agent-detail = Ukuziphatha kwe-agent nezimvume zamathuluzi.
+schema-layout = Isakhiwo
+schema-layout-detail = Iwindi, amaphaneli, ibha eseceleni, nendandatho yokugxila.
+schema-agent = I-ejenti
+schema-agent-detail = Ukuziphatha kwe-ejenti nezimvume zamathuluzi.
 schema-shortcuts = Izinqamuleli
-schema-shortcuts-detail = Umbono wokufunda kuphela. Hlela settings.ron ngokuqondile ukushintsha iziboshiwe.
-schema-terminal = I-Terminal
+schema-shortcuts-detail = Ukubuka kuphela. Hlela settings.ron ngqo ukuze ushintshe izibopho zokhiye.
+schema-terminal = Terminal
 schema-browser = Isiphequluli
 schema-mode = Imodi
-schema-mode-detail = Isema semibala kumawebhu. Idivayisi ilandela uhlelo lwakho.
+schema-mode-detail = Isikimu sombala samakhasi ewebhu. Idivayisi ilandela uhlelo lwakho.
 schema-device = Idivayisi
-schema-light = Ukukhanya
-schema-dark = Ubumnyama
+schema-light = Okukhanyayo
+schema-dark = Okumnyama
 schema-language = Ulimi
-schema-language-detail = Sebenzisa uhlelo, en-US, ja, noma ikhodi ye-BCP 47 enomhlanganiso ofanele we-~/.vmux/locales/<tag>.ftl.
-schema-auto-update = Ibuyekezo Eliqhubekayo
-schema-auto-update-detail = Hlola futhi ufake izibuyekezo uma kuqalisa nangehora ngalinye.
-schema-startup-url = I-URL Yokuqala
-schema-startup-url-detail = Ukungagcwalisi kuvula isimemo somudluli wemiyalo.
+schema-language-detail = Sebenzisa uhlelo, en-US, ja, noma noma iyiphi ithegi ye-BCP 47 enekhathalogi efanayo ethi ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Hlola bese ufaka izibuyekezo uma kuqalwa futhi njalo ngehora.
+schema-startup-url = I-URL yokuqalisa
+schema-startup-url-detail = Uma kungenalutho kuvula umyalo webha yemiyalo.
 schema-search-engine = Injini yokusesha
-schema-search-engine-detail = Isetshenziswa ukusesha iwebhu kusuka ku-Start nakumudluli wemiyalo.
+schema-search-engine-detail = Isetshenziselwa ukusesha iwebhu kusuka ku-Qala nakubha yemiyalo.
 schema-window = Iwindi
-schema-pane = Ingcezu
-schema-side-sheet = Ikhasi Elingakuhlangothi
-schema-focus-ring = Indandatho Yokugxila
-schema-run-placement = Vumela ukushintshwa kokubeka kwegijimo
-schema-run-placement-detail = Vumela amagents ukukhetha imodi yephani legijimo, ukhomba, nesikhungo.
+schema-pane = Iphaneli
+schema-side-sheet = Ishidi laseceleni
+schema-focus-ring = Indandatho yokugxila
+schema-run-placement = Vumela ukweqa ukubekwa kokusebenza
+schema-run-placement-detail = Vumela ama-ejenti akhethe imodi yephaneli yokusebenza, inkomba, ne-ankile.
 schema-leader = Umholi
-schema-leader-detail = Isihluthulelo sokuqala sezinqamuleli zamazwi.
-schema-chord-timeout = Isikhathi Sewadi
-schema-chord-timeout-detail = Amamilisekendi ngaphambi kokuphela kwesihluthulelo sokuqala sewadi.
-schema-bindings = Iziboshiwe
+schema-leader-detail = Ukhiye wesiqalo wezinqamuleli ze-chord.
+schema-chord-timeout = Isikhathi sokuphela kwe-chord
+schema-chord-timeout-detail = Amamilisekhondi ngaphambi kokuthi isiqalo se-chord siphelelwe isikhathi.
+schema-bindings = Izibopho zokhiye
 schema-confirm-close = Qinisekisa ukuvala
-schema-confirm-close-detail = Buza ngaphambi kokuvala i-terminal ene-process egijimayo.
-schema-default-theme = Ithemu Ezenzakalelayo
-schema-default-theme-detail = Igama lethemu elisebenzayo ohlelweni lwamathemu.
+schema-confirm-close-detail = Cela ukuqinisekisa ngaphambi kokuvala i-terminal enenqubo eqhubekayo.
+schema-default-theme = Itimu ezenzakalelayo
+schema-default-theme-detail = Igama letimu esebenzayo ohlwini lwamatimu.

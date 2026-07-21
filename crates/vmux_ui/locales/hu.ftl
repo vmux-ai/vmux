@@ -1,16 +1,16 @@
-common-open = Nyissa meg
+common-open = Megnyitás
 common-close = Bezárás
 common-install = Telepítés
 common-uninstall = Eltávolítás
 common-update = Frissítés
-common-retry = Próbálja újra
+common-retry = Újra
 common-refresh = Frissítés
-common-remove = Távolítsa el
+common-remove = Eltávolítás
 common-enable = Engedélyezés
 common-disable = Letiltás
 common-new = Új
 common-active = aktív
-common-running = futás
+common-running = fut
 common-done = kész
 common-failed = Sikertelen
 common-installed = Telepítve
@@ -18,201 +18,201 @@ common-items = { $count ->
     [one] { $count } elem
    *[other] { $count } elem
 }
-start-title = Indítsa el
-start-tagline = Egy felszólítás. Bármi, kész.
+start-title = Kezdés
+start-tagline = Egy prompt. Bármi elkészül.
 
-agents-title = Ügynökök
-agents-search = Keresés ACP és CLI ügynökök között…
-agents-empty = Nincsenek megfelelő ügynökök
-agents-empty-detail = Próbáljon ki egy nevet, futási környezetet vagy ACP/CLI.
+agents-title = Agentek
+agents-search = ACP- és CLI-agentek keresése…
+agents-empty = Nincs találó agent
+agents-empty-detail = Próbáljon névre, futtatókörnyezetre vagy ACP/CLI-re keresni.
 agents-install-failed = A telepítés sikertelen
 agents-updating = Frissítés…
 agents-retrying = Újrapróbálkozás…
-agents-preparing = Felkészülés…
+agents-preparing = Előkészítés…
 
-extensions-title = Kiterjesztések
-extensions-search = Keresés telepítve vagy Chrome Web Store…
-extensions-relaunch = A jelentkezéshez indítsa újra
-extensions-empty = Nincsenek telepítve bővítmények
-extensions-no-match = Nincsenek megfelelő bővítmények
-extensions-empty-detail = Keressen a fenti Chrome Web Store között, és nyomja meg a Return gombot.
-extensions-no-match-detail = Próbálkozzon másik névvel vagy bővítményazonosítóval.
+extensions-title = Bővítmények
+extensions-search = Keresés a telepítettek között vagy a Chrome Web Store-ban…
+extensions-relaunch = Újraindítás az alkalmazáshoz
+extensions-empty = Nincs telepített bővítmény
+extensions-no-match = Nincs találó bővítmény
+extensions-empty-detail = Keressen fent a Chrome Web Store-ban, majd nyomja meg az Entert.
+extensions-no-match-detail = Próbáljon másik nevet vagy bővítményazonosítót.
 extensions-on = Be
 extensions-off = Ki
-extensions-enable-confirm = Engedélyezi a { $name }?
-extensions-enable-permissions = Engedélyezze a { $name } és engedélyezze:
+extensions-enable-confirm = Engedélyezi ezt: { $name }?
+extensions-enable-permissions = { $name } engedélyezése és hozzáférés engedélyezése:
 
-lsp-title = Nyelvi szerverek
-lsp-search = Nyelvi szerverek, linterek, formázók keresése…
+lsp-title = Nyelvi kiszolgálók
+lsp-search = Nyelvi kiszolgálók, lintelők, formázók keresése…
 lsp-loading = Katalógus betöltése…
-lsp-empty = Nincsenek megfelelő nyelvű szerverek
-lsp-empty-detail = Próbálkozzon másik nyelvvel, linterrel vagy formázóval.
-lsp-needs = { $tool } kell
+lsp-empty = Nincs találó nyelvi kiszolgáló
+lsp-empty-detail = Próbáljon másik nyelvet, lintelőt vagy formázót.
+lsp-needs = szükséges: { $tool }
 lsp-status-available = Elérhető
-lsp-status-on-path = PATH
+lsp-status-on-path = A PATH-ban
 lsp-status-installing = Telepítés…
 lsp-status-installed = Telepítve
-lsp-status-outdated = Frissítés elérhető
-lsp-status-running = Futás
+lsp-status-outdated = Frissítés érhető el
+lsp-status-running = Fut
 lsp-status-failed = Sikertelen
 
-spaces-title = Spaces
-spaces-new-placeholder = Új térnév
-spaces-empty = Nincs szóköz
-spaces-default-name = Tér { $number }
+spaces-title = Munkaterek
+spaces-new-placeholder = Új munkatér neve
+spaces-empty = Nincsenek munkaterek
+spaces-default-name = Munkatér { $number }
 spaces-tabs = { $count ->
     [one] 1 lap
-   *[other] { $count } lapok
+   *[other] { $count } lap
 }
-spaces-delete = Tér törlése
+spaces-delete = Munkatér törlése
 
 team-title = Csapat
-team-just-you = Csak te ezen a téren
+team-just-you = Csak Ön van ebben a munkatérben
 team-agents = { $count ->
-    [one] Ön és 1 ügynök
-   *[other] Ön és { $count } ügynökök
+    [one] Ön és 1 agent
+   *[other] Ön és { $count } agent
 }
 team-empty = Még nincs itt senki
-team-you = Te
-team-agent = ügynök
+team-you = Ön
+team-agent = Agent
 
 services-title = Háttérszolgáltatások
 services-processes = { $count ->
     [one] 1 folyamat
-   *[other] { $count } folyamatok
+   *[other] { $count } folyamat
 }
-services-kill-all = Ölj meg mindent
+services-kill-all = Összes kilövése
 services-not-running = A szolgáltatás nem fut
-services-start-with = Kezdje ezzel:
+services-start-with = Indítás ezzel:
 services-empty = Nincsenek aktív folyamatok
 services-filter = Folyamatok szűrése…
-services-no-match = Nincsenek megfelelő folyamatok
-services-connected = Csatlakozva
-services-disconnected = Lekapcsolva
+services-no-match = Nincs találó folyamat
+services-connected = Csatlakoztatva
+services-disconnected = Nincs kapcsolat
 services-attached = csatolva
-services-kill = Ölj meg
+services-kill = Kilövés
 services-memory = Memória
 services-size = Méret
 services-shell = Shell
 
 error-title = Hiba
 
-history-search = Keresési előzmények
-history-clear-all = Minden törlése
+history-search = Keresés az előzményekben
+history-clear-all = Összes törlése
 history-clear-confirm = Törli az összes előzményt?
-history-clear-warning = Ezt nem lehet visszavonni.
-history-cancel = Mégsem
+history-clear-warning = Ez nem vonható vissza.
+history-cancel = Mégse
 history-today = Ma
-history-yesterday = tegnap
+history-yesterday = Tegnap
 history-days-ago = { $count } napja
-history-day-offset = nap -{ $count }
+history-day-offset = Nap -{ $count }
 
-settings-title = Beállítások elemre
+settings-title = Beállítások
 settings-loading = Beállítások betöltése…
-settings-stored = Tárolva: ~/.vmux/settings.ron
+settings-stored = Tárolási hely: ~/.vmux/settings.ron
 settings-other = Egyéb
 settings-software-update = Szoftverfrissítés
-settings-check-updates = Ellenőrizze a frissítéseket
-settings-check-updates-hint = Automatikusan ellenőrzi indításkor és óránként, ha az automatikus frissítés engedélyezve van.
-settings-update-unavailable = Nem elérhető
-settings-update-unavailable-hint = Ez a build nem tartalmazza a frissítőt.
+settings-check-updates = Frissítések keresése
+settings-check-updates-hint = Indításkor és óránként automatikusan ellenőrzi, ha az automatikus frissítés be van kapcsolva.
+settings-update-unavailable = Nem érhető el
+settings-update-unavailable-hint = Ez a build nem tartalmaz frissítőt.
 settings-update-checking = Ellenőrzés…
 settings-update-checking-hint = Frissítések keresése…
-settings-update-check-again = Ellenőrizze újra
+settings-update-check-again = Újraellenőrzés
 settings-update-current = A Vmux naprakész.
 settings-update-downloading = Letöltés…
 settings-update-downloading-hint = Vmux { $version } letöltése…
 settings-update-installing = Telepítés…
 settings-update-installing-hint = Vmux { $version } telepítése…
-settings-update-ready = Frissítés kész
-settings-update-ready-hint = Vmux { $version } készen áll. Indítsa újra az alkalmazáshoz.
-settings-update-try-again = Próbáld újra
-settings-update-failed = Nem lehet frissítéseket keresni.
-settings-item = Tétel
-settings-item-number = { $number } elem
-settings-press-key = Nyomj meg egy gombot…
+settings-update-ready = A frissítés kész
+settings-update-ready-hint = A Vmux { $version } készen áll. Indítsa újra az alkalmazáshoz.
+settings-update-try-again = Próbálja újra
+settings-update-failed = Nem sikerült frissítéseket keresni.
+settings-item = Elem
+settings-item-number = Elem { $number }
+settings-press-key = Nyomjon meg egy billentyűt…
 settings-saved = Mentve
-settings-record-key = Kattintson az új kulcskombó rögzítéséhez
+settings-record-key = Kattintson új billentyűkombináció rögzítéséhez
 
-tray-open-window = Nyissa meg az ablakot
-tray-close-window = Zárja be az ablakot
-tray-pause-recording = Felvétel szüneteltetése
-tray-resume-recording = Felvétel folytatása
-tray-finish-recording = Felvétel befejezése
-tray-quit = Kilépés a Vmux alkalmazásból
+tray-open-window = Ablak megnyitása
+tray-close-window = Ablak bezárása
+tray-pause-recording = Rögzítés szüneteltetése
+tray-resume-recording = Rögzítés folytatása
+tray-finish-recording = Rögzítés befejezése
+tray-quit = Kilépés a Vmuxból
 
 composer-attach-files = Fájlok csatolása (/upload)
-composer-remove-attachment = Távolítsa el a mellékletet
+composer-remove-attachment = Melléklet eltávolítása
 
 layout-back = Vissza
 layout-forward = Előre
 layout-reload = Újratöltés
-layout-bookmark-page = Könyvjelzők közé ezt az oldalt
+layout-bookmark-page = Oldal könyvjelzőzése
 layout-remove-bookmark = Könyvjelző eltávolítása
-layout-pin-page = Rögzítse ezt az oldalt
-layout-unpin-page = Oldja fel az oldal rögzítését
+layout-pin-page = Oldal kitűzése
+layout-unpin-page = Oldal kitűzésének megszüntetése
 layout-manage-extensions = Bővítmények kezelése
-layout-new-stack = Új Stack
+layout-new-stack = Új réteg
 layout-close-tab = Lap bezárása
 layout-bookmark = Könyvjelző
-layout-pin = Pin
+layout-pin = Kitűzés
 layout-new-tab = Új lap
 layout-team = Csapat
 
-command-switch-space = Helyváltás…
-command-search-ask = Keress vagy kérdezz…
-command-new-tab-placeholder = Keressen vagy írjon be egy URL, vagy válassza a Terminál…
-command-placeholder = Írjon be egy URL, keressen tabulátorokat vagy > parancsokat…
-command-composer-placeholder = Írja be a / parancsokat, vagy a @-t a média használatához
+command-switch-space = Munkatér váltása…
+command-search-ask = Keresés vagy kérdés…
+command-new-tab-placeholder = Keressen vagy írjon be egy URL-t, vagy válassza a Terminált…
+command-placeholder = Írjon be egy URL-t, keressen a lapok között, vagy használja a > jelet parancsokhoz…
+command-composer-placeholder = Parancsokhoz írjon / jelet, médiához @ jelet
 command-send = Küldés (Enter)
 command-terminal = Terminál
-command-open-terminal = Megnyitás a terminálban
-command-stack = Verem
+command-open-terminal = Megnyitás Terminálban
+command-stack = Réteg
 command-tabs = { $count ->
     [one] 1 lap
-   *[other] { $count } lapok
+   *[other] { $count } lap
 }
 command-prompt = Prompt
 command-new-tab = Új lap
 command-search = Keresés
-command-open-value = Nyissa meg a következőt: „{ $value }”
-command-search-value = Keresés „{ $value }”
+command-open-value = „{ $value }” megnyitása
+command-search-value = „{ $value }” keresése
 
 schema-appearance = Megjelenés
-schema-general = tábornok
+schema-general = Általános
 schema-layout = Elrendezés
-schema-layout-detail = Ablak, ablaktáblák, oldalsáv és fókuszgyűrű.
-schema-agent = ügynök
-schema-agent-detail = Ügynök viselkedése és eszközengedélyei.
-schema-shortcuts = Parancsikonok
-schema-shortcuts-detail = Csak olvasható nézet. Szerkessze közvetlenül a settings.ron fájlt a kötések módosításához.
+schema-layout-detail = Ablak, panelek, oldalsáv és fókuszkeret.
+schema-agent = Agent
+schema-agent-detail = Agent viselkedése és eszközengedélyei.
+schema-shortcuts = Billentyűparancsok
+schema-shortcuts-detail = Csak olvasható nézet. A kiosztások módosításához szerkessze közvetlenül a settings.ron fájlt.
 schema-terminal = Terminál
 schema-browser = Böngésző
-schema-mode = mód
-schema-mode-detail = Weboldalak színséma. Az eszköz követi a rendszert.
+schema-mode = Mód
+schema-mode-detail = Weboldalak színsémája. Az Eszköz beállítás a rendszerét követi.
 schema-device = Eszköz
-schema-light = Fény
+schema-light = Világos
 schema-dark = Sötét
 schema-language = Nyelv
-schema-language-detail = Használjon rendszert, en-US, ja-t vagy bármely BCP 47 címkét a megfelelő ~/.vmux/locales/<tag>.ftl katalógussal.
+schema-language-detail = Használja a rendszer nyelvét, az en-US-t, a ja-t vagy bármely BCP 47 címkét egy hozzá illő ~/.vmux/locales/<tag>.ftl katalógussal.
 schema-auto-update = Automatikus frissítés
-schema-auto-update-detail = Ellenőrizze és telepítse a frissítéseket indításkor és óránként.
-schema-startup-url = Indítás URL
-schema-startup-url-detail = Az üres megnyitja a parancssort.
+schema-auto-update-detail = Frissítések keresése és telepítése indításkor és óránként.
+schema-startup-url = Indítási URL
+schema-startup-url-detail = Üresen a parancssáv promptja nyílik meg.
 schema-search-engine = Keresőmotor
-schema-search-engine-detail = Internetes keresésekhez használatos a Startból és a parancssorból.
+schema-search-engine-detail = Webes keresésekhez használja a Kezdés képernyőről és a parancssávból.
 schema-window = Ablak
 schema-pane = Panel
-schema-side-sheet = Oldallap
-schema-focus-ring = Fókusz gyűrű
+schema-side-sheet = Oldalsó lap
+schema-focus-ring = Fókuszkeret
 schema-run-placement = Futtatási elhelyezés felülbírálásának engedélyezése
-schema-run-placement-detail = Hagyja, hogy az ügynökök válasszák ki a futáspanel módot, irányt és horgonyzást.
-schema-leader = Vezető
-schema-leader-detail = Előtag gomb az akkord gyorsbillentyűkhöz.
-schema-chord-timeout = Akkord időtúllépés
-schema-chord-timeout-detail = Ezredmásodperccel az akkord előtag lejárta előtt.
-schema-bindings = Kötések
-schema-confirm-close = Erősítse meg a bezárást
-schema-confirm-close-detail = Kérdezzen egy terminál bezárása előtt egy futó folyamattal.
+schema-run-placement-detail = Az agentek kiválaszthatják a futtatási panel módját, irányát és rögzítési pontját.
+schema-leader = Leader
+schema-leader-detail = Előtagbillentyű akkordos billentyűparancsokhoz.
+schema-chord-timeout = Akkord időkorlátja
+schema-chord-timeout-detail = Ennyi ezredmásodperc után jár le az akkord előtagja.
+schema-bindings = Kiosztások
+schema-confirm-close = Bezárás megerősítése
+schema-confirm-close-detail = Kérjen megerősítést futó folyamattal rendelkező terminál bezárása előtt.
 schema-default-theme = Alapértelmezett téma
 schema-default-theme-detail = Az aktív téma neve a témalistából.

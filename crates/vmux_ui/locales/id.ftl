@@ -1,8 +1,8 @@
 common-open = Buka
 common-close = Tutup
 common-install = Instal
-common-uninstall = Copot pemasangan
-common-update = Pembaruan
+common-uninstall = Hapus instalasi
+common-update = Perbarui
 common-retry = Coba lagi
 common-refresh = Segarkan
 common-remove = Hapus
@@ -10,70 +10,70 @@ common-enable = Aktifkan
 common-disable = Nonaktifkan
 common-new = Baru
 common-active = aktif
-common-running = berlari
+common-running = berjalan
 common-done = selesai
 common-failed = Gagal
-common-installed = Dipasang
+common-installed = Terinstal
 common-items = { $count ->
-    [one] { $count } barang
+    [one] { $count } item
    *[other] { $count } item
 }
 start-title = Mulai
-start-tagline = Satu perintah. Apapun, selesai.
+start-tagline = Satu prompt. Apa pun beres.
 
 agents-title = Agen
 agents-search = Cari agen ACP dan CLI…
 agents-empty = Tidak ada agen yang cocok
-agents-empty-detail = Coba nama, waktu proses, atau ACP/CLI.
-agents-install-failed = Penginstalan gagal
+agents-empty-detail = Coba nama, runtime, atau ACP/CLI.
+agents-install-failed = Instalasi gagal
 agents-updating = Memperbarui…
 agents-retrying = Mencoba lagi…
-agents-preparing = Mempersiapkan…
+agents-preparing = Menyiapkan…
 
 extensions-title = Ekstensi
-extensions-search = Pencarian terpasang atau Chrome Web Store…
-extensions-relaunch = Luncurkan kembali untuk melamar
-extensions-empty = Tidak ada ekstensi yang dipasang
+extensions-search = Cari yang terinstal atau di Chrome Web Store…
+extensions-relaunch = Buka ulang untuk menerapkan
+extensions-empty = Belum ada ekstensi terinstal
 extensions-no-match = Tidak ada ekstensi yang cocok
-extensions-empty-detail = Cari Chrome Web Store di atas dan tekan Return.
+extensions-empty-detail = Cari di Chrome Web Store di atas, lalu tekan Return.
 extensions-no-match-detail = Coba nama atau ID ekstensi lain.
-extensions-on = Aktif
+extensions-on = Nyala
 extensions-off = Mati
 extensions-enable-confirm = Aktifkan { $name }?
 extensions-enable-permissions = Aktifkan { $name } dan izinkan:
 
 lsp-title = Server Bahasa
-lsp-search = Cari server bahasa, linter, pemformat…
+lsp-search = Cari server bahasa, linter, formatter…
 lsp-loading = Memuat katalog…
 lsp-empty = Tidak ada server bahasa yang cocok
 lsp-empty-detail = Coba bahasa, linter, atau formatter lain.
-lsp-needs = kebutuhan { $tool }
+lsp-needs = memerlukan { $tool }
 lsp-status-available = Tersedia
-lsp-status-on-path = Pada PATH
-lsp-status-installing = Memasang…
-lsp-status-installed = Dipasang
+lsp-status-on-path = Di PATH
+lsp-status-installing = Menginstal…
+lsp-status-installed = Terinstal
 lsp-status-outdated = Pembaruan tersedia
-lsp-status-running = Berlari
+lsp-status-running = Berjalan
 lsp-status-failed = Gagal
 
-spaces-title = Spasi
+spaces-title = Ruang
 spaces-new-placeholder = Nama ruang baru
-spaces-empty = Tidak ada spasi
-spaces-default-name = Spasi { $number }
+spaces-empty = Belum ada ruang
+spaces-default-name = Ruang { $number }
 spaces-tabs = { $count ->
     [one] 1 tab
    *[other] { $count } tab
 }
-spaces-delete = Hapus spasi
+spaces-delete = Hapus ruang
 
 team-title = Tim
-team-just-you = Hanya kamu di ruang ini
+team-just-you = Hanya Anda di ruang ini
 team-agents = { $count ->
     [one] Anda dan 1 agen
-   *[other] Anda dan agen { $count }
+   *[other] Anda dan { $count } agen
 }
-team-empty = Belum ada seorang pun di sini
-team-you = kamu
+team-empty = Belum ada siapa pun di sini
+team-you = Anda
 team-agent = Agen
 
 services-title = Layanan Latar Belakang
@@ -81,30 +81,30 @@ services-processes = { $count ->
     [one] 1 proses
    *[other] { $count } proses
 }
-services-kill-all = Bunuh Semua
+services-kill-all = Hentikan Semua Paksa
 services-not-running = Layanan tidak berjalan
-services-start-with = Mulailah dengan:
+services-start-with = Mulai dengan:
 services-empty = Tidak ada proses aktif
-services-filter = Memfilter proses…
+services-filter = Filter proses…
 services-no-match = Tidak ada proses yang cocok
 services-connected = Terhubung
 services-disconnected = Terputus
 services-attached = terlampir
-services-kill = Bunuh
+services-kill = Hentikan paksa
 services-memory = Memori
 services-size = Ukuran
-services-shell = cangkang
+services-shell = Shell
 
 error-title = Kesalahan
 
-history-search = Riwayat pencarian
-history-clear-all = Hapus semuanya
+history-search = Cari riwayat
+history-clear-all = Hapus semua
 history-clear-confirm = Hapus semua riwayat?
-history-clear-warning = Hal ini tidak dapat dibatalkan.
-history-cancel = Batalkan
+history-clear-warning = Tindakan ini tidak dapat dibatalkan.
+history-cancel = Batal
 history-today = Hari ini
 history-yesterday = Kemarin
-history-days-ago = { $count } hari yang lalu
+history-days-ago = { $count } hari lalu
 history-day-offset = Hari -{ $count }
 
 settings-title = Pengaturan
@@ -113,32 +113,32 @@ settings-stored = Disimpan di ~/.vmux/settings.ron
 settings-other = Lainnya
 settings-software-update = Pembaruan Perangkat Lunak
 settings-check-updates = Periksa Pembaruan
-settings-check-updates-hint = Memeriksa secara otomatis saat peluncuran dan setiap jam saat Pembaruan otomatis diaktifkan.
+settings-check-updates-hint = Diperiksa otomatis saat diluncurkan dan setiap jam jika Pembaruan otomatis aktif.
 settings-update-unavailable = Tidak tersedia
-settings-update-unavailable-hint = Updater tidak termasuk dalam build ini.
+settings-update-unavailable-hint = Pembaru tidak disertakan dalam build ini.
 settings-update-checking = Memeriksa…
 settings-update-checking-hint = Memeriksa pembaruan…
 settings-update-check-again = Periksa Lagi
-settings-update-current = Vmux sudah yang terbaru.
+settings-update-current = Vmux sudah versi terbaru.
 settings-update-downloading = Mengunduh…
 settings-update-downloading-hint = Mengunduh Vmux { $version }…
-settings-update-installing = Memasang…
-settings-update-installing-hint = Memasang Vmux { $version }…
+settings-update-installing = Menginstal…
+settings-update-installing-hint = Menginstal Vmux { $version }…
 settings-update-ready = Pembaruan Siap
-settings-update-ready-hint = Vmux { $version } sudah siap. Mulai ulang untuk menerapkannya.
+settings-update-ready-hint = Vmux { $version } siap. Mulai ulang untuk menerapkannya.
 settings-update-try-again = Coba Lagi
 settings-update-failed = Tidak dapat memeriksa pembaruan.
-settings-item = Barang
-settings-item-number = Barang { $number }
-settings-press-key = Tekan sebuah tombol…
-settings-saved = Disimpan
-settings-record-key = Klik untuk merekam kombo kunci baru
+settings-item = Item
+settings-item-number = Item { $number }
+settings-press-key = Tekan tombol…
+settings-saved = Tersimpan
+settings-record-key = Klik untuk merekam kombinasi tombol baru
 
 tray-open-window = Buka Jendela
 tray-close-window = Tutup Jendela
 tray-pause-recording = Jeda Perekaman
 tray-resume-recording = Lanjutkan Perekaman
-tray-finish-recording = Selesai Merekam
+tray-finish-recording = Selesaikan Perekaman
 tray-quit = Keluar dari Vmux
 
 composer-attach-files = Lampirkan file (/upload)
@@ -148,19 +148,19 @@ layout-back = Kembali
 layout-forward = Maju
 layout-reload = Muat ulang
 layout-bookmark-page = Tandai halaman ini
-layout-remove-bookmark = Hapus penanda
+layout-remove-bookmark = Hapus markah
 layout-pin-page = Sematkan halaman ini
 layout-unpin-page = Lepas sematan halaman ini
 layout-manage-extensions = Kelola ekstensi
-layout-new-stack = Tumpukan Baru
+layout-new-stack = Tumpukan baru
 layout-close-tab = Tutup tab
-layout-bookmark = Penanda buku
+layout-bookmark = Markah
 layout-pin = Sematkan
 layout-new-tab = Tab baru
 layout-team = Tim
 
-command-switch-space = Ganti ruang…
-command-search-ask = Cari atau tanyakan…
+command-switch-space = Beralih ruang…
+command-search-ask = Cari atau tanya…
 command-new-tab-placeholder = Cari atau ketik URL, atau pilih Terminal…
 command-placeholder = Ketik URL, cari tab, atau > untuk perintah…
 command-composer-placeholder = Ketik / untuk perintah atau @ untuk media
@@ -172,47 +172,47 @@ command-tabs = { $count ->
     [one] 1 tab
    *[other] { $count } tab
 }
-command-prompt = Cepat
+command-prompt = Prompt
 command-new-tab = Tab baru
 command-search = Cari
 command-open-value = Buka “{ $value }”
-command-search-value = Telusuri “{ $value }”
+command-search-value = Cari “{ $value }”
 
-schema-appearance = Penampilan
+schema-appearance = Tampilan
 schema-general = Umum
-schema-layout = Tata Letak
-schema-layout-detail = Jendela, panel, sidebar, dan cincin fokus.
+schema-layout = Tata letak
+schema-layout-detail = Jendela, panel, bilah sisi, dan cincin fokus.
 schema-agent = Agen
 schema-agent-detail = Perilaku agen dan izin alat.
-schema-shortcuts = Jalan pintas
-schema-shortcuts-detail = Tampilan hanya baca. Edit settings.ron secara langsung untuk mengubah pengikatan.
+schema-shortcuts = Pintasan
+schema-shortcuts-detail = Tampilan hanya-baca. Edit settings.ron langsung untuk mengubah binding.
 schema-terminal = Terminal
-schema-browser = Peramban
-schema-mode = Modus
+schema-browser = Browser
+schema-mode = Mode
 schema-mode-detail = Skema warna untuk halaman web. Perangkat mengikuti sistem Anda.
 schema-device = Perangkat
-schema-light = Ringan
+schema-light = Terang
 schema-dark = Gelap
 schema-language = Bahasa
-schema-language-detail = Gunakan tag sistem, en-US, ja, atau BCP 47 apa pun dengan katalog ~/.vmux/locales/<tag>.ftl yang cocok.
+schema-language-detail = Gunakan sistem, en-US, ja, atau tag BCP 47 apa pun dengan katalog ~/.vmux/locales/<tag>.ftl yang sesuai.
 schema-auto-update = Pembaruan otomatis
-schema-auto-update-detail = Periksa dan instal pembaruan saat peluncuran dan setiap jam.
-schema-startup-url = Memulai URL
-schema-startup-url-detail = Kosong membuka prompt bilah perintah.
-schema-search-engine = Mesin pencari
+schema-auto-update-detail = Periksa dan instal pembaruan saat diluncurkan dan setiap jam.
+schema-startup-url = URL awal
+schema-startup-url-detail = Kosongkan untuk membuka prompt bilah perintah.
+schema-search-engine = Mesin telusur
 schema-search-engine-detail = Digunakan untuk pencarian web dari Mulai dan bilah perintah.
 schema-window = Jendela
-schema-pane = panel
+schema-pane = Panel
 schema-side-sheet = Lembar samping
 schema-focus-ring = Cincin fokus
-schema-run-placement = Izinkan penggantian penempatan dijalankan
-schema-run-placement-detail = Biarkan agen memilih mode panel lari, arah, dan jangkar.
-schema-leader = Pemimpin
-schema-leader-detail = Kunci awalan untuk pintasan akord.
-schema-chord-timeout = Batas waktu akord
-schema-chord-timeout-detail = Milidetik sebelum awalan akor berakhir.
+schema-run-placement = Izinkan penggantian penempatan run
+schema-run-placement-detail = Izinkan agen memilih mode panel run, arah, dan jangkar.
+schema-leader = Leader
+schema-leader-detail = Tombol awalan untuk pintasan chord.
+schema-chord-timeout = Waktu habis chord
+schema-chord-timeout-detail = Milidetik sebelum awalan chord kedaluwarsa.
 schema-bindings = Binding
-schema-confirm-close = Konfirmasikan tutup
-schema-confirm-close-detail = Prompt sebelum menutup terminal dengan proses yang sedang berjalan.
-schema-default-theme = Tema bawaan
+schema-confirm-close = Konfirmasi saat menutup
+schema-confirm-close-detail = Minta konfirmasi sebelum menutup terminal dengan proses yang sedang berjalan.
+schema-default-theme = Tema default
 schema-default-theme-detail = Nama tema aktif dari daftar tema.

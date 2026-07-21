@@ -1,218 +1,218 @@
 common-open = Mepee
 common-close = Mechie
 common-install = Wụnye
-common-uninstall = Wepu
+common-uninstall = Wepụ nwụnye
 common-update = Melite
-common-retry = Nwaa Ọzọ
-common-refresh = Mee Ọhụrụ
-common-remove = Wepu
-common-enable = Kwado
+common-retry = Nwaa ọzọ
+common-refresh = Megharịa
+common-remove = Wepụ
+common-enable = Gbanwuo
 common-disable = Gbanyụọ
 common-new = Ọhụrụ
 common-active = na-arụ ọrụ
-common-running = na-agba ọsọ
-common-done = emechara
-common-failed = Dara Ada
-common-installed = Ewụnyela
+common-running = na-agba
+common-done = emechaala
+common-failed = Dara
+common-installed = Awụnyere
 common-items = { $count ->
     [one] { $count } ihe
    *[other] { $count } ihe
 }
 start-title = Malite
-start-tagline = Otu arịọ. Ihe ọ bụla, emechara.
+start-tagline = Otu prompt. Ihe ọ bụla, emechaala.
 
-agents-title = Ndị Nnọchi
-agents-search = Chọọ ndị nnọchi ACP na CLI…
-agents-empty = Ọ dịghị ndị nnọchi na-akaebe
+agents-title = Ndị agent
+agents-search = Chọọ ndị agent ACP na CLI…
+agents-empty = Enweghị agent dabara
 agents-empty-detail = Nwaa aha, runtime, ma ọ bụ ACP/CLI.
-agents-install-failed = Ịwụnye dara ada
-agents-updating = Na-eme mmelite…
+agents-install-failed = Nwụnye dara
+agents-updating = Na-emelite…
 agents-retrying = Na-anwa ọzọ…
-agents-preparing = Na-akwado…
+agents-preparing = Na-akwadebe…
 
-extensions-title = Mgbasawanye
-extensions-search = Chọọ ndị ewụnyere ma ọ bụ Chrome Web Store…
-extensions-relaunch = Malite ọzọ iji tinye
-extensions-empty = Ọ dịghị mgbasawanye ewụnyere
-extensions-no-match = Ọ dịghị mgbasawanye na-akaebe
-extensions-empty-detail = Chọọ na Chrome Web Store dị elu wee pịa Return.
-extensions-no-match-detail = Nwaa aha ọzọ ma ọ bụ ID nke mgbasawanye.
-extensions-on = Kwado
-extensions-off = Gbanyụọ
-extensions-enable-confirm = Kwado { $name }?
-extensions-enable-permissions = Kwado { $name } wee nkwere:
+extensions-title = Mgbakwunye
+extensions-search = Chọọ ndị awụnyere ma ọ bụ Chrome Web Store…
+extensions-relaunch = Malitegharịa ka ọ rụọ ọrụ
+extensions-empty = Enweghị mgbakwunye awụnyere
+extensions-no-match = Enweghị mgbakwunye dabara
+extensions-empty-detail = Chọọ Chrome Web Store n’elu wee pịa Return.
+extensions-no-match-detail = Nwaa aha ọzọ ma ọ bụ ID mgbakwunye.
+extensions-on = Gbanwuru
+extensions-off = Gbanyụrụ
+extensions-enable-confirm = Gbanwuo { $name }?
+extensions-enable-permissions = Gbanwuo { $name } ma kwe ka:
 
 lsp-title = Sava Asụsụ
 lsp-search = Chọọ sava asụsụ, linters, formatters…
-lsp-loading = Na-ebugo ndepụta…
-lsp-empty = Ọ dịghị sava asụsụ na-akaebe
+lsp-loading = Na-ebunye katalọgụ…
+lsp-empty = Enweghị sava asụsụ dabara
 lsp-empty-detail = Nwaa asụsụ ọzọ, linter, ma ọ bụ formatter.
-lsp-needs = chọọ { $tool }
-lsp-status-available = Dị Nnọọ
+lsp-needs = chọrọ { $tool }
+lsp-status-available = Dị
 lsp-status-on-path = Dị na PATH
-lsp-status-installing = Na-ewụnye…
-lsp-status-installed = Ewụnyela
+lsp-status-installing = Na-awụnye…
+lsp-status-installed = Awụnyere
 lsp-status-outdated = Mmelite dị
-lsp-status-running = Na-agba Ọsọ
-lsp-status-failed = Dara Ada
+lsp-status-running = Na-agba
+lsp-status-failed = Dara
 
-spaces-title = Oghere
-spaces-new-placeholder = Aha oghere ọhụrụ
-spaces-empty = Ọ dịghị oghere
-spaces-default-name = Oghere { $number }
+spaces-title = Ebe
+spaces-new-placeholder = Aha ebe ọhụrụ
+spaces-empty = Enweghị ebe
+spaces-default-name = Ebe { $number }
 spaces-tabs = { $count ->
-    [one] 1 taabụ
-   *[other] { $count } taabụ
+    [one] taabụ 1
+   *[other] taabụ { $count }
 }
-spaces-delete = Hichapụ oghere
+spaces-delete = Hichapụ ebe
 
-team-title = Otu
-team-just-you = Ị naanị i nọ n'oghere a
+team-title = Ndị otu
+team-just-you = Naanị gị nọ n’ebe a
 team-agents = { $count ->
-    [one] Gị na otu nnọchi
-   *[other] Gị na ndị nnọchi { $count }
+    [one] Gị na agent 1
+   *[other] Gị na agent { $count }
 }
-team-empty = Ọ dịghị onye nọ ebe a ugbu a
+team-empty = Onweghị onye nọ ebe a
 team-you = Gị
-team-agent = Nnọchi
+team-agent = Agent
 
-services-title = Ọrụ Azụ
+services-title = Ọrụ Ndabere
 services-processes = { $count ->
-    [one] 1 usoro
-   *[other] { $count } usoro
+    [one] process 1
+   *[other] process { $count }
 }
-services-kill-all = Gbuo Ha Nile
-services-not-running = Ọrụ anaghị agba ọsọ
-services-start-with = Malite ya na:
-services-empty = Ọ dịghị usoro na-arụ ọrụ
-services-filter = Tụlee usoro…
-services-no-match = Ọ dịghị usoro na-akaebe
-services-connected = Ejikọtara
-services-disconnected = Ekejịtara
-services-attached = ejikọtara
-services-kill = Gbuo
-services-memory = Ebe Nchekwa
-services-size = Ogo
+services-kill-all = Kwụsị Ha Niile N’ike
+services-not-running = Ọrụ a anaghị agba
+services-start-with = Malite na:
+services-empty = Enweghị process na-agba
+services-filter = Nyochaa process…
+services-no-match = Enweghị process dabara
+services-connected = Ejikọrọ
+services-disconnected = Ejikọghị
+services-attached = etinyere
+services-kill = Kwụsị n’ike
+services-memory = Ebe nchekwa
+services-size = Nha
 services-shell = Shell
 
 error-title = Njehie
 
-history-search = Chọọ akụkọ ihe mere eme
-history-clear-all = Hichapụ Nile
-history-clear-confirm = Hichapụ akụkọ ihe mere eme nile?
-history-clear-warning = Enweghị ike ịlọghachi ya.
+history-search = Chọọ akụkọ
+history-clear-all = Hichapụ niile
+history-clear-confirm = Hichapụ akụkọ niile?
+history-clear-warning = A gaghị eweghachi nke a.
 history-cancel = Kagbuo
 history-today = Taa
 history-yesterday = Ụnyaahụ
-history-days-ago = Ụbọchị { $count } gara aga
+history-days-ago = ụbọchị { $count } gara aga
 history-day-offset = Ụbọchị -{ $count }
 
 settings-title = Ntọala
-settings-loading = Na-ebugo ntọala…
+settings-loading = Na-ebunye ntọala…
 settings-stored = Echekwara na ~/.vmux/settings.ron
-settings-other = Ndị Ọzọ
-settings-software-update = Mmelite Software
-settings-check-updates = Lelee Mmelite
-settings-check-updates-hint = Na-enyocha na-akpaaka mgbe e malitere na ọ bụla awa mgbe Auto-update kwadoro.
+settings-other = Ndị ọzọ
+settings-software-update = Mmelite ngwanrọ
+settings-check-updates = Lelee mmelite
+settings-check-updates-hint = Na-elele onwe ya mgbe mmalite na kwa elekere mgbe Auto-update gbanyere.
 settings-update-unavailable = Adịghị
-settings-update-unavailable-hint = Updater enweghị na ihe a wụnyere.
+settings-update-unavailable-hint = Updater adịghị na build a.
 settings-update-checking = Na-enyocha…
 settings-update-checking-hint = Na-enyocha mmelite…
-settings-update-check-again = Nyocha Ọzọ
-settings-update-current = Vmux dị ọhụrụ.
+settings-update-check-again = Lelee ọzọ
+settings-update-current = Vmux emeliterela.
 settings-update-downloading = Na-ebudata…
 settings-update-downloading-hint = Na-ebudata Vmux { $version }…
-settings-update-installing = Na-ewụnye…
-settings-update-installing-hint = Na-ewụnye Vmux { $version }…
-settings-update-ready = Mmelite Dị Njikere
-settings-update-ready-hint = Vmux { $version } dị njikere. Malite ọzọ iji tinye ya.
-settings-update-try-again = Nwaa Ọzọ
-settings-update-failed = Enweghị ike ịnyocha mmelite.
+settings-update-installing = Na-awụnye…
+settings-update-installing-hint = Na-awụnye Vmux { $version }…
+settings-update-ready = Mmelite adịla njikere
+settings-update-ready-hint = Vmux { $version } adịla njikere. Malitegharịa ka ọ rụọ ọrụ.
+settings-update-try-again = Nwaa ọzọ
+settings-update-failed = Enweghị ike ịlele mmelite.
 settings-item = Ihe
 settings-item-number = Ihe { $number }
 settings-press-key = Pịa igodo…
 settings-saved = Echekwara
-settings-record-key = Pịa iji dezie combo igodo ọhụrụ
+settings-record-key = Pịa ka ịdekọ ngwakọta igodo ọhụrụ
 
-tray-open-window = Mepee Windo
-tray-close-window = Mechie Windo
-tray-pause-recording = Kwụsị Ndekọ
-tray-resume-recording = Laghachi Ndekọ
-tray-finish-recording = Mechaa Ndekọ
-tray-quit = Hapụ Vmux
+tray-open-window = Mepee windo
+tray-close-window = Mechie windo
+tray-pause-recording = Kwụsị ndekọ nwa oge
+tray-resume-recording = Gaa n’ihu ndekọ
+tray-finish-recording = Mechaa ndekọ
+tray-quit = Kwụsị Vmux
 
 composer-attach-files = Tinye faịlụ (/upload)
-composer-remove-attachment = Wepu ihe ejikọrọ
+composer-remove-attachment = Wepụ mgbakwunye
 
-layout-back = Azụ
-layout-forward = Ihu
-layout-reload = Tọgharịa
-layout-bookmark-page = Deba ihe nchekwa peeji a
-layout-remove-bookmark = Wepu ihe nchekwa
-layout-pin-page = Tinye pin peeji a
-layout-unpin-page = Wepu pin peeji a
-layout-manage-extensions = Njikwa mgbasawanye
-layout-new-stack = Stack Ọhụrụ
+layout-back = Laghachi
+layout-forward = Gaa n’ihu
+layout-reload = Bubanye ọzọ
+layout-bookmark-page = Tinye ibe a na bookmark
+layout-remove-bookmark = Wepụ bookmark
+layout-pin-page = Kpọgide ibe a
+layout-unpin-page = Wepụ mkpọgide ibe a
+layout-manage-extensions = Jikwaa mgbakwunye
+layout-new-stack = Stack ọhụrụ
 layout-close-tab = Mechie taabụ
-layout-bookmark = Ihe Nchekwa
-layout-pin = Pin
+layout-bookmark = Bookmark
+layout-pin = Kpọgide
 layout-new-tab = Taabụ ọhụrụ
-layout-team = Otu
+layout-team = Ndị otu
 
-command-switch-space = Gbanwee oghere…
+command-switch-space = Gbanwee ebe…
 command-search-ask = Chọọ ma ọ bụ jụọ…
-command-new-tab-placeholder = Chọọ ma ọ bụ pụtara URL, ma ọ bụ họrọ Terminal…
-command-placeholder = Pụtara URL, chọọ taabụ, ma ọ bụ > maka iwu…
-command-composer-placeholder = Pụtara / maka iwu ma ọ bụ @ maka mgbasa ozi
-command-send = Ziga (Enter)
+command-new-tab-placeholder = Chọọ ma ọ bụ pịnye URL, ma ọ bụ họrọ Terminal…
+command-placeholder = Pịnye URL, chọọ taabụ, ma ọ bụ > maka iwu…
+command-composer-placeholder = Pịnye / maka iwu ma ọ bụ @ maka media
+command-send = Zipụ (Enter)
 command-terminal = Terminal
 command-open-terminal = Mepee na Terminal
 command-stack = Stack
 command-tabs = { $count ->
-    [one] 1 taabụ
-   *[other] { $count } taabụ
+    [one] taabụ 1
+   *[other] taabụ { $count }
 }
-command-prompt = Arịọ
+command-prompt = Prompt
 command-new-tab = Taabụ ọhụrụ
 command-search = Chọọ
-command-open-value = Mepee "{ $value }"
-command-search-value = Chọọ "{ $value }"
+command-open-value = Mepee “{ $value }”
+command-search-value = Chọọ “{ $value }”
 
 schema-appearance = Ọdịdị
 schema-general = Izugbe
 schema-layout = Nhazi
-schema-layout-detail = Windo, panes, ọnọdụ akụkụ, na ihe nlere.
-schema-agent = Nnọchi
-schema-agent-detail = Omume nnọchi na ikike ngwa ọrụ.
-schema-shortcuts = Ụzọ Dị Mkpụmkpụ
-schema-shortcuts-detail = Ọchọcha naanị. Dezie settings.ron ozugbo iji gbanwee njikọ.
+schema-layout-detail = Windo, pane, sidebar, na focus ring.
+schema-agent = Agent
+schema-agent-detail = Omume agent na ikike ngwaọrụ.
+schema-shortcuts = Ụzọ mkpirisi
+schema-shortcuts-detail = Nlele naanị-agụ. Dezie settings.ron ozugbo iji gbanwee bindings.
 schema-terminal = Terminal
-schema-browser = Nchọpụta
+schema-browser = Ihe nchọgharị
 schema-mode = Ọnọdụ
-schema-mode-detail = Atụmatụ ụcha maka peeji weebụ. Ngwaọrụ na-eso usoro gị.
-schema-device = Ngwaọrụ
+schema-mode-detail = Usoro agba maka ibe weebụ. Device na-eso sistemụ gị.
+schema-device = Device
 schema-light = Ìhè
-schema-dark = Oji
+schema-dark = Ọchịchịrị
 schema-language = Asụsụ
-schema-language-detail = Jiri usoro, en-US, ja, ma ọ bụ mkpado BCP 47 ọ bụla na ndepụta ~/.vmux/locales/<tag>.ftl kwekọrọ.
-schema-auto-update = Mmelite Na-akpaaka
-schema-auto-update-detail = Nyocha wee wụnye mmelite mgbe e malitere na ọ bụla awa.
-schema-startup-url = URL Mmalite
-schema-startup-url-detail = Ifo na-emepee arịọ ọnụ iwu.
-schema-search-engine = Injin Ọchọcha
-schema-search-engine-detail = Ejiri maka ọchọcha weebụ site na Malite na ọnụ iwu.
+schema-language-detail = Jiri nke sistemụ, en-US, ja, ma ọ bụ tag BCP 47 ọ bụla nwere katalọgụ ~/.vmux/locales/<tag>.ftl kwekọrọ.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Lelee ma wụnye mmelite mgbe mmalite na kwa elekere.
+schema-startup-url = URL mmalite
+schema-startup-url-detail = Ọ bụrụ na ọ tọgbọ chakoo, ọ ga-emepe prompt nke command bar.
+schema-search-engine = Injin ọchụchọ
+schema-search-engine-detail = A na-eji ya maka ọchụchọ weebụ site na Malite na command bar.
 schema-window = Windo
 schema-pane = Pane
-schema-side-sheet = Ibe Akụkụ
-schema-focus-ring = Ihe Nlere
-schema-run-placement = Nkwere ịgbanwe ọnọdụ ọgbụgba
-schema-run-placement-detail = Kwe ndị nnọchi họrọ ọnọdụ pane ọgbụgba, ọnọdụ, na nkwụrụ.
-schema-leader = Onye Isi
-schema-leader-detail = Igodo nwụnnata maka ụzọ dị mkpụmkpụ chord.
-schema-chord-timeout = Oge Chord Gwụọ
-schema-chord-timeout-detail = Milliseconds tupu oge nwụnnata chord agwụ.
-schema-bindings = Njikọ
-schema-confirm-close = Nkwenye Mechie
-schema-confirm-close-detail = Jụọ tupu ịmechie terminal nwere usoro na-agba ọsọ.
-schema-default-theme = Isiụtọ Ndabara
-schema-default-theme-detail = Aha isiụtọ na-arụ ọrụ si na ndepụta isiụtọ.
+schema-side-sheet = Mpempe akụkụ
+schema-focus-ring = Focus ring
+schema-run-placement = Kwe ka override nke ebe run
+schema-run-placement-detail = Kwe ka ndị agent họrọ mode pane run, ntụziaka, na anchor.
+schema-leader = Leader
+schema-leader-detail = Igodo mbido maka ụzọ mkpirisi chord.
+schema-chord-timeout = Oge ngwụcha chord
+schema-chord-timeout-detail = Millisekọnd tupu prefix chord agwụ.
+schema-bindings = Bindings
+schema-confirm-close = Kwenye tupu imechi
+schema-confirm-close-detail = Jụọ tupu imechi terminal nwere process na-agba.
+schema-default-theme = Theme ndabara
+schema-default-theme-detail = Aha theme na-arụ ọrụ site na ndepụta themes.

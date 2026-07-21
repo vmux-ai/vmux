@@ -4,215 +4,215 @@ common-install = ຕິດຕັ້ງ
 common-uninstall = ຖອນການຕິດຕັ້ງ
 common-update = ອັບເດດ
 common-retry = ລອງໃໝ່
-common-refresh = ໂຫຼດຂໍ້ມູນຄືນໃໝ່
+common-refresh = ໂຫຼດໃໝ່
 common-remove = ເອົາອອກ
 common-enable = ເປີດໃຊ້
-common-disable = ປິດໃຊ້ງານ
-common-new = ໃໝ່
-common-active = ເຄື່ອນໄຫວ
-common-running = ແລ່ນ
-common-done = ສຳເລັດແລ້ວ
-common-failed = ລົ້ມເຫລວ
+common-disable = ປິດໃຊ້
+common-new = ສ້າງໃໝ່
+common-active = ກຳລັງໃຊ້
+common-running = ກຳລັງເຮັດວຽກ
+common-done = ສຳເລັດ
+common-failed = ລົ້ມເຫຼວ
 common-installed = ຕິດຕັ້ງແລ້ວ
 common-items = { $count ->
     [one] { $count } ລາຍການ
    *[other] { $count } ລາຍການ
 }
-start-title = ເລີ່ມ
-start-tagline = ການເຕືອນຫນຶ່ງ. ທຸກຢ່າງ, ເຮັດແລ້ວ.
+start-title = ເລີ່ມຕົ້ນ
+start-tagline = ສັ່ງຄັ້ງດຽວ. ເຮັດຫຍັງກໍໄດ້ໃຫ້ສຳເລັດ.
 
-agents-title = ຕົວແທນ
-agents-search = ຊອກຫາ ACP ແລະ CLI ຕົວແທນ…
-agents-empty = ບໍ່ມີຕົວແທນທີ່ກົງກັນ
-agents-empty-detail = ລອງຊື່, runtime, ຫຼື ACP/CLI.
-agents-install-failed = ການຕິດຕັ້ງລົ້ມເຫລວ
-agents-updating = ກຳລັງອັບເດດ...
-agents-retrying = ກຳລັງລອງໃໝ່...
-agents-preparing = ກຳລັງກະກຽມ...
+agents-title = ເອເຈນຕ໌
+agents-search = ຄົ້ນຫາເອເຈນຕ໌ ACP ແລະ CLI…
+agents-empty = ບໍ່ມີເອເຈນຕ໌ທີ່ກົງກັນ
+agents-empty-detail = ລອງຄົ້ນດ້ວຍຊື່, runtime ຫຼື ACP/CLI.
+agents-install-failed = ຕິດຕັ້ງບໍ່ສຳເລັດ
+agents-updating = ກຳລັງອັບເດດ…
+agents-retrying = ກຳລັງລອງໃໝ່…
+agents-preparing = ກຳລັງກຽມ…
 
 extensions-title = ສ່ວນຂະຫຍາຍ
-extensions-search = ຊອກຫາທີ່ຕິດຕັ້ງ ຫຼື Chrome Web Store…
-extensions-relaunch = ເປີດຄືນໃໝ່ເພື່ອສະໝັກ
-extensions-empty = ບໍ່ມີສ່ວນຂະຫຍາຍທີ່ຕິດຕັ້ງ
+extensions-search = ຄົ້ນຫາທີ່ຕິດຕັ້ງແລ້ວ ຫຼື Chrome Web Store…
+extensions-relaunch = ເປີດໃໝ່ເພື່ອນຳໃຊ້
+extensions-empty = ຍັງບໍ່ມີສ່ວນຂະຫຍາຍທີ່ຕິດຕັ້ງ
 extensions-no-match = ບໍ່ມີສ່ວນຂະຫຍາຍທີ່ກົງກັນ
-extensions-empty-detail = ຄົ້ນຫາ Chrome Web Store ຂ້າງເທິງ ແລະກົດ Return.
+extensions-empty-detail = ຄົ້ນຫາໃນ Chrome Web Store ຂ້າງເທິງ ແລ້ວກົດ Return.
 extensions-no-match-detail = ລອງຊື່ອື່ນ ຫຼື ID ສ່ວນຂະຫຍາຍ.
-extensions-on = ສຸດ
+extensions-on = ເປີດ
 extensions-off = ປິດ
 extensions-enable-confirm = ເປີດໃຊ້ { $name } ບໍ?
-extensions-enable-permissions = ເປີດໃຊ້ { $name } ແລະອະນຸຍາດໃຫ້:
+extensions-enable-permissions = ເປີດໃຊ້ { $name } ແລະອະນຸຍາດ:
 
 lsp-title = ເຊີບເວີພາສາ
-lsp-search = ຄົ້ນຫາເຊີບເວີພາສາ, ຕົວພິມນ້ອຍ, ຮູບແບບ...
-lsp-loading = ກຳລັງໂຫຼດລາຍການ...
+lsp-search = ຄົ້ນຫາເຊີບເວີພາສາ, linter, formatter…
+lsp-loading = ກຳລັງໂຫຼດຄາຕາລັອກ…
 lsp-empty = ບໍ່ມີເຊີບເວີພາສາທີ່ກົງກັນ
-lsp-empty-detail = ລອງໃຊ້ພາສາອື່ນ, ພາສາຂຽນ, ຫຼືຕົວຈັດຮູບແບບ.
-lsp-needs = ຕ້ອງການ { $tool }
-lsp-status-available = ມີໃຫ້
-lsp-status-on-path = ໃນ PATH
-lsp-status-installing = ກຳລັງຕິດຕັ້ງ...
+lsp-empty-detail = ລອງພາສາ, linter ຫຼື formatter ອື່ນ.
+lsp-needs = ຕ້ອງມີ { $tool }
+lsp-status-available = ພ້ອມໃຊ້
+lsp-status-on-path = ຢູ່ໃນ PATH
+lsp-status-installing = ກຳລັງຕິດຕັ້ງ…
 lsp-status-installed = ຕິດຕັ້ງແລ້ວ
-lsp-status-outdated = ມີອັບເດດແລ້ວ
-lsp-status-running = ແລ່ນ
-lsp-status-failed = ລົ້ມເຫລວ
+lsp-status-outdated = ມີອັບເດດ
+lsp-status-running = ກຳລັງເຮັດວຽກ
+lsp-status-failed = ລົ້ມເຫຼວ
 
-spaces-title = ພື້ນທີ່
-spaces-new-placeholder = ຊື່ຊ່ອງໃໝ່
-spaces-empty = ບໍ່ມີຊ່ອງຫວ່າງ
-spaces-default-name = ພື້ນທີ່ { $number }
+spaces-title = ພື້ນທີ່ວຽກ
+spaces-new-placeholder = ຊື່ພື້ນທີ່ວຽກໃໝ່
+spaces-empty = ຍັງບໍ່ມີພື້ນທີ່ວຽກ
+spaces-default-name = ພື້ນທີ່ວຽກ { $number }
 spaces-tabs = { $count ->
-    [one] 1 ແຖບ
-   *[other] { $count } ແຖບ
+    [one] 1 ແທັບ
+   *[other] { $count } ແທັບ
 }
-spaces-delete = ລຶບພື້ນທີ່
+spaces-delete = ລຶບພື້ນທີ່ວຽກ
 
-team-title = ທີມງານ
-team-just-you = ພຽງແຕ່ທ່ານຢູ່ໃນຊ່ອງນີ້
+team-title = ທີມ
+team-just-you = ມີພຽງແຕ່ທ່ານໃນພື້ນທີ່ວຽກນີ້
 team-agents = { $count ->
-    [one] ເຈົ້າ ແລະ 1 ຕົວແທນ
-   *[other] ທ່ານ ແລະ { $count } ຕົວແທນ
+    [one] ທ່ານ ແລະເອເຈນຕ໌ 1 ຕົວ
+   *[other] ທ່ານ ແລະເອເຈນຕ໌ { $count } ຕົວ
 }
-team-empty = ບໍ່ມີໃຜຢູ່ທີ່ນີ້ເທື່ອ
-team-you = ເຈົ້າ
-team-agent = ຕົວແທນ
+team-empty = ຍັງບໍ່ມີໃຜຢູ່ນີ້
+team-you = ທ່ານ
+team-agent = ເອເຈນຕ໌
 
 services-title = ບໍລິການພື້ນຫຼັງ
 services-processes = { $count ->
-    [one] 1 ຂະບວນການ
-   *[other] { $count } ຂະບວນການ
+    [one] 1 ໂປຣເຊສ
+   *[other] { $count } ໂປຣເຊສ
 }
-services-kill-all = ຂ້າທັງໝົດ
-services-not-running = ບໍລິການບໍ່ເຮັດວຽກ
-services-start-with = ເລີ່ມຕົ້ນດ້ວຍ:
-services-empty = ບໍ່ມີຂະບວນການເຄື່ອນໄຫວ
-services-filter = ຂະບວນການກັ່ນຕອງ...
-services-no-match = ບໍ່ມີຂະບວນການທີ່ກົງກັນ
-services-connected = ເຊື່ອມຕໍ່
+services-kill-all = ຢຸດທັງໝົດ
+services-not-running = ບໍລິການບໍ່ໄດ້ເຮັດວຽກ
+services-start-with = ເລີ່ມດ້ວຍ:
+services-empty = ບໍ່ມີໂປຣເຊສທີ່ກຳລັງເຮັດວຽກ
+services-filter = ກັ່ນຕອງໂປຣເຊສ…
+services-no-match = ບໍ່ມີໂປຣເຊສທີ່ກົງກັນ
+services-connected = ເຊື່ອມຕໍ່ແລ້ວ
 services-disconnected = ຕັດການເຊື່ອມຕໍ່
-services-attached = ຕິດ
-services-kill = ຂ້າ
-services-memory = ຄວາມຊົງຈໍາ
+services-attached = ແນບຢູ່
+services-kill = ບັງຄັບຢຸດ
+services-memory = ໜ່ວຍຄວາມຈຳ
 services-size = ຂະໜາດ
-services-shell = ແກະ
+services-shell = Shell
 
-error-title = ຜິດພາດ
+error-title = ຂໍ້ຜິດພາດ
 
-history-search = ປະຫວັດການຄົ້ນຫາ
-history-clear-all = ລຶບລ້າງທັງໝົດ
-history-clear-confirm = ລຶບລ້າງປະຫວັດທັງໝົດບໍ?
-history-clear-warning = ອັນນີ້ບໍ່ສາມາດຍົກເລີກໄດ້.
+history-search = ຄົ້ນຫາປະຫວັດ
+history-clear-all = ລຶບທັງໝົດ
+history-clear-confirm = ລຶບປະຫວັດທັງໝົດບໍ?
+history-clear-warning = ບໍ່ສາມາດຍ້ອນກັບໄດ້.
 history-cancel = ຍົກເລີກ
 history-today = ມື້ນີ້
-history-yesterday = ມື້ວານນີ້
+history-yesterday = ມື້ວານ
 history-days-ago = { $count } ມື້ກ່ອນ
 history-day-offset = ມື້ -{ $count }
 
 settings-title = ການຕັ້ງຄ່າ
-settings-loading = ກຳລັງໂຫຼດການຕັ້ງຄ່າ...
-settings-stored = ເກັບໄວ້ໃນ ~/.vmux/settings.ron
+settings-loading = ກຳລັງໂຫຼດການຕັ້ງຄ່າ…
+settings-stored = ເກັບໄວ້ທີ່ ~/.vmux/settings.ron
 settings-other = ອື່ນໆ
 settings-software-update = ອັບເດດຊອບແວ
-settings-check-updates = ກວດສອບການອັບເດດ
-settings-check-updates-hint = ກວດສອບອັດຕະໂນມັດເມື່ອເປີດຕົວ ແລະທຸກໆຊົ່ວໂມງເມື່ອເປີດໃຊ້ການອັບເດດອັດຕະໂນມັດ.
-settings-update-unavailable = ບໍ່ສາມາດໃຊ້ໄດ້
-settings-update-unavailable-hint = ຕົວອັບເດດບໍ່ໄດ້ລວມຢູ່ໃນການກໍ່ສ້າງນີ້.
-settings-update-checking = ກຳລັງກວດສອບ...
-settings-update-checking-hint = ກຳລັງກວດສອບການອັບເດດ...
-settings-update-check-again = ກວດເບິ່ງອີກຄັ້ງ
-settings-update-current = Vmux ອັບເດດແລ້ວ.
-settings-update-downloading = ກຳລັງດາວໂຫຼດ...
+settings-check-updates = ກວດຫາອັບເດດ
+settings-check-updates-hint = ກວດອັດຕະໂນມັດເມື່ອເປີດແອັບ ແລະທຸກຊົ່ວໂມງເມື່ອເປີດ Auto-update.
+settings-update-unavailable = ໃຊ້ບໍ່ໄດ້
+settings-update-unavailable-hint = ບິວນີ້ບໍ່ມີຕົວອັບເດດ.
+settings-update-checking = ກຳລັງກວດ…
+settings-update-checking-hint = ກຳລັງກວດຫາອັບເດດ…
+settings-update-check-again = ກວດອີກຄັ້ງ
+settings-update-current = Vmux ເປັນເວີຊັນຫຼ້າສຸດແລ້ວ.
+settings-update-downloading = ກຳລັງດາວໂຫຼດ…
 settings-update-downloading-hint = ກຳລັງດາວໂຫຼດ Vmux { $version }…
-settings-update-installing = ກຳລັງຕິດຕັ້ງ...
+settings-update-installing = ກຳລັງຕິດຕັ້ງ…
 settings-update-installing-hint = ກຳລັງຕິດຕັ້ງ Vmux { $version }…
 settings-update-ready = ອັບເດດພ້ອມແລ້ວ
-settings-update-ready-hint = Vmux { $version } ພ້ອມແລ້ວ. ຣີສະຕາດເພື່ອນຳໃຊ້ມັນ.
+settings-update-ready-hint = Vmux { $version } ພ້ອມແລ້ວ. ຣີສະຕາດເພື່ອນຳໃຊ້.
 settings-update-try-again = ລອງອີກຄັ້ງ
-settings-update-failed = ບໍ່ສາມາດກວດສອບການອັບເດດໄດ້.
+settings-update-failed = ບໍ່ສາມາດກວດຫາອັບເດດໄດ້.
 settings-item = ລາຍການ
 settings-item-number = ລາຍການ { $number }
 settings-press-key = ກົດປຸ່ມ…
 settings-saved = ບັນທຶກແລ້ວ
-settings-record-key = ຄລິກເພື່ອບັນທຶກປຸ່ມຄອມໂບໃໝ່
+settings-record-key = ຄລິກເພື່ອບັນທຶກຊຸດປຸ່ມໃໝ່
 
-tray-open-window = ເປີດປ່ອງຢ້ຽມ
-tray-close-window = ປິດໜ້າຈໍ
-tray-pause-recording = ຢຸດການບັນທຶກຊົ່ວຄາວ
-tray-resume-recording = ສືບຕໍ່ການບັນທຶກ
-tray-finish-recording = ສຳເລັດການບັນທຶກ
+tray-open-window = ເປີດໜ້າຕ່າງ
+tray-close-window = ປິດໜ້າຕ່າງ
+tray-pause-recording = ຢຸດບັນທຶກຊົ່ວຄາວ
+tray-resume-recording = ບັນທຶກຕໍ່
+tray-finish-recording = ສິ້ນສຸດການບັນທຶກ
 tray-quit = ອອກຈາກ Vmux
 
 composer-attach-files = ແນບໄຟລ໌ (/upload)
-composer-remove-attachment = ເອົາໄຟລ໌ແນບ
+composer-remove-attachment = ເອົາໄຟລ໌ແນບອອກ
 
-layout-back = ກັບຄືນໄປບ່ອນ
-layout-forward = ສົ່ງຕໍ່
+layout-back = ກັບຄືນ
+layout-forward = ໄປໜ້າ
 layout-reload = ໂຫຼດໃໝ່
 layout-bookmark-page = ບຸກມາກໜ້ານີ້
 layout-remove-bookmark = ເອົາບຸກມາກອອກ
 layout-pin-page = ປັກໝຸດໜ້ານີ້
 layout-unpin-page = ຖອນປັກໝຸດໜ້ານີ້
 layout-manage-extensions = ຈັດການສ່ວນຂະຫຍາຍ
-layout-new-stack = Stack ໃໝ່
-layout-close-tab = ປິດແຖບ
+layout-new-stack = ສະແຕັກໃໝ່
+layout-close-tab = ປິດແທັບ
 layout-bookmark = ບຸກມາກ
 layout-pin = ປັກໝຸດ
-layout-new-tab = ແຖບໃໝ່
-layout-team = ທີມງານ
+layout-new-tab = ແທັບໃໝ່
+layout-team = ທີມ
 
-command-switch-space = ສະຫຼັບພື້ນທີ່…
-command-search-ask = ຊອກຫາ ຫຼືຖາມ...
-command-new-tab-placeholder = ຊອກຫາ ຫຼືພິມ URL, ຫຼືເລືອກ Terminal...
-command-placeholder = ພິມ URL, ແຖບຊອກຫາ, ຫຼື > ສໍາລັບຄໍາສັ່ງ...
-command-composer-placeholder = ພິມ / ສໍາລັບຄໍາສັ່ງຫຼື @ ສໍາລັບສື່
+command-switch-space = ສະຫຼັບພື້ນທີ່ວຽກ…
+command-search-ask = ຄົ້ນຫາ ຫຼືຖາມ…
+command-new-tab-placeholder = ຄົ້ນຫາ ຫຼືພິມ URL, ຫຼືເລືອກ Terminal…
+command-placeholder = ພິມ URL, ຄົ້ນຫາແທັບ ຫຼືພິມ > ເພື່ອໃຊ້ຄຳສັ່ງ…
+command-composer-placeholder = ພິມ / ເພື່ອໃຊ້ຄຳສັ່ງ ຫຼື @ ເພື່ອແນບມີເດຍ
 command-send = ສົ່ງ (Enter)
-command-terminal = ສະຖານີ
+command-terminal = Terminal
 command-open-terminal = ເປີດໃນ Terminal
-command-stack = stack
+command-stack = ສະແຕັກ
 command-tabs = { $count ->
-    [one] 1 ແຖບ
-   *[other] { $count } ແຖບ
+    [one] 1 ແທັບ
+   *[other] { $count } ແທັບ
 }
-command-prompt = ເຕືອນ
-command-new-tab = ແຖບໃໝ່
-command-search = ຊອກຫາ
+command-prompt = ພຣອມປ໌
+command-new-tab = ແທັບໃໝ່
+command-search = ຄົ້ນຫາ
 command-open-value = ເປີດ “{ $value }”
-command-search-value = ຊອກຫາ “{ $value }”
+command-search-value = ຄົ້ນຫາ “{ $value }”
 
 schema-appearance = ຮູບລັກສະນະ
 schema-general = ທົ່ວໄປ
-schema-layout = ແຜນຜັງ
-schema-layout-detail = ປ່ອງຢ້ຽມ, ແຖບ, ແຖບດ້ານຂ້າງ, ແລະວົງການໂຟກັສ.
-schema-agent = ຕົວແທນ
-schema-agent-detail = ພຶດຕິກໍາຂອງຕົວແທນແລະການອະນຸຍາດເຄື່ອງມື.
+schema-layout = ເຄົ້າໂຄງ
+schema-layout-detail = ໜ້າຕ່າງ, ແພນ, ແຖບຂ້າງ ແລະວົງເນັ້ນໂຟກັສ.
+schema-agent = ເອເຈນຕ໌
+schema-agent-detail = ພຶດຕິກຳເອເຈນຕ໌ ແລະສິດໃຊ້ເຄື່ອງມື.
 schema-shortcuts = ທາງລັດ
-schema-shortcuts-detail = ມຸມມອງແບບອ່ານເທົ່ານັ້ນ. ແກ້ໄຂ settings.ron ໂດຍກົງເພື່ອປ່ຽນການຜູກມັດ.
-schema-terminal = ສະຖານີ
-schema-browser = ຕົວທ່ອງເວັບ
+schema-shortcuts-detail = ເບິ່ງໄດ້ຢ່າງດຽວ. ແກ້ໄຂ bindings ໂດຍກົງໃນ settings.ron.
+schema-terminal = Terminal
+schema-browser = ເບຣາວເຊີ
 schema-mode = ໂໝດ
-schema-mode-detail = ໂຄງການສີສໍາລັບຫນ້າເວັບ. ອຸປະກອນປະຕິບັດຕາມລະບົບຂອງທ່ານ.
-schema-device = ອຸປະກອນ
-schema-light = ແສງສະຫວ່າງ
+schema-mode-detail = ຊຸດສີສຳລັບໜ້າເວັບ. Device ຈະຕາມລະບົບຂອງທ່ານ.
+schema-device = Device
+schema-light = ສະຫວ່າງ
 schema-dark = ມືດ
 schema-language = ພາສາ
-schema-language-detail = ໃຊ້ລະບົບ, en-US, ja, ຫຼືແທັກ BCP 47 ໃດໆກໍຕາມທີ່ມີແຄັດຕາລັອກ ~/.vmux/locales/<tag>.ftl ທີ່ກົງກັນ.
-schema-auto-update = ອັບເດດອັດຕະໂນມັດ
-schema-auto-update-detail = ກວດເບິ່ງແລະຕິດຕັ້ງການອັບເດດກ່ຽວກັບການເປີດຕົວແລະທຸກໆຊົ່ວໂມງ.
-schema-startup-url = ການເລີ່ມຕົ້ນ URL
-schema-startup-url-detail = ຫວ່າງເປົ່າເປີດແຖບຄໍາສັ່ງ prompt.
-schema-search-engine = ເຄື່ອງຈັກຊອກຫາ
-schema-search-engine-detail = ໃຊ້ສໍາລັບການຄົ້ນຫາເວັບໄຊຕ໌ຈາກ Start ແລະແຖບຄໍາສັ່ງ.
-schema-window = ປ່ອງຢ້ຽມ
-schema-pane = ແຖບ
-schema-side-sheet = ແຜ່ນຂ້າງ
-schema-focus-ring = ວົງການສຸມໃສ່
-schema-run-placement = ອະນຸຍາດໃຫ້ມີການລົບລ້າງການຈັດວາງ
-schema-run-placement-detail = ໃຫ້ຕົວແທນເລືອກຮູບແບບການແລ່ນ, ທິດທາງ, ແລະສະມໍ.
-schema-leader = ຜູ້ນໍາ
-schema-leader-detail = ຄຳນຳໜ້າສຳລັບທາງລັດ chord.
-schema-chord-timeout = ໝົດເວລາຂອງ Chord
-schema-chord-timeout-detail = ມິນລິວິນາທີກ່ອນທີ່ຄຳນຳໜ້າ chord ຈະໝົດອາຍຸ.
-schema-bindings = ຜູກມັດ
-schema-confirm-close = ຢືນຢັນປິດ
-schema-confirm-close-detail = ເຕືອນກ່ອນທີ່ຈະປິດ terminal ທີ່ມີຂະບວນການແລ່ນ.
-schema-default-theme = ຮູບແບບສີສັນເລີ່ມຕົ້ນ
-schema-default-theme-detail = ຊື່ຂອງຮູບແບບສີສັນທີ່ໃຊ້ໄດ້ຈາກລາຍຊື່ຫົວຂໍ້.
+schema-language-detail = ໃຊ້ພາສາລະບົບ, en-US, ja ຫຼືແທັກ BCP 47 ໃດກໍໄດ້ທີ່ມີຄາຕາລັອກ ~/.vmux/locales/<tag>.ftl ທີ່ກົງກັນ.
+schema-auto-update = Auto-update
+schema-auto-update-detail = ກວດຫາ ແລະຕິດຕັ້ງອັບເດດເມື່ອເປີດແອັບ ແລະທຸກຊົ່ວໂມງ.
+schema-startup-url = URL ເມື່ອເປີດແອັບ
+schema-startup-url-detail = ປ່ອຍວ່າງໄວ້ຈະເປີດພຣອມປ໌ໃນແຖບຄຳສັ່ງ.
+schema-search-engine = ເຄື່ອງມືຄົ້ນຫາ
+schema-search-engine-detail = ໃຊ້ສຳລັບຄົ້ນຫາເວັບຈາກ Start ແລະແຖບຄຳສັ່ງ.
+schema-window = ໜ້າຕ່າງ
+schema-pane = ແພນ
+schema-side-sheet = ແຜ່ນດ້ານຂ້າງ
+schema-focus-ring = ວົງເນັ້ນໂຟກັສ
+schema-run-placement = ອະນຸຍາດໃຫ້ override ຕຳແໜ່ງການຣັນ
+schema-run-placement-detail = ໃຫ້ເອເຈນຕ໌ເລືອກໂໝດແພນສຳລັບຣັນ, ທິດທາງ ແລະຈຸດຍຶດ.
+schema-leader = Leader
+schema-leader-detail = ປຸ່ມນຳໜ້າສຳລັບທາງລັດແບບ chord.
+schema-chord-timeout = ໝົດເວລາ chord
+schema-chord-timeout-detail = ຈຳນວນມິນລິວິນາທີກ່ອນຄຳນຳໜ້າ chord ຈະໝົດອາຍຸ.
+schema-bindings = Bindings
+schema-confirm-close = ຢືນຢັນກ່ອນປິດ
+schema-confirm-close-detail = ຖາມກ່ອນປິດ Terminal ທີ່ມີໂປຣເຊສກຳລັງເຮັດວຽກ.
+schema-default-theme = ທີມເລີ່ມຕົ້ນ
+schema-default-theme-detail = ຊື່ຂອງທີມທີ່ໃຊ້ຢູ່ຈາກລາຍການທີມ.

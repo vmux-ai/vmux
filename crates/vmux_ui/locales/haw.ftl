@@ -1,218 +1,218 @@
 common-open = Wehe
 common-close = Pani
-common-install = Hoʻokomo
-common-uninstall = Wehe ʻia
-common-update = Hōʻano hou
-common-retry = E hoao hou
+common-install = Hoʻouka
+common-uninstall = Wehe hoʻouka
+common-update = Hoʻohou
+common-retry = Hoʻāʻo hou
 common-refresh = Hōʻano hou
 common-remove = Wehe
-common-enable = Hiki
-common-disable = Hoʻopau
+common-enable = Hoʻā
+common-disable = Hoʻopio
 common-new = Hou
 common-active = ʻeleu
-common-running = e holo ana
-common-done = hana
+common-running = ke holo nei
+common-done = pau
 common-failed = Ua hāʻule
-common-installed = Hoʻokomo ʻia
+common-installed = Ua hoʻouka ʻia
 common-items = { $count ->
     [one] { $count } mea
-   *[other] { $count } mau mea
+   *[other] { $count } mea
 }
 start-title = Hoʻomaka
-start-tagline = Hoʻokahi manaʻo. Kekahi mea, hana.
+start-tagline = Hoʻokahi prompt. Pau nā mea a pau.
 
-agents-title = Na Agena
-agents-search = Huli ACP a me CLI mau ʻelele…
-agents-empty = ʻAʻohe mea kūʻai like
-agents-empty-detail = E ho'āʻo i inoa, manawa holo, a i ʻole ACP/CLI.
-agents-install-failed = ʻAʻole i hoʻokomo ʻia
-agents-updating = Ke hōʻano hou nei…
+agents-title = Nā ʻākena
+agents-search = Huli i nā ʻākena ACP a me CLI…
+agents-empty = ʻAʻohe ʻākena kūlike
+agents-empty-detail = E hoʻāʻo i ka inoa, ke runtime, a i ʻole ACP/CLI.
+agents-install-failed = ʻAʻole i hoʻouka ʻia
+agents-updating = Ke hoʻohou nei…
 agents-retrying = Ke hoʻāʻo hou nei…
 agents-preparing = Ke hoʻomākaukau nei…
 
-extensions-title = Hoʻonui
-extensions-search = Huli ʻia a i ʻole Chrome Web Store…
-extensions-relaunch = Hoʻomaka hou e noi
-extensions-empty = ʻAʻohe mea hoʻonui i kau ʻia
-extensions-no-match = ʻAʻohe mea hoʻonui like
-extensions-empty-detail = Huli i ka Chrome Web Store ma luna a paʻi iā Return.
-extensions-no-match-detail = E hoʻāʻo i kahi inoa a i ʻole ID hoʻonui.
-extensions-on = Ma ka
-extensions-off = Paʻa
-extensions-enable-confirm = Hiki iā { $name }?
-extensions-enable-permissions = E ho'ā iā { $name } a ʻae:
+extensions-title = Nā mea hoʻolōʻihi
+extensions-search = Huli i nā mea i hoʻouka ʻia a i ʻole Chrome Web Store…
+extensions-relaunch = Hoʻomaka hou no ka hoʻokō
+extensions-empty = ʻAʻohe mea hoʻolōʻihi i hoʻouka ʻia
+extensions-no-match = ʻAʻohe mea hoʻolōʻihi kūlike
+extensions-empty-detail = Huli ma Chrome Web Store ma luna a pēhi iā Return.
+extensions-no-match-detail = E hoʻāʻo i inoa ʻē aʻe a i ʻole ID mea hoʻolōʻihi.
+extensions-on = ʻĀ
+extensions-off = Pio
+extensions-enable-confirm = Hoʻā iā { $name }?
+extensions-enable-permissions = Hoʻā iā { $name } a ʻae i kēia:
 
-lsp-title = Nā Kūlana ʻŌlelo
+lsp-title = Nā kikowaena ʻōlelo
 lsp-search = Huli i nā kikowaena ʻōlelo, linters, formatters…
-lsp-loading = Ke hoʻouka nei i ka papa inoa…
-lsp-empty = ʻAʻohe kikowaena ʻōlelo like ʻole
-lsp-empty-detail = E ho'āʻo i ka ʻōlelo ʻē aʻe, linter, a i ʻole mea hoʻopono.
-lsp-needs = pono { $tool }
+lsp-loading = Ke hoʻouka nei i ka papa helu…
+lsp-empty = ʻAʻohe kikowaena ʻōlelo kūlike
+lsp-empty-detail = E hoʻāʻo i ʻōlelo, linter, a i ʻole formatter ʻē aʻe.
+lsp-needs = pono iā { $tool }
 lsp-status-available = Loaʻa
 lsp-status-on-path = Ma PATH
-lsp-status-installing = Ke kau nei…
-lsp-status-installed = Hoʻokomo ʻia
+lsp-status-installing = Ke hoʻouka nei…
+lsp-status-installed = Ua hoʻouka ʻia
 lsp-status-outdated = Loaʻa ka hōʻano hou
 lsp-status-running = Ke holo nei
 lsp-status-failed = Ua hāʻule
 
-spaces-title = Nā hakahaka
-spaces-new-placeholder = He inoa hakahaka hou
-spaces-empty = ʻAʻohe hakahaka
+spaces-title = Nā wahi
+spaces-new-placeholder = Inoa wahi hou
+spaces-empty = ʻAʻohe wahi
 spaces-default-name = Wahi { $number }
 spaces-tabs = { $count ->
-    [one] 1 papa
-   *[other] { $count } papa
+    [one] 1 kapu
+   *[other] { $count } kapu
 }
-spaces-delete = Holoi i ka hakahaka
+spaces-delete = Holoi i ka wahi
 
-team-title = Hui
+team-title = Kime
 team-just-you = ʻO ʻoe wale nō ma kēia wahi
 team-agents = { $count ->
-    [one] ʻO ʻoe a me 1 luna
-   *[other] ʻO ʻoe a me { $count } mau ʻelele
+    [one] ʻO ʻoe a me 1 ʻākena
+   *[other] ʻO ʻoe a me { $count } ʻākena
 }
-team-empty = ʻAʻohe kanaka ma ʻaneʻi
+team-empty = ʻAʻohe mea ma ʻaneʻi i kēia manawa
 team-you = ʻO ʻoe
-team-agent = Agena
+team-agent = ʻĀkena
 
-services-title = Nā lawelawe kāʻei kua
+services-title = Nā lawelawe hope
 services-processes = { $count ->
-    [one] 1 kaʻina hana
-   *[other] { $count } kaʻina hana
+    [one] 1 kaʻina
+   *[other] { $count } kaʻina
 }
-services-kill-all = Kill All
+services-kill-all = Hoʻopau ikaika i nā mea a pau
 services-not-running = ʻAʻole holo ka lawelawe
-services-start-with = E hoʻomaka me:
-services-empty = ʻAʻohe kaʻina hana
-services-filter = Nā kaʻina hana kānana…
-services-no-match = ʻAʻohe kaʻina hana like
-services-connected = Hoʻopili ʻia
-services-disconnected = Hoʻokuʻu ʻia
-services-attached = pili
-services-kill = Pepehi
+services-start-with = Hoʻomaka me:
+services-empty = ʻAʻohe kaʻina ʻeleu
+services-filter = Kānana i nā kaʻina…
+services-no-match = ʻAʻohe kaʻina kūlike
+services-connected = Pili
+services-disconnected = Moku
+services-attached = hoʻopili ʻia
+services-kill = Hoʻopau ikaika
 services-memory = Hoʻomanaʻo
 services-size = Nui
-services-shell = ʻO ka pūpū
+services-shell = Shell
 
-error-title = Kuhihewa
+error-title = Hewa
 
 history-search = Huli mōʻaukala
-history-clear-all = Holoi i nā mea a pau
-history-clear-confirm = Holoi i nā moʻolelo a pau?
-history-clear-warning = ʻAʻole hiki ke hoʻopau ʻia kēia.
-history-cancel = Hoʻopau
+history-clear-all = Holoi pau
+history-clear-confirm = Holoi i ka mōʻaukala a pau?
+history-clear-warning = ʻAʻole hiki ke hoʻihoʻi.
+history-cancel = Hoʻōki
 history-today = I kēia lā
 history-yesterday = I nehinei
-history-days-ago = { $count } mau lā aku nei
+history-days-ago = { $count } lā i hala
 history-day-offset = Lā -{ $count }
 
 settings-title = Nā hoʻonohonoho
 settings-loading = Ke hoʻouka nei i nā hoʻonohonoho…
-settings-stored = Mālama ʻia ma ~/.vmux/settings.ron
-settings-other = 'ē aʻe
-settings-software-update = Hoʻohou polokalamu
-settings-check-updates = E nānā i nā mea hou
-settings-check-updates-hint = Hoʻopaʻa maʻalahi i ka hoʻomaka ʻana a i kēlā me kēia hola ke hoʻā ʻia ʻo Auto-update.
-settings-update-unavailable = Loaʻa ʻole
-settings-update-unavailable-hint = ʻAʻole hoʻokomo ʻia ka Updater i kēia kūkulu.
+settings-stored = Waiho ʻia ma ~/.vmux/settings.ron
+settings-other = ʻĒ aʻe
+settings-software-update = Hōʻano hou lako polokalamu
+settings-check-updates = Nānā i nā hōʻano hou
+settings-check-updates-hint = Nānā ʻakomi ke hoʻomaka a i kēlā me kēia hola inā hoʻā ʻia ka Hoʻohou ʻakomi.
+settings-update-unavailable = ʻAʻole loaʻa
+settings-update-unavailable-hint = ʻAʻole komo ka mea hoʻohou i kēia kūkulu.
 settings-update-checking = Ke nānā nei…
-settings-update-checking-hint = Ke nānā nei i nā mea hou…
-settings-update-check-again = Nānā Hou
-settings-update-current = Vmux ka mea hou.
-settings-update-downloading = Hoʻoiho ʻia…
-settings-update-downloading-hint = Hoʻoiho ʻia Vmux { $version }…
-settings-update-installing = Ke kau nei…
+settings-update-checking-hint = Ke nānā nei i nā hōʻano hou…
+settings-update-check-again = Nānā hou
+settings-update-current = Ua hou loa ʻo Vmux.
+settings-update-downloading = Ke hoʻoiho nei…
+settings-update-downloading-hint = Ke hoʻoiho nei iā Vmux { $version }…
+settings-update-installing = Ke hoʻouka nei…
 settings-update-installing-hint = Ke hoʻouka nei iā Vmux { $version }…
-settings-update-ready = Mākaukau Hou
-settings-update-ready-hint = Vmux { $version } ua mākaukau. Hoʻomaka hou e hoʻohana.
-settings-update-try-again = E hoao hou
-settings-update-failed = ʻAʻole hiki ke nānā i nā mea hou.
-settings-item = 'ikamu
-settings-item-number = 'ikamu { $number }
-settings-press-key = E kaomi i kahi kī…
+settings-update-ready = Mākaukau ka hōʻano hou
+settings-update-ready-hint = Mākaukau ʻo Vmux { $version }. Hoʻomaka hou no ka hoʻokō.
+settings-update-try-again = Hoʻāʻo hou
+settings-update-failed = ʻAʻole hiki ke nānā i nā hōʻano hou.
+settings-item = Mea
+settings-item-number = Mea { $number }
+settings-press-key = Pēhi i kekahi kī…
 settings-saved = Mālama ʻia
-settings-record-key = Kaomi no ka hoʻopaʻa ʻana i kahi hui kī hou
+settings-record-key = Kaomi no ka hoʻopaʻa ʻana i hui kī hou
 
-tray-open-window = Wehe puka makani
+tray-open-window = Wehe pukaaniani
 tray-close-window = Pani pukaaniani
 tray-pause-recording = Hoʻomaha i ka hoʻopaʻa ʻana
-tray-resume-recording = Hoʻomaka i ka hoʻopaʻa ʻana
-tray-finish-recording = Hoʻopau Hoʻopaʻa
-tray-quit = Haʻalele Vmux
+tray-resume-recording = Hoʻomau i ka hoʻopaʻa ʻana
+tray-finish-recording = Hoʻopau i ka hoʻopaʻa ʻana
+tray-quit = Haʻalele iā Vmux
 
-composer-attach-files = Hoʻopili i nā faila (/upload)
+composer-attach-files = Hoʻopili i nā waihona (/upload)
 composer-remove-attachment = Wehe i ka hoʻopili
 
-layout-back = Ke kua
+layout-back = Hoʻi
 layout-forward = Imua
 layout-reload = Hoʻouka hou
-layout-bookmark-page = E kaha puke i kēia ʻaoʻao
-layout-remove-bookmark = Wehe i ka bookmark
+layout-bookmark-page = Kaha puke i kēia ʻaoʻao
+layout-remove-bookmark = Wehe i ke kaha puke
 layout-pin-page = Pin i kēia ʻaoʻao
-layout-unpin-page = Wehe i kēia ʻaoʻao
-layout-manage-extensions = Mālama i nā hoʻonui
-layout-new-stack = Puʻu Hou
-layout-close-tab = Pani i ka pā
+layout-unpin-page = Wehe pin i kēia ʻaoʻao
+layout-manage-extensions = Mālama i nā mea hoʻolōʻihi
+layout-new-stack = Ahu hou
+layout-close-tab = Pani i ke kapu
 layout-bookmark = Kaha puke
 layout-pin = Pin
-layout-new-tab = Pahu hou
-layout-team = Hui
+layout-new-tab = Kapu hou
+layout-team = Kime
 
-command-switch-space = E hoʻololi i ka hakahaka…
-command-search-ask = Huli a nīnau paha…
-command-new-tab-placeholder = Huli a kikokiko i kahi URL, a i ʻole koho i ka Terminal…
-command-placeholder = Kākau i URL, ʻimi ʻaoʻao, a i ʻole > no nā kauoha…
-command-composer-placeholder = E kikokiko / no nā kauoha a i ʻole @ no ka media
+command-switch-space = Kuapo wahi…
+command-search-ask = Huli a nīnau…
+command-new-tab-placeholder = Huli a kikokiko i URL, a i ʻole koho iā Terminal…
+command-placeholder = Kikokiko i URL, huli kapu, a i ʻole > no nā kauoha…
+command-composer-placeholder = Kikokiko / no nā kauoha a i ʻole @ no ka pāpaho
 command-send = Hoʻouna (Enter)
 command-terminal = Terminal
 command-open-terminal = Wehe ma Terminal
-command-stack = Hoʻopaʻa
+command-stack = Ahu
 command-tabs = { $count ->
-    [one] 1 papa
-   *[other] { $count } papa
+    [one] 1 kapu
+   *[other] { $count } kapu
 }
-command-prompt = Hoʻomaka
-command-new-tab = Pahu hou
+command-prompt = Prompt
+command-new-tab = Kapu hou
 command-search = Huli
-command-open-value = Wehe "{ $value }"
-command-search-value = Huli “{ $value }”
+command-open-value = Wehe iā “{ $value }”
+command-search-value = Huli iā “{ $value }”
 
-schema-appearance = Ka nana aku
-schema-general = Generala
+schema-appearance = ʻIke maka
+schema-general = Laulā
 schema-layout = Hoʻolālā
-schema-layout-detail = ʻO ka puka makani, nā pane, ka ʻaoʻao ʻaoʻao, a me ke apo kiko.
-schema-agent = Agena
-schema-agent-detail = Nā ʻae ʻae a me nā mea hana.
-schema-shortcuts = Pōkole
-schema-shortcuts-detail = Nānā heluhelu wale nō. Hoʻoponopono pololei iā settings.ron e hoʻololi i nā mea paʻa.
+schema-layout-detail = Pukaaniani, nā māhele, ʻaoʻao kōkua, a me ke apo kālele.
+schema-agent = ʻĀkena
+schema-agent-detail = Ka hana a ka ʻākena a me nā ʻae mea hana.
+schema-shortcuts = Nā pōkole
+schema-shortcuts-detail = Nānā wale. Hoʻoponopono pololei iā settings.ron no ka hoʻololi ʻana i nā paʻa kī.
 schema-terminal = Terminal
-schema-browser = Pūnaewele
-schema-mode = Ke ano
-schema-mode-detail = Hoʻolālā kala no nā ʻaoʻao pūnaewele. Ke hahai nei ka polokalamu i kāu ʻōnaehana.
-schema-device = Mea lako
-schema-light = Māmā
-schema-dark = Poʻeleʻele
+schema-browser = Mākaʻikaʻi
+schema-mode = ʻAno
+schema-mode-detail = Hoʻolālā waihoʻoluʻu no nā ʻaoʻao pūnaewele. Hahai ka hāmeʻa i kāu ʻōnaehana.
+schema-device = Hāmeʻa
+schema-light = Mālamalama
+schema-dark = Pouli
 schema-language = ʻŌlelo
-schema-language-detail = E hoʻohana i ka ʻōnaehana, en-US, ja, a i ʻole kekahi hōʻailona BCP 47 me kahi waihona ~/.vmux/locales/<tag>.ftl like.
+schema-language-detail = Hoʻohana i ka ʻōnaehana, en-US, ja, a i ʻole kekahi hōʻailona BCP 47 me ka papa ʻōlelo ~/.vmux/locales/<tag>.ftl kūlike.
 schema-auto-update = Hoʻohou ʻakomi
-schema-auto-update-detail = E nānā a hoʻokomo i nā mea hou ma ka hoʻomaka ʻana a me kēlā me kēia hola.
-schema-startup-url = Hoʻomaka URL
-schema-startup-url-detail = Wehe ʻia ʻo Empty i ke kauoha bar prompt.
-schema-search-engine = ʻenekini huli
-schema-search-engine-detail = Hoʻohana ʻia no ka ʻimi pūnaewele mai ka Start a me ka pahu kauoha.
-schema-window = pukaaniani
-schema-pane = Pane
+schema-auto-update-detail = Nānā a hoʻouka i nā hōʻano hou ke hoʻomaka a i kēlā me kēia hola.
+schema-startup-url = URL hoʻomaka
+schema-startup-url-detail = Inā hakahaka, wehe ʻia ka prompt o ka pahu kauoha.
+schema-search-engine = ʻEnekini huli
+schema-search-engine-detail = Hoʻohana ʻia no nā huli pūnaewele mai Hoʻomaka a me ka pahu kauoha.
+schema-window = Pukaaniani
+schema-pane = Māhele
 schema-side-sheet = Pepa ʻaoʻao
-schema-focus-ring = Hoʻopaʻa apo
-schema-run-placement = E ʻae i ka hoʻolele ʻana i ke kau ʻana
-schema-run-placement-detail = E koho nā ʻelele i ke ʻano holo pane, kuhikuhi, a me ka heleuma.
-schema-leader = Alakai
-schema-leader-detail = Kiʻi prefix no nā ʻaoʻao pōkole.
-schema-chord-timeout = Hoʻopau manawa hoʻokani pila
-schema-chord-timeout-detail = Milikikona ma mua o ka pau ʻana o kahi prefix chord.
-schema-bindings = Hoʻopaʻa
-schema-confirm-close = E hōʻoia kokoke
-schema-confirm-close-detail = E hoʻomaka ma mua o ka pani ʻana i kahi pahu me kahi kaʻina holo.
-schema-default-theme = Ke kumuhana paʻamau
-schema-default-theme-detail = Ka inoa o ka manaʻo hana mai ka papa inoa o nā kumuhana.
+schema-focus-ring = Apo kālele
+schema-run-placement = ʻAe i ka hoʻokahuli wahi holo
+schema-run-placement-detail = ʻAe i nā ʻākena e koho i ke ʻano māhele holo, ke kuhikuhi, a me ka heleuma.
+schema-leader = Alakaʻi
+schema-leader-detail = Kī mua no nā pōkole chord.
+schema-chord-timeout = Manawa pau chord
+schema-chord-timeout-detail = Nā millisecond ma mua o ka pau ʻana o kahi mua chord.
+schema-bindings = Nā paʻa kī
+schema-confirm-close = Hōʻoia ma mua o ka pani
+schema-confirm-close-detail = Nīnau ma mua o ka pani ʻana i terminal me kahi kaʻina e holo nei.
+schema-default-theme = Kumuhana paʻamau
+schema-default-theme-detail = Inoa o ke kumuhana ʻeleu mai ka papa kumuhana.

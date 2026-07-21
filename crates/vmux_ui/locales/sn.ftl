@@ -2,217 +2,217 @@ common-open = Vhura
 common-close = Vhara
 common-install = Isa
 common-uninstall = Bvisa
-common-update = Shandura
-common-retry = Edza Zvakare
+common-update = Gadziridza
+common-retry = Edzazve
 common-refresh = Vandudza
 common-remove = Bvisa
-common-enable = Bvumira
+common-enable = Batidza
 common-disable = Dzima
 common-new = Itsva
-common-active = inoshanda
-common-running = ichimhanya
-common-done = yapera
-common-failed = Yakundikana
-common-installed = Yaaiswa
+common-active = iri kushanda
+common-running = iri kumhanya
+common-done = zvaitwa
+common-failed = Zvaramba
+common-installed = Yakaiswa
 common-items = { $count ->
-    [one] { $count } chinhu
-   *[other] { $count } zvinhu
+    [one] chinhu { $count }
+   *[other] zvinhu { $count }
 }
 start-title = Tanga
-start-tagline = Murayiro umwe. Chero chinhu, chapera.
+start-tagline = Murayiro mumwe. Zvese zvaitwa.
 
-agents-title = Maajenti
-agents-search = Tsvaga maajenti eACP neCLI…
-agents-empty = Hapana maajenti anowanikwa
+agents-title = Maagent
+agents-search = Tsvaga maagent eACP neCLI…
+agents-empty = Hapana maagent anoenderana
 agents-empty-detail = Edza zita, runtime, kana ACP/CLI.
-agents-install-failed = Kuisa kwakundikana
-agents-updating = Ichishandurwa…
-agents-retrying = Ichiedzazve…
-agents-preparing = Ichirongwa…
+agents-install-failed = Kuisa kwaramba
+agents-updating = Kugadziridza…
+agents-retrying = Kuedzazve…
+agents-preparing = Kugadzirira…
 
-extensions-title = Zvowedzerwa
-extensions-search = Tsvaga zvaiswa kana Chrome Web Store…
-extensions-relaunch = Tanga patsva kugamuchira
-extensions-empty = Hapana zvowedzerwa zvaaiswa
-extensions-no-match = Hapana zvowedzerwa zvinowanikwa
-extensions-empty-detail = Tsvaga muChrome Web Store pamusoro uye baya Return.
+extensions-title = Maextension
+extensions-search = Tsvaga akaiswa kana muChrome Web Store…
+extensions-relaunch = Tangazve kuti zvishande
+extensions-empty = Hapana maextension akaiswa
+extensions-no-match = Hapana maextension anoenderana
+extensions-empty-detail = Tsvaga muChrome Web Store pamusoro wodzvanya Return.
 extensions-no-match-detail = Edza rimwe zita kana extension ID.
-extensions-on = Kwazvo
-extensions-off = Kwete
-extensions-enable-confirm = Bvumira { $name }?
-extensions-enable-permissions = Bvumira { $name } uye tendera:
+extensions-on = Yakabatidzwa
+extensions-off = Yakadzimwa
+extensions-enable-confirm = Batidza { $name }?
+extensions-enable-permissions = Batidza { $name } wobvumira:
 
-lsp-title = Maseva eMutauro
-lsp-search = Tsvaga maseva emutauro, malinters, maformatters…
-lsp-loading = Ichitakura katalogu…
-lsp-empty = Hapana maseva emutauro anowanikwa
-lsp-empty-detail = Edza mumwe mutauro, linter, kana formatter.
+lsp-title = Maseva Emitauro
+lsp-search = Tsvaga maseva emitauro, linters, mafomata…
+lsp-loading = Kuverenga catalog…
+lsp-empty = Hapana maseva emitauro anoenderana
+lsp-empty-detail = Edza mumwe mutauro, linter, kana fomata.
 lsp-needs = inoda { $tool }
 lsp-status-available = Iripo
-lsp-status-on-path = Mu PATH
-lsp-status-installing = Ichiiswa…
-lsp-status-installed = Yaaiswa
-lsp-status-outdated = Shanduro iripo
-lsp-status-running = Ichimhanya
-lsp-status-failed = Yakundikana
+lsp-status-on-path = Iri paPATH
+lsp-status-installing = Kuisa…
+lsp-status-installed = Yakaiswa
+lsp-status-outdated = Gadziridzo iripo
+lsp-status-running = Iri kumhanya
+lsp-status-failed = Yaramba
 
 spaces-title = Nzvimbo
 spaces-new-placeholder = Zita renzvimbo itsva
 spaces-empty = Hapana nzvimbo
 spaces-default-name = Nzvimbo { $number }
 spaces-tabs = { $count ->
-    [one] 1 tab
-   *[other] { $count } matab
+    [one] tabhu 1
+   *[other] matabhu { $count }
 }
 spaces-delete = Dzima nzvimbo
 
-team-title = Timu
-team-just-you = Iwe woga munzvimbo ino
+team-title = Chikwata
+team-just-you = Uri wega munzvimbo iyi
 team-agents = { $count ->
-    [one] Iwe ne1 mugari
-   *[other] Iwe ne{ $count } vagari
+    [one] Iwe neagent 1
+   *[other] Iwe nemaagent { $count }
 }
-team-empty = Hapana munhu pano zvino
+team-empty = Hapana munhu pano parizvino
 team-you = Iwe
-team-agent = Mugari
+team-agent = Agent
 
-services-title = Masevhisi Emumashure
+services-title = Masevhisi Ekumashure
 services-processes = { $count ->
-    [one] 1 basa
-   *[other] { $count } mabasa
+    [one] process 1
+   *[other] maprocess { $count }
 }
-services-kill-all = Dzima Zvose
-services-not-running = Sevhisi haina kushanda
+services-kill-all = Misa Zvese Nechisimba
+services-not-running = Sevhisi haisi kumhanya
 services-start-with = Tanga ne:
-services-empty = Hapana mabasa anoshanda
-services-filter = Sarudza mabasa…
-services-no-match = Hapana mabasa anowanikwa
+services-empty = Hapana maprocess ari kushanda
+services-filter = Sefa maprocess…
+services-no-match = Hapana maprocess anoenderana
 services-connected = Yakabatana
-services-disconnected = Yakabviswa
-services-attached = yakabatwa
-services-kill = Dzima
-services-memory = Ndangariro
-services-size = Ukuru
+services-disconnected = Haina kubatana
+services-attached = yakabatanidzwa
+services-kill = Misa nechisimba
+services-memory = Memory
+services-size = Saizi
 services-shell = Shell
 
 error-title = Kukanganisa
 
-history-search = Tsvaga nhoroondo
-history-clear-all = Bvisa zvose
-history-clear-confirm = Bvisa nhoroondo yose?
-history-clear-warning = Izvi hazvigadzirisiki.
+history-search = Tsvaga munhoroondo
+history-clear-all = Bvisa zvese
+history-clear-confirm = Bvisa nhoroondo yese?
+history-clear-warning = Izvi hazvigoni kudzoserwa.
 history-cancel = Kanzura
 history-today = Nhasi
 history-yesterday = Nezuro
-history-days-ago = { $count } mazuva apfuura
+history-days-ago = mazuva { $count } apfuura
 history-day-offset = Zuva -{ $count }
 
-settings-title = Zvigadziriso
-settings-loading = Ichitakura zvigadziriso…
-settings-stored = Yakachengeterwa mu~/.vmux/settings.ron
+settings-title = Zvirongwa
+settings-loading = Kuverenga zvirongwa…
+settings-stored = Zvakachengetwa mu ~/.vmux/settings.ron
 settings-other = Zvimwe
-settings-software-update = Shanduro yeSoftware
-settings-check-updates = Tarisa Shanduro
-settings-check-updates-hint = Inotarisa otomatiki pakutanga nepaawa rega rega Auto-update inobvumirwa.
-settings-update-unavailable = Haipo
-settings-update-unavailable-hint = Updater hairimo mubuild ino.
-settings-update-checking = Ichitarisa…
-settings-update-checking-hint = Ichitarisa shanduro…
+settings-software-update = Gadziridzo yeSoftware
+settings-check-updates = Tarisa Gadziridzo
+settings-check-updates-hint = Inotarisa yega pakuvhura uye awa rega rega kana Auto-update yakabatidzwa.
+settings-update-unavailable = Haisi kuwanikwa
+settings-update-unavailable-hint = Updater haina kuisirwa mubuild iyi.
+settings-update-checking = Kutarisa…
+settings-update-checking-hint = Kutarisa magadziridzo…
 settings-update-check-again = Tarisa Zvakare
-settings-update-current = Vmux iri pachiyero.
-settings-update-downloading = Ichidownload…
-settings-update-downloading-hint = Ichidownload Vmux { $version }…
-settings-update-installing = Ichiisa…
-settings-update-installing-hint = Ichiisa Vmux { $version }…
-settings-update-ready = Shanduro Yakagadzirira
-settings-update-ready-hint = Vmux { $version } yakagadzirira. Tambira zvakare kugamuchira.
-settings-update-try-again = Edza Zvakare
-settings-update-failed = Kusakwanisa kutarisa shanduro.
+settings-update-current = Vmux iri pagadziridzo yazvino.
+settings-update-downloading = Kudhaunirodha…
+settings-update-downloading-hint = Kudhaunirodha Vmux { $version }…
+settings-update-installing = Kuisa…
+settings-update-installing-hint = Kuisa Vmux { $version }…
+settings-update-ready = Gadziridzo Yagadzirira
+settings-update-ready-hint = Vmux { $version } yagadzirira. Tangazve kuti ishande.
+settings-update-try-again = Edzazve
+settings-update-failed = Hatina kukwanisa kutarisa magadziridzo.
 settings-item = Chinhu
 settings-item-number = Chinhu { $number }
-settings-press-key = Baya kiyi…
-settings-saved = Yakachengetwa
-settings-record-key = Dzvanya kurekodhera kiyi combo itsva
+settings-press-key = Dzvanya kiyi…
+settings-saved = Zvachengetwa
+settings-record-key = Dzvanya kuti urekodhe combo itsva yemakiyi
 
 tray-open-window = Vhura Hwindo
 tray-close-window = Vhara Hwindo
-tray-pause-recording = Mira Pakati Kurekodha
-tray-resume-recording = Pindazve Kurekodha
-tray-finish-recording = Pedzisa Kurekodha
-tray-quit = Buda Vmux
+tray-pause-recording = Misa Kurekodha Kwechinguva
+tray-resume-recording = Enderera Kurekodha
+tray-finish-recording = Pedza Kurekodha
+tray-quit = Buda muVmux
 
-composer-attach-files = Batanidza mafaili (/upload)
-composer-remove-attachment = Bvisa chinhu chakabatanidzwa
+composer-attach-files = Batanidza mafaera (/upload)
+composer-remove-attachment = Bvisa chakabatanidzwa
 
-layout-back = Shure
-layout-forward = Mberi
-layout-reload = Rodha Zvakare
-layout-bookmark-page = Bookmark peji ino
+layout-back = Dzokera
+layout-forward = Enda mberi
+layout-reload = Rodhazve
+layout-bookmark-page = Chengeta peji iri
 layout-remove-bookmark = Bvisa bookmark
-layout-pin-page = Bika peji ino
-layout-unpin-page = Bvisa kubika peji ino
-layout-manage-extensions = Gadzirisa zvowedzerwa
+layout-pin-page = Pinza peji iri
+layout-unpin-page = Bvisa pin yepeji iri
+layout-manage-extensions = Tonga maextension
 layout-new-stack = Stack Itsva
-layout-close-tab = Vhara tab
+layout-close-tab = Vhara tabhu
 layout-bookmark = Bookmark
-layout-pin = Bika
-layout-new-tab = Tab itsva
-layout-team = Timu
+layout-pin = Pinza
+layout-new-tab = Tabhu itsva
+layout-team = Chikwata
 
-command-switch-space = Shandura nzvimbo…
-command-search-ask = Tsvaga kana bvunza…
+command-switch-space = Chinja nzvimbo…
+command-search-ask = Tsvaga kana kubvunza…
 command-new-tab-placeholder = Tsvaga kana nyora URL, kana sarudza Terminal…
-command-placeholder = Nyora URL, tsvaga matab, kana > yemirayiro…
-command-composer-placeholder = Nyora / yemirayiro kana @ yemamedia
+command-placeholder = Nyora URL, tsvaga matabhu, kana > yemirairo…
+command-composer-placeholder = Nyora / yemirairo kana @ yemedia
 command-send = Tumira (Enter)
 command-terminal = Terminal
 command-open-terminal = Vhura muTerminal
 command-stack = Stack
 command-tabs = { $count ->
-    [one] 1 tab
-   *[other] { $count } matab
+    [one] tabhu 1
+   *[other] matabhu { $count }
 }
 command-prompt = Murayiro
-command-new-tab = Tab itsva
+command-new-tab = Tabhu itsva
 command-search = Tsvaga
-command-open-value = Vhura "{ $value }"
-command-search-value = Tsvaga "{ $value }"
+command-open-value = Vhura “{ $value }”
+command-search-value = Tsvaga “{ $value }”
 
-schema-appearance = Kuonekwa
+schema-appearance = Chitarisiko
 schema-general = Zvakajairika
-schema-layout = Layout
-schema-layout-detail = Hwindo, mapane, sidebar, nering yefokasi.
-schema-agent = Mugari
-schema-agent-detail = Maitiro emugari nemaruramiro ezvishandiso.
-schema-shortcuts = Nzira Pfupi
-schema-shortcuts-detail = Onai chete. Gadzirisa settings.ron pakare kuchinja mabatanidzo.
+schema-layout = Marongerwo
+schema-layout-detail = Hwindo, mapani, sidebar, uye focus ring.
+schema-agent = Agent
+schema-agent-detail = Maitiro eagent nemvumo yezvishandiso.
+schema-shortcuts = Mashortcut
+schema-shortcuts-detail = Kuona chete. Rongedza settings.ron zvakananga kuti uchinje mabinding.
 schema-terminal = Terminal
 schema-browser = Browser
 schema-mode = Mode
-schema-mode-detail = Ruvara rwemapeji eweb. Mucherechedzo unotevera system yako.
-schema-device = Mucherechedzo
+schema-mode-detail = Ruvara rwemapeji ewebhu. Device inotevera system yako.
+schema-device = Device
 schema-light = Chiedza
 schema-dark = Rima
 schema-language = Mutauro
-schema-language-detail = Shandisa system, en-US, ja, kana BCP 47 tag ipi neipi ine katalogu inopindana ~/.vmux/locales/<tag>.ftl.
-schema-auto-update = Auto-shandura
-schema-auto-update-detail = Tarisa uye isa shanduro pakutanga nepaawa rega rega.
-schema-startup-url = URL yekutanga
-schema-startup-url-detail = Isina chinhu inhovhura murayiro webaa yemirayiro.
+schema-language-detail = Shandisa system, en-US, ja, kana chero BCP 47 tag ine catalog inoenderana pa ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Tarisa uye isa magadziridzo pakuvhura uye awa rega rega.
+schema-startup-url = Startup URL
+schema-startup-url-detail = Kana isina chinhu, inovhura prompt yebhaa remirairo.
 schema-search-engine = Injini yekutsvaga
-schema-search-engine-detail = Inoshandiswa kutsvaga web kubva kuStart nebaa yemirayiro.
+schema-search-engine-detail = Inoshandiswa pakutsvaga pawebhu kubva paTanga nebhaa remirairo.
 schema-window = Hwindo
-schema-pane = Pane
-schema-side-sheet = Pepa repamabviro
-schema-focus-ring = Ring yefokasi
-schema-run-placement = Bvumira kusandura nzvimbo yekumhanya
-schema-run-placement-detail = Bvumira maajenti kusarudza mode yepane, nzira, neanchora.
-schema-leader = Mutungamiriri
-schema-leader-detail = Kiyi yeprefix yenzira pfupi dzechord.
-schema-chord-timeout = Nguva yechord
-schema-chord-timeout-detail = Milliseconds chord prefix isati yapera nguva.
-schema-bindings = Mabatanidzo
+schema-pane = Pani
+schema-side-sheet = Side sheet
+schema-focus-ring = Focus ring
+schema-run-placement = Bvumira kuchinja pekumhanyisa
+schema-run-placement-detail = Rega maagent asarudze mode yepani yekumhanyisa, direction, uye anchor.
+schema-leader = Leader
+schema-leader-detail = Kiyi yekutanga mashortcut echord.
+schema-chord-timeout = Nguva yekumirira chord
+schema-chord-timeout-detail = Mamillisecond chord prefix isati yapera.
+schema-bindings = Mabinding
 schema-confirm-close = Simbisa kuvhara
-schema-confirm-close-detail = Bvunza usati wavhara terminal ine basa rinoshanda.
-schema-default-theme = Theme remudzimu
-schema-default-theme-detail = Zita retheme inoshanda kubva murondedzero yamathemes.
+schema-confirm-close-detail = Bvunza usati wavhara terminal ine process iri kumhanya.
+schema-default-theme = Theme yekutanga
+schema-default-theme-detail = Zita retheme iri kushanda kubva parondedzero yemitheme.

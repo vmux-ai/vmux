@@ -1,218 +1,218 @@
-common-open = Open
-common-close = Close
-common-install = install
-common-uninstall = Uninstall
-common-update = Renovatio
-common-retry = Retry
-common-refresh = Renovare
-common-remove = Aufer
-common-enable = Admitte
-common-disable = inactivare
-common-new = New
-common-active = active
-common-running = cursus
+common-open = Aperi
+common-close = Claude
+common-install = Installa
+common-uninstall = Deinstalla
+common-update = Renova
+common-retry = Itera
+common-refresh = Relege
+common-remove = Remove
+common-enable = Activa
+common-disable = Inactiva
+common-new = Novum
+common-active = activum
+common-running = currens
 common-done = factum
 common-failed = Defecit
-common-installed = installed
+common-installed = Installatum
 common-items = { $count ->
-    [one] { $count } item
-   *[other] { $count } items
+    [one] { $count } res
+   *[other] { $count } res
 }
-start-title = Satus
-start-tagline = Una prompta. Quidvis, feci.
+start-title = Initium
+start-tagline = Unum promptum. Quidlibet, perfectum.
 
 agents-title = Agentes
-agents-search = Quaere ACP et CLI agentium…
-agents-empty = Non matching agentium
-agents-empty-detail = Nomen experire, runtime, vel ACP/CLI.
-agents-install-failed = Install defuit
-agents-updating = Adaequationis…
-agents-retrying = Retrying…
-agents-preparing = Praeparans…
+agents-search = Quaere agentes ACP et CLI…
+agents-empty = Nulli agentes congruentes
+agents-empty-detail = Nomen, ambitum executionis, aut ACP/CLI tenta.
+agents-install-failed = Installatio defecit
+agents-updating = Renovatur…
+agents-retrying = Iteratur…
+agents-preparing = Paratur…
 
 extensions-title = Extensiones
-extensions-search = Quaerere institutum vel Chrome Web Store…
-extensions-relaunch = Relaunch adhibere
-extensions-empty = Nulla extensiones installed
-extensions-no-match = Non matching extensiones
-extensions-empty-detail = Quaere supra Chrome Web Store et preme Return.
-extensions-no-match-detail = Conare nomen aliud seu extensio ID.
-extensions-on = On
-extensions-off = Off
-extensions-enable-confirm = Admitte { $name }?
-extensions-enable-permissions = Admitte { $name } et permitte;
+extensions-search = Quaere installatas vel in Chrome Web Store…
+extensions-relaunch = Reaperi ut valeat
+extensions-empty = Nullae extensiones installatae
+extensions-no-match = Nullae extensiones congruentes
+extensions-empty-detail = Quaere supra in Chrome Web Store et preme Return.
+extensions-no-match-detail = Aliud nomen aut ID extensionis tenta.
+extensions-on = Activum
+extensions-off = Inactivum
+extensions-enable-confirm = Activare { $name }?
+extensions-enable-permissions = Activare { $name } et permittere:
 
-lsp-title = Lingua Server
-lsp-search = Quaerere servitores linguae, linteamina, formatores...
-lsp-loading = Loading catalog...
-lsp-empty = Non matching linguarum servers
-lsp-empty-detail = Aliam linguam experire, linteolum, aut formatorem.
-lsp-needs = necesse est { $tool }
+lsp-title = Servientes linguarum
+lsp-search = Quaere servientes linguarum, lintra, formatores…
+lsp-loading = Catalogus oneratur…
+lsp-empty = Nulli servientes linguarum congruentes
+lsp-empty-detail = Aliam linguam, lintrum, aut formatorem tenta.
+lsp-needs = eget { $tool }
 lsp-status-available = Praesto
-lsp-status-on-path = Pridie PATH
-lsp-status-installing = Installing…
-lsp-status-installed = installed
-lsp-status-outdated = Renovatio available
-lsp-status-running = Running
+lsp-status-on-path = In PATH
+lsp-status-installing = Installatur…
+lsp-status-installed = Installatum
+lsp-status-outdated = Renovatio praesto
+lsp-status-running = Currit
 lsp-status-failed = Defecit
 
 spaces-title = Spatia
-spaces-new-placeholder = Novum spatii nomen
+spaces-new-placeholder = Nomen novi spatii
 spaces-empty = Nulla spatia
 spaces-default-name = Spatium { $number }
 spaces-tabs = { $count ->
-    [one] 1 tab
-   *[other] { $count } tabs
+    [one] 1 scheda
+   *[other] { $count } schedae
 }
-spaces-delete = Delere spatium
+spaces-delete = Dele spatium
 
-team-title = Team
-team-just-you = Iustus in hoc spatio
+team-title = Grex
+team-just-you = Tu solus in hoc spatio
 team-agents = { $count ->
-    [one] Tu et I agente
-   *[other] Tu et { $count } actores
+    [one] Tu et 1 agens
+   *[other] Tu et { $count } agentes
 }
-team-empty = Nemo tamen hic
+team-empty = Nemo hic adhuc
 team-you = Tu
 team-agent = Agens
 
-services-title = Background Services
+services-title = Ministeria in fundo
 services-processes = { $count ->
-    [one] 1 processum
-   *[other] { $count } processuum
+    [one] 1 processus
+   *[other] { $count } processus
 }
-services-kill-all = omnes occiditis
-services-not-running = Ministerium non est currens
-services-start-with = Incipere:
-services-empty = Nullae actiones activae
-services-filter = Filtrum processuum…
-services-no-match = Non matching processuum
-services-connected = Coniuncta
-services-disconnected = Disiungitur
-services-attached = attachiatus
-services-kill = Occidere
+services-kill-all = Omnia opprime
+services-not-running = Ministerium non currit
+services-start-with = Incipe cum:
+services-empty = Nulli processus activi
+services-filter = Filtra processus…
+services-no-match = Nulli processus congruentes
+services-connected = Coniunctum
+services-disconnected = Disiunctum
+services-attached = adnexum
+services-kill = Opprime
 services-memory = Memoria
 services-size = Magnitudo
 services-shell = Testa
 
 error-title = Error
 
-history-search = Quaerere historiam
-history-clear-all = Patet omnia
-history-clear-confirm = Patet omnem historiam?
-history-clear-warning = Hoc fieri infectum non potest.
-history-cancel = Cancel
-history-today = hodie
-history-yesterday = heri
-history-days-ago = { $count } diebus abhinc
+history-search = Quaere historiam
+history-clear-all = Omnia dele
+history-clear-confirm = Delere totam historiam?
+history-clear-warning = Hoc revocari non potest.
+history-cancel = Abice
+history-today = Hodie
+history-yesterday = Heri
+history-days-ago = ante { $count } dies
 history-day-offset = Dies -{ $count }
 
-settings-title = Occasus
-settings-loading = Loading occasus…
-settings-stored = Conditum in ~/.vmux/settings.ron
-settings-other = Other
-settings-software-update = Software Update
-settings-check-updates = Reprehendo pro Updates
-settings-check-updates-hint = Automatice in launch et in omni hora, cum auto-renovatio est facultas.
-settings-update-unavailable = Unavailable
-settings-update-unavailable-hint = Renovator in hac aedificatione non comprehenditur.
-settings-update-checking = Reperiens…
-settings-update-checking-hint = Reprehendo pro updates ...
-settings-update-check-again = Iterum reprehendo
-settings-update-current = Vmux usque ad date est.
-settings-update-downloading = Downloading…
-settings-update-downloading-hint = Download Vmux { $version }…
-settings-update-installing = Installing…
-settings-update-installing-hint = Inaugurari Vmux { $version }…
-settings-update-ready = Update Promptus
-settings-update-ready-hint = Vmux { $version } parata est. Sileo adhibere.
-settings-update-try-again = Iterum conare
-settings-update-failed = Posse reprimendam updates.
-settings-item = Item
-settings-item-number = Item { $number }
-settings-press-key = Preme clavis…
-settings-saved = salvus
-settings-record-key = Click to recordarentur novam clavis combo
+settings-title = Optiones
+settings-loading = Optiones onerantur…
+settings-stored = Servatur in ~/.vmux/settings.ron
+settings-other = Alia
+settings-software-update = Renovatio programmatis
+settings-check-updates = Quaere renovationes
+settings-check-updates-hint = Automate quaerit in initio et singulis horis, si renovatio automatica activa est.
+settings-update-unavailable = Non praesto
+settings-update-unavailable-hint = Renovator huic aedificationi non inclusus est.
+settings-update-checking = Quaeritur…
+settings-update-checking-hint = Renovationes quaeruntur…
+settings-update-check-again = Iterum quaere
+settings-update-current = Vmux recentissimum est.
+settings-update-downloading = Excipitur…
+settings-update-downloading-hint = Vmux { $version } excipitur…
+settings-update-installing = Installatur…
+settings-update-installing-hint = Vmux { $version } installatur…
+settings-update-ready = Renovatio parata
+settings-update-ready-hint = Vmux { $version } paratum est. Restarte ut valeat.
+settings-update-try-again = Iterum tenta
+settings-update-failed = Renovationes quaeri non potuerunt.
+settings-item = Res
+settings-item-number = Res { $number }
+settings-press-key = Preme clavem…
+settings-saved = Servatum
+settings-record-key = Preme ut novam clavium compositionem capias
 
-tray-open-window = Open Fenestra
-tray-close-window = Prope Fenestra
-tray-pause-recording = Declina Recordatio
-tray-resume-recording = Proin Recordatio
-tray-finish-recording = Finis Book
-tray-quit = quit Vmux
+tray-open-window = Aperi fenestram
+tray-close-window = Claude fenestram
+tray-pause-recording = Intermitte inscriptionem
+tray-resume-recording = Perge inscriptionem
+tray-finish-recording = Perfice inscriptionem
+tray-quit = Exi e Vmux
 
-composer-attach-files = Documenta affigere (/upload)
-composer-remove-attachment = Remove affectum
+composer-attach-files = Adnecte fasciculos (/upload)
+composer-remove-attachment = Remove adnexum
 
 layout-back = Retro
-layout-forward = Deinceps
-layout-reload = Reload
-layout-bookmark-page = Hanc paginam signare
-layout-remove-bookmark = Aufer Bookmark
-layout-pin-page = Hanc paginam pin
-layout-unpin-page = Unpin hanc paginam
-layout-manage-extensions = Curo extensiones
-layout-new-stack = Novum Stack
-layout-close-tab = Prope tab
-layout-bookmark = Bookmark
-layout-pin = Pin
-layout-new-tab = Nova tab
-layout-team = Team
+layout-forward = Porro
+layout-reload = Relege
+layout-bookmark-page = Nota hanc paginam
+layout-remove-bookmark = Remove notam
+layout-pin-page = Fige hanc paginam
+layout-unpin-page = Defige hanc paginam
+layout-manage-extensions = Gere extensiones
+layout-new-stack = Nova strues
+layout-close-tab = Claude schedam
+layout-bookmark = Nota
+layout-pin = Fige
+layout-new-tab = Nova scheda
+layout-team = Grex
 
-command-switch-space = Spatium commutandum…
-command-search-ask = Quaerere vel quaerere…
-command-new-tab-placeholder = Investigare vel typus a URL, vel eligere Terminationem…
-command-placeholder = Typus a URL, tabs quaere, vel > ad imperia…
-command-composer-placeholder = Typus / ad imperium seu @ ad media
+command-switch-space = Muta spatium…
+command-search-ask = Quaere aut interroga…
+command-new-tab-placeholder = Quaere aut inscribe URL, vel elige Terminal…
+command-placeholder = Inscribe URL, quaere schedas, aut > pro mandatis…
+command-composer-placeholder = Inscribe / pro mandatis aut @ pro mediis
 command-send = Mitte (Enter)
 command-terminal = Terminal
-command-open-terminal = Apertum in Terminal
-command-stack = Stack
+command-open-terminal = Aperi in Terminal
+command-stack = Strues
 command-tabs = { $count ->
-    [one] 1 tab
-   *[other] { $count } tabs
+    [one] 1 scheda
+   *[other] { $count } schedae
 }
-command-prompt = promptus
-command-new-tab = Nova tab
-command-search = Investigatio
-command-open-value = Aperi "{ $value }"
-command-search-value = Quaerere "{ $value }"
+command-prompt = Promptum
+command-new-tab = Nova scheda
+command-search = Quaere
+command-open-value = Aperi “{ $value }”
+command-search-value = Quaere “{ $value }”
 
-schema-appearance = Aspectus
-schema-general = General
-schema-layout = Layout
-schema-layout-detail = Fenestra, panes, pars, et focus anulus.
+schema-appearance = Species
+schema-general = Generalia
+schema-layout = Dispositio
+schema-layout-detail = Fenestra, regiones, laterale, et anulus focus.
 schema-agent = Agens
-schema-agent-detail = Agens morum et instrumentum permissionum.
+schema-agent-detail = Mores agentis et permissiones instrumentorum.
 schema-shortcuts = Compendia
-schema-shortcuts-detail = Read-tantum visum. Recensere settings.ron directe ad ligamenta varianda.
+schema-shortcuts-detail = Prospectus tantum legendus. Edita settings.ron directe ut ligaturas mutes.
 schema-terminal = Terminal
-schema-browser = Pasco
+schema-browser = Navigator
 schema-mode = Modus
-schema-mode-detail = Color schema per paginas. Fabrica ratio tua sequitur.
-schema-device = Device
-schema-light = lux
-schema-dark = Dark
-schema-language = Linguae
-schema-language-detail = Systema utere, en-US, ia, vel quaevis BCP 47 tag cum congruens ~/.vmux/locales/<tag>.ftl catalogo.
-schema-auto-update = Auto-renovatio
-schema-auto-update-detail = Reprehendo pro ac renovationes in launch et in omni hora niteremur.
-schema-startup-url = Satum URL
-schema-startup-url-detail = Inani prompta aperiri mandamus forensibus per in.
-schema-search-engine = Quaere engine
-schema-search-engine-detail = Adhibentur pro inquisitionibus interretialibus ab initio et vecte praecepti.
+schema-mode-detail = Schema colorum paginarum interretialium. Instrumentum systema tuum sequitur.
+schema-device = Instrumentum
+schema-light = Clarum
+schema-dark = Obscurum
+schema-language = Lingua
+schema-language-detail = Utere systemate, en-US, ja, aut quovis signo BCP 47 cum catalogo congruenti ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Renovatio automatica
+schema-auto-update-detail = Quaere et installa renovationes in initio et singulis horis.
+schema-startup-url = URL initiale
+schema-startup-url-detail = Vacuum aperit promptum vectis mandatorum.
+schema-search-engine = Machina quaerendi
+schema-search-engine-detail = Adhibetur ad quaestiones interretiales ex Initio et vecte mandatorum.
 schema-window = Fenestra
-schema-pane = Pane
-schema-side-sheet = Parte sheet
-schema-focus-ring = Focus anulus
-schema-run-placement = Liceat currere collocatione override
-schema-run-placement-detail = Agentes eligant modum, directionem, anchoram currunt.
+schema-pane = Regio
+schema-side-sheet = Lamina lateralis
+schema-focus-ring = Anulus focus
+schema-run-placement = Permitte agenti locum executionis mutare
+schema-run-placement-detail = Sine agentibus eligere modum regionis executionis, directionem, et ancoram.
 schema-leader = Dux
-schema-leader-detail = Clavis praepositionis ad chordas chordarum.
-schema-chord-timeout = chorda timeout
-schema-chord-timeout-detail = Milliseconds quam praepositionem funem expirat.
-schema-bindings = Vincula
-schema-confirm-close = Confírma prope
-schema-confirm-close-detail = Promptus ante claudendo terminatio currit processus.
-schema-default-theme = Default theme
-schema-default-theme-detail = Nomen thematis activi a themate ponit.
+schema-leader-detail = Clavis praefixa compendiis chordatis.
+schema-chord-timeout = Tempus chordae
+schema-chord-timeout-detail = Millisecunda antequam praefixum chordae exspiret.
+schema-bindings = Ligaturae
+schema-confirm-close = Confirma clausuram
+schema-confirm-close-detail = Interroga antequam terminale cum processu currente claudatur.
+schema-default-theme = Thema praedefinitum
+schema-default-theme-detail = Nomen thematis activi ex indice thematum.

@@ -1,106 +1,106 @@
-common-open = გახსენით
+common-open = გახსნა
 common-close = დახურვა
-common-install = დააინსტალირეთ
-common-uninstall = დეინსტალაცია
+common-install = დაყენება
+common-uninstall = წაშლა
 common-update = განახლება
-common-retry = ხელახლა სცადეთ
-common-refresh = განაახლეთ
-common-remove = ამოღება
+common-retry = ხელახლა ცდა
+common-refresh = განახლება
+common-remove = ამოშლა
 common-enable = ჩართვა
 common-disable = გამორთვა
 common-new = ახალი
 common-active = აქტიური
-common-running = გაშვებული
-common-done = შესრულებული
-common-failed = ვერ მოხერხდა
+common-running = გაშვებულია
+common-done = დასრულდა
+common-failed = ვერ შესრულდა
 common-installed = დაყენებულია
 common-items = { $count ->
     [one] { $count } ელემენტი
    *[other] { $count } ელემენტი
 }
 start-title = დაწყება
-start-tagline = ერთი მოწოდება. ყველაფერი, შესრულებულია.
+start-tagline = ერთი პრომპტი. ყველაფერი მზად.
 
 agents-title = აგენტები
-agents-search = მოძებნეთ ACP და CLI აგენტები…
+agents-search = ACP და CLI აგენტების ძიება…
 agents-empty = შესატყვისი აგენტები არ არის
-agents-empty-detail = სცადეთ სახელი, გაშვების დრო ან ACP/CLI.
-agents-install-failed = ინსტალაცია ვერ მოხერხდა
-agents-updating = მიმდინარეობს განახლება…
-agents-retrying = ხელახლა მცდელობა…
-agents-preparing = მზადება…
+agents-empty-detail = სცადეთ სახელი, გაშვების გარემო ან ACP/CLI.
+agents-install-failed = დაყენება ვერ მოხერხდა
+agents-updating = ახლდება…
+agents-retrying = ხელახლა ვცდით…
+agents-preparing = მზადდება…
 
 extensions-title = გაფართოებები
-extensions-search = ძიება დაინსტალირებულია ან Chrome Web Store…
-extensions-relaunch = ხელახლა გაშვება განაცხადისთვის
-extensions-empty = არ არის დაინსტალირებული გაფართოებები
+extensions-search = მოძებნეთ დაყენებულებში ან Chrome Web Store-ში…
+extensions-relaunch = ცვლილებების გამოსაყენებლად ხელახლა გაუშვით
+extensions-empty = გაფართოებები დაყენებული არ არის
 extensions-no-match = შესატყვისი გაფართოებები არ არის
-extensions-empty-detail = მოძებნეთ ზემოთ Chrome Web Store და დააჭირეთ Return.
+extensions-empty-detail = მოძებნეთ ზემოთ Chrome Web Store-ში და დააჭირეთ Enter-ს.
 extensions-no-match-detail = სცადეთ სხვა სახელი ან გაფართოების ID.
 extensions-on = ჩართულია
 extensions-off = გამორთულია
-extensions-enable-confirm = ჩაირთოს { $name }?
-extensions-enable-permissions = ჩართეთ { $name } და დაუშვით:
+extensions-enable-confirm = ჩავრთოთ { $name }?
+extensions-enable-permissions = ჩაირთოს { $name } და მიენიჭოს წვდომა:
 
 lsp-title = ენის სერვერები
-lsp-search = მოძებნეთ ენის სერვერები, ლინტერები, ფორმატორები…
-lsp-loading = კატალოგის ჩატვირთვა…
+lsp-search = ენის სერვერების, ლინტერებისა და ფორმატერების ძიება…
+lsp-loading = კატალოგი იტვირთება…
 lsp-empty = შესატყვისი ენის სერვერები არ არის
-lsp-empty-detail = სცადეთ სხვა ენა, ლინტერი ან ფორმატორი.
+lsp-empty-detail = სცადეთ სხვა ენა, ლინტერი ან ფორმატერი.
 lsp-needs = სჭირდება { $tool }
 lsp-status-available = ხელმისაწვდომია
-lsp-status-on-path = PATH-ზე
-lsp-status-installing = მიმდინარეობს ინსტალაცია…
+lsp-status-on-path = PATH-შია
+lsp-status-installing = ყენდება…
 lsp-status-installed = დაყენებულია
 lsp-status-outdated = განახლება ხელმისაწვდომია
-lsp-status-running = სირბილი
-lsp-status-failed = ვერ მოხერხდა
+lsp-status-running = გაშვებულია
+lsp-status-failed = ვერ შესრულდა
 
-spaces-title = ფართები
-spaces-new-placeholder = ახალი სივრცის სახელი
-spaces-empty = არ არის სივრცეები
-spaces-default-name = სივრცე { $number }
+spaces-title = გარემოები
+spaces-new-placeholder = ახალი გარემოს სახელი
+spaces-empty = გარემოები არ არის
+spaces-default-name = გარემო { $number }
 spaces-tabs = { $count ->
     [one] 1 ჩანართი
-   *[other] { $count } ჩანართები
+   *[other] { $count } ჩანართი
 }
-spaces-delete = სივრცის წაშლა
+spaces-delete = გარემოს წაშლა
 
 team-title = გუნდი
-team-just-you = მხოლოდ შენ ამ სივრცეში
+team-just-you = ამ გარემოში მხოლოდ თქვენ ხართ
 team-agents = { $count ->
-    [one] შენ და 1 აგენტი
-   *[other] თქვენ და { $count } აგენტები
+    [one] თქვენ და 1 აგენტი
+   *[other] თქვენ და { $count } აგენტი
 }
-team-empty = აქ ჯერ არავინ
-team-you = შენ
+team-empty = აქ ჯერ არავინაა
+team-you = თქვენ
 team-agent = აგენტი
 
-services-title = ფონის სერვისები
+services-title = ფონური სერვისები
 services-processes = { $count ->
     [one] 1 პროცესი
-   *[other] { $count } პროცესები
+   *[other] { $count } პროცესი
 }
-services-kill-all = მოკალი ყველა
-services-not-running = სერვისი არ მუშაობს
-services-start-with = დაიწყეთ:
-services-empty = არ არის აქტიური პროცესები
+services-kill-all = ყველას იძულებით დასრულება
+services-not-running = სერვისი გაშვებული არ არის
+services-start-with = გაშვება:
+services-empty = აქტიური პროცესები არ არის
 services-filter = პროცესების გაფილტვრა…
 services-no-match = შესატყვისი პროცესები არ არის
 services-connected = დაკავშირებულია
 services-disconnected = გათიშულია
-services-attached = მიმაგრებული
-services-kill = მოკალი
+services-attached = მიბმულია
+services-kill = იძულებით დასრულება
 services-memory = მეხსიერება
 services-size = ზომა
-services-shell = ჭურვი
+services-shell = გარსი
 
 error-title = შეცდომა
 
-history-search = ძიების ისტორია
-history-clear-all = გაასუფთავე ყველა
-history-clear-confirm = გსურთ მთელი ისტორიის გასუფთავება?
-history-clear-warning = ამის გაუქმება შეუძლებელია.
+history-search = ისტორიის ძიება
+history-clear-all = ყველაფრის გასუფთავება
+history-clear-confirm = გავასუფთავოთ მთელი ისტორია?
+history-clear-warning = ამ მოქმედების გაუქმება შეუძლებელია.
 history-cancel = გაუქმება
 history-today = დღეს
 history-yesterday = გუშინ
@@ -108,111 +108,111 @@ history-days-ago = { $count } დღის წინ
 history-day-offset = დღე -{ $count }
 
 settings-title = პარამეტრები
-settings-loading = პარამეტრების ჩატვირთვა…
+settings-loading = პარამეტრები იტვირთება…
 settings-stored = ინახება ~/.vmux/settings.ron-ში
 settings-other = სხვა
-settings-software-update = პროგრამული უზრუნველყოფის განახლება
-settings-check-updates = შეამოწმეთ განახლებები
-settings-check-updates-hint = ამოწმებს ავტომატურად გაშვებისას და ყოველ საათში, როდესაც ჩართულია ავტომატური განახლება.
+settings-software-update = პროგრამის განახლება
+settings-check-updates = განახლებების შემოწმება
+settings-check-updates-hint = ავტომატურად მოწმდება გაშვებისას და ყოველ საათში, როცა ავტომატური განახლება ჩართულია.
 settings-update-unavailable = მიუწვდომელია
-settings-update-unavailable-hint = განახლება არ შედის ამ კონსტრუქციაში.
-settings-update-checking = მიმდინარეობს შემოწმება…
-settings-update-checking-hint = მიმდინარეობს განახლებების შემოწმება…
-settings-update-check-again = შეამოწმეთ ისევ
+settings-update-unavailable-hint = განახლების მოდული ამ აგებაში არ შედის.
+settings-update-checking = მოწმდება…
+settings-update-checking-hint = განახლებები მოწმდება…
+settings-update-check-again = ხელახლა შემოწმება
 settings-update-current = Vmux განახლებულია.
-settings-update-downloading = მიმდინარეობს ჩამოტვირთვა…
-settings-update-downloading-hint = მიმდინარეობს ჩამოტვირთვა Vmux { $version }…
-settings-update-installing = მიმდინარეობს ინსტალაცია…
-settings-update-installing-hint = მიმდინარეობს Vmux { $version } ინსტალაცია…
+settings-update-downloading = იტვირთება…
+settings-update-downloading-hint = იტვირთება Vmux { $version }…
+settings-update-installing = ყენდება…
+settings-update-installing-hint = ყენდება Vmux { $version }…
 settings-update-ready = განახლება მზადაა
-settings-update-ready-hint = Vmux { $version } მზად არის. გადატვირთეთ მის გამოსაყენებლად.
-settings-update-try-again = სცადეთ ისევ
-settings-update-failed = განახლებების შემოწმება შეუძლებელია.
+settings-update-ready-hint = Vmux { $version } მზადაა. გამოსაყენებლად გადატვირთეთ.
+settings-update-try-again = ხელახლა ცდა
+settings-update-failed = განახლებების შემოწმება ვერ მოხერხდა.
 settings-item = ელემენტი
 settings-item-number = ელემენტი { $number }
-settings-press-key = დააჭირეთ ღილაკს…
+settings-press-key = დააჭირეთ კლავიშს…
 settings-saved = შენახულია
-settings-record-key = დააწკაპუნეთ ახალი კლავიშების კომბინაციის ჩასაწერად
+settings-record-key = დააწკაპუნეთ ახალი კლავიშთა კომბინაციის ჩასაწერად
 
-tray-open-window = გახსენით ფანჯარა
+tray-open-window = ფანჯრის გახსნა
 tray-close-window = ფანჯრის დახურვა
-tray-pause-recording = ჩაწერის პაუზა
-tray-resume-recording = ჩაწერის განახლება
+tray-pause-recording = ჩაწერის შეჩერება
+tray-resume-recording = ჩაწერის გაგრძელება
 tray-finish-recording = ჩაწერის დასრულება
-tray-quit = გასვლა Vmux
+tray-quit = Vmux-იდან გასვლა
 
 composer-attach-files = ფაილების მიმაგრება (/upload)
-composer-remove-attachment = დანართის წაშლა
+composer-remove-attachment = დანართის ამოშლა
 
 layout-back = უკან
 layout-forward = წინ
-layout-reload = გადატვირთვა
-layout-bookmark-page = მონიშნეთ ეს გვერდი
-layout-remove-bookmark = ამოიღეთ სანიშნე
-layout-pin-page = ჩამაგრება ეს გვერდი
-layout-unpin-page = ამ გვერდის ჩამაგრების მოხსნა
+layout-reload = ხელახლა ჩატვირთვა
+layout-bookmark-page = გვერდის სანიშნეებში დამატება
+layout-remove-bookmark = სანიშნის ამოშლა
+layout-pin-page = გვერდის მიმაგრება
+layout-unpin-page = გვერდის მოხსნა
 layout-manage-extensions = გაფართოებების მართვა
-layout-new-stack = ახალი დასტა
+layout-new-stack = ახალი სტეკი
 layout-close-tab = ჩანართის დახურვა
 layout-bookmark = სანიშნე
-layout-pin = პინი
+layout-pin = მიმაგრება
 layout-new-tab = ახალი ჩანართი
 layout-team = გუნდი
 
-command-switch-space = სივრცის გადართვა…
-command-search-ask = მოძებნეთ ან იკითხეთ…
-command-new-tab-placeholder = მოძებნეთ ან აკრიფეთ URL, ან აირჩიეთ ტერმინალი…
-command-placeholder = აკრიფეთ URL, მოძებნეთ ჩანართები ან > ბრძანებებისთვის…
-command-composer-placeholder = ჩაწერეთ / ბრძანებებისთვის ან @ მედიისთვის
+command-switch-space = გარემოს შეცვლა…
+command-search-ask = ძიება ან კითხვა…
+command-new-tab-placeholder = მოძებნეთ, შეიყვანეთ URL ან აირჩიეთ ტერმინალი…
+command-placeholder = შეიყვანეთ URL, მოძებნეთ ჩანართებში ან ბრძანებებისთვის აკრიფეთ >…
+command-composer-placeholder = ბრძანებებისთვის აკრიფეთ /, მედიისთვის — @
 command-send = გაგზავნა (Enter)
 command-terminal = ტერმინალი
-command-open-terminal = გახსენით ტერმინალში
-command-stack = დასტის
+command-open-terminal = ტერმინალში გახსნა
+command-stack = სტეკი
 command-tabs = { $count ->
     [one] 1 ჩანართი
-   *[other] { $count } ჩანართები
+   *[other] { $count } ჩანართი
 }
-command-prompt = მოწოდება
+command-prompt = პრომპტი
 command-new-tab = ახალი ჩანართი
 command-search = ძიება
-command-open-value = გახსენით „{ $value }“
-command-search-value = ძიება „{ $value }“
+command-open-value = „{ $value }“-ის გახსნა
+command-search-value = „{ $value }“-ის ძიება
 
-schema-appearance = გარეგნობა
-schema-general = გენერალი
+schema-appearance = იერსახე
+schema-general = ზოგადი
 schema-layout = განლაგება
-schema-layout-detail = ფანჯარა, პანელები, გვერდითი ზოლი და ფოკუსის რგოლი.
+schema-layout-detail = ფანჯარა, პანელები, გვერდითი ზოლი და ფოკუსის ჩარჩო.
 schema-agent = აგენტი
-schema-agent-detail = აგენტის ქცევა და ხელსაწყოს ნებართვები.
+schema-agent-detail = აგენტის ქცევა და ხელსაწყოების ნებართვები.
 schema-shortcuts = მალსახმობები
-schema-shortcuts-detail = მხოლოდ წაკითხვადი ხედი. შეცვალეთ settings.ron პირდაპირ, რომ შეცვალოთ საკინძები.
+schema-shortcuts-detail = მხოლოდ ნახვა. კომბინაციების შესაცვლელად პირდაპირ settings.ron ჩაასწორეთ.
 schema-terminal = ტერმინალი
 schema-browser = ბრაუზერი
 schema-mode = რეჟიმი
-schema-mode-detail = ფერადი სქემა ვებ გვერდებისთვის. მოწყობილობა მიჰყვება თქვენს სისტემას.
+schema-mode-detail = ვებგვერდების ფერთა სქემა. მოწყობილობა მიჰყვება სისტემურ პარამეტრს.
 schema-device = მოწყობილობა
-schema-light = სინათლე
-schema-dark = ბნელი
+schema-light = ღია
+schema-dark = მუქი
 schema-language = ენა
-schema-language-detail = გამოიყენეთ სისტემა, en-US, ja, ან ნებისმიერი BCP 47 ტეგი შესაბამისი ~/.vmux/locales/<tag>.ftl კატალოგით.
+schema-language-detail = გამოიყენეთ სისტემური, en-US, ja ან ნებისმიერი BCP 47 ტეგი შესაბამისი ~/.vmux/locales/<tag>.ftl კატალოგით.
 schema-auto-update = ავტომატური განახლება
-schema-auto-update-detail = შეამოწმეთ და დააინსტალირეთ განახლებები გაშვებისას და ყოველ საათში.
-schema-startup-url = გაშვება URL
-schema-startup-url-detail = ცარიელი ხსნის ბრძანების ზოლს.
+schema-auto-update-detail = განახლებების შემოწმება და დაყენება გაშვებისას და ყოველ საათში.
+schema-startup-url = საწყისი URL
+schema-startup-url-detail = ცარიელი მნიშვნელობა ხსნის ბრძანების ზოლის პრომპტს.
 schema-search-engine = საძიებო სისტემა
-schema-search-engine-detail = გამოიყენება ვებ ძიებისთვის Start-დან და ბრძანების ზოლიდან.
+schema-search-engine-detail = გამოიყენება ვებძიებისთვის დაწყების გვერდიდან და ბრძანების ზოლიდან.
 schema-window = ფანჯარა
 schema-pane = პანელი
 schema-side-sheet = გვერდითი ფურცელი
-schema-focus-ring = ფოკუსის ბეჭედი
-schema-run-placement = გაშვების განლაგების უგულებელყოფის დაშვება
-schema-run-placement-detail = მიეცით საშუალება აგენტებს აირჩიონ პანელის გაშვების რეჟიმი, მიმართულება და დამაგრება.
+schema-focus-ring = ფოკუსის ჩარჩო
+schema-run-placement = გაშვების მდებარეობის გადაფარვის დაშვება
+schema-run-placement-detail = მიეცით აგენტებს გაშვების პანელის რეჟიმის, მიმართულებისა და მიბმის წერტილის არჩევის უფლება.
 schema-leader = ლიდერი
-schema-leader-detail = პრეფიქსის ღილაკი აკორდის მალსახმობებისთვის.
-schema-chord-timeout = აკორდის დრო
-schema-chord-timeout-detail = მილიწამებით ადრე აკორდის პრეფიქსის ვადის ამოწურვამდე.
-schema-bindings = საკინძები
-schema-confirm-close = დაადასტურეთ დახურვა
-schema-confirm-close-detail = მოთხოვნა ტერმინალის დახურვამდე მიმდინარე პროცესით.
+schema-leader-detail = პრეფიქს-კლავიში ქორდული მალსახმობებისთვის.
+schema-chord-timeout = ქორდის ვადა
+schema-chord-timeout-detail = მილიწამები, სანამ ქორდის პრეფიქსი გაუქმდება.
+schema-bindings = კომბინაციები
+schema-confirm-close = დახურვის დადასტურება
+schema-confirm-close-detail = დადასტურების მოთხოვნა გაშვებული პროცესის მქონე ტერმინალის დახურვამდე.
 schema-default-theme = ნაგულისხმევი თემა
 schema-default-theme-detail = აქტიური თემის სახელი თემების სიიდან.

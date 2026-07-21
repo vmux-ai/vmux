@@ -4,75 +4,75 @@ common-install = ઇન્સ્ટોલ કરો
 common-uninstall = અનઇન્સ્ટોલ કરો
 common-update = અપડેટ કરો
 common-retry = ફરી પ્રયાસ કરો
-common-refresh = તાજું કરો
+common-refresh = રિફ્રેશ કરો
 common-remove = દૂર કરો
-common-enable = સક્ષમ કરો
-common-disable = અક્ષમ કરો
-common-new = નવી
+common-enable = ચાલુ કરો
+common-disable = બંધ કરો
+common-new = નવું
 common-active = સક્રિય
-common-running = દોડવું
+common-running = ચાલી રહ્યું છે
 common-done = પૂર્ણ
 common-failed = નિષ્ફળ
-common-installed = ઇન્સ્ટોલ કરેલ
+common-installed = ઇન્સ્ટોલ થયેલ
 common-items = { $count ->
     [one] { $count } આઇટમ
-   *[other] { $count } આઇટમ્સ
+   *[other] { $count } આઇટમ
 }
 start-title = શરૂ કરો
-start-tagline = એક પ્રોમ્પ્ટ. કંઈપણ, થઈ ગયું.
+start-tagline = એક prompt. કંઈ પણ, તૈયાર.
 
-agents-title = એજન્ટો
-agents-search = ACP અને CLI એજન્ટો શોધો...
-agents-empty = કોઈ મેળ ખાતા એજન્ટો નથી
-agents-empty-detail = નામ, રનટાઇમ અથવા ACP/CLI અજમાવી જુઓ.
-agents-install-failed = ઇન્સ્ટોલ નિષ્ફળ થયું
-agents-updating = અપડેટ કરી રહ્યું છે...
-agents-retrying = ફરી પ્રયાસ કરી રહ્યાં છીએ...
-agents-preparing = તૈયારી કરી રહ્યું છે...
+agents-title = એજન્ટ્સ
+agents-search = ACP અને CLI એજન્ટ્સ શોધો…
+agents-empty = મેળ ખાતા એજન્ટ્સ નથી
+agents-empty-detail = નામ, runtime અથવા ACP/CLI અજમાવો.
+agents-install-failed = ઇન્સ્ટોલ નિષ્ફળ
+agents-updating = અપડેટ થઈ રહ્યું છે…
+agents-retrying = ફરી પ્રયાસ થઈ રહ્યો છે…
+agents-preparing = તૈયારી થઈ રહી છે…
 
 extensions-title = એક્સ્ટેન્શન્સ
-extensions-search = ઇન્સ્ટોલ કરેલ શોધો અથવા Chrome Web Store…
-extensions-relaunch = અરજી કરવા માટે ફરીથી લોંચ કરો
-extensions-empty = કોઈ એક્સ્ટેંશન ઇન્સ્ટોલ કરેલ નથી
-extensions-no-match = કોઈ મેળ ખાતા એક્સ્ટેન્શન્સ નથી
-extensions-empty-detail = ઉપર Chrome Web Store શોધો અને Return દબાવો.
-extensions-no-match-detail = બીજું નામ અથવા એક્સ્ટેંશન ID અજમાવો.
+extensions-search = ઇન્સ્ટોલ થયેલ અથવા Chrome Web Store માં શોધો…
+extensions-relaunch = લાગુ કરવા ફરી શરૂ કરો
+extensions-empty = કોઈ એક્સ્ટેન્શન ઇન્સ્ટોલ નથી
+extensions-no-match = મેળ ખાતું એક્સ્ટેન્શન નથી
+extensions-empty-detail = ઉપર Chrome Web Store માં શોધો અને Return દબાવો.
+extensions-no-match-detail = બીજું નામ અથવા એક્સ્ટેન્શન ID અજમાવો.
 extensions-on = ચાલુ
 extensions-off = બંધ
-extensions-enable-confirm = { $name } ને સક્ષમ કરીએ?
-extensions-enable-permissions = { $name } ને સક્ષમ કરો અને મંજૂરી આપો:
+extensions-enable-confirm = { $name } ચાલુ કરવું છે?
+extensions-enable-permissions = { $name } ચાલુ કરો અને મંજૂરી આપો:
 
-lsp-title = ભાષા સર્વર્સ
-lsp-search = ભાષા સર્વર્સ, લિંટર, ફોર્મેટર્સ શોધો...
-lsp-loading = કેટલોગ લોડ કરી રહ્યું છે...
-lsp-empty = કોઈ મેળ ખાતા ભાષા સર્વર નથી
-lsp-empty-detail = બીજી ભાષા, લિંટર અથવા ફોર્મેટરનો પ્રયાસ કરો.
-lsp-needs = જરૂર છે { $tool }
-lsp-status-available = ઉપલબ્ધ છે
-lsp-status-on-path = PATH ના રોજ
-lsp-status-installing = ઇન્સ્ટોલ કરી રહ્યું છે...
-lsp-status-installed = ઇન્સ્ટોલ કરેલ
-lsp-status-outdated = અપડેટ ઉપલબ્ધ છે
-lsp-status-running = ચાલી રહી છે
+lsp-title = Language Servers
+lsp-search = language servers, linters, formatters શોધો…
+lsp-loading = કૅટલોગ લોડ થઈ રહ્યો છે…
+lsp-empty = મેળ ખાતા language servers નથી
+lsp-empty-detail = બીજી ભાષા, linter અથવા formatter અજમાવો.
+lsp-needs = { $tool } જરૂરી છે
+lsp-status-available = ઉપલબ્ધ
+lsp-status-on-path = PATH પર
+lsp-status-installing = ઇન્સ્ટોલ થઈ રહ્યું છે…
+lsp-status-installed = ઇન્સ્ટોલ થયેલ
+lsp-status-outdated = અપડેટ ઉપલબ્ધ
+lsp-status-running = ચાલી રહ્યું છે
 lsp-status-failed = નિષ્ફળ
 
-spaces-title = જગ્યાઓ
-spaces-new-placeholder = નવી જગ્યા નામ
-spaces-empty = કોઈ જગ્યા નથી
-spaces-default-name = જગ્યા { $number }
+spaces-title = વર્કસ્પેસ
+spaces-new-placeholder = નવા વર્કસ્પેસનું નામ
+spaces-empty = કોઈ વર્કસ્પેસ નથી
+spaces-default-name = વર્કસ્પેસ { $number }
 spaces-tabs = { $count ->
-    [one] 1 ટેબ
-   *[other] { $count } ટૅબ્સ
+    [one] 1 ટૅબ
+   *[other] { $count } ટૅબ
 }
-spaces-delete = જગ્યા કાઢી નાખો
+spaces-delete = વર્કસ્પેસ કાઢી નાખો
 
 team-title = ટીમ
-team-just-you = આ જગ્યામાં ફક્ત તમે
+team-just-you = આ વર્કસ્પેસમાં માત્ર તમે
 team-agents = { $count ->
     [one] તમે અને 1 એજન્ટ
-   *[other] તમે અને { $count } એજન્ટો
+   *[other] તમે અને { $count } એજન્ટ્સ
 }
-team-empty = હજુ સુધી અહીં કોઈ નથી
+team-empty = હજી અહીં કોઈ નથી
 team-you = તમે
 team-agent = એજન્ટ
 
@@ -81,64 +81,64 @@ services-processes = { $count ->
     [one] 1 પ્રક્રિયા
    *[other] { $count } પ્રક્રિયાઓ
 }
-services-kill-all = બધાને મારી નાખો
+services-kill-all = બધું બંધ કરો
 services-not-running = સેવા ચાલી રહી નથી
-services-start-with = આનાથી પ્રારંભ કરો:
-services-empty = કોઈ સક્રિય પ્રક્રિયાઓ નથી
-services-filter = ફિલ્ટર પ્રક્રિયાઓ...
-services-no-match = કોઈ મેળ ખાતી પ્રક્રિયાઓ નથી
-services-connected = કનેક્ટેડ
-services-disconnected = ડિસ્કનેક્ટ
+services-start-with = આથી શરૂ કરો:
+services-empty = કોઈ સક્રિય પ્રક્રિયા નથી
+services-filter = પ્રક્રિયાઓ ફિલ્ટર કરો…
+services-no-match = મેળ ખાતી પ્રક્રિયા નથી
+services-connected = જોડાયેલ
+services-disconnected = ડિસ્કનેક્ટેડ
 services-attached = જોડાયેલ
-services-kill = મારી નાખો
-services-memory = સ્મૃતિ
+services-kill = બળજબરીથી બંધ કરો
+services-memory = મેમરી
 services-size = કદ
-services-shell = શેલ
+services-shell = Shell
 
 error-title = ભૂલ
 
-history-search = શોધ ઇતિહાસ
-history-clear-all = બધા સાફ કરો
-history-clear-confirm = બધો ઇતિહાસ સાફ કરીએ?
-history-clear-warning = આ પૂર્વવત્ કરી શકાતું નથી.
+history-search = ઇતિહાસ શોધો
+history-clear-all = બધું સાફ કરો
+history-clear-confirm = આખો ઇતિહાસ સાફ કરવો છે?
+history-clear-warning = આ પાછું ફેરવી શકાશે નહીં.
 history-cancel = રદ કરો
 history-today = આજે
 history-yesterday = ગઈકાલે
-history-days-ago = { $count } દિવસ પહેલા
+history-days-ago = { $count } દિવસ પહેલાં
 history-day-offset = દિવસ -{ $count }
 
 settings-title = સેટિંગ્સ
-settings-loading = સેટિંગ્સ લોડ કરી રહ્યું છે...
+settings-loading = સેટિંગ્સ લોડ થઈ રહી છે…
 settings-stored = ~/.vmux/settings.ron માં સંગ્રહિત
 settings-other = અન્ય
 settings-software-update = સોફ્ટવેર અપડેટ
-settings-check-updates = અપડેટ્સ માટે તપાસો
-settings-check-updates-hint = જ્યારે સ્વતઃ-અપડેટ સક્ષમ હોય ત્યારે લોંચ પર અને દર કલાકે આપમેળે તપાસ કરે છે.
-settings-update-unavailable = અનુપલબ્ધ
-settings-update-unavailable-hint = અપડેટર આ બિલ્ડમાં સમાવેલ નથી.
-settings-update-checking = તપાસી રહ્યું છે...
-settings-update-checking-hint = અપડેટ માટે તપાસી રહ્યું છે...
+settings-check-updates = અપડેટ્સ તપાસો
+settings-check-updates-hint = Auto-update ચાલુ હોય ત્યારે લૉન્ચ સમયે અને દર કલાકે આપમેળે તપાસે છે.
+settings-update-unavailable = ઉપલબ્ધ નથી
+settings-update-unavailable-hint = આ બિલ્ડમાં updater સામેલ નથી.
+settings-update-checking = તપાસી રહ્યું છે…
+settings-update-checking-hint = અપડેટ્સ તપાસી રહ્યું છે…
 settings-update-check-again = ફરી તપાસો
-settings-update-current = Vmux અપ ટુ ડેટ છે.
-settings-update-downloading = ડાઉનલોડ કરી રહ્યું છે...
-settings-update-downloading-hint = ડાઉનલોડ કરી રહ્યું છે Vmux { $version }…
-settings-update-installing = ઇન્સ્ટોલ કરી રહ્યું છે...
-settings-update-installing-hint = Vmux { $version } ઇન્સ્ટોલ કરી રહ્યું છે…
+settings-update-current = Vmux અદ્યતન છે.
+settings-update-downloading = ડાઉનલોડ થઈ રહ્યું છે…
+settings-update-downloading-hint = Vmux { $version } ડાઉનલોડ થઈ રહ્યું છે…
+settings-update-installing = ઇન્સ્ટોલ થઈ રહ્યું છે…
+settings-update-installing-hint = Vmux { $version } ઇન્સ્ટોલ થઈ રહ્યું છે…
 settings-update-ready = અપડેટ તૈયાર
-settings-update-ready-hint = Vmux { $version } તૈયાર છે. તેને લાગુ કરવા માટે પુનઃપ્રારંભ કરો.
+settings-update-ready-hint = Vmux { $version } તૈયાર છે. લાગુ કરવા ફરી શરૂ કરો.
 settings-update-try-again = ફરી પ્રયાસ કરો
-settings-update-failed = અપડેટ્સ તપાસવામાં અસમર્થ.
-settings-item = વસ્તુ
+settings-update-failed = અપડેટ્સ તપાસી શક્યાં નથી.
+settings-item = આઇટમ
 settings-item-number = આઇટમ { $number }
-settings-press-key = એક કી દબાવો...
-settings-saved = સાચવેલ
-settings-record-key = નવી કી કોમ્બો રેકોર્ડ કરવા માટે ક્લિક કરો
+settings-press-key = કોઈ કી દબાવો…
+settings-saved = સાચવ્યું
+settings-record-key = નવું કી કોમ્બો રેકોર્ડ કરવા ક્લિક કરો
 
 tray-open-window = વિન્ડો ખોલો
 tray-close-window = વિન્ડો બંધ કરો
 tray-pause-recording = રેકોર્ડિંગ થોભાવો
 tray-resume-recording = રેકોર્ડિંગ ફરી શરૂ કરો
-tray-finish-recording = રેકોર્ડિંગ સમાપ્ત કરો
+tray-finish-recording = રેકોર્ડિંગ પૂર્ણ કરો
 tray-quit = Vmux છોડો
 
 composer-attach-files = ફાઇલો જોડો (/upload)
@@ -146,73 +146,73 @@ composer-remove-attachment = જોડાણ દૂર કરો
 
 layout-back = પાછળ
 layout-forward = આગળ
-layout-reload = ફરીથી લોડ કરો
-layout-bookmark-page = આ પૃષ્ઠને બુકમાર્ક કરો
+layout-reload = ફરી લોડ કરો
+layout-bookmark-page = આ પેજ બુકમાર્ક કરો
 layout-remove-bookmark = બુકમાર્ક દૂર કરો
-layout-pin-page = આ પૃષ્ઠને પિન કરો
-layout-unpin-page = આ પૃષ્ઠને અનપિન કરો
-layout-manage-extensions = એક્સ્ટેંશન મેનેજ કરો
+layout-pin-page = આ પેજ પિન કરો
+layout-unpin-page = આ પેજ અનપિન કરો
+layout-manage-extensions = એક્સ્ટેન્શન્સ મેનેજ કરો
 layout-new-stack = નવો સ્ટેક
-layout-close-tab = ટેબ બંધ કરો
+layout-close-tab = ટૅબ બંધ કરો
 layout-bookmark = બુકમાર્ક
-layout-pin = પિન
-layout-new-tab = નવી ટેબ
+layout-pin = પિન કરો
+layout-new-tab = નવી ટૅબ
 layout-team = ટીમ
 
-command-switch-space = જગ્યા સ્વિચ કરો...
-command-search-ask = શોધો અથવા પૂછો...
-command-new-tab-placeholder = શોધો અથવા URL લખો, અથવા ટર્મિનલ પસંદ કરો...
-command-placeholder = આદેશો માટે URL, શોધ ટેબ અથવા > લખો...
-command-composer-placeholder = આદેશો માટે / અથવા મીડિયા માટે @ લખો
+command-switch-space = વર્કસ્પેસ બદલો…
+command-search-ask = શોધો અથવા પૂછો…
+command-new-tab-placeholder = શોધો અથવા URL લખો, અથવા Terminal પસંદ કરો…
+command-placeholder = URL લખો, ટૅબ શોધો, અથવા કમાન્ડ માટે > લખો…
+command-composer-placeholder = કમાન્ડ માટે / અથવા મીડિયા માટે @ લખો
 command-send = મોકલો (Enter)
-command-terminal = ટર્મિનલ
-command-open-terminal = ટર્મિનલમાં ખોલો
+command-terminal = Terminal
+command-open-terminal = Terminal માં ખોલો
 command-stack = સ્ટેક
 command-tabs = { $count ->
-    [one] 1 ટેબ
-   *[other] { $count } ટૅબ્સ
+    [one] 1 ટૅબ
+   *[other] { $count } ટૅબ
 }
-command-prompt = પ્રોમ્પ્ટ
-command-new-tab = નવી ટેબ
+command-prompt = Prompt
+command-new-tab = નવી ટૅબ
 command-search = શોધો
 command-open-value = “{ $value }” ખોલો
 command-search-value = “{ $value }” શોધો
 
 schema-appearance = દેખાવ
-schema-general = જનરલ
+schema-general = સામાન્ય
 schema-layout = લેઆઉટ
-schema-layout-detail = વિન્ડો, ફલક, સાઇડબાર અને ફોકસ રિંગ.
+schema-layout-detail = વિન્ડો, પેન, સાઇડબાર અને ફોકસ રિંગ.
 schema-agent = એજન્ટ
-schema-agent-detail = એજન્ટ વર્તન અને સાધન પરવાનગીઓ.
-schema-shortcuts = શૉર્ટકટ્સ
-schema-shortcuts-detail = ફક્ત વાંચવા માટેનું દૃશ્ય. બાઈન્ડિંગ્સ બદલવા માટે સીધા જ settings.ron ને સંપાદિત કરો.
-schema-terminal = ટર્મિનલ
+schema-agent-detail = એજન્ટનું વર્તન અને ટૂલ પરવાનગીઓ.
+schema-shortcuts = શોર્ટકટ્સ
+schema-shortcuts-detail = માત્ર વાંચવા માટે. bindings બદલવા settings.ron સીધું સંપાદિત કરો.
+schema-terminal = Terminal
 schema-browser = બ્રાઉઝર
 schema-mode = મોડ
-schema-mode-detail = વેબ પૃષ્ઠો માટે રંગ યોજના. ઉપકરણ તમારી સિસ્ટમને અનુસરે છે.
-schema-device = ઉપકરણ
-schema-light = પ્રકાશ
-schema-dark = શ્યામ
+schema-mode-detail = વેબ પેજ માટે રંગ યોજના. Device તમારા સિસ્ટમને અનુસરે છે.
+schema-device = Device
+schema-light = લાઇટ
+schema-dark = ડાર્ક
 schema-language = ભાષા
-schema-language-detail = સિસ્ટમનો ઉપયોગ કરો, en-US, ja, અથવા કોઈપણ BCP 47 ટૅગ મેળ ખાતા ~/.vmux/locales/<tag>.ftl કૅટેલોગ સાથે.
-schema-auto-update = સ્વતઃ અપડેટ
-schema-auto-update-detail = લોંચ અને દર કલાકે અપડેટ્સ માટે તપાસો અને ઇન્સ્ટોલ કરો.
-schema-startup-url = સ્ટાર્ટઅપ URL
-schema-startup-url-detail = ખાલી કમાન્ડ બાર પ્રોમ્પ્ટ ખોલે છે.
+schema-language-detail = system, en-US, ja, અથવા મેળ ખાતા ~/.vmux/locales/<tag>.ftl કૅટલોગ સાથે કોઈપણ BCP 47 tag વાપરો.
+schema-auto-update = Auto-update
+schema-auto-update-detail = લૉન્ચ સમયે અને દર કલાકે અપડેટ્સ તપાસો અને ઇન્સ્ટોલ કરો.
+schema-startup-url = શરૂઆતનું URL
+schema-startup-url-detail = ખાલી હોય તો કમાન્ડ બાર prompt ખૂલે છે.
 schema-search-engine = શોધ એન્જિન
-schema-search-engine-detail = સ્ટાર્ટ અને કમાન્ડ બારમાંથી વેબ શોધ માટે વપરાય છે.
-schema-window = બારી
-schema-pane = ફલક
+schema-search-engine-detail = Start અને કમાન્ડ બારમાંથી વેબ શોધ માટે વપરાય છે.
+schema-window = વિન્ડો
+schema-pane = પેન
 schema-side-sheet = સાઇડ શીટ
 schema-focus-ring = ફોકસ રિંગ
-schema-run-placement = પ્લેસમેન્ટ ઓવરરાઇડ ચલાવવાની મંજૂરી આપો
-schema-run-placement-detail = એજન્ટોને રન પેન મોડ, દિશા અને એન્કર પસંદ કરવા દો.
-schema-leader = નેતા
-schema-leader-detail = તાર શૉર્ટકટ્સ માટે ઉપસર્ગ કી.
-schema-chord-timeout = કોર્ડ સમયસમાપ્તિ
-schema-chord-timeout-detail = તાર ઉપસર્ગ સમાપ્ત થાય તે પહેલાં મિલિસેકન્ડ્સ.
-schema-bindings = બાઈન્ડિંગ્સ
-schema-confirm-close = બંધની પુષ્ટિ કરો
-schema-confirm-close-detail = ચાલતી પ્રક્રિયા સાથે ટર્મિનલ બંધ કરતા પહેલા પ્રોમ્પ્ટ કરો.
-schema-default-theme = ડિફૉલ્ટ થીમ
-schema-default-theme-detail = થીમ સૂચિમાંથી સક્રિય થીમનું નામ.
+schema-run-placement = run placement override મંજૂર કરો
+schema-run-placement-detail = એજન્ટ્સને run પેન મોડ, દિશા અને anchor પસંદ કરવા દો.
+schema-leader = લીડર
+schema-leader-detail = chord શોર્ટકટ્સ માટે prefix કી.
+schema-chord-timeout = Chord timeout
+schema-chord-timeout-detail = chord prefix સમાપ્ત થાય તે પહેલાંના મિલિસેકન્ડ.
+schema-bindings = Bindings
+schema-confirm-close = બંધ કરતા પહેલાં પુષ્ટિ
+schema-confirm-close-detail = ચાલી રહેલી પ્રક્રિયા ધરાવતા terminal ને બંધ કરતા પહેલાં પૂછો.
+schema-default-theme = ડિફોલ્ટ થીમ
+schema-default-theme-detail = થીમ્સ સૂચિમાંથી સક્રિય થીમનું નામ.

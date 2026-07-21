@@ -1,17 +1,17 @@
 common-open = Iepenje
-common-close = Slút
+common-close = Slute
 common-install = Ynstallearje
-common-uninstall = Uninstall
-common-update = Update
+common-uninstall = De-ynstallearje
+common-update = Bywurkje
 common-retry = Opnij besykje
-common-refresh = Ferfarskje
+common-refresh = Fernije
 common-remove = Fuortsmite
 common-enable = Ynskeakelje
 common-disable = Utskeakelje
 common-new = Nij
 common-active = aktyf
-common-running = running
-common-done = dien
+common-running = rint
+common-done = klear
 common-failed = Mislearre
 common-installed = Ynstallearre
 common-items = { $count ->
@@ -19,200 +19,200 @@ common-items = { $count ->
    *[other] { $count } items
 }
 start-title = Start
-start-tagline = Ien prompt. Alles, dien.
+start-tagline = Ien prompt. Alles dien.
 
-agents-title = Aginten
-agents-search = Sykje ACP en CLI aginten ...
-agents-empty = Gjin oerienkommende aginten
-agents-empty-detail = Besykje in namme, runtime, of ACP/CLI.
+agents-title = Agents
+agents-search = Sykje ACP- en CLI-agents…
+agents-empty = Gjin oerienkommende agents
+agents-empty-detail = Besykje in namme, runtime of ACP/CLI.
 agents-install-failed = Ynstallaasje mislearre
-agents-updating = Bywurkje...
-agents-retrying = Opnij besykje...
-agents-preparing = Tariede…
+agents-updating = Wurdt bywurke…
+agents-retrying = Wurdt opnij besocht…
+agents-preparing = Wurdt taret…
 
-extensions-title = Tafoegings
-extensions-search = Sykje ynstalleare of Chrome Web Store...
-extensions-relaunch = Relaunch om oan te freegjen
-extensions-empty = Gjin tafoegings ynstallearre
-extensions-no-match = Gjin oerienkommende tafoegings
-extensions-empty-detail = Sykje de Chrome Web Store hjirboppe en druk op Return.
-extensions-no-match-detail = Besykje in oare namme of tafoeging ID.
+extensions-title = Utwreidingen
+extensions-search = Sykje ynstallearre of Chrome Web Store…
+extensions-relaunch = Opnij starte om ta te passen
+extensions-empty = Gjin utwreidingen ynstallearre
+extensions-no-match = Gjin oerienkommende utwreidingen
+extensions-empty-detail = Sykje hjirboppe yn de Chrome Web Store en druk op Enter.
+extensions-no-match-detail = Besykje in oare namme of utwreidings-ID.
 extensions-on = Oan
-extensions-off = Off
+extensions-off = Ut
 extensions-enable-confirm = { $name } ynskeakelje?
 extensions-enable-permissions = { $name } ynskeakelje en tastean:
 
 lsp-title = Taalservers
-lsp-search = Sykje taalservers, linters, formatters ...
-lsp-loading = Katalogus laden…
-lsp-empty = Gjin oerienkommende taaltsjinners
-lsp-empty-detail = Besykje in oare taal, linter, of formatter.
-lsp-needs = moat { $tool }
+lsp-search = Sykje taalservers, linters, formatters…
+lsp-loading = Katalogus wurdt laden…
+lsp-empty = Gjin oerienkommende taalservers
+lsp-empty-detail = Besykje in oare taal, linter of formatter.
+lsp-needs = hat { $tool } nedich
 lsp-status-available = Beskikber
 lsp-status-on-path = Op PATH
-lsp-status-installing = Ynstallearje…
+lsp-status-installing = Wurdt ynstallearre…
 lsp-status-installed = Ynstallearre
 lsp-status-outdated = Update beskikber
-lsp-status-running = Running
+lsp-status-running = Rint
 lsp-status-failed = Mislearre
 
-spaces-title = Spaasjes
-spaces-new-placeholder = Nije romte namme
-spaces-empty = Gjin spaasjes
-spaces-default-name = Spaasje { $number }
+spaces-title = Romten
+spaces-new-placeholder = Namme fan nije romte
+spaces-empty = Gjin romten
+spaces-default-name = Romte { $number }
 spaces-tabs = { $count ->
-    [one] 1 tabje
+    [one] 1 ljepper
    *[other] { $count } ljeppers
 }
-spaces-delete = Wiskje romte
+spaces-delete = Romte wiskje
 
 team-title = Team
-team-just-you = Krekt jo yn dizze romte
+team-just-you = Allinnich do yn dizze romte
 team-agents = { $count ->
-    [one] Jo en 1 agent
-   *[other] Jo en { $count } aginten
+    [one] Do en 1 agent
+   *[other] Do en { $count } agents
 }
-team-empty = Hjir noch gjinien
-team-you = Jo
+team-empty = Hjir is noch nimmen
+team-you = Do
 team-agent = Agent
 
-services-title = Eftergrûn Tsjinsten
+services-title = Eftergrûntsjinsten
 services-processes = { $count ->
     [one] 1 proses
    *[other] { $count } prosessen
 }
-services-kill-all = Deadzje All
+services-kill-all = Alles forsearre stopje
 services-not-running = Tsjinst rint net
-services-start-with = Begjin mei:
+services-start-with = Starte mei:
 services-empty = Gjin aktive prosessen
-services-filter = Filterprosessen...
+services-filter = Prosessen filterje…
 services-no-match = Gjin oerienkommende prosessen
 services-connected = Ferbûn
-services-disconnected = Ferbûn
-services-attached = taheakke
-services-kill = Deadzje
+services-disconnected = Net ferbûn
+services-attached = keppele
+services-kill = Forsearre stopje
 services-memory = Unthâld
 services-size = Grutte
 services-shell = Shell
 
 error-title = Flater
 
-history-search = Sykskiednis
+history-search = Skiednis sykje
 history-clear-all = Alles wiskje
-history-clear-confirm = Alle skiednis wiskje?
+history-clear-confirm = Hiele skiednis wiskje?
 history-clear-warning = Dit kin net ûngedien makke wurde.
-history-cancel = Ofbrekke
+history-cancel = Annulearje
 history-today = Hjoed
 history-yesterday = Juster
 history-days-ago = { $count } dagen lyn
 history-day-offset = Dei -{ $count }
 
-settings-title = Ynstellings
-settings-loading = Ynstellings laden…
+settings-title = Ynstellingen
+settings-loading = Ynstellingen wurde laden…
 settings-stored = Opslein yn ~/.vmux/settings.ron
-settings-other = Oare
-settings-software-update = Software Update
-settings-check-updates = Kontrolearje op Updates
-settings-check-updates-hint = Kontrolearret automatysk by lansearring en elk oere as Auto-fernijing ynskeakele is.
+settings-other = Oars
+settings-software-update = Software-update
+settings-check-updates = Kontrolearje op updates
+settings-check-updates-hint = Kontrolearret automatysk by it starten en elk oere as Auto-update ynskeakele is.
 settings-update-unavailable = Net beskikber
-settings-update-unavailable-hint = Updater is net opnommen yn dizze build.
-settings-update-checking = Kontrolearje…
-settings-update-checking-hint = Kontrolearje op updates...
-settings-update-check-again = Kontrolearje nochris
-settings-update-current = Vmux is bywurke.
-settings-update-downloading = Ynladen…
-settings-update-downloading-hint = Downloading Vmux { $version }...
-settings-update-installing = Ynstallearje…
-settings-update-installing-hint = Ynstallearje Vmux { $version }...
-settings-update-ready = Update Ready
-settings-update-ready-hint = Vmux { $version } is klear. Begjin opnij om it oan te passen.
-settings-update-try-again = Besykje nochris
-settings-update-failed = Kin net kontrolearje op updates.
+settings-update-unavailable-hint = De updater sit net yn dizze build.
+settings-update-checking = Wurdt kontrolearre…
+settings-update-checking-hint = Kontrolearret op updates…
+settings-update-check-again = Opnij kontrolearje
+settings-update-current = Vmux is by de tiid.
+settings-update-downloading = Wurdt ynladen…
+settings-update-downloading-hint = Vmux { $version } wurdt ynladen…
+settings-update-installing = Wurdt ynstallearre…
+settings-update-installing-hint = Vmux { $version } wurdt ynstallearre…
+settings-update-ready = Update klear
+settings-update-ready-hint = Vmux { $version } is klear. Start opnij om ta te passen.
+settings-update-try-again = Opnij besykje
+settings-update-failed = Kin net op updates kontrolearje.
 settings-item = Item
 settings-item-number = Item { $number }
-settings-press-key = Druk op in toets ...
+settings-press-key = Druk op in toets…
 settings-saved = Opslein
-settings-record-key = Klikje om in nije toetskombinaasje op te nimmen
+settings-record-key = Klik om in nije toetskombinaasje op te nimmen
 
 tray-open-window = Finster iepenje
 tray-close-window = Finster slute
-tray-pause-recording = Pauze opname
-tray-resume-recording = Ferfetsje opname
-tray-finish-recording = Finish Recording
+tray-pause-recording = Opname pauzearje
+tray-resume-recording = Opname ferfetsje
+tray-finish-recording = Opname ôfmeitsje
 tray-quit = Vmux ôfslute
 
-composer-attach-files = Triemmen taheakje (/upload)
-composer-remove-attachment = Fuortsmite taheaksel
+composer-attach-files = Bestannen taheakje (/upload)
+composer-remove-attachment = Taheakke bestân fuortsmite
 
-layout-back = Werom
+layout-back = Tebek
 layout-forward = Foarút
-layout-reload = Reload
-layout-bookmark-page = Blêdwizer dizze side
+layout-reload = Opnij lade
+layout-bookmark-page = Dizze side blêdwizerje
 layout-remove-bookmark = Blêdwizer fuortsmite
-layout-pin-page = Pin dizze side
+layout-pin-page = Dizze side fêstsette
 layout-unpin-page = Dizze side losmeitsje
-layout-manage-extensions = Beheare útwreidingen
-layout-new-stack = Nije Stack
-layout-close-tab = Ljepblêd slute
+layout-manage-extensions = Utwreidingen beheare
+layout-new-stack = Nije steapel
+layout-close-tab = Ljepper slute
 layout-bookmark = Blêdwizer
-layout-pin = Pin
+layout-pin = Fêstsette
 layout-new-tab = Nije ljepper
 layout-team = Team
 
-command-switch-space = Skeakelje romte...
+command-switch-space = Wikselje fan romte…
 command-search-ask = Sykje of freegje…
-command-new-tab-placeholder = Sykje of typ in URL, of selektearje Terminal ...
-command-placeholder = Typ in URL, sykljepblêden, of > foar kommando's ...
-command-composer-placeholder = Typ / foar kommando's of @ foar media
-command-send = Stjoer (Enter)
+command-new-tab-placeholder = Sykje of typ in URL, of kies Terminal…
+command-placeholder = Typ in URL, sykje ljeppers, of > foar kommando’s…
+command-composer-placeholder = Typ / foar kommando’s of @ foar media
+command-send = Ferstjoere (Enter)
 command-terminal = Terminal
 command-open-terminal = Iepenje yn Terminal
-command-stack = Stapel
+command-stack = Steapel
 command-tabs = { $count ->
-    [one] 1 tabje
+    [one] 1 ljepper
    *[other] { $count } ljeppers
 }
 command-prompt = Prompt
 command-new-tab = Nije ljepper
 command-search = Sykje
-command-open-value = Iepenje "{ $value }"
-command-search-value = Sykje "{ $value }"
+command-open-value = “{ $value }” iepenje
+command-search-value = “{ $value }” sykje
 
 schema-appearance = Uterlik
 schema-general = Algemien
-schema-layout = Layout
-schema-layout-detail = Finster, ruten, sydbalke en fokusring.
+schema-layout = Yndieling
+schema-layout-detail = Finster, panielen, sydbalke en fokusring.
 schema-agent = Agent
-schema-agent-detail = Agent gedrach en ark tastimmingen.
+schema-agent-detail = Gedrach fan agents en tastimmingen foar ark.
 schema-shortcuts = Fluchtoetsen
-schema-shortcuts-detail = Allinnich lêzen werjefte. Bewurkje settings.ron direkt om bindingen te feroarjen.
+schema-shortcuts-detail = Allinnich lêze. Bewurkje settings.ron direkt om toetsbiningen te feroarjen.
 schema-terminal = Terminal
 schema-browser = Browser
-schema-mode = Mode
-schema-mode-detail = Kleurskema foar websiden. Apparaat folget jo systeem.
+schema-mode = Modus
+schema-mode-detail = Kleurenskema foar websiden. Apparaat folget dyn systeem.
 schema-device = Apparaat
 schema-light = Ljocht
-schema-dark = Dûnker
+schema-dark = Donker
 schema-language = Taal
-schema-language-detail = Brûk systeem, en-US, ja, of hokker BCP 47 tag mei in oerienkommende ~/.vmux/locales/<tag>.ftl katalogus.
+schema-language-detail = Brûk systeem, en-US, ja, of in BCP 47-tag mei in oerienkommende ~/.vmux/locales/<tag>.ftl-katalogus.
 schema-auto-update = Auto-update
-schema-auto-update-detail = Kontrolearje en ynstallearje updates by lansearring en elk oere.
-schema-startup-url = Opstarten URL
-schema-startup-url-detail = Leech iepent de kommandobalke-prompt.
+schema-auto-update-detail = Kontrolearje op en ynstallearje updates by it starten en elk oere.
+schema-startup-url = Opstart-URL
+schema-startup-url-detail = Leech iepenet de prompt yn de kommandobalke.
 schema-search-engine = Sykmasine
-schema-search-engine-detail = Wurdt brûkt foar sykaksjes op it web fan Start en de kommandobalke.
+schema-search-engine-detail = Brûkt foar websykjen fanút Start en de kommandobalke.
 schema-window = Finster
-schema-pane = Pane
-schema-side-sheet = Sideblêd
-schema-focus-ring = Fokus ring
-schema-run-placement = Tastean run pleatsing oerskriuwe
-schema-run-placement-detail = Lit aginten kieze run pane modus, rjochting en anker.
+schema-pane = Paniel
+schema-side-sheet = Sydblêd
+schema-focus-ring = Fokusring
+schema-run-placement = Oerskriuwen fan útfierpleatsing tastean
+schema-run-placement-detail = Lit agents panielmodus, rjochting en anker foar útfiering kieze.
 schema-leader = Leader
-schema-leader-detail = Prefix-kaai foar akkoard fluchtoetsen.
-schema-chord-timeout = Akkoard timeout
-schema-chord-timeout-detail = Millisekonden foardat in akkoardfoarheaksel ferrint.
-schema-bindings = Binings
-schema-confirm-close = Befêstigje slute
-schema-confirm-close-detail = Freegje foardat jo in terminal slute mei in rinnend proses.
-schema-default-theme = Standert tema
+schema-leader-detail = Foarheaktoets foar chord-fluchtoetsen.
+schema-chord-timeout = Chord-time-out
+schema-chord-timeout-detail = Millisekonden oant in chord-foarheak ferrint.
+schema-bindings = Toetsbiningen
+schema-confirm-close = Sluten befêstigje
+schema-confirm-close-detail = Freegje om befêstiging foar it sluten fan in terminal mei in rinnend proses.
+schema-default-theme = Standerttema
 schema-default-theme-detail = Namme fan it aktive tema út de temalist.

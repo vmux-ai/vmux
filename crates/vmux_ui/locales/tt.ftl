@@ -3,15 +3,15 @@ common-close = Ябу
 common-install = Урнаштыру
 common-uninstall = Бетерү
 common-update = Яңарту
-common-retry = Кабатлап карау
+common-retry = Кабатлау
 common-refresh = Яңарту
-common-remove = Бетерү
-common-enable = Эшләтү
+common-remove = Алып кую
+common-enable = Кушу
 common-disable = Сүндерү
 common-new = Яңа
 common-active = актив
 common-running = эшли
-common-done = эшләнде
+common-done = әзер
 common-failed = Уңышсыз
 common-installed = Урнаштырылган
 common-items = { $count ->
@@ -19,87 +19,87 @@ common-items = { $count ->
    *[other] { $count } элемент
 }
 start-title = Башлау
-start-tagline = Бер боерык. Теләсә нәрсә, эшләнде.
+start-tagline = Бер prompt. Теләсә нәрсә — әзер.
 
 agents-title = Агентлар
 agents-search = ACP һәм CLI агентларын эзләү…
-agents-empty = Туры килүче агентлар юк
-agents-empty-detail = Исем, эш мохите яки ACP/CLI белән сынагыз.
-agents-install-failed = Урнаштыру уңышсыз
+agents-empty = Туры килгән агентлар юк
+agents-empty-detail = Исем, башкару мохите яки ACP/CLI буенча эзләгез.
+agents-install-failed = Урнаштырып булмады
 agents-updating = Яңартыла…
 agents-retrying = Кабатлана…
 agents-preparing = Әзерләнә…
 
-extensions-title = Киңәйтмәләр
-extensions-search = Урнаштырылганнарны яки Chrome Web Store'ны эзләү…
-extensions-relaunch = Кулланыр өчен яңадан башлатыгыз
-extensions-empty = Урнаштырылган киңәйтмәләр юк
-extensions-no-match = Туры килүче киңәйтмәләр юк
-extensions-empty-detail = Югарыдагы Chrome Web Store'дан эзләгез һәм Return басыгыз.
-extensions-no-match-detail = Башка исем яки киңәйтмә идентификаторын сынагыз.
-extensions-on = Эшли
-extensions-off = Эшләми
-extensions-enable-confirm = { $name } эшләтергәме?
-extensions-enable-permissions = { $name } эшләтү һәм рөхсәт бирү:
+extensions-title = Өстәмәләр
+extensions-search = Урнаштырылганнардан яки Chrome Web Store’дан эзләү…
+extensions-relaunch = Куллану өчен яңадан җибәрегез
+extensions-empty = Урнаштырылган өстәмәләр юк
+extensions-no-match = Туры килгән өстәмәләр юк
+extensions-empty-detail = Өстәге Chrome Web Store эзләвенә языгыз һәм Return басыгыз.
+extensions-no-match-detail = Башка исем яки өстәмә ID’сын сынагыз.
+extensions-on = Кабызылган
+extensions-off = Сүндерелгән
+extensions-enable-confirm = { $name } өстәмәсен кушаргамы?
+extensions-enable-permissions = { $name } өстәмәсен кушу һәм рөхсәт итү:
 
-lsp-title = Тел Серверлары
-lsp-search = Тел серверларын, линтерларны, форматлаучыларны эзләү…
+lsp-title = Тел серверлары
+lsp-search = Тел серверларын, линтерларны, форматлагычларны эзләү…
 lsp-loading = Каталог йөкләнә…
-lsp-empty = Туры килүче тел серверлары юк
-lsp-empty-detail = Башка тел, линтер яки форматлаучы сынагыз.
+lsp-empty = Туры килгән тел серверлары юк
+lsp-empty-detail = Башка тел, линтер яки форматлагычны сынагыз.
 lsp-needs = { $tool } кирәк
-lsp-status-available = Мөмкин
-lsp-status-on-path = PATH'та
+lsp-status-available = Бар
+lsp-status-on-path = PATH’та
 lsp-status-installing = Урнаштырыла…
 lsp-status-installed = Урнаштырылган
 lsp-status-outdated = Яңарту бар
 lsp-status-running = Эшли
 lsp-status-failed = Уңышсыз
 
-spaces-title = Урыннар
-spaces-new-placeholder = Яңа урын исеме
-spaces-empty = Урыннар юк
-spaces-default-name = Урын { $number }
+spaces-title = Мохитләр
+spaces-new-placeholder = Яңа мохит исеме
+spaces-empty = Мохитләр юк
+spaces-default-name = Мохит { $number }
 spaces-tabs = { $count ->
-    [one] 1 таб
-   *[other] { $count } таб
+    [one] 1 кыстыргыч
+   *[other] { $count } кыстыргыч
 }
-spaces-delete = Урынны бетерү
+spaces-delete = Мохитне бетерү
 
 team-title = Команда
-team-just-you = Бу урында сез генә
+team-just-you = Бу мохиттә әлегә сез генә
 team-agents = { $count ->
     [one] Сез һәм 1 агент
    *[other] Сез һәм { $count } агент
 }
-team-empty = Монда әле беркем юк
+team-empty = Монда әлегә беркем юк
 team-you = Сез
 team-agent = Агент
 
-services-title = Фон Хезмәтләре
+services-title = Фон хезмәтләре
 services-processes = { $count ->
     [one] 1 процесс
    *[other] { $count } процесс
 }
-services-kill-all = Барысын Туктату
+services-kill-all = Барысын мәҗбүри туктату
 services-not-running = Хезмәт эшләми
-services-start-with = Белән башлау:
+services-start-with = Болай башлау:
 services-empty = Актив процесслар юк
 services-filter = Процессларны фильтрлау…
-services-no-match = Туры килүче процесслар юк
+services-no-match = Туры килгән процесслар юк
 services-connected = Тоташкан
 services-disconnected = Тоташмаган
-services-attached = тоташтырылган
-services-kill = Туктату
+services-attached = бәйләнгән
+services-kill = Мәҗбүри туктату
 services-memory = Хәтер
-services-size = Зурлык
-services-shell = Кабык
+services-size = Үлчәм
+services-shell = Shell
 
 error-title = Хата
 
-history-search = Тарихны эзләү
+history-search = Тарихтан эзләү
 history-clear-all = Барысын чистарту
-history-clear-confirm = Бөтен тарихны чистартырга?
+history-clear-confirm = Бөтен тарихны чистартыргамы?
 history-clear-warning = Моны кире кайтарып булмый.
 history-cancel = Баш тарту
 history-today = Бүген
@@ -109,110 +109,110 @@ history-day-offset = Көн -{ $count }
 
 settings-title = Көйләүләр
 settings-loading = Көйләүләр йөкләнә…
-settings-stored = ~/.vmux/settings.ron'да саклана
+settings-stored = ~/.vmux/settings.ron эчендә саклана
 settings-other = Башка
-settings-software-update = Программа Яңарту
-settings-check-updates = Яңартуларны Тикшерү
-settings-check-updates-hint = Автоматик яңарту эшләгәндә, башлатуда һәм сәгать саен автоматик тикшерелә.
+settings-software-update = Программаны яңарту
+settings-check-updates = Яңартуларны тикшерү
+settings-check-updates-hint = Автояңарту кабызылган булса, эшли башлаганда һәм һәр сәгать саен автоматик тикшерә.
 settings-update-unavailable = Мөмкин түгел
-settings-update-unavailable-hint = Яңарткыч бу сборкада кертелмәгән.
+settings-update-unavailable-hint = Бу җыелмада яңарткыч юк.
 settings-update-checking = Тикшерелә…
 settings-update-checking-hint = Яңартулар тикшерелә…
-settings-update-check-again = Тагын Тикшерү
-settings-update-current = Vmux иң яңа версиядә.
+settings-update-check-again = Кабат тикшерү
+settings-update-current = Vmux актуаль.
 settings-update-downloading = Йөкләнә…
 settings-update-downloading-hint = Vmux { $version } йөкләнә…
 settings-update-installing = Урнаштырыла…
 settings-update-installing-hint = Vmux { $version } урнаштырыла…
-settings-update-ready = Яңарту Әзер
-settings-update-ready-hint = Vmux { $version } әзер. Кулланыр өчен яңадан башлатыгыз.
-settings-update-try-again = Кабатлап Карау
-settings-update-failed = Яңартуларны тикшерү мөмкин түгел.
+settings-update-ready = Яңарту әзер
+settings-update-ready-hint = Vmux { $version } әзер. Куллану өчен яңадан җибәрегез.
+settings-update-try-again = Кабат сынау
+settings-update-failed = Яңартуларны тикшереп булмады.
 settings-item = Элемент
 settings-item-number = Элемент { $number }
-settings-press-key = Төймә басыгыз…
+settings-press-key = Клавишага басыгыз…
 settings-saved = Сакланды
-settings-record-key = Яңа төймәләр комбинациясен язу өчен басыгыз
+settings-record-key = Яңа клавиша комбинациясен язу өчен басыгыз
 
-tray-open-window = Тәрәзәне Ачу
-tray-close-window = Тәрәзәне Ябу
-tray-pause-recording = Язуны Туктату
-tray-resume-recording = Язуны Дәвам Итү
-tray-finish-recording = Язуны Тәмамлау
-tray-quit = Vmux'тан Чыгу
+tray-open-window = Тәрәзә ачу
+tray-close-window = Тәрәзәне ябу
+tray-pause-recording = Язуны туктатып тору
+tray-resume-recording = Язуны дәвам итү
+tray-finish-recording = Язуны тәмамлау
+tray-quit = Vmux’тан чыгу
 
-composer-attach-files = Файллар өстәү (/upload)
-composer-remove-attachment = Өстәлгәнне бетерү
+composer-attach-files = Файллар беркетү (/upload)
+composer-remove-attachment = Беркетмәне алып кую
 
 layout-back = Артка
 layout-forward = Алга
-layout-reload = Яңадан йөкләү
-layout-bookmark-page = Бу битне тамгалау
-layout-remove-bookmark = Тамганы бетерү
+layout-reload = Кабат йөкләү
+layout-bookmark-page = Бу битне кыстыргычларга өстәү
+layout-remove-bookmark = Кыстыргычны алып кую
 layout-pin-page = Бу битне беркетү
-layout-unpin-page = Бу битне чишү
-layout-manage-extensions = Киңәйтмәләрне идарә итү
-layout-new-stack = Яңа Стек
-layout-close-tab = Табны ябу
-layout-bookmark = Тамга
+layout-unpin-page = Бу битне ычкындыру
+layout-manage-extensions = Өстәмәләр белән идарә итү
+layout-new-stack = Яңа стек
+layout-close-tab = Кыстыргычны ябу
+layout-bookmark = Кыстыргычка өстәү
 layout-pin = Беркетү
-layout-new-tab = Яңа таб
+layout-new-tab = Яңа кыстыргыч
 layout-team = Команда
 
-command-switch-space = Урынны алмаштыру…
+command-switch-space = Мохитне алыштыру…
 command-search-ask = Эзләү яки сорау…
-command-new-tab-placeholder = Эзләгез яки URL языгыз, яки Терминал сайлагыз…
-command-placeholder = URL языгыз, табларны эзләгез, яки > боерыклар өчен…
-command-composer-placeholder = Боерыклар өчен / яки медиа өчен @ языгыз
+command-new-tab-placeholder = Эзләгез, URL языгыз яки Терминалны сайлагыз…
+command-placeholder = URL языгыз, кыстыргычлардан эзләгез яки командалар өчен > кертегез…
+command-composer-placeholder = Командалар өчен / яки медиа өчен @ кертегез
 command-send = Җибәрү (Enter)
 command-terminal = Терминал
-command-open-terminal = Терминалда Ачу
+command-open-terminal = Терминалда ачу
 command-stack = Стек
 command-tabs = { $count ->
-    [one] 1 таб
-   *[other] { $count } таб
+    [one] 1 кыстыргыч
+   *[other] { $count } кыстыргыч
 }
-command-prompt = Боерык
-command-new-tab = Яңа таб
+command-prompt = Prompt
+command-new-tab = Яңа кыстыргыч
 command-search = Эзләү
-command-open-value = "{ $value }" ачу
-command-search-value = "{ $value }" эзләү
+command-open-value = “{ $value }” ачу
+command-search-value = “{ $value }” эзләү
 
 schema-appearance = Күренеш
 schema-general = Гомуми
-schema-layout = Урнашу
-schema-layout-detail = Тәрәзә, панельләр, ян панель һәм фокус боҗрасы.
+schema-layout = Макет
+schema-layout-detail = Тәрәзә, панельләр, ян такта һәм фокус кысасы.
 schema-agent = Агент
-schema-agent-detail = Агент тәртибе һәм корал рөхсәтләре.
-schema-shortcuts = Кыскартмалар
-schema-shortcuts-detail = Тик уку режимы. Бәйлемнәрне үзгәртү өчен settings.ron'ны турыдан-туры үзгәртегез.
+schema-agent-detail = Агент тәртибе һәм коралларга рөхсәтләр.
+schema-shortcuts = Тиз клавишалар
+schema-shortcuts-detail = Уку өчен генә. Бәйләүләрне үзгәртү өчен settings.ron файлын турыдан-туры төзәтегез.
 schema-terminal = Терминал
 schema-browser = Браузер
 schema-mode = Режим
-schema-mode-detail = Веб-битләр өчен төс схемасы. Корылма системагызга ияреп билгеләнә.
-schema-device = Корылма
+schema-mode-detail = Веб-битләр өчен төс схемасы. Җайланма режимы система көйләвен куллана.
+schema-device = Җайланма
 schema-light = Якты
-schema-dark = Карангы
+schema-dark = Караңгы
 schema-language = Тел
-schema-language-detail = Система, en-US, ja яки туры килүче ~/.vmux/locales/<tag>.ftl каталогы булган теләсә кайсы BCP 47 теге кулланыгыз.
-schema-auto-update = Автоматик яңарту
-schema-auto-update-detail = Башлатуда һәм сәгать саен яңартуларны тикшерү һәм урнаштыру.
-schema-startup-url = Башлату URL'ы
-schema-startup-url-detail = Буш булса боерык юлагы ачыла.
+schema-language-detail = Системаны, en-US, ja яки туры килгән ~/.vmux/locales/<tag>.ftl каталогы булган теләсә кайсы BCP 47 тегын кулланыгыз.
+schema-auto-update = Автояңарту
+schema-auto-update-detail = Эшли башлаганда һәм һәр сәгать саен яңартуларны тикшерү һәм урнаштыру.
+schema-startup-url = Башлангыч URL
+schema-startup-url-detail = Буш булса, команда юлы prompt’ын ача.
 schema-search-engine = Эзләү системасы
-schema-search-engine-detail = Башлау битеннән һәм боерык юлагыннан веб-эзләүдә кулланыла.
+schema-search-engine-detail = Башлау битеннән һәм команда юлыннан веб-эзләү өчен кулланыла.
 schema-window = Тәрәзә
 schema-pane = Панель
-schema-side-sheet = Ян панель
-schema-focus-ring = Фокус боҗрасы
-schema-run-placement = Урнаштыру өстенлеген рөхсәт итү
-schema-run-placement-detail = Агентларга эш панеле режимын, юнәлешен һәм якорен сайларга рөхсәт итү.
+schema-side-sheet = Ян бит
+schema-focus-ring = Фокус кысасы
+schema-run-placement = Эшләтү урынын үзгәртүне рөхсәт итү
+schema-run-placement-detail = Агентларга эшләтү панеле режимын, юнәлешен һәм терәк ноктасын сайларга рөхсәт итү.
 schema-leader = Лидер
-schema-leader-detail = Аккорд кыскартмалары өчен алгы тамга.
-schema-chord-timeout = Аккорд вакыт чиге
-schema-chord-timeout-detail = Аккорд алгы тамгасы чиккә чыкканчы миллисекунд санаткычы.
-schema-bindings = Бәйлемнәр
+schema-leader-detail = Chord тиз клавишалары өчен префикс клавиша.
+schema-chord-timeout = Chord көтү вакыты
+schema-chord-timeout-detail = Chord префиксы гамәлдән чыкканчы миллисекундлар.
+schema-bindings = Бәйләүләр
 schema-confirm-close = Ябуны раслау
-schema-confirm-close-detail = Эшли торган процессы булган терминалны ябар алдыннан сорау.
-schema-default-theme = Стандарт тема
-schema-default-theme-detail = Темалар исемлегеннән актив теманың исеме.
+schema-confirm-close-detail = Эшләп торган процессы булган терминалны япканчы сорау.
+schema-default-theme = Килешенгән тема
+schema-default-theme-detail = Темалар исемлегендәге актив тема исеме.

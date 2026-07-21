@@ -1,7 +1,7 @@
-common-open = Avatud
-common-close = Sule
-common-install = Installige
-common-uninstall = Desinstalli
+common-open = Ava
+common-close = Sulge
+common-install = Paigalda
+common-uninstall = Eemalda
 common-update = Värskenda
 common-retry = Proovi uuesti
 common-refresh = Värskenda
@@ -10,67 +10,67 @@ common-enable = Luba
 common-disable = Keela
 common-new = Uus
 common-active = aktiivne
-common-running = jooksmine
-common-done = tehtud
-common-failed = Ebaõnnestunud
+common-running = töötab
+common-done = valmis
+common-failed = Nurjus
 common-installed = Paigaldatud
 common-items = { $count ->
     [one] { $count } üksus
    *[other] { $count } üksust
 }
 start-title = Alusta
-start-tagline = Üks käsk. Midagi, tehtud.
+start-tagline = Üks prompt. Kõik tehtud.
 
 agents-title = Agendid
 agents-search = Otsi ACP ja CLI agente…
 agents-empty = Sobivaid agente pole
-agents-empty-detail = Proovige nime, käitusaega või ACP/CLI.
-agents-install-failed = Install ebaõnnestus
-agents-updating = Värskendamine…
-agents-retrying = Uuesti proovimine…
-agents-preparing = Ettevalmistus…
+agents-empty-detail = Proovi nime, käituskeskkonda või ACP/CLI-d.
+agents-install-failed = Paigaldamine nurjus
+agents-updating = Värskendatakse…
+agents-retrying = Proovitakse uuesti…
+agents-preparing = Valmistatakse ette…
 
 extensions-title = Laiendused
-extensions-search = Otsige installitud või Chrome Web Store…
-extensions-relaunch = Taotlemiseks taaskäivitage
-extensions-empty = Laiendusi pole installitud
-extensions-no-match = Sobivaid laiendeid pole
-extensions-empty-detail = Otsige ülalolevast Chrome Web Store ja vajutage Return.
-extensions-no-match-detail = Proovige teist nime või laienduse ID-d.
+extensions-search = Otsi paigaldatutest või Chrome Web Store’ist…
+extensions-relaunch = Rakendamiseks käivita uuesti
+extensions-empty = Laiendusi pole paigaldatud
+extensions-no-match = Sobivaid laiendusi pole
+extensions-empty-detail = Otsi ülal Chrome Web Store’ist ja vajuta sisestusklahvi.
+extensions-no-match-detail = Proovi teist nime või laienduse ID-d.
 extensions-on = Sees
 extensions-off = Väljas
-extensions-enable-confirm = Kas lubada { $name }?
-extensions-enable-permissions = Lubage { $name } ja lubage:
+extensions-enable-confirm = Lubada { $name }?
+extensions-enable-permissions = Luba { $name } ja anna õigused:
 
 lsp-title = Keeleserverid
-lsp-search = Otsi keeleserveritest, linteritest, vormindajatest…
+lsp-search = Otsi keeleservereid, lintreid, vormindajaid…
 lsp-loading = Kataloogi laadimine…
 lsp-empty = Sobivaid keeleservereid pole
-lsp-empty-detail = Proovige mõnda muud keelt, linterit või vormindajat.
-lsp-needs = vajab { $tool }
+lsp-empty-detail = Proovi teist keelt, lintrit või vormindajat.
+lsp-needs = vajab tööriista { $tool }
 lsp-status-available = Saadaval
-lsp-status-on-path = PATH
-lsp-status-installing = Installimine…
+lsp-status-on-path = PATH-is
+lsp-status-installing = Paigaldatakse…
 lsp-status-installed = Paigaldatud
 lsp-status-outdated = Värskendus saadaval
-lsp-status-running = Jooksmine
-lsp-status-failed = Ebaõnnestunud
+lsp-status-running = Töötab
+lsp-status-failed = Nurjus
 
-spaces-title = Ruumid
-spaces-new-placeholder = Uus ruumi nimi
-spaces-empty = Tühikuid pole
-spaces-default-name = Ruum { $number }
+spaces-title = Tööruumid
+spaces-new-placeholder = Uue tööruumi nimi
+spaces-empty = Tööruume pole
+spaces-default-name = Tööruum { $number }
 spaces-tabs = { $count ->
-    [one] 1 vahekaart
-   *[other] { $count } vahekaarte
+    [one] 1 kaart
+   *[other] { $count } kaarti
 }
-spaces-delete = Kustuta tühik
+spaces-delete = Kustuta tööruum
 
-team-title = Meeskond
-team-just-you = Ainult sina selles ruumis
+team-title = Tiim
+team-just-you = Selles tööruumis oled ainult sina
 team-agents = { $count ->
     [one] Sina ja 1 agent
-   *[other] Teie ja { $count } agendid
+   *[other] Sina ja { $count } agenti
 }
 team-empty = Siin pole veel kedagi
 team-you = Sina
@@ -79,69 +79,69 @@ team-agent = Agent
 services-title = Taustateenused
 services-processes = { $count ->
     [one] 1 protsess
-   *[other] { $count } protsessid
+   *[other] { $count } protsessi
 }
-services-kill-all = Tapa kõik
+services-kill-all = Lõpeta kõik jõuga
 services-not-running = Teenus ei tööta
-services-start-with = Alustage:
+services-start-with = Käivita käsuga:
 services-empty = Aktiivseid protsesse pole
-services-filter = Filtreeri protsessid…
-services-no-match = Ühtegi sobitamisprotsesse pole
+services-filter = Filtreeri protsesse…
+services-no-match = Sobivaid protsesse pole
 services-connected = Ühendatud
-services-disconnected = Ühendus katkestatud
-services-attached = lisatud
-services-kill = Tapa
+services-disconnected = Ühenduseta
+services-attached = ühendatud
+services-kill = Lõpeta jõuga
 services-memory = Mälu
 services-size = Suurus
 services-shell = Kest
 
 error-title = Viga
 
-history-search = Otsinguajalugu
+history-search = Otsi ajaloost
 history-clear-all = Tühjenda kõik
-history-clear-confirm = Kas kustutada kogu ajalugu?
+history-clear-confirm = Tühjendada kogu ajalugu?
 history-clear-warning = Seda ei saa tagasi võtta.
-history-cancel = Tühista
+history-cancel = Loobu
 history-today = Täna
-history-yesterday = eile
+history-yesterday = Eile
 history-days-ago = { $count } päeva tagasi
 history-day-offset = Päev -{ $count }
 
 settings-title = Seaded
 settings-loading = Seadete laadimine…
-settings-stored = Salvestatud ~/.vmux/settings.ron
-settings-other = muud
-settings-software-update = Tarkvara värskendus
-settings-check-updates = Kontrollige värskendusi
-settings-check-updates-hint = Kontrollib automaatselt käivitamisel ja iga tunni järel, kui automaatvärskendus on lubatud.
+settings-stored = Salvestatud faili ~/.vmux/settings.ron
+settings-other = Muu
+settings-software-update = Tarkvaravärskendus
+settings-check-updates = Kontrolli värskendusi
+settings-check-updates-hint = Kui automaatvärskendus on lubatud, kontrollitakse käivitamisel ja iga tunni järel.
 settings-update-unavailable = Pole saadaval
-settings-update-unavailable-hint = Värskendaja ei sisaldu selles järgus.
-settings-update-checking = Kontrollimine…
-settings-update-checking-hint = Värskenduste otsimine…
-settings-update-check-again = Kontrollige uuesti
+settings-update-unavailable-hint = See järk ei sisalda värskendajat.
+settings-update-checking = Kontrollitakse…
+settings-update-checking-hint = Värskenduste kontrollimine…
+settings-update-check-again = Kontrolli uuesti
 settings-update-current = Vmux on ajakohane.
-settings-update-downloading = Allalaadimine…
+settings-update-downloading = Laaditakse alla…
 settings-update-downloading-hint = Vmux { $version } allalaadimine…
-settings-update-installing = Installimine…
-settings-update-installing-hint = Vmux { $version } installimine…
-settings-update-ready = Värskendus valmis
-settings-update-ready-hint = Vmux { $version } on valmis. Selle rakendamiseks taaskäivitage.
-settings-update-try-again = Proovige uuesti
-settings-update-failed = Värskendusi ei saa kontrollida.
+settings-update-installing = Paigaldatakse…
+settings-update-installing-hint = Vmux { $version } paigaldamine…
+settings-update-ready = Värskendus on valmis
+settings-update-ready-hint = Vmux { $version } on valmis. Rakendamiseks taaskäivita.
+settings-update-try-again = Proovi uuesti
+settings-update-failed = Värskendusi ei õnnestunud kontrollida.
 settings-item = Üksus
 settings-item-number = Üksus { $number }
-settings-press-key = Vajutage klahvi…
+settings-press-key = Vajuta klahvi…
 settings-saved = Salvestatud
-settings-record-key = Klõpsake uue klahvikombo salvestamiseks
+settings-record-key = Klõpsa uue klahvikombinatsiooni salvestamiseks
 
 tray-open-window = Ava aken
-tray-close-window = Sule aken
+tray-close-window = Sulge aken
 tray-pause-recording = Peata salvestamine
 tray-resume-recording = Jätka salvestamist
 tray-finish-recording = Lõpeta salvestamine
-tray-quit = Lõpeta Vmux
+tray-quit = Välju Vmuxist
 
-composer-attach-files = Failide manustamine (/upload)
+composer-attach-files = Lisa failid (/upload)
 composer-remove-attachment = Eemalda manus
 
 layout-back = Tagasi
@@ -149,70 +149,70 @@ layout-forward = Edasi
 layout-reload = Laadi uuesti
 layout-bookmark-page = Lisa see leht järjehoidjatesse
 layout-remove-bookmark = Eemalda järjehoidja
-layout-pin-page = Kinnitage see leht
-layout-unpin-page = Vabastage see leht
-layout-manage-extensions = Laienduste haldamine
+layout-pin-page = Kinnita see leht
+layout-unpin-page = Eemalda selle lehe kinnitus
+layout-manage-extensions = Halda laiendusi
 layout-new-stack = Uus virn
-layout-close-tab = Sule vahekaart
+layout-close-tab = Sulge kaart
 layout-bookmark = Järjehoidja
-layout-pin = Pin
-layout-new-tab = Uus vahekaart
-layout-team = Meeskond
+layout-pin = Kinnita
+layout-new-tab = Uus kaart
+layout-team = Tiim
 
-command-switch-space = Vaheta ruumi…
+command-switch-space = Vaheta tööruumi…
 command-search-ask = Otsi või küsi…
-command-new-tab-placeholder = Otsige või tippige URL või valige Terminal…
-command-placeholder = Tippige käskude jaoks URL, otsige vahekaarte või >...
-command-composer-placeholder = Sisestage käskude jaoks / või meediumide jaoks @
+command-new-tab-placeholder = Otsi, sisesta URL või vali Terminal…
+command-placeholder = Sisesta URL, otsi kaartidelt või kasuta käskudeks märki >…
+command-composer-placeholder = Käskudeks sisesta /, meedia jaoks @
 command-send = Saada (Enter)
 command-terminal = Terminal
-command-open-terminal = Avage terminalis
-command-stack = Virna
+command-open-terminal = Ava terminalis
+command-stack = Virn
 command-tabs = { $count ->
-    [one] 1 vahekaart
-   *[other] { $count } vahekaarte
+    [one] 1 kaart
+   *[other] { $count } kaarti
 }
-command-prompt = Viip
-command-new-tab = Uus vahekaart
+command-prompt = Prompt
+command-new-tab = Uus kaart
 command-search = Otsi
-command-open-value = Ava "{ $value }"
-command-search-value = Otsi "{ $value }"
+command-open-value = Ava „{ $value }”
+command-search-value = Otsi „{ $value }”
 
 schema-appearance = Välimus
-schema-general = Kindral
+schema-general = Üldine
 schema-layout = Paigutus
-schema-layout-detail = Aken, paanid, külgriba ja teravustamisrõngas.
+schema-layout-detail = Aken, paanid, külgriba ja fookuseraam.
 schema-agent = Agent
-schema-agent-detail = Agendi käitumine ja tööriista load.
-schema-shortcuts = Otseteed
-schema-shortcuts-detail = Kirjutuskaitstud vaade. Sidemete muutmiseks muutke settings.ron otse.
+schema-agent-detail = Agendi käitumine ja tööriistade õigused.
+schema-shortcuts = Kiirklahvid
+schema-shortcuts-detail = Ainult lugemiseks. Seoste muutmiseks muuda otse faili settings.ron.
 schema-terminal = Terminal
 schema-browser = Brauser
 schema-mode = Režiim
-schema-mode-detail = Veebilehtede värviskeem. Seade järgib teie süsteemi.
+schema-mode-detail = Veebilehtede värviskeem. Seade järgib süsteemi.
 schema-device = Seade
-schema-light = Valgus
+schema-light = Hele
 schema-dark = Tume
 schema-language = Keel
-schema-language-detail = Kasutage süsteemi, en-US, ja või mis tahes BCP 47 märgendit sobiva ~/.vmux/locales/<tag>.ftl kataloogiga.
-schema-auto-update = Automaatne värskendus
-schema-auto-update-detail = Kontrollige ja installige värskendusi käivitamisel ja iga tund.
-schema-startup-url = Käivitamine URL
-schema-startup-url-detail = Tühi avab käsuriba viipa.
+schema-language-detail = Kasuta süsteemi keelt, en-US, ja või mis tahes BCP 47 märgendit, millele vastab ~/.vmux/locales/<tag>.ftl kataloog.
+schema-auto-update = Automaatvärskendus
+schema-auto-update-detail = Kontrolli ja paigalda värskendusi käivitamisel ning iga tunni järel.
+schema-startup-url = Käivitus-URL
+schema-startup-url-detail = Tühja väärtuse korral avaneb käsuriba prompt.
 schema-search-engine = Otsingumootor
-schema-search-engine-detail = Kasutatakse veebiotsinguks Start ja käsuribalt.
+schema-search-engine-detail = Kasutatakse veebiotsinguteks avalehelt ja käsuribalt.
 schema-window = Aken
 schema-pane = Paan
-schema-side-sheet = Külgleht
-schema-focus-ring = Fookusrõngas
-schema-run-placement = Luba käitamise paigutuse alistamine
-schema-run-placement-detail = Laske agentidel valida käitamispaani režiim, suund ja ankur.
-schema-leader = Juht
-schema-leader-detail = Prefiksklahv akordi otseteede jaoks.
-schema-chord-timeout = Akordi ajalõpp
-schema-chord-timeout-detail = Millisekundeid enne akordi eesliite aegumist.
-schema-bindings = Köited
-schema-confirm-close = Kinnitage sulgemine
-schema-confirm-close-detail = Küsi enne töötava protsessiga terminali sulgemist.
+schema-side-sheet = Külgpaneel
+schema-focus-ring = Fookuseraam
+schema-run-placement = Luba käivituse paigutuse ülekirjutamine
+schema-run-placement-detail = Luba agentidel valida käivituspaani režiim, suund ja ankur.
+schema-leader = Juhtklahv
+schema-leader-detail = Eesliide akordkiirklahvide jaoks.
+schema-chord-timeout = Akordi aegumine
+schema-chord-timeout-detail = Millisekundid, mille järel akordi eesliide aegub.
+schema-bindings = Seosed
+schema-confirm-close = Sulgemise kinnitus
+schema-confirm-close-detail = Küsi kinnitust enne töötava protsessiga terminali sulgemist.
 schema-default-theme = Vaiketeema
 schema-default-theme-detail = Aktiivse teema nimi teemade loendist.

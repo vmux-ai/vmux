@@ -1,218 +1,218 @@
 common-open = Bula
-common-close = Koala
+common-close = Kwala
 common-install = Kenya
-common-uninstall = Tloša
-common-update = Ntlafatsa
+common-uninstall = Ntsha
+common-update = Ntjhafatsa
 common-retry = Leka hape
-common-refresh = Mpshafatsa
-common-remove = Tloša
-common-enable = Kgontšha
-common-disable = Thibela
-common-new = E ntjha
+common-refresh = Kgatholla
+common-remove = Tlosa
+common-enable = Bulela
+common-disable = Tima
+common-new = Ntjha
 common-active = e sebetsa
-common-running = e matha
-common-done = e phethiloe
-common-failed = Ho hlōlehile
+common-running = e ntse e sebetsa
+common-done = ho phethilwe
+common-failed = E hlolehile
 common-installed = E kentswe
 common-items = { $count ->
     [one] { $count } ntho
-   *[other] { $count } dintho
+   *[other] dintho tse { $count }
 }
 start-title = Qala
-start-tagline = Kopo e le nngwe. Ntho efe kapa efe, e phethiloe.
+start-tagline = Prompt e le nngwe. Eng kapa eng, e phethilwe.
 
-agents-title = Baetapele
-agents-search = Batla baetapele ba ACP le CLI…
-agents-empty = Ha ho baetapele ba tšoanang
+agents-title = Di-agent
+agents-search = Batla di-agent tsa ACP le CLI…
+agents-empty = Ha ho di-agent tse tshwanelanang
 agents-empty-detail = Leka lebitso, runtime, kapa ACP/CLI.
-agents-install-failed = Ho kenya ho hlōlehile
-agents-updating = E ntlafatswa…
+agents-install-failed = Ho kenya ho hlolehile
+agents-updating = E a ntjhafatswa…
 agents-retrying = E leka hape…
-agents-preparing = E itokisetsa…
+agents-preparing = E a lokisetswa…
 
-extensions-title = Dikgatiso
+extensions-title = Di-extensions
 extensions-search = Batla tse kentsweng kapa Chrome Web Store…
-extensions-relaunch = Qala hape ho sebetsa
-extensions-empty = Ha ho dikgatiso tse kentsweng
-extensions-no-match = Ha ho dikgatiso tse tšoanang
-extensions-empty-detail = Batla Chrome Web Store ka hodimo mme kgomarela Return.
-extensions-no-match-detail = Leka lebitso le leng kapa ID ya kgatiso.
-extensions-on = Setse
-extensions-off = Timetswe
-extensions-enable-confirm = Kgontšha { $name }?
-extensions-enable-permissions = Kgontšha { $name } le dumela:
+extensions-relaunch = Qala hape ho kenya tshebetsong
+extensions-empty = Ha ho di-extensions tse kentsweng
+extensions-no-match = Ha ho di-extensions tse tshwanelanang
+extensions-empty-detail = Batla ho Chrome Web Store ka hodimo, ebe o tobetsa Return.
+extensions-no-match-detail = Leka lebitso le leng kapa ID ya extension.
+extensions-on = E buletswe
+extensions-off = E timilwe
+extensions-enable-confirm = Bulela { $name }?
+extensions-enable-permissions = Bulela { $name } mme o dumelle:
 
-lsp-title = Maseva a Polelo
-lsp-search = Batla maseva a polelo, dilinter, diformatha…
-lsp-loading = E laola katalogo…
-lsp-empty = Ha ho maseva a polelo a tšoanang
-lsp-empty-detail = Leka polelo e nngwe, linter, kapa formatter.
+lsp-title = Diseva tsa Dipuo
+lsp-search = Batla diseva tsa dipuo, di-linter, di-formatter…
+lsp-loading = E kenya katalog…
+lsp-empty = Ha ho diseva tsa dipuo tse tshwanelanang
+lsp-empty-detail = Leka puo e nngwe, linter, kapa formatter.
 lsp-needs = e hloka { $tool }
-lsp-status-available = E fumanehile
-lsp-status-on-path = Ho PATH
-lsp-status-installing = E kentswa…
+lsp-status-available = E teng
+lsp-status-on-path = E ho PATH
+lsp-status-installing = E a kenngwa…
 lsp-status-installed = E kentswe
-lsp-status-outdated = Ntlafatso e fumanehile
-lsp-status-running = E matha
-lsp-status-failed = Ho hlōlehile
+lsp-status-outdated = Ntjhafatso e teng
+lsp-status-running = E ntse e sebetsa
+lsp-status-failed = E hlolehile
 
 spaces-title = Dibaka
-spaces-new-placeholder = Lebitso la sebaka se sentswa
+spaces-new-placeholder = Lebitso la sebaka se setjha
 spaces-empty = Ha ho dibaka
 spaces-default-name = Sebaka { $number }
 spaces-tabs = { $count ->
-    [one] 1 tabu
-   *[other] { $count } ditabu
+    [one] tabo e 1
+   *[other] ditabo tse { $count }
 }
-spaces-delete = Phumola sebaka
+spaces-delete = Hlakola sebaka
 
 team-title = Sehlopha
-team-just-you = Wena feela sebakeng sena
+team-just-you = Ke wena feela sebakeng sena
 team-agents = { $count ->
-    [one] Wena le moetapele o 1
-   *[other] Wena le baetapele ba { $count }
+    [one] Wena le agent e 1
+   *[other] Wena le di-agent tse { $count }
 }
-team-empty = Ha ho motho mona hase
+team-empty = Ha ho motho mona hajoale
 team-you = Wena
-team-agent = Moetapele
+team-agent = Agent
 
-services-title = Ditirelo tsa Morao
+services-title = Ditshebeletso tsa Ka morao
 services-processes = { $count ->
-    [one] 1 ts'ebetso
-   *[other] { $count } dits'ebetso
+    [one] process e 1
+   *[other] di-process tse { $count }
 }
-services-kill-all = Felisa Tsohle
-services-not-running = Tirelo ha e mathi
+services-kill-all = Emisa Tsohle ka Qobello
+services-not-running = Tshebeletso ha e sebetse
 services-start-with = Qala ka:
-services-empty = Ha ho dits'ebetso tse sebetsang
-services-filter = Hlekoletsa dits'ebetso…
-services-no-match = Ha ho dits'ebetso tse tšoanang
-services-connected = E kgomaretse
-services-disconnected = Ha e kgomaretse
-services-attached = e kgomaretse
-services-kill = Felisa
-services-memory = Khumbulo
-services-size = Bokaalo
+services-empty = Ha ho di-process tse sebetsang
+services-filter = Sefa di-process…
+services-no-match = Ha ho di-process tse tshwanelanang
+services-connected = E hoketswe
+services-disconnected = E kgaotswe
+services-attached = e hoketswe
+services-kill = Emisa ka qobello
+services-memory = Memori
+services-size = Boholo
 services-shell = Shell
 
 error-title = Phoso
 
-history-search = Batla nalane
-history-clear-all = Phumola tsohle
-history-clear-confirm = Phumola nalane yohle?
-history-clear-warning = Sena ha se khone ho fetolwa.
-history-cancel = Hlōhla
+history-search = Batla historing
+history-clear-all = Hlakola tsohle
+history-clear-confirm = Hlakola histori yohle?
+history-clear-warning = Sena se ke ke sa etsollwa.
+history-cancel = Hlakola
 history-today = Kajeno
 history-yesterday = Maobane
-history-days-ago = { $count } matsatsi a fetileng
+history-days-ago = Matsatsi a { $count } a fetileng
 history-day-offset = Letsatsi -{ $count }
 
-settings-title = Maemo
-settings-loading = E laola maemo…
-settings-stored = E bolokiloe ho ~/.vmux/settings.ron
-settings-other = Tse ling
-settings-software-update = Ntlafatso ya Software
-settings-check-updates = Hlahloba Ntlafatso
-settings-check-updates-hint = E hlahloba ka boithaopo ha e qala le hora le hora ha Auto-update e kgontšhitswe.
+settings-title = Disetting
+settings-loading = E kenya disetting…
+settings-stored = E bolokilwe ho ~/.vmux/settings.ron
+settings-other = Tse ding
+settings-software-update = Ntjhafatso ya Software
+settings-check-updates = Hlahloba Dintjhafatso
+settings-check-updates-hint = E hlahloba ka bo yona ha e qala le hora le hora ha Auto-update e buletswe.
 settings-update-unavailable = Ha e fumanehe
-settings-update-unavailable-hint = Setlami ha se kenyeletswa ho kaho ena.
-settings-update-checking = E hlahloba…
-settings-update-checking-hint = E hlahloba ntlafatso…
+settings-update-unavailable-hint = Sentjhafatsi ha se a kenyeletswa mohahong ona.
+settings-update-checking = E a hlahloba…
+settings-update-checking-hint = E hlahloba dintjhafatso…
 settings-update-check-again = Hlahloba Hape
-settings-update-current = Vmux e mpshafaditšwe.
-settings-update-downloading = E laola…
-settings-update-downloading-hint = E laola Vmux { $version }…
-settings-update-installing = E kenya…
+settings-update-current = Vmux e ntjhafetse.
+settings-update-downloading = E a jarolla…
+settings-update-downloading-hint = E jarolla Vmux { $version }…
+settings-update-installing = E a kenya…
 settings-update-installing-hint = E kenya Vmux { $version }…
-settings-update-ready = Ntlafatso e Lokile
-settings-update-ready-hint = Vmux { $version } e lokile. Qala hape ho sebetsa.
+settings-update-ready = Ntjhafatso e Lokile
+settings-update-ready-hint = Vmux { $version } e lokile. Qala hape ho e kenya tshebetsong.
 settings-update-try-again = Leka Hape
-settings-update-failed = Ha e khone ho hlahloba ntlafatso.
+settings-update-failed = Ha ho kgonehe ho hlahloba dintjhafatso.
 settings-item = Ntho
 settings-item-number = Ntho { $number }
-settings-press-key = Kgomarela senotlolo…
-settings-saved = E boloketswe
-settings-record-key = Tobetsa ho ngola seleheletso se sentswa
+settings-press-key = Tobetsa konopo…
+settings-saved = E bolokilwe
+settings-record-key = Tobetsa ho rekota motsoako o motjha wa dikonopo
 
-tray-open-window = Bula Fensetere
-tray-close-window = Koala Fensetere
-tray-pause-recording = Emisa Ngolo
-tray-resume-recording = Tsoela Pele Ngolo
-tray-finish-recording = Qetella Ngolo
-tray-quit = Tswa Vmux
+tray-open-window = Bula Fesetere
+tray-close-window = Kwala Fesetere
+tray-pause-recording = Emisa Rekoto Nakwana
+tray-resume-recording = Tswelapele ka Rekoto
+tray-finish-recording = Qeta Rekoto
+tray-quit = Tswala Vmux
 
-composer-attach-files = Tšehetsa difaele (/upload)
-composer-remove-attachment = Tlosa setšehetswa
+composer-attach-files = Hokela difaele (/upload)
+composer-remove-attachment = Tlosa sehokelo
 
 layout-back = Morao
 layout-forward = Pele
-layout-reload = Laola Hape
-layout-bookmark-page = Beakanya letlakala lena
-layout-remove-bookmark = Tlosa beakanyetso
-layout-pin-page = Kgomarela letlakala lena
-layout-unpin-page = Qhaqha letlakala lena
-layout-manage-extensions = Laola dikgatiso
-layout-new-stack = Setsoha se Sentswa
-layout-close-tab = Koala tabu
-layout-bookmark = Beakanya
-layout-pin = Kgomarela
-layout-new-tab = Tabu e ntjha
+layout-reload = Kenya hape
+layout-bookmark-page = Tshwaya leqephe lena
+layout-remove-bookmark = Tlosa letshwao
+layout-pin-page = Penya leqephe lena
+layout-unpin-page = Tlohela leqephe lena
+layout-manage-extensions = Laola di-extensions
+layout-new-stack = Mokgobo o motjha
+layout-close-tab = Kwala tabo
+layout-bookmark = Letshwao
+layout-pin = Penya
+layout-new-tab = Tabo e ntjha
 layout-team = Sehlopha
 
 command-switch-space = Fetola sebaka…
 command-search-ask = Batla kapa botsa…
-command-new-tab-placeholder = Batla kapa ngola URL, kapa kgetha Terminale…
-command-placeholder = Ngola URL, batla ditabu, kapa > bakeng sa ditaelo…
-command-composer-placeholder = Ngola / bakeng sa ditaelo kapa @ bakeng sa media
+command-new-tab-placeholder = Batla kapa thaepa URL, kapa kgetha Terminal…
+command-placeholder = Thaepa URL, batla ditabo, kapa > bakeng sa ditaelo…
+command-composer-placeholder = Thaepa / bakeng sa ditaelo kapa @ bakeng sa media
 command-send = Romela (Enter)
-command-terminal = Terminale
-command-open-terminal = Bula ho Terminale
-command-stack = Setsoha
+command-terminal = Terminal
+command-open-terminal = Bula ho Terminal
+command-stack = Mokgobo
 command-tabs = { $count ->
-    [one] 1 tabu
-   *[other] { $count } ditabu
+    [one] tabo e 1
+   *[other] ditabo tse { $count }
 }
-command-prompt = Kopo
-command-new-tab = Tabu e ntjha
+command-prompt = Prompt
+command-new-tab = Tabo e ntjha
 command-search = Batla
-command-open-value = Bula "{ $value }"
-command-search-value = Batla "{ $value }"
+command-open-value = Bula “{ $value }”
+command-search-value = Batla “{ $value }”
 
-schema-appearance = Sebōnō
+schema-appearance = Ponahalo
 schema-general = Kakaretso
 schema-layout = Tlhophiso
-schema-layout-detail = Fensetere, dipane, letlakala la thoko, le mose wa tsebo.
-schema-agent = Moetapele
-schema-agent-detail = Boitshwaro ba moetapele le tumello ya didirišwa.
-schema-shortcuts = Ditsebelisano tse Khuts'wane
-schema-shortcuts-detail = Pono e balwang feela. Fetola settings.ron ka kotloloho ho fetola dikgomaretso.
-schema-terminal = Terminale
-schema-browser = Molaodi wa Makhetho
+schema-layout-detail = Fesetere, dikarolo, bara ya ka thoko, le reng ya focus.
+schema-agent = Agent
+schema-agent-detail = Boitshwaro ba agent le ditumello tsa dithulusi.
+schema-shortcuts = Dikgaoletso
+schema-shortcuts-detail = Pono ya ho bala feela. Fetola settings.ron ka kotloloho ho fetola dikopano tsa dikonopo.
+schema-terminal = Terminal
+schema-browser = Sebatli
 schema-mode = Mokgwa
-schema-mode-detail = Mmala wa mekgwa ya maqephe a inthanete. Sedirišwa se latela sisteme ya hao.
-schema-device = Sedirišwa
-schema-light = Lesedi
-schema-dark = Lefifi
-schema-language = Polelo
-schema-language-detail = Sebedisa sisteme, en-US, ja, kapa taelo efe kapa efe ya BCP 47 e nang le katalogo ya ~/.vmux/locales/<tag>.ftl e tšoanang.
-schema-auto-update = Ntlafatsa ka Boithaopo
-schema-auto-update-detail = Hlahloba le kenya ntlafatso ha e qala le hora le hora.
-schema-startup-url = URL ya Qalo
-schema-startup-url-detail = Feela e bula kopo ya palangwa ya ditaelo.
-schema-search-engine = Enjene ya Dipatlisiso
-schema-search-engine-detail = E sebedisetswa dipatlisiso tsa inthanete ho tswa Qaleng le palangweng ya ditaelo.
-schema-window = Fensetere
-schema-pane = Pane
-schema-side-sheet = Letlakala la Thoko
-schema-focus-ring = Mose wa Tsebo
-schema-run-placement = Dumela ho fetola setulo sa tšebeliso
-schema-run-placement-detail = Dumela baetapele ho kgetha mokgwa wa pane ya tšebeliso, tshwara, le ntlhakgolo.
-schema-leader = Molaoli
-schema-leader-detail = Senotlolo sa mathata bakeng sa ditsebelisano tsa koodu.
-schema-chord-timeout = Nako ya Koodu
-schema-chord-timeout-detail = Masekhonte a makgutshwane pele ntlhakgolo ya koodu e fela.
-schema-bindings = Dikgomaretso
-schema-confirm-close = Netefatsa Koalo
-schema-confirm-close-detail = Botsa pele ho koala terminale e nang le ts'ebetso e matha.
-schema-default-theme = Tema ya Default
-schema-default-theme-detail = Lebitso la tema e sebetsang ho tswa lenatheng la ditheme.
+schema-mode-detail = Sekema sa mebala bakeng sa maqephe a web. Device e latela sistimi ya hao.
+schema-device = Device
+schema-light = E kganyang
+schema-dark = E lefifi
+schema-language = Puo
+schema-language-detail = Sebedisa ya sistimi, en-US, ja, kapa tag efe kapa efe ya BCP 47 e nang le katalog ya ~/.vmux/locales/<tag>.ftl e tshwanelanang.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Hlahloba le ho kenya dintjhafatso ha e qala le hora le hora.
+schema-startup-url = URL ya ho qala
+schema-startup-url-detail = Ha e se na letho e bula prompt ya bara ya ditaelo.
+schema-search-engine = Enjine ya ho batla
+schema-search-engine-detail = E sebediswa bakeng sa dipatlisiso tsa web ho Start le bareng ya ditaelo.
+schema-window = Fesetere
+schema-pane = Karolo
+schema-side-sheet = Leqephe la ka thoko
+schema-focus-ring = Reng ya focus
+schema-run-placement = Dumella ho feta tlhophiso ya sebaka sa run
+schema-run-placement-detail = Dumella di-agent ho kgetha mokgwa wa karolo ya run, tsela, le ankere.
+schema-leader = Leader
+schema-leader-detail = Konopo ya pele bakeng sa dikgaoletso tsa chord.
+schema-chord-timeout = Nako ya ho fela ya chord
+schema-chord-timeout-detail = Dimilisecond pele prefix ya chord e felloa ke nako.
+schema-bindings = Dikopano tsa dikonopo
+schema-confirm-close = Netefatsa ho kwala
+schema-confirm-close-detail = Botsa pele o kwala terminal e nang le process e ntseng e sebetsa.
+schema-default-theme = Theme ya kamehla
+schema-default-theme-detail = Lebitso la theme e sebetsang lenaneng la di-theme.

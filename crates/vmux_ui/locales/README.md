@@ -2,7 +2,7 @@
 
 `en-US.ftl` is the source catalog. Vmux bundles 115 locale tags, including Japanese, regional Chinese and Portuguese variants, and broad ISO 639-1 coverage.
 
-Every bundled catalog has the same message IDs and variables as English. Non-English catalogs beyond Japanese are machine translated; native corrections are welcome.
+Every bundled catalog has the same message IDs and variables as English. All non-English catalogs, including Japanese, are context-aware LLM localizations rather than literal translations. Native corrections are welcome.
 
 Custom languages and overrides do not require code changes. Copy the English catalog to `~/.vmux/locales/<BCP-47-tag>.ftl`, translate values without changing message IDs or variables, then set:
 

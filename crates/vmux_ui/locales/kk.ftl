@@ -1,218 +1,218 @@
-common-open = Ашық
+common-open = Ашу
 common-close = Жабу
 common-install = Орнату
 common-uninstall = Жою
 common-update = Жаңарту
-common-retry = Қайталап көріңіз
+common-retry = Қайталау
 common-refresh = Жаңарту
-common-remove = Жою
+common-remove = Өшіру
 common-enable = Қосу
 common-disable = Өшіру
 common-new = Жаңа
 common-active = белсенді
-common-running = жүгіру
-common-done = орындалды
+common-running = орындалуда
+common-done = дайын
 common-failed = Сәтсіз
 common-installed = Орнатылған
 common-items = { $count ->
     [one] { $count } элемент
-   *[other] { $count } элементтер
+   *[other] { $count } элемент
 }
 start-title = Бастау
-start-tagline = Бір шақыру. Кез келген нәрсе жасалды.
+start-tagline = Бір prompt. Кез келген іс — дайын.
 
 agents-title = Агенттер
 agents-search = ACP және CLI агенттерін іздеу…
 agents-empty = Сәйкес агенттер жоқ
-agents-empty-detail = Атты, орындалу уақытын немесе ACP/CLI қолданып көріңіз.
+agents-empty-detail = Атауын, орындалу ортасын немесе ACP/CLI мәнін көріңіз.
 agents-install-failed = Орнату сәтсіз аяқталды
-agents-updating = Жаңарту...
+agents-updating = Жаңартылуда…
 agents-retrying = Қайталануда…
 agents-preparing = Дайындалуда…
 
 extensions-title = Кеңейтімдер
-extensions-search = Орнатылған іздеу немесе Chrome Web Store…
-extensions-relaunch = Өтініш беру үшін қайта іске қосыңыз
-extensions-empty = Ешқандай кеңейтімдер орнатылмаған
+extensions-search = Орнатылғандардан немесе Chrome Web Store ішінен іздеу…
+extensions-relaunch = Қолдану үшін қайта іске қосыңыз
+extensions-empty = Кеңейтімдер орнатылмаған
 extensions-no-match = Сәйкес кеңейтімдер жоқ
-extensions-empty-detail = Жоғарыдағы Chrome Web Store іздеп, Return түймесін басыңыз.
-extensions-no-match-detail = Басқа атауды немесе кеңейтім идентификаторын қолданып көріңіз.
+extensions-empty-detail = Жоғарыдан Chrome Web Store ішінен іздеп, Return пернесін басыңыз.
+extensions-no-match-detail = Басқа атауды немесе кеңейтім ID-ін көріңіз.
 extensions-on = Қосулы
 extensions-off = Өшірулі
-extensions-enable-confirm = { $name } қосу керек пе?
-extensions-enable-permissions = { $name } қосыңыз және рұқсат етіңіз:
+extensions-enable-confirm = { $name } қосылсын ба?
+extensions-enable-permissions = { $name } қосылып, мыналарға рұқсат берілсін:
 
 lsp-title = Тіл серверлері
-lsp-search = Тіл серверлерін, линтерлерін, пішімдеушілерін іздеу…
+lsp-search = Тіл серверлерін, линтерлерді, форматтағыштарды іздеу…
 lsp-loading = Каталог жүктелуде…
 lsp-empty = Сәйкес тіл серверлері жоқ
-lsp-empty-detail = Басқа тілді, линтерді немесе пішімдеуді қолданып көріңіз.
-lsp-needs = қажет { $tool }
-lsp-status-available = Қол жетімді
-lsp-status-on-path = PATH қосулы
+lsp-empty-detail = Басқа тілді, линтерді немесе форматтағышты көріңіз.
+lsp-needs = { $tool } қажет
+lsp-status-available = Қолжетімді
+lsp-status-on-path = PATH ішінде
 lsp-status-installing = Орнатылуда…
 lsp-status-installed = Орнатылған
-lsp-status-outdated = Жаңарту қолжетімді
-lsp-status-running = Жүгіру
+lsp-status-outdated = Жаңарту бар
+lsp-status-running = Орындалуда
 lsp-status-failed = Сәтсіз
 
 spaces-title = Кеңістіктер
-spaces-new-placeholder = Жаңа ғарыш атауы
-spaces-empty = Бос орындар жоқ
+spaces-new-placeholder = Жаңа кеңістік атауы
+spaces-empty = Кеңістіктер жоқ
 spaces-default-name = Кеңістік { $number }
 spaces-tabs = { $count ->
     [one] 1 қойынды
-   *[other] { $count } қойындылары
+   *[other] { $count } қойынды
 }
-spaces-delete = Бос орынды жою
+spaces-delete = Кеңістікті өшіру
 
-team-title = Команда
-team-just-you = Бұл кеңістікте тек сен
+team-title = Топ
+team-just-you = Бұл кеңістікте тек сіз барсыз
 team-agents = { $count ->
     [one] Сіз және 1 агент
-   *[other] Сіз және { $count } агенттер
+   *[other] Сіз және { $count } агент
 }
-team-empty = Мұнда әлі ешкім жоқ
+team-empty = Мұнда әзірге ешкім жоқ
 team-you = Сіз
 team-agent = Агент
 
 services-title = Фондық қызметтер
 services-processes = { $count ->
     [one] 1 процесс
-   *[other] { $count } процестер
+   *[other] { $count } процесс
 }
-services-kill-all = Барлығын өлтір
-services-not-running = Қызмет жұмыс істемейді
-services-start-with = Мынадан бастаңыз:
+services-kill-all = Барлығын мәжбүрлеп тоқтату
+services-not-running = Қызмет іске қосылмаған
+services-start-with = Мынамен іске қосу:
 services-empty = Белсенді процестер жоқ
 services-filter = Процестерді сүзу…
 services-no-match = Сәйкес процестер жоқ
-services-connected = Қосылды
+services-connected = Қосылған
 services-disconnected = Ажыратылған
 services-attached = тіркелген
-services-kill = Өлтір
+services-kill = Мәжбүрлеп тоқтату
 services-memory = Жад
 services-size = Өлшем
 services-shell = Shell
 
 error-title = Қате
 
-history-search = Іздеу тарихы
-history-clear-all = Барлығын өшіру
-history-clear-confirm = Барлық тарихты өшіру керек пе?
+history-search = Тарихтан іздеу
+history-clear-all = Барлығын тазалау
+history-clear-confirm = Бүкіл тарих тазалансын ба?
 history-clear-warning = Бұл әрекетті қайтару мүмкін емес.
-history-cancel = Болдырмау
+history-cancel = Бас тарту
 history-today = Бүгін
 history-yesterday = Кеше
 history-days-ago = { $count } күн бұрын
 history-day-offset = Күн -{ $count }
 
-settings-title = Параметрлер
-settings-loading = Параметрлер жүктелуде…
-settings-stored = ~/.vmux/settings.ron ішінде сақталған
+settings-title = Баптаулар
+settings-loading = Баптаулар жүктелуде…
+settings-stored = ~/.vmux/settings.ron ішінде сақталады
 settings-other = Басқа
-settings-software-update = Бағдарламалық құралды жаңарту
-settings-check-updates = Жаңартуларды тексеріңіз
-settings-check-updates-hint = Іске қосылғанда және Автоматты жаңарту қосылғанда сағат сайын автоматты түрде тексереді.
-settings-update-unavailable = Қолжетімсіз
-settings-update-unavailable-hint = Жаңартқыш бұл құрылымға қосылмаған.
+settings-software-update = Бағдарламаны жаңарту
+settings-check-updates = Жаңартуларды тексеру
+settings-check-updates-hint = Автожаңарту қосулы болса, іске қосылғанда және әр сағат сайын автоматты түрде тексереді.
+settings-update-unavailable = Қолжетімді емес
+settings-update-unavailable-hint = Бұл жинақта жаңартқыш жоқ.
 settings-update-checking = Тексерілуде…
 settings-update-checking-hint = Жаңартулар тексерілуде…
 settings-update-check-again = Қайта тексеру
 settings-update-current = Vmux жаңартылған.
 settings-update-downloading = Жүктеп алынуда…
-settings-update-downloading-hint = Жүктеп алынуда Vmux { $version }…
+settings-update-downloading-hint = Vmux { $version } жүктеп алынуда…
 settings-update-installing = Орнатылуда…
 settings-update-installing-hint = Vmux { $version } орнатылуда…
 settings-update-ready = Жаңарту дайын
-settings-update-ready-hint = Vmux { $version } дайын. Оны қолдану үшін қайта іске қосыңыз.
-settings-update-try-again = Қайталап көріңіз
-settings-update-failed = Жаңартуларды тексеру мүмкін емес.
+settings-update-ready-hint = Vmux { $version } дайын. Қолдану үшін қайта іске қосыңыз.
+settings-update-try-again = Қайталап көру
+settings-update-failed = Жаңартуларды тексеру мүмкін болмады.
 settings-item = Элемент
 settings-item-number = Элемент { $number }
 settings-press-key = Пернені басыңыз…
 settings-saved = Сақталды
-settings-record-key = Жаңа пернелер тіркесімін жазу үшін басыңыз
+settings-record-key = Жаңа перне тіркесімін жазу үшін басыңыз
 
 tray-open-window = Терезені ашу
 tray-close-window = Терезені жабу
 tray-pause-recording = Жазуды кідірту
 tray-resume-recording = Жазуды жалғастыру
 tray-finish-recording = Жазуды аяқтау
-tray-quit = Vmux шығу
+tray-quit = Vmux-тан шығу
 
 composer-attach-files = Файлдарды тіркеу (/upload)
-composer-remove-attachment = Қосымшаны алып тастаңыз
+composer-remove-attachment = Тіркемені өшіру
 
 layout-back = Артқа
 layout-forward = Алға
-layout-reload = Қайта жүктеңіз
-layout-bookmark-page = Осы бетті белгілеңіз
-layout-remove-bookmark = Бетбелгіні алып тастаңыз
-layout-pin-page = Бұл бетті бекітіңіз
+layout-reload = Қайта жүктеу
+layout-bookmark-page = Бұл бетті бетбелгіге қосу
+layout-remove-bookmark = Бетбелгіні өшіру
+layout-pin-page = Бұл бетті бекіту
 layout-unpin-page = Бұл бетті босату
 layout-manage-extensions = Кеңейтімдерді басқару
 layout-new-stack = Жаңа стек
 layout-close-tab = Қойындыны жабу
 layout-bookmark = Бетбелгі
-layout-pin = Pin
+layout-pin = Бекіту
 layout-new-tab = Жаңа қойынды
-layout-team = Команда
+layout-team = Топ
 
 command-switch-space = Кеңістікті ауыстыру…
 command-search-ask = Іздеу немесе сұрау…
-command-new-tab-placeholder = URL іздеңіз немесе теріңіз немесе Терминалды таңдаңыз…
-command-placeholder = Пәрмендер үшін URL, іздеу қойындыларын немесе > теріңіз…
-command-composer-placeholder = Пәрмендер үшін / немесе медиа үшін @ теріңіз
+command-new-tab-placeholder = Іздеңіз, URL енгізіңіз немесе Терминалды таңдаңыз…
+command-placeholder = URL енгізіңіз, қойындылардан іздеңіз немесе командалар үшін > теріңіз…
+command-composer-placeholder = Командалар үшін /, медиа үшін @ теріңіз
 command-send = Жіберу (Enter)
 command-terminal = Терминал
-command-open-terminal = Терминалда ашыңыз
+command-open-terminal = Терминалда ашу
 command-stack = Стек
 command-tabs = { $count ->
     [one] 1 қойынды
-   *[other] { $count } қойындылары
+   *[other] { $count } қойынды
 }
-command-prompt = Шақыру
+command-prompt = Prompt
 command-new-tab = Жаңа қойынды
 command-search = Іздеу
 command-open-value = “{ $value }” ашу
-command-search-value = "{ $value }" іздеу
+command-search-value = “{ $value }” іздеу
 
-schema-appearance = Сыртқы түрі
+schema-appearance = Көрініс
 schema-general = Жалпы
 schema-layout = Орналасу
-schema-layout-detail = Терезе, тақталар, бүйірлік тақта және фокус сақинасы.
+schema-layout-detail = Терезе, панельдер, бүйірлік тақта және фокус жиегі.
 schema-agent = Агент
 schema-agent-detail = Агент әрекеті және құрал рұқсаттары.
-schema-shortcuts = Таңбашалар
-schema-shortcuts-detail = Тек оқуға арналған көрініс. Байланыстыруларды өзгерту үшін settings.ron тікелей өңдеңіз.
+schema-shortcuts = Перне тіркесімдері
+schema-shortcuts-detail = Тек оқуға арналған көрініс. Тіркесімдерді өзгерту үшін settings.ron файлын тікелей өңдеңіз.
 schema-terminal = Терминал
 schema-browser = Браузер
 schema-mode = Режим
-schema-mode-detail = Веб-беттерге арналған түс схемасы. Құрылғы жүйеңізді бақылайды.
+schema-mode-detail = Веб-беттердің түс схемасы. «Құрылғы» жүйеңізге сай жүреді.
 schema-device = Құрылғы
-schema-light = Жарық
+schema-light = Ашық
 schema-dark = Қараңғы
 schema-language = Тіл
-schema-language-detail = Жүйені, en-US, ja немесе сәйкес ~/.vmux/locales/<tag>.ftl каталогы бар кез келген BCP 47 тегін пайдаланыңыз.
-schema-auto-update = Автоматты жаңарту
-schema-auto-update-detail = Жаңартуларды іске қосу кезінде және әр сағат сайын тексеріңіз және орнатыңыз.
-schema-startup-url = Іске қосу URL
-schema-startup-url-detail = Бос пәрмен жолының шақыруын ашады.
+schema-language-detail = Жүйе тілін, en-US, ja немесе сәйкес ~/.vmux/locales/<tag>.ftl каталогы бар кез келген BCP 47 тегін пайдаланыңыз.
+schema-auto-update = Автожаңарту
+schema-auto-update-detail = Іске қосылғанда және әр сағат сайын жаңартуларды тексеріп, орнату.
+schema-startup-url = Іске қосу URL-і
+schema-startup-url-detail = Бос болса, команда жолағының prompt өрісі ашылады.
 schema-search-engine = Іздеу жүйесі
-schema-search-engine-detail = «Бастау» және пәрмендер тақтасынан веб-іздеу үшін пайдаланылады.
+schema-search-engine-detail = Бастау бетінен және команда жолағынан вебте іздеу үшін қолданылады.
 schema-window = Терезе
 schema-pane = Панель
 schema-side-sheet = Бүйірлік парақ
-schema-focus-ring = Фокус сақинасы
-schema-run-placement = Орналастыруды қайта анықтауға рұқсат беріңіз
-schema-run-placement-detail = Агенттерге іске қосу тақтасы режимін, бағытты және якорьді таңдауға рұқсат етіңіз.
-schema-leader = Көшбасшы
-schema-leader-detail = Аккорд таңбашалары үшін префикс пернесі.
+schema-focus-ring = Фокус жиегі
+schema-run-placement = Орындау орнын өзгертуге рұқсат ету
+schema-run-placement-detail = Агенттерге орындау панелі режимін, бағытын және бекіту нүктесін таңдауға рұқсат етіңіз.
+schema-leader = Бастапқы перне
+schema-leader-detail = Аккорд тіркесімдеріне арналған префикс перне.
 schema-chord-timeout = Аккорд күту уақыты
-schema-chord-timeout-detail = Аккорд префиксінің мерзімі аяқталғанға дейін миллисекундтар.
-schema-bindings = Байланыстар
-schema-confirm-close = Жабуды растаңыз
-schema-confirm-close-detail = Жұмыс істеп тұрған процессі бар терминалды жабу алдында сұрау.
+schema-chord-timeout-detail = Аккорд префиксі аяқталғанға дейінгі миллисекундтар.
+schema-bindings = Тіркесімдер
+schema-confirm-close = Жабуды растау
+schema-confirm-close-detail = Процесс орындалып тұрған терминалды жабар алдында сұрау.
 schema-default-theme = Әдепкі тақырып
-schema-default-theme-detail = Тақырыптар тізімінен белсенді тақырыптың атауы.
+schema-default-theme-detail = Тақырыптар тізіміндегі белсенді тақырып атауы.
