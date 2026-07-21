@@ -15,6 +15,7 @@ use vmux_remote::{
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
+const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 fn main() {
@@ -586,7 +587,7 @@ fn AppHead() -> Element {
         document::Title { "Vmux Remote" }
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
         document::Meta { name: "theme-color", content: "#09090b" }
-        document::Stylesheet { href: "/tailwind.out.css" }
+        document::Stylesheet { href: TAILWIND_CSS }
     }
 }
 
