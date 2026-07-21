@@ -6,7 +6,9 @@ use bevy_cef::prelude::{BinHostEmitEvent, BinReceive, Browsers};
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
-use vmux_layout::event::{REMOTE_STATE_EVENT, RemoteCommandEvent, RemotePhase, RemoteStateEvent};
+use vmux_layout::event::{
+    REMOTE_STATE_EVENT, RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent,
+};
 
 pub(crate) struct RemoteDesktopPlugin;
 
@@ -14,6 +16,7 @@ impl Plugin for RemoteDesktopPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RemoteDesktopState>()
             .add_observer(on_remote_command)
+            .add_observer(on_remote_copy)
             .add_systems(Startup, reconcile_remote_on_startup)
             .add_systems(
                 Update,
@@ -24,6 +27,12 @@ impl Plugin for RemoteDesktopPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteDesktopState>) {
+    if state.phase == RemotePhase::Enabled && !state.pairing_url.is_empty() {
+        vmux_terminal::clipboard::write(state.pairing_url.clone());
     }
 }
 

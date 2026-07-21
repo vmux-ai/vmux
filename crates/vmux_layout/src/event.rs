@@ -521,6 +521,21 @@ pub struct RemoteCommandEvent {
     pub enabled: bool,
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RemoteCopyEvent;
+
 /// The active tab's working directory + live git status, auto-detected from git. Rendered as the
 /// git-integration section of the side-sheet's first card.
 #[derive(
