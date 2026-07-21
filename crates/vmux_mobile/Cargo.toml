@@ -2,7 +2,7 @@
 name = "vmux_mobile"
 version.workspace = true
 edition.workspace = true
-description = "Native Dioxus Mobile client for Vmux Remote"
+description = "Native Dioxus Mobile client for Vmux"
 publish = false
 
 [features]
