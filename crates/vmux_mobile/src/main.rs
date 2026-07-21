@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use dioxus::prelude::*;
@@ -14,9 +15,22 @@ use vmux_remote::{
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
+static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 
 fn main() {
-    dioxus::launch(App);
+    let config = dioxus::mobile::Config::new().with_custom_event_handler(|event, _| {
+        if let dioxus::mobile::tao::event::Event::Opened { urls } = event {
+            let mut opened = OPENED_URLS
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            opened.extend(
+                urls.iter()
+                    .filter(|url| url.scheme() == "vmuxremote")
+                    .map(ToString::to_string),
+            );
+        }
+    });
+    dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -136,6 +150,9 @@ fn App() -> Element {
     let connected = use_signal(|| false);
     let mut drawer = use_signal(|| false);
     let mut stream_generation = use_signal(|| 0_u64);
+    let mut pending_pair_url = use_signal(|| None::<String>);
+    let mut deep_link_received = use_signal(|| false);
+    let mut pairing = use_signal(|| false);
 
     use_effect(move || {
         let _ = messages.read().len();
@@ -146,10 +163,23 @@ fn App() -> Element {
     });
 
     use_future(move || async move {
+        if let Some(opened) = take_opened_url() {
+            deep_link_received.set(true);
+            pair_url.set(opened.clone());
+            pending_pair_url.set(Some(opened));
+            auth.set(AuthState::Unpaired);
+            return;
+        }
         let Some(credentials) = load_credentials().await else {
+            if deep_link_received() {
+                return;
+            }
             auth.set(AuthState::Unpaired);
             return;
         };
+        if deep_link_received() {
+            return;
+        }
         pair_url.set(pairing_url(&credentials));
         let client = Api::new(credentials);
         match client.sessions().await {
@@ -174,13 +204,80 @@ fn App() -> Element {
             }
             Err(ApiError::Unauthorized) => {
                 clear_credentials();
-                error.set("Pairing expired. Run vmux remote again.".to_string());
+                error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                 auth.set(AuthState::Unpaired);
             }
             Err(ApiError::Message(message)) => {
                 error.set(message);
                 auth.set(AuthState::Unpaired);
             }
+        }
+    });
+
+    use_future(move || async move {
+        loop {
+            if let Some(opened) = take_opened_url() {
+                deep_link_received.set(true);
+                pair_url.set(opened.clone());
+                pending_pair_url.set(Some(opened));
+                error.set(String::new());
+                auth.set(AuthState::Unpaired);
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+    });
+
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let pending = pending_pair_url.write().take();
+            let Some(input) = pending else {
+                continue;
+            };
+            let credentials = match parse_pairing_url(&input) {
+                Ok(credentials) => credentials,
+                Err(message) => {
+                    pairing.set(false);
+                    error.set(message);
+                    auth.set(AuthState::Unpaired);
+                    continue;
+                }
+            };
+            pairing.set(true);
+            error.set(String::new());
+            let client = Api::new(credentials.clone());
+            match client.sessions().await {
+                Ok(next) => {
+                    save_credentials(&credentials);
+                    pair_url.set(pairing_url(&credentials));
+                    api.set(Some(client.clone()));
+                    sessions.set(next.clone());
+                    auth.set(AuthState::Paired);
+                    if let Some(first) = next.first().cloned() {
+                        open_session(
+                            client,
+                            first,
+                            current,
+                            messages,
+                            live_delta,
+                            status,
+                            approval,
+                            connected,
+                            drawer,
+                            stream_generation,
+                        );
+                    }
+                }
+                Err(ApiError::Unauthorized) => {
+                    error.set("Pairing token was rejected.".to_string());
+                    auth.set(AuthState::Unpaired);
+                }
+                Err(ApiError::Message(message)) => {
+                    error.set(message);
+                    auth.set(AuthState::Unpaired);
+                }
+            }
+            pairing.set(false);
         }
     });
 
@@ -216,7 +313,7 @@ fn App() -> Element {
                 Err(ApiError::Unauthorized) => {
                     clear_credentials();
                     api.set(None);
-                    error.set("Pairing expired. Run vmux remote again.".to_string());
+                    error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                     auth.set(AuthState::Unpaired);
                 }
                 Err(ApiError::Message(_)) => {}
@@ -239,45 +336,10 @@ fn App() -> Element {
             PairScreen {
                 value: pair_url(),
                 error: error(),
+                pairing: pairing(),
                 on_value: move |value| pair_url.set(value),
                 on_pair: move |_| {
-                    let credentials = match parse_pairing_url(&pair_url()) {
-                        Ok(credentials) => credentials,
-                        Err(message) => {
-                            error.set(message);
-                            return;
-                        }
-                    };
-                    spawn(async move {
-                        let client = Api::new(credentials.clone());
-                        match client.sessions().await {
-                            Ok(next) => {
-                                save_credentials(&credentials);
-                                api.set(Some(client.clone()));
-                                sessions.set(next.clone());
-                                error.set(String::new());
-                                auth.set(AuthState::Paired);
-                                if let Some(first) = next.first().cloned() {
-                                    open_session(
-                                        client,
-                                        first,
-                                        current,
-                                        messages,
-                                        live_delta,
-                                        status,
-                                        approval,
-                                        connected,
-                                        drawer,
-                                        stream_generation,
-                                    );
-                                }
-                            }
-                            Err(ApiError::Unauthorized) => {
-                                error.set("Pairing token was rejected.".to_string())
-                            }
-                            Err(ApiError::Message(message)) => error.set(message),
-                        }
-                    });
+                    pending_pair_url.set(Some(pair_url()));
                 },
             }
         };
@@ -532,6 +594,7 @@ fn AppHead() -> Element {
 struct PairScreenProps {
     value: String,
     error: String,
+    pairing: bool,
     on_value: EventHandler<String>,
     on_pair: EventHandler<()>,
 }
@@ -543,7 +606,7 @@ fn PairScreen(props: PairScreenProps) -> Element {
             div { class: "w-full max-w-sm rounded-3xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl shadow-black/50",
                 div { class: "mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 text-xl font-bold text-white shadow-lg shadow-violet-500/20", "V" }
                 h1 { class: "text-2xl font-semibold tracking-tight", "Pair with your Mac" }
-                p { class: "mt-2 text-sm leading-6 text-zinc-500", "Run vmux remote on your Mac. Paste the printed pairing URL." }
+                p { class: "mt-2 text-sm leading-6 text-zinc-500", "Enable Remote on your Mac and scan its QR code. You can also paste the pairing URL." }
                 form {
                     class: "mt-6 flex flex-col gap-3",
                     onsubmit: move |event| {
@@ -563,7 +626,12 @@ fn PairScreen(props: PairScreenProps) -> Element {
                     if !props.error.is_empty() {
                         p { class: "text-sm leading-5 text-red-300", "{props.error}" }
                     }
-                    button { class: "h-13 rounded-xl bg-white font-semibold text-black active:scale-[0.99]", r#type: "submit", "Pair" }
+                    button {
+                        class: "h-13 rounded-xl bg-white font-semibold text-black disabled:opacity-50 active:scale-[0.99]",
+                        r#type: "submit",
+                        disabled: props.pairing,
+                        if props.pairing { "Pairing…" } else { "Pair" }
+                    }
                 }
             }
         }
@@ -807,10 +875,38 @@ fn parse_sse_event(frame: &[u8]) -> Option<RemoteEvent> {
 
 fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
     let input = input.trim();
+    if input.starts_with("vmuxremote://") {
+        let parsed = Url::parse(input).map_err(|_| "Pairing URL is invalid.".to_string())?;
+        if parsed.scheme() != "vmuxremote" || parsed.host_str() != Some("pair") {
+            return Err("Pairing URL is invalid.".to_string());
+        }
+        let params = parsed
+            .query_pairs()
+            .collect::<std::collections::HashMap<_, _>>();
+        let base_url = params
+            .get("base")
+            .map(|value| value.to_string())
+            .ok_or_else(|| "Pairing URL has no server address.".to_string())?;
+        let token = params
+            .get("token")
+            .map(|value| value.to_string())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "Pairing URL has no token.".to_string())?;
+        let base = Url::parse(&base_url)
+            .map_err(|_| "Pairing URL has an invalid server address.".to_string())?;
+        if !matches!(base.scheme(), "http" | "https") {
+            return Err("Pairing URL must use HTTPS or HTTP.".to_string());
+        }
+        let base_url = base.origin().ascii_serialization();
+        if base_url == "null" {
+            return Err("Pairing URL has no server address.".to_string());
+        }
+        return Ok(Credentials { base_url, token });
+    }
     let start = input
         .find("https://")
         .or_else(|| input.find("http://"))
-        .ok_or_else(|| "Paste the full URL printed by vmux remote.".to_string())?;
+        .ok_or_else(|| "Paste the full pairing URL shown by Vmux on your Mac.".to_string())?;
     let candidate = input[start..].split_whitespace().next().unwrap_or_default();
     let parsed = Url::parse(candidate).map_err(|_| "Pairing URL is invalid.".to_string())?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -830,6 +926,13 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         return Err("Pairing URL has no server address.".to_string());
     }
     Ok(Credentials { base_url, token })
+}
+
+fn take_opened_url() -> Option<String> {
+    OPENED_URLS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .pop()
 }
 
 fn pairing_url(credentials: &Credentials) -> String {
@@ -895,6 +998,20 @@ mod tests {
                 .unwrap(),
             Credentials {
                 base_url: "https://mac.example.ts.net".to_string(),
+                token: "secret".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_pairing_deep_link() {
+        assert_eq!(
+            parse_pairing_url(
+                "vmuxremote://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret"
+            )
+            .unwrap(),
+            Credentials {
+                base_url: "https://mac.example.ts.net:54821".to_string(),
                 token: "secret".to_string(),
             }
         );

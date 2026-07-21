@@ -6,6 +6,7 @@ mod extensions;
 pub use extensions::ExtensionsPlugin;
 mod host_focus;
 pub use host_focus::HostFocusIntent;
+mod remote;
 
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -43,7 +44,7 @@ use vmux_core::{
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
-use vmux_layout::event::SideSheetCommandEvent;
+use vmux_layout::event::{RemoteCommandEvent, SideSheetCommandEvent};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
@@ -224,9 +225,12 @@ impl Plugin for BrowserPlugin {
                         embedded_hosts,
                         ..default()
                     },
-                    BinEventEmitterPlugin::<(HeaderCommandEvent, SideSheetCommandEvent)>::for_hosts(
-                        &["layout"],
-                    ),
+                    remote::RemoteDesktopPlugin,
+                    BinEventEmitterPlugin::<(
+                        HeaderCommandEvent,
+                        SideSheetCommandEvent,
+                        RemoteCommandEvent,
+                    )>::for_hosts(&["layout"]),
                     BinEventEmitterPlugin::<(
                         DebugUpdateReady,
                         DebugUpdateClear,

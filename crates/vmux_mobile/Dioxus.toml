@@ -11,6 +11,9 @@ publisher = "Vmux"
 short_description = "Continue Vmux agent chats from your phone."
 icon = ["../../icon.png"]
 
+[deep_links]
+schemes = ["vmuxremote"]
+
 [ios]
 deployment_target = "15.0"
 identifier = "ai.vmux.remote"

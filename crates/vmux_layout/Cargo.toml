@@ -63,6 +63,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 js-sys = "0.3"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"

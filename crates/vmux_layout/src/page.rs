@@ -3,9 +3,9 @@
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
     BookmarksCommandEvent, BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT,
-    LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent,
-    STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent,
-    TabsHostEvent,
+    LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, REMOTE_STATE_EVENT,
+    ReloadEvent, RemoteCommandEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT, StackNode,
+    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -94,6 +94,7 @@ pub fn Page() -> Element {
         });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let remote_state = use_event::<RemoteStateEvent>(REMOTE_STATE_EVENT, RemoteStateEvent::default);
 
     let extensions_state =
         use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
@@ -228,6 +229,7 @@ pub fn Page() -> Element {
                             panes,
                             active_space,
                             tab_boundary,
+                            remote: remote_state(),
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
                             knowledge_loaded: knowledge_state_received(),
@@ -808,6 +810,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
+    remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_loaded: bool,
@@ -860,6 +863,7 @@ fn SideSheetView(
                             }
                         }
                     }
+                    RemotePanel { remote: remote.clone() }
                 }
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
@@ -881,6 +885,182 @@ fn SideSheetView(
             }
         }
     }
+}
+
+#[component]
+fn RemotePanel(remote: RemoteStateEvent) -> Element {
+    let mut show_pairing = use_signal(|| !remote.paired);
+    let mut copied = use_signal(|| false);
+    let paired = remote.paired;
+    let phase = remote.phase;
+    use_effect(move || {
+        if !paired {
+            show_pairing.set(true);
+        } else if phase != RemotePhase::Enabled {
+            show_pairing.set(false);
+        }
+    });
+    let active = remote.phase == RemotePhase::Enabled;
+    let transitioning = remote.phase == RemotePhase::Starting;
+    let status = match remote.phase {
+        RemotePhase::Disabled => "Off",
+        RemotePhase::Starting if remote.enabled => "Starting…",
+        RemotePhase::Starting => "Stopping…",
+        RemotePhase::Enabled => "On",
+        RemotePhase::Error => "Needs attention",
+    };
+    let qr = if active && show_pairing() && !remote.pairing_deep_link.is_empty() {
+        pairing_qr_svg(&remote.pairing_deep_link)
+    } else {
+        None
+    };
+    let pairing_url = remote.pairing_url.clone();
+    rsx! {
+        div {
+            class: if remote.enabled {
+                "border-t border-emerald-400/30 bg-emerald-500/10 px-2.5 py-2.5"
+            } else {
+                "border-t border-foreground/10 px-2.5 py-2.5"
+            },
+            div { class: "flex items-center gap-2",
+                div {
+                    class: if remote.enabled {
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-emerald-400/15 text-emerald-400"
+                    } else {
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/5 text-muted-foreground"
+                    },
+                    Icon { class: "size-4",
+                        path { d: "M12 2a10 10 0 1 0 10 10" }
+                        path { d: "M12 12 22 2" }
+                        path { d: "M15 2h7v7" }
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "flex items-center gap-1.5",
+                        span { class: "text-ui font-semibold", "Remote" }
+                        if active {
+                            span { class: "inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-400",
+                                span { class: "size-1.5 rounded-full bg-emerald-400" }
+                                "Live"
+                            }
+                        }
+                    }
+                    div {
+                        class: if remote.phase == RemotePhase::Error {
+                            "mt-0.5 truncate text-[10px] text-destructive"
+                        } else if remote.enabled {
+                            "mt-0.5 text-[10px] text-emerald-400/80"
+                        } else {
+                            "mt-0.5 text-[10px] text-muted-foreground"
+                        },
+                        "{status}"
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: if remote.enabled {
+                        "relative h-5 w-9 shrink-0 rounded-full bg-emerald-400 transition-colors"
+                    } else {
+                        "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
+                    },
+                    aria_label: "Toggle Remote",
+                    aria_pressed: remote.enabled,
+                    onclick: move |_| {
+                        let _ = try_cef_bin_emit_rkyv(&RemoteCommandEvent {
+                            enabled: !remote.enabled,
+                        });
+                    },
+                    span {
+                        class: if remote.enabled {
+                            "absolute left-[18px] top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
+                        } else {
+                            "absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
+                        }
+                    }
+                }
+            }
+            if remote.phase == RemotePhase::Error {
+                div { class: "mt-2 rounded-md border border-destructive/20 bg-destructive/5 p-2",
+                    div { class: "break-words text-[10px] leading-4 text-destructive", "{remote.error}" }
+                    button {
+                        r#type: "button",
+                        class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&RemoteCommandEvent {
+                                enabled: remote.enabled,
+                            });
+                        },
+                        "Retry"
+                    }
+                }
+            } else if transitioning {
+                div { class: "mt-2 h-1 overflow-hidden rounded-full bg-foreground/10",
+                    div { class: "h-full w-full rounded-full bg-emerald-400" }
+                }
+            } else if active {
+                div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
+                    div {
+                        class: "min-w-0 flex-1 truncate font-mono text-[9px] text-muted-foreground",
+                        title: "{remote.pairing_url}",
+                        "{remote.pairing_url}"
+                    }
+                    button {
+                        r#type: "button",
+                        class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
+                        onclick: move |_| {
+                            copy_to_clipboard(&pairing_url);
+                            copied.set(true);
+                        },
+                        if copied() { "Copied" } else { "Copy" }
+                    }
+                }
+                if let Some(svg) = qr {
+                    div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
+                        div { class: "overflow-hidden rounded-sm", dangerous_inner_html: "{svg}" }
+                        div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
+                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux Remote and pairs automatically" }
+                    }
+                    div { class: "mt-1.5 text-[9px] leading-4 text-muted-foreground",
+                        "Or paste the URL above into the mobile app."
+                    }
+                } else if remote.paired {
+                    div { class: "mt-2 flex items-center gap-2",
+                        div { class: "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-400",
+                            span { class: "size-1.5 rounded-full bg-emerald-400" }
+                            "Phone paired"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "text-[10px] font-semibold text-foreground hover:opacity-70",
+                            onclick: move |_| show_pairing.set(true),
+                            "Pair another"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn pairing_qr_svg(value: &str) -> Option<String> {
+    use qrcode::QrCode;
+    use qrcode::render::svg;
+
+    let code = QrCode::new(value).ok()?;
+    Some(
+        code.render::<svg::Color>()
+            .min_dimensions(148, 148)
+            .dark_color(svg::Color("#09090b"))
+            .light_color(svg::Color("#ffffff"))
+            .build(),
+    )
+}
+
+fn copy_to_clipboard(value: &str) {
+    let Ok(value) = serde_json::to_string(value) else {
+        return;
+    };
+    let _ = document::eval(&format!("navigator.clipboard.writeText({value});"));
 }
 
 #[derive(Clone, PartialEq)]

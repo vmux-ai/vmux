@@ -26,20 +26,21 @@ pub fn run(args: RemoteArgs) -> std::io::Result<i32> {
         }
 
         let target = format!("http://127.0.0.1:{port}");
+        let https_port = format!("--https={port}");
         let served = Command::new("tailscale")
-            .args(["serve", "--bg", &target])
+            .args(["serve", "--bg", "--yes", &https_port, &target])
             .status()
             .is_ok_and(|status| status.success());
         let dns_name = tailscale_dns_name();
         if served && let Some(host) = dns_name {
-            println!("paste into Vmux Remote: https://{host}/#token={token}");
+            println!("paste into Vmux Remote: https://{host}:{port}/#token={token}");
             return Ok(0);
         }
 
         println!("mobile app ready on {target}");
-        println!("run: tailscale serve --bg {target}");
+        println!("run: tailscale serve --bg --yes {https_port} {target}");
         if let Some(host) = dns_name {
-            println!("paste into Vmux Remote: https://{host}/#token={token}");
+            println!("paste into Vmux Remote: https://{host}:{port}/#token={token}");
         } else {
             println!("pair token: {token}");
         }
@@ -58,6 +59,7 @@ fn start_service(reset: bool) -> std::io::Result<()> {
     if reset {
         let _ = vmux_service::launchd::bootout(vmux_service::current_profile());
         let _ = std::fs::remove_file(vmux_service::remote_token_path());
+        let _ = std::fs::remove_file(vmux_service::remote_paired_path());
     }
     vmux_service::launchd::ensure_running(
         vmux_service::current_profile(),
