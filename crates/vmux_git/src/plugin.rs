@@ -11,10 +11,64 @@ use crate::event::{
 };
 use crate::job::{Emit, JobKind, emit_event_name, run_job};
 
-pub type OutboxQueue = Vec<(Entity, Vec<Emit>)>;
+pub enum GitOutboxItem {
+    Events {
+        webview: Entity,
+        emits: Vec<Emit>,
+    },
+    StatusBatch {
+        repo_root: PathBuf,
+        results: Vec<(Entity, Vec<Emit>)>,
+    },
+}
+
+pub type OutboxQueue = Vec<GitOutboxItem>;
 
 #[derive(Resource, Clone, Default)]
 pub struct GitOutbox(pub Arc<Mutex<OutboxQueue>>);
+
+#[derive(Clone, Debug)]
+struct PendingStatusRequest {
+    webview: Entity,
+    path: PathBuf,
+    dirty: bool,
+}
+
+#[derive(Resource, Default)]
+struct GitStatusJobs {
+    pending: HashMap<PathBuf, HashMap<Entity, PendingStatusRequest>>,
+    in_flight: HashSet<PathBuf>,
+}
+
+impl GitStatusJobs {
+    fn queue(&mut self, repo_root: PathBuf, request: PendingStatusRequest) {
+        self.pending
+            .entry(repo_root)
+            .or_default()
+            .insert(request.webview, request);
+    }
+
+    fn take_ready(&mut self) -> Vec<(PathBuf, Vec<PendingStatusRequest>)> {
+        let roots: Vec<PathBuf> = self
+            .pending
+            .keys()
+            .filter(|root| !self.in_flight.contains(*root))
+            .cloned()
+            .collect();
+        roots
+            .into_iter()
+            .filter_map(|root| {
+                let requests = self.pending.remove(&root)?;
+                self.in_flight.insert(root.clone());
+                Some((root, requests.into_values().collect()))
+            })
+            .collect()
+    }
+
+    fn complete(&mut self, repo_root: &Path) {
+        self.in_flight.remove(repo_root);
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct GitWatchTarget {
@@ -24,6 +78,7 @@ struct GitWatchTarget {
 
 struct GitSubscription {
     path: PathBuf,
+    repo_root: PathBuf,
     targets: Vec<GitWatchTarget>,
     complete: bool,
 }
@@ -56,7 +111,9 @@ fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
     canon(&path)
 }
 
-fn git_watch_targets(file: &Path) -> Result<Vec<GitWatchTarget>, crate::runner::GitError> {
+fn git_watch_targets(
+    file: &Path,
+) -> Result<(PathBuf, Vec<GitWatchTarget>), crate::runner::GitError> {
     let root = crate::runner::repo_root(file)?;
     let (stdout, stderr, ok) = crate::runner::git(
         &root,
@@ -88,10 +145,18 @@ fn git_watch_targets(file: &Path) -> Result<Vec<GitWatchTarget>, crate::runner::
         path: common_dir.join("refs"),
         recursive: true,
     });
-    Ok(targets)
+    Ok((root, targets))
+}
+
+fn is_git_lock_path(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().ends_with(".lock"))
 }
 
 fn target_matches(target: &GitWatchTarget, changed: &Path) -> bool {
+    if is_git_lock_path(changed) {
+        return false;
+    }
     let changed = canon(changed);
     changed == target.path
         || if target.recursive {
@@ -102,19 +167,22 @@ fn target_matches(target: &GitWatchTarget, changed: &Path) -> bool {
 }
 
 impl GitWatch {
-    fn subscribe(&mut self, entity: Entity, path: &Path) {
+    fn subscribe(
+        &mut self,
+        entity: Entity,
+        path: &Path,
+    ) -> Result<PathBuf, crate::runner::GitError> {
         let path = canon(path);
-        if self
+        if let Some(subscription) = self
             .subscriptions
             .get(&entity)
-            .is_some_and(|subscription| subscription.path == path && subscription.complete)
+            .filter(|subscription| subscription.path == path && subscription.complete)
         {
-            return;
+            return Ok(subscription.repo_root.clone());
         }
-        let Ok(targets) = git_watch_targets(&path) else {
+        let (repo_root, targets) = git_watch_targets(&path).inspect_err(|_| {
             self.subscriptions.remove(&entity);
-            return;
-        };
+        })?;
         let mut complete = true;
         for target in &targets {
             if self.watched.contains(target) {
@@ -135,10 +203,12 @@ impl GitWatch {
             entity,
             GitSubscription {
                 path,
+                repo_root: repo_root.clone(),
                 targets,
                 complete,
             },
         );
+        Ok(repo_root)
     }
 }
 
@@ -154,9 +224,10 @@ impl Plugin for GitPlugin {
             .get_resource::<bevy::winit::EventLoopProxyWrapper>()
             .map(|wrapper| (**wrapper).clone());
         match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            let wake = result
-                .as_ref()
-                .is_ok_and(|event| !matches!(event.kind, EventKind::Access(_)));
+            let wake = result.as_ref().is_ok_and(|event| {
+                !matches!(event.kind, EventKind::Access(_))
+                    && event.paths.iter().any(|path| !is_git_lock_path(path))
+            });
             let _ = tx.send(result);
             if wake && let Some(proxy) = proxy.as_ref() {
                 let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -173,6 +244,7 @@ impl Plugin for GitPlugin {
             Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
         }
         app.init_resource::<GitOutbox>()
+            .init_resource::<GitStatusJobs>()
             .add_plugins(BinEventEmitterPlugin::<(
                 GitStatusRequest,
                 GitDiffRequest,
@@ -191,7 +263,10 @@ impl Plugin for GitPlugin {
             .add_observer(on_commit_request)
             .add_observer(on_push_request)
             .add_observer(on_hunk_request)
-            .add_systems(Update, (drain_git_watch, drain_git_outbox));
+            .add_systems(
+                Update,
+                (drain_git_watch, drain_git_outbox, dispatch_status_jobs).chain(),
+            );
     }
 }
 
@@ -201,7 +276,50 @@ fn spawn_job(outbox: &GitOutbox, webview: Entity, job: JobKind) {
         let emits = run_job(job);
         sink.lock()
             .unwrap_or_else(|p| p.into_inner())
-            .push((webview, emits));
+            .push(GitOutboxItem::Events { webview, emits });
+    });
+}
+
+fn spawn_status_batch(
+    outbox: &GitOutbox,
+    repo_root: PathBuf,
+    requests: Vec<PendingStatusRequest>,
+) {
+    let sink = outbox.0.clone();
+    std::thread::spawn(move || {
+        let paths: Vec<PathBuf> = requests.iter().map(|request| request.path.clone()).collect();
+        let results = match crate::runner::statuses(&repo_root, &paths) {
+            Ok(events) => requests
+                .into_iter()
+                .zip(events)
+                .map(|(request, mut event)| {
+                    if request.dirty {
+                        event.file_status = match event.file_status {
+                            crate::event::FileStatus::Clean => crate::event::FileStatus::Modified,
+                            crate::event::FileStatus::Staged => {
+                                crate::event::FileStatus::StagedModified
+                            }
+                            status => status,
+                        };
+                    }
+                    (request.webview, vec![Emit::Status(event)])
+                })
+                .collect(),
+            Err(error) => requests
+                .into_iter()
+                .map(|request| {
+                    (
+                        request.webview,
+                        vec![Emit::Error(crate::event::GitErrorEvent {
+                            message: error.0.clone(),
+                        })],
+                    )
+                })
+                .collect(),
+        };
+        sink.lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(GitOutboxItem::StatusBatch { repo_root, results });
     });
 }
 
@@ -210,19 +328,43 @@ fn on_status_request(
     sources: Query<&GitDiffSource>,
     outbox: Res<GitOutbox>,
     watch: Option<NonSendMut<GitWatch>>,
+    mut jobs: ResMut<GitStatusJobs>,
 ) {
-    if let Some(mut watch) = watch {
-        watch.subscribe(
-            trigger.event().webview,
-            Path::new(&trigger.event().payload.path),
-        );
+    let webview = trigger.event().webview;
+    let path: PathBuf = trigger.event().payload.path.clone().into();
+    let repo_root = if let Some(mut watch) = watch {
+        watch.subscribe(webview, &path)
+    } else {
+        crate::runner::repo_root(&path)
+    };
+    match repo_root {
+        Ok(repo_root) => jobs.queue(
+            repo_root,
+            PendingStatusRequest {
+                webview,
+                path,
+                dirty: sources
+                    .get(webview)
+                    .is_ok_and(|source| source.dirty),
+            },
+        ),
+        Err(error) => outbox
+            .0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(GitOutboxItem::Events {
+                webview,
+                emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                    message: error.0,
+                })],
+            }),
     }
-    spawn_job(&outbox, trigger.event().webview, JobKind::Status {
-        path: trigger.event().payload.path.clone().into(),
-        dirty: sources
-            .get(trigger.event().webview)
-            .is_ok_and(|source| source.dirty),
-    });
+}
+
+fn dispatch_status_jobs(mut jobs: ResMut<GitStatusJobs>, outbox: Res<GitOutbox>) {
+    for (repo_root, requests) in jobs.take_ready() {
+        spawn_status_batch(&outbox, repo_root, requests);
+    }
 }
 
 fn drain_git_watch(watch: Option<NonSendMut<GitWatch>>, mut commands: Commands) {
@@ -321,20 +463,40 @@ fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbo
     });
 }
 
-fn drain_git_outbox(outbox: Res<GitOutbox>, mut commands: Commands) {
+fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
+    for emit in emits {
+        let name = emit_event_name(&emit);
+        match emit {
+            Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+            Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+            Emit::DiffViewport(ev) => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev))
+            }
+            Emit::Result(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+            Emit::Error(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+        }
+    }
+}
+
+fn drain_git_outbox(
+    outbox: Res<GitOutbox>,
+    mut jobs: ResMut<GitStatusJobs>,
+    mut commands: Commands,
+) {
     let drained: OutboxQueue = {
         let mut q = outbox.0.lock().unwrap_or_else(|p| p.into_inner());
         q.drain(..).collect()
     };
-    for (webview, emits) in drained {
-        for emit in emits {
-            let name = emit_event_name(&emit);
-            match emit {
-                Emit::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-                Emit::DiffMeta(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-                Emit::DiffViewport(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-                Emit::Result(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
-                Emit::Error(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(webview, name, &ev)),
+    for item in drained {
+        match item {
+            GitOutboxItem::Events { webview, emits } => {
+                emit_events(&mut commands, webview, emits);
+            }
+            GitOutboxItem::StatusBatch { repo_root, results } => {
+                jobs.complete(&repo_root);
+                for (webview, emits) in results {
+                    emit_events(&mut commands, webview, emits);
+                }
             }
         }
     }
@@ -351,13 +513,21 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<GitOutbox>()
+            .init_resource::<GitStatusJobs>()
             .add_systems(Update, drain_git_outbox);
 
         let webview = app.world_mut().spawn_empty().id();
-        app.world().resource::<GitOutbox>().0.lock().unwrap().push((
-            webview,
-            vec![Emit::Error(GitErrorEvent { message: "boom".into() })],
-        ));
+        app.world()
+            .resource::<GitOutbox>()
+            .0
+            .lock()
+            .unwrap()
+            .push(GitOutboxItem::Events {
+                webview,
+                emits: vec![Emit::Error(GitErrorEvent {
+                    message: "boom".into(),
+                })],
+            });
 
         app.update();
 
@@ -368,7 +538,7 @@ mod tests {
     fn git_watch_targets_cover_index_and_refs() {
         let repo = test_repo::init();
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
-        let targets = git_watch_targets(&file).unwrap();
+        let (_, targets) = git_watch_targets(&file).unwrap();
         let git_dir = canon(&repo.path().join(".git"));
 
         assert!(targets.contains(&GitWatchTarget {
@@ -401,7 +571,7 @@ mod tests {
             ],
         );
 
-        let targets = git_watch_targets(&worktree.join("a.txt")).unwrap();
+        let (_, targets) = git_watch_targets(&worktree.join("a.txt")).unwrap();
         let common = canon(&repo.path().join(".git"));
 
         assert!(targets.iter().any(|target| {
@@ -432,7 +602,83 @@ mod tests {
         };
 
         assert!(target_matches(&direct, &root.join("index")));
+        assert!(!target_matches(&direct, &root.join("index.lock")));
         assert!(!target_matches(&direct, &root.join("refs/heads/main")));
         assert!(target_matches(&recursive, &root.join("refs/heads/main")));
+        assert!(!target_matches(
+            &recursive,
+            &root.join("refs/heads/main.lock")
+        ));
+    }
+
+    #[test]
+    fn status_jobs_batch_by_repo_and_keep_one_batch_in_flight() {
+        let root = PathBuf::from("/repo");
+        let other_root = PathBuf::from("/other");
+        let first = Entity::from_bits(1);
+        let second = Entity::from_bits(2);
+        let mut jobs = GitStatusJobs::default();
+
+        jobs.queue(
+            root.clone(),
+            PendingStatusRequest {
+                webview: first,
+                path: root.join("a.txt"),
+                dirty: false,
+            },
+        );
+        jobs.queue(
+            root.clone(),
+            PendingStatusRequest {
+                webview: first,
+                path: root.join("a.txt"),
+                dirty: true,
+            },
+        );
+        jobs.queue(
+            root.clone(),
+            PendingStatusRequest {
+                webview: second,
+                path: root.join("b.txt"),
+                dirty: false,
+            },
+        );
+        jobs.queue(
+            other_root.clone(),
+            PendingStatusRequest {
+                webview: first,
+                path: other_root.join("c.txt"),
+                dirty: false,
+            },
+        );
+
+        let batches = jobs.take_ready();
+        assert_eq!(batches.len(), 2);
+        let (_, requests) = batches
+            .iter()
+            .find(|(batch_root, _)| batch_root == &root)
+            .unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.webview == first && request.dirty)
+        );
+
+        jobs.queue(
+            root.clone(),
+            PendingStatusRequest {
+                webview: first,
+                path: root.join("a.txt"),
+                dirty: false,
+            },
+        );
+        assert!(jobs.take_ready().is_empty());
+
+        jobs.complete(&root);
+        let batches = jobs.take_ready();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].0, root);
+        assert_eq!(batches[0].1.len(), 1);
     }
 }
