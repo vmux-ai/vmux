@@ -1,3 +1,4 @@
+use crate::i18n_catalogs::{AVAILABLE_LOCALES, EMBEDDED_CATALOGS};
 use fluent_bundle::{FluentArgs, FluentBundle, FluentResource};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -5,9 +6,6 @@ use std::str::FromStr;
 use unic_langid::{CharacterDirection, LanguageIdentifier};
 
 pub const DEFAULT_LOCALE: &str = "en-US";
-
-const EN_US: &str = include_str!("../locales/en-US.ftl");
-const JA: &str = include_str!("../locales/ja.ftl");
 
 thread_local! {
     static CURRENT_LOCALE: RefCell<String> = RefCell::new(preferred_locale());
@@ -84,7 +82,7 @@ pub fn translate_for_with(locale: &str, id: &str, args: &[(&str, TranslationValu
 }
 
 pub fn available_locales() -> &'static [&'static str] {
-    &[DEFAULT_LOCALE, "ja"]
+    AVAILABLE_LOCALES
 }
 
 pub fn register_catalog(locale: &str, source: &str) -> Result<(), String> {
@@ -111,18 +109,23 @@ fn catalog_for(locale: &str) -> String {
     if has_external_catalog(language) {
         return language.to_string();
     }
-    if locale.language.as_str() == "ja" {
-        "ja".to_string()
-    } else {
-        DEFAULT_LOCALE.to_string()
+    if has_embedded_catalog(&exact) {
+        return exact;
     }
+    if has_embedded_catalog(language) {
+        return language.to_string();
+    }
+    DEFAULT_LOCALE.to_string()
 }
 
-fn embedded_catalog_source(locale: &str) -> &'static str {
-    match locale {
-        "ja" => JA,
-        _ => EN_US,
-    }
+fn embedded_catalog_source(locale: &str) -> Option<&'static str> {
+    EMBEDDED_CATALOGS
+        .iter()
+        .find_map(|(tag, source)| (*tag == locale).then_some(*source))
+}
+
+fn has_embedded_catalog(locale: &str) -> bool {
+    embedded_catalog_source(locale).is_some()
 }
 
 fn has_external_catalog(locale: &str) -> bool {
@@ -145,7 +148,8 @@ fn format_message(locale: &str, id: &str, args: &FluentArgs<'_>) -> Option<Strin
 fn build_bundle(locale: &str) -> FluentBundle<FluentResource> {
     let source = EXTERNAL_CATALOGS
         .with_borrow(|catalogs| catalogs.get(locale).cloned())
-        .unwrap_or_else(|| embedded_catalog_source(locale).to_string());
+        .or_else(|| embedded_catalog_source(locale).map(str::to_string))
+        .unwrap_or_else(|| embedded_catalog_source(DEFAULT_LOCALE).unwrap().to_string());
     build_bundle_from_source(locale, &source)
         .unwrap_or_else(|error| panic!("invalid {locale} Fluent catalog: {error}"))
 }
@@ -215,9 +219,15 @@ mod tests {
 
     #[test]
     fn bundled_catalogs_parse_and_have_identical_message_ids() {
-        build_bundle(DEFAULT_LOCALE);
-        build_bundle("ja");
-        assert_eq!(message_ids(EN_US), message_ids(JA));
+        let english = embedded_catalog_source(DEFAULT_LOCALE).unwrap();
+        for &(locale, source) in EMBEDDED_CATALOGS {
+            build_bundle(locale);
+            assert_eq!(
+                message_ids(english),
+                message_ids(source),
+                "message IDs differ for {locale}"
+            );
+        }
     }
 
     #[test]
@@ -228,7 +238,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_english_for_unknown_locale_and_missing_message() {
-        assert_eq!(translate_for("fr-FR", "common-open"), "Open");
+        assert_eq!(translate_for("zz-ZZ", "common-open"), "Open");
         register_catalog("de", "common-open = Öffnen").unwrap();
         assert_eq!(translate_for("de", "common-close"), "Close");
     }

@@ -1,8 +1,10 @@
 # Locale catalogs
 
-`en-US.ftl` is the source catalog. `ja.ftl` is the bundled Japanese catalog.
+`en-US.ftl` is the source catalog. Vmux bundles 115 locale tags, including Japanese, regional Chinese and Portuguese variants, and broad ISO 639-1 coverage.
 
-Additional languages do not require code changes. Copy the English catalog to `~/.vmux/locales/<BCP-47-tag>.ftl`, translate values without changing message IDs or variables, then set:
+Every bundled catalog has the same message IDs and variables as English. Non-English catalogs beyond Japanese are machine translated; native corrections are welcome.
+
+Custom languages and overrides do not require code changes. Copy the English catalog to `~/.vmux/locales/<BCP-47-tag>.ftl`, translate values without changing message IDs or variables, then set:
 
 ```ron
 (
@@ -12,4 +14,4 @@ Additional languages do not require code changes. Copy the English catalog to `~
 )
 ```
 
-Missing messages fall back to English. Region tags fall back to their base-language file.
+External catalogs take precedence over bundled catalogs. Missing messages fall back to English. Region tags fall back to their base-language file.

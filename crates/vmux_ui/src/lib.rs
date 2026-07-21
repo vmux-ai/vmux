@@ -13,6 +13,10 @@ pub mod file_icon;
 
 pub mod icon;
 
+mod i18n_catalogs {
+    include!(concat!(env!("OUT_DIR"), "/i18n_catalogs.rs"));
+}
+
 pub mod i18n;
 
 pub mod prompt_ghost;
