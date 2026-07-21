@@ -60,9 +60,20 @@ if [[ "${CI:-}" != "true" ]]; then
     target_parent="$(cd "$target_parent" && pwd)"
     target_dir="$target_parent/$(basename "$target_dir")"
     export VMUX_TARGET_DESTINATION="$target_dir"
-    "$root/scripts/seed-worktree-target.sh" --if-needed "$root"
-    vmux_target_lock_acquire "$target_dir" "$root" 8
-    trap cleanup EXIT
+    inherited_target_lock=0
+    if [[ "${VMUX_TARGET_LOCK_TARGET:-}" == "$target_dir" \
+        && "${VMUX_TARGET_LOCK_OWNER_PID:-}" =~ ^[0-9]+$ \
+        && "${VMUX_TARGET_LOCK_OWNER_PID}" != "$$" ]] \
+        && kill -0 "$VMUX_TARGET_LOCK_OWNER_PID" 2>/dev/null; then
+        inherited_target_lock=1
+    fi
+    if [[ "$inherited_target_lock" == "0" ]]; then
+        "$root/scripts/seed-worktree-target.sh" --if-needed "$root"
+        vmux_target_lock_acquire "$target_dir" "$root" 8
+        export VMUX_TARGET_LOCK_TARGET="$target_dir"
+        export VMUX_TARGET_LOCK_OWNER_PID="$$"
+        trap cleanup EXIT
+    fi
 fi
 
 trap 'forward_signal HUP' HUP

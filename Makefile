@@ -80,7 +80,7 @@ build: ensure-mac-deps
 -include .env
 export
 
-build-local: ensure-mac-deps ensure-package-deps
+build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps
 	./scripts/build-mac-release.sh local
 
 local: build-local

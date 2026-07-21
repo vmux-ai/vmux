@@ -75,6 +75,95 @@ fn local_cargo_builds_share_cef_sdk_and_sccache() {
     assert!(wrapper.contains("CMAKE_CXX_COMPILER_LAUNCHER"));
 }
 
+#[cfg(unix)]
+#[test]
+fn cargo_cache_wrapper_allows_nested_package_builds() {
+    use std::{
+        fs,
+        os::unix::{fs::PermissionsExt, process::CommandExt},
+        process::Command,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let target = temp.path().join("target");
+    let locks = temp.path().join("locks");
+    let cache = temp.path().join("cef-cache");
+    let cargo = temp.path().join("cargo");
+    let rustc = temp.path().join("rustc");
+    let log = temp.path().join("cargo.log");
+    fs::create_dir_all(&target).expect("create target");
+    fs::write(
+        &cargo,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-V" ]]; then
+    echo "cargo 1.0.0"
+    exit 0
+fi
+printf '%s\n' "$*" >> "$FAKE_CARGO_LOG"
+if [[ "${1:-}" == "packager" ]]; then
+    "$CARGO_WRAPPER" build -p nested-package-build
+fi
+"#,
+    )
+    .expect("write fake cargo");
+    fs::write(
+        &rustc,
+        "#!/usr/bin/env bash\necho 'rustc 1.0.0'\necho 'host: test-host'\n",
+    )
+    .expect("write fake rustc");
+    for executable in [&cargo, &rustc] {
+        let mut permissions = fs::metadata(executable)
+            .expect("fake executable metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(executable, permissions).expect("make fake executable runnable");
+    }
+
+    let wrapper = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../scripts/cargo-with-cef-cache.sh");
+    let mut command = Command::new("bash");
+    command
+        .arg(&wrapper)
+        .arg("packager")
+        .env_remove("CI")
+        .env_remove("VMUX_TARGET_LOCK_TARGET")
+        .env_remove("VMUX_TARGET_LOCK_OWNER_PID")
+        .env("CARGO_BIN", &cargo)
+        .env("RUSTC", &rustc)
+        .env("CARGO_TARGET_DIR", &target)
+        .env("VMUX_TARGET_LOCK_ROOT", &locks)
+        .env("VMUX_CEF_SDK_CACHE", &cache)
+        .env("VMUX_DISABLE_SCCACHE", "1")
+        .env("CARGO_WRAPPER", &wrapper)
+        .env("FAKE_CARGO_LOG", &log)
+        .process_group(0);
+    let mut child = command.spawn().expect("run nested cargo wrapper");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll nested cargo wrapper") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = Command::new("kill")
+                .arg("-TERM")
+                .arg(format!("-{}", child.id()))
+                .status();
+            let _ = child.wait();
+            panic!("nested cargo wrapper deadlocked on the target cache lock");
+        }
+        thread::sleep(Duration::from_millis(100));
+    };
+
+    assert!(status.success());
+    assert_eq!(
+        fs::read_to_string(log).expect("read fake cargo log"),
+        "packager\nbuild -p nested-package-build\n"
+    );
+}
+
 #[test]
 fn cef_wheel_forwarding_rejects_invalid_events() {
     let source =
@@ -297,6 +386,8 @@ fn cef_injection_uses_ci_cached_framework_path() {
 #[test]
 fn local_signing_uses_stable_codesigning_identity() {
     let signing_script = include_str!("../../../scripts/ensure-local-codesign-identity.sh");
+    let build_script = include_str!("../../../scripts/build-mac-release.sh");
+    let makefile = include_str!("../../../Makefile");
 
     assert!(signing_script.contains("Vmux Dev"));
     assert!(!signing_script.contains("Vmux Development"));
@@ -311,6 +402,11 @@ fn local_signing_uses_stable_codesigning_identity() {
     assert!(signing_script.contains("security set-key-partition-list"));
     assert!(signing_script.contains("could not pre-authorize codesign key access"));
     assert!(signing_script.contains("security find-identity -v -p codesigning"));
+    assert!(build_script.contains("ensure-local-codesign-identity.sh"));
+    assert!(build_script.contains("SKIP_NOTARIZE=\"${SKIP_NOTARIZE:-1}\""));
+    assert!(
+        makefile.contains("build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps")
+    );
 }
 
 #[test]
