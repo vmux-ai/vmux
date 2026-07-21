@@ -92,6 +92,13 @@ Every ACP session receives the complete migrated memory set through its appended
 Claude and Codex CLI sessions receive the same context through their native appended-instruction
 surfaces. Vibe CLI receives a vmux-managed block in the user-level `~/.vibe/AGENTS.md`; vmux never
 writes agent instruction files into project directories and preserves user-authored Vibe content.
+Standalone Claude, Codex, and Vibe sessions receive the same memory context through managed blocks
+in their user-level instruction files. Knowledge skills are symlinked into Claude's personal skill
+directory, registered in Codex's user config, and added to Vibe's `skill_paths`. User content and
+non-vmux skill settings remain untouched.
+Claude's auto-memory output is redirected to `memories/claude/auto/`. Empty Codex native memory
+directories are replaced with symlinks to the corresponding Knowledge directories, so new native
+memories stay in the vault without deleting an existing non-empty directory.
 
 ## Safety
 

@@ -1098,8 +1098,8 @@ If you invoke a required Skill tool, continue the original user request in the s
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
-    if let Err(error) = vmux_core::knowledge::migrate_external_memories() {
-        bevy::log::warn!("knowledge memory migration failed: {error}");
+    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+        bevy::log::warn!("external agent Knowledge sync failed: {error}");
     }
     session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_context_prompt())
 }

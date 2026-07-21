@@ -96,6 +96,11 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
+mod agent_config;
+#[cfg(not(target_arch = "wasm32"))]
+pub use agent_config::sync_external_agent_configs;
+
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_SKILLS: usize = 64;
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_EMBEDDED_BYTES: usize = 24 * 1024;

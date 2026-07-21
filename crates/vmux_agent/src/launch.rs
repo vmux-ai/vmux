@@ -15,6 +15,9 @@ pub fn build_agent_launch(
         .get_cli(kind)
         .ok_or_else(|| format!("CLI strategy not registered for {:?}", kind))?;
     let mcp_cfg = mcp::resolve(cwd, anchor, kind)?;
+    if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
+        bevy::log::warn!("external agent Knowledge sync failed: {error}");
+    }
     strategy.prepare_launch(&mcp_cfg);
     let args = strategy.build_args(&mcp_cfg, session_id);
     let mut env: Vec<(String, String)> = std::env::vars().collect();
