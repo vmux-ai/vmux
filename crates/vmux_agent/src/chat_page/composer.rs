@@ -2,7 +2,6 @@ use super::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry, i
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SelectorMode<'a> {
     None,

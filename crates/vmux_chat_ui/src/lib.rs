@@ -464,6 +464,81 @@ pub fn WorkingBlock(verb: String, elapsed: String) -> Element {
 }
 
 #[component]
+pub fn WorkingIndicator() -> Element {
+    let mut elapsed = use_signal(|| 0u32);
+    let mut verb = use_signal(|| WORKING_VERBS[0].to_string());
+    use_future(move || async move {
+        loop {
+            working_delay(1000).await;
+            elapsed.set(elapsed() + 1);
+        }
+    });
+    use_future(move || async move {
+        loop {
+            working_delay(2500).await;
+            verb.set(next_working_verb().to_string());
+        }
+    });
+    rsx! {
+        WorkingBlock { verb: verb(), elapsed: format_elapsed(elapsed()) }
+    }
+}
+
+pub fn format_elapsed(secs: u32) -> String {
+    if secs >= 60 {
+        format!("{}:{:02}", secs / 60, secs % 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+const WORKING_VERBS: &[&str] = &[
+    "Working",
+    "Thinking",
+    "Pondering",
+    "Noodling",
+    "Percolating",
+    "Conjuring",
+    "Cooking",
+    "Brewing",
+    "Musing",
+    "Ruminating",
+    "Scheming",
+    "Synthesizing",
+    "Tinkering",
+    "Churning",
+    "Vibing",
+    "Simmering",
+    "Crafting",
+    "Divining",
+    "Mulling",
+    "Spelunking",
+];
+
+#[cfg(target_arch = "wasm32")]
+async fn working_delay(milliseconds: u64) {
+    gloo_timers::future::TimeoutFuture::new(milliseconds as u32).await;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn working_delay(milliseconds: u64) {
+    tokio::time::sleep(std::time::Duration::from_millis(milliseconds)).await;
+}
+
+fn next_working_verb() -> &'static str {
+    #[cfg(target_arch = "wasm32")]
+    let index = ((js_sys::Math::random() * WORKING_VERBS.len() as f64) as usize)
+        .min(WORKING_VERBS.len() - 1);
+    #[cfg(not(target_arch = "wasm32"))]
+    let index = {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed) % WORKING_VERBS.len()
+    };
+    WORKING_VERBS[index]
+}
+
+#[component]
 pub fn TurnMeta(label: String) -> Element {
     rsx! {
         div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground/70",
@@ -729,5 +804,11 @@ mod tests {
     fn tool_labels_are_shared() {
         assert_eq!(tool_presentation("read_file", "{}").1, "Read files");
         assert_eq!(tool_presentation("exec_command", "{}").1, "Ran commands");
+    }
+
+    #[test]
+    fn elapsed_labels_are_shared() {
+        assert_eq!(format_elapsed(4), "4s");
+        assert_eq!(format_elapsed(64), "1:04");
     }
 }

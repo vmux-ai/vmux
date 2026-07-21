@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 
+mod native_transition;
+
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -12,7 +14,7 @@ use vmux_chat_ui::{
     AssistantTurn, DiffBlock, PlanBlock, PlanItem, PromptBoxTone, PromptComposer,
     PromptComposerAction, PromptComposerAttachment, PromptMediaOption, PromptMediaOptions,
     PromptPopup, PromptPopupPlacement, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
-    ToolUseBlock, UserBubble,
+    ToolUseBlock, UserBubble, WorkingIndicator,
 };
 use vmux_remote::{
     AgentAttachment, ApprovalRequest, AssistantBlock, Message, NewChatRequest, PromptRequest,
@@ -322,6 +324,7 @@ fn leave_session(
     mut connected: Signal<bool>,
     mut generation: Signal<u64>,
 ) {
+    let transition = native_transition::begin_close();
     generation.set(generation().wrapping_add(1));
     current.set(None);
     messages.set(Vec::new());
@@ -329,10 +332,12 @@ fn leave_session(
     status.set(RemoteStatus::Idle);
     approval.set(None);
     connected.set(false);
+    native_transition::finish_close(transition);
 }
 
 #[component]
 fn App() -> Element {
+    native_transition::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);
     let mut error = use_signal(String::new);
@@ -644,6 +649,7 @@ fn App() -> Element {
     let cancel_sid = selected_sid.clone();
     let approval_sid = selected_sid.clone();
     let approval_value = approval();
+    let live_delta_value = live_delta();
 
     rsx! {
         AppHead {}
@@ -694,7 +700,7 @@ fn App() -> Element {
             }
 
             main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5",
-                if messages().is_empty() && live_delta().is_empty() {
+                if messages().is_empty() && live_delta_value.is_empty() && !is_streaming {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-zinc-600",
                         "No messages yet."
                     }
@@ -703,11 +709,19 @@ fn App() -> Element {
                     for (index, item) in group_messages(messages()).into_iter().enumerate() {
                         MessageView { key: "{index}", item }
                     }
-                    if !live_delta().is_empty() {
+                    if !live_delta_value.is_empty() {
                         div { class: "mb-4 flex flex-col",
                             AssistantTurn {
-                                TextBlock { text: live_delta() }
-                                span { class: "ml-0.5 h-3.5 w-1.5 animate-pulse bg-violet-400" }
+                                TextBlock { text: live_delta_value.clone() }
+                                if is_streaming {
+                                    WorkingIndicator {}
+                                }
+                            }
+                        }
+                    } else if is_streaming {
+                        div { class: "mb-4 flex flex-col",
+                            AssistantTurn {
+                                WorkingIndicator {}
                             }
                         }
                     }
@@ -999,9 +1013,9 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                     },
                                     span { class: status_dot(&session.status) }
                                     div { class: "min-w-0 flex-1",
-                                        div { class: "truncate text-sm font-medium text-zinc-200", "{session.name}" }
+                                        div { class: "truncate text-sm font-medium text-zinc-200", "{session.title}" }
                                         div { class: "mt-1 truncate text-[11px] text-zinc-600",
-                                            "{session.runtime} · {cwd_name(&session.cwd)}"
+                                            "{session.name} · {session.runtime} · {cwd_name(&session.cwd)}"
                                             if let Some(model) = session.model.as_ref() {
                                                 " · {model}"
                                             }
@@ -1215,6 +1229,7 @@ fn open_session(
     mut connected: Signal<bool>,
     mut generation: Signal<u64>,
 ) {
+    let transition = native_transition::begin_open();
     let sid = session.sid.clone();
     current.set(Some(session.clone()));
     messages.set(Vec::new());
@@ -1224,6 +1239,7 @@ fn open_session(
     connected.set(false);
     let next_generation = generation().wrapping_add(1);
     generation.set(next_generation);
+    native_transition::finish_open(transition);
     spawn(async move {
         loop {
             if generation() != next_generation {

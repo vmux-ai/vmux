@@ -659,7 +659,6 @@ pub const WORKING_VERBS: &[&str] = &[
     "Mulling",
     "Spelunking",
 ];
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -808,11 +807,6 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn working_verbs_nonempty() {
-        assert!(!WORKING_VERBS.is_empty());
     }
 
     #[test]

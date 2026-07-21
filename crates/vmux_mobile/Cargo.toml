@@ -33,3 +33,15 @@ tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
 vmux_remote = { path = "../vmux_remote" }
 vmux_chat_ui = { path = "../vmux_chat_ui" }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-ui-kit = { version = "0.3", default-features = false, features = [
+    "block2",
+    "objc2-core-foundation",
+    "UIPresentationController",
+    "UIResponder",
+    "UISheetPresentationController",
+    "UIView",
+    "UIViewController",
+] }

@@ -7,6 +7,7 @@ publish = false
 
 [dependencies]
 serde = { workspace = true }
+unicode-segmentation = "1"
 vmux_wire = { path = "../vmux_wire" }
 
 [dev-dependencies]

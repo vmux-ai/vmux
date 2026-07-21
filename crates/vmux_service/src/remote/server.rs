@@ -151,6 +151,11 @@ fn request_token(headers: &HeaderMap) -> Option<&str> {
 async fn list_sessions(State(state): State<RemoteState>) -> Json<Vec<RemoteSession>> {
     let mut sessions = state.agents.lock().await.remote_sessions();
     sessions.extend(state.acp.lock().await.remote_sessions());
+    for session in &mut sessions {
+        if let Some(messages) = session_messages(&state, &session.sid).await {
+            session.title = vmux_remote::conversation_title(&messages, &session.name);
+        }
+    }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
     Json(sessions)
 }
@@ -324,13 +329,16 @@ async fn session_stream(
 )> {
     {
         let acp = state.acp.lock().await;
-        if let Some(session) = acp.remote_session(sid) {
-            return Some((session, acp.remote_messages(sid)?, acp.subscribe(sid)?));
+        if let Some(mut session) = acp.remote_session(sid) {
+            let messages = acp.remote_messages(sid)?;
+            session.title = vmux_remote::conversation_title(&messages, &session.name);
+            return Some((session, messages, acp.subscribe(sid)?));
         }
     }
     let agents = state.agents.lock().await;
-    let session = agents.remote_session(sid)?;
+    let mut session = agents.remote_session(sid)?;
     let messages = agents.remote_messages(sid).await?;
+    session.title = vmux_remote::conversation_title(&messages, &session.name);
     Some((session, messages, agents.subscribe(sid)?))
 }
 
@@ -345,10 +353,19 @@ async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>
 }
 
 async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
-    if let Some(session) = state.acp.lock().await.remote_session(sid) {
-        return Some(session);
+    let acp_session = {
+        let acp = state.acp.lock().await;
+        acp.remote_session(sid)
+    };
+    let mut session = if let Some(session) = acp_session {
+        session
+    } else {
+        state.agents.lock().await.remote_session(sid)?
+    };
+    if let Some(messages) = session_messages(state, sid).await {
+        session.title = vmux_remote::conversation_title(&messages, &session.name);
     }
-    state.agents.lock().await.remote_session(sid)
+    Some(session)
 }
 
 async fn service_event(

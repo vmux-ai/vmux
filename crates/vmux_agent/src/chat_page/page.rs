@@ -18,7 +18,7 @@ use crate::chat_page::event::{
     ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERBS, latest_tool_location,
+    SlashCommands, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -26,7 +26,8 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use vmux_chat_ui::{
     AssistantTurn, DiffBlock, PlanBlock, PlanItem, ReconnectBlock, SubagentActivity, TextBlock,
-    ThinkingBlock, ToolResultBlock, ToolUseBlock, TurnMeta, UserBubble, WorkingBlock,
+    ThinkingBlock, ToolResultBlock, ToolUseBlock, TurnMeta, UserBubble, WorkingIndicator,
+    format_elapsed,
 };
 use vmux_command::prompt_media::{
     inline_media_query, media_display_path, media_reference, replace_inline_media_query,
@@ -1909,13 +1910,13 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
         .collect::<Vec<_>>();
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
-            format!("Worked for {}", fmt_elapsed(duration))
+            format!("Worked for {}", format_elapsed(duration))
         } else if turn.step_count == 1 {
-            format!("Worked for {} · 1 step", fmt_elapsed(duration))
+            format!("Worked for {} · 1 step", format_elapsed(duration))
         } else {
             format!(
                 "Worked for {} · {} steps",
-                fmt_elapsed(duration),
+                format_elapsed(duration),
                 turn.step_count
             )
         }
@@ -1950,31 +1951,6 @@ fn render_disclosure_icon() -> Element {
             class: "disclosure-icon relative inline-block h-3 w-3 shrink-0 text-muted-foreground",
             aria_hidden: "true",
         }
-    }
-}
-
-#[component]
-fn WorkingIndicator() -> Element {
-    let mut elapsed = use_signal(|| 0u32);
-    let mut verb = use_signal(|| "Working".to_string());
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(1000).await;
-            elapsed.set(elapsed() + 1);
-        }
-    });
-    use_future(move || async move {
-        loop {
-            gloo_timers::future::TimeoutFuture::new(2500).await;
-            let count = WORKING_VERBS.len();
-            let index = ((js_sys::Math::random() * count as f64) as usize).min(count - 1);
-            verb.set(WORKING_VERBS[index].to_string());
-        }
-    });
-    let verb_text = verb();
-    let elapsed_text = fmt_elapsed(elapsed());
-    rsx! {
-        WorkingBlock { verb: verb_text, elapsed: elapsed_text }
     }
 }
 
@@ -2754,14 +2730,6 @@ fn avatar_node(icon: &str, accent: &str, agent: &str, name: &str, size_class: &s
                 "{initial}"
             }
         }
-    }
-}
-
-fn fmt_elapsed(secs: u32) -> String {
-    if secs >= 60 {
-        format!("{}:{:02}", secs / 60, secs % 60)
-    } else {
-        format!("{secs}s")
     }
 }
 
