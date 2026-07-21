@@ -1278,7 +1278,7 @@ fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     }
 }
 
-fn prompt_agent_url(
+pub(crate) fn prompt_agent_url(
     snapshot: &CommandBarAgentsSnapshot,
     requested_url: Option<&str>,
 ) -> Option<String> {

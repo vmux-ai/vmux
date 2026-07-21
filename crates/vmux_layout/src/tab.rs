@@ -158,6 +158,7 @@ fn handle_tab_commands(
     all_children: Query<&Children>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
+    agents: Res<vmux_command::snapshot::CommandBarAgentsSnapshot>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut close_requests: MessageWriter<CloseTabRequest>,
     mut commands: Commands,
@@ -308,6 +309,10 @@ fn handle_tab_commands(
     }
 
     for request in new_agent_chats.read() {
+        let Some(agent_url) = crate::command_bar::handler::prompt_agent_url(&agents, None) else {
+            warn!("remote new chat ignored because no installed agent is available");
+            continue;
+        };
         let Some((space, startup_dir)) = effective_startup_dir
             .as_deref()
             .and_then(|effective| effective.0.clone())
@@ -321,7 +326,7 @@ fn handle_tab_commands(
             name: Some(name),
             startup_dir,
             content: TabLayoutSpawnContent::AgentPrompt {
-                url: "vmux://agent/".to_string(),
+                url: agent_url,
                 prompt: request.prompt.clone(),
             },
             clear_pending_stack: true,
@@ -768,6 +773,21 @@ mod tests {
     fn new_agent_chat_spawns_focused_tab_with_pending_prompt() {
         let mut app = build_app();
         build_main_and_tab(&mut app);
+        app.world_mut()
+            .resource_mut::<vmux_command::snapshot::CommandBarAgentsSnapshot>()
+            .providers
+            .push(vmux_command::snapshot::AgentProviderSummary {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                url: "vmux://agent/codex/cli".to_string(),
+                icon: String::new(),
+            });
+        app.world_mut()
+            .resource_mut::<vmux_command::snapshot::CommandBarAgentsSnapshot>()
+            .recent
+            .push(vmux_command::snapshot::AgentPromptTarget::Cli(
+                vmux_core::agent::AgentKind::Codex,
+            ));
 
         app.world_mut()
             .resource_mut::<Messages<crate::NewAgentChatRequest>>()
@@ -779,7 +799,7 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert_eq!(collected.0.len(), 1);
-        assert_eq!(collected.0[0].url, "vmux://agent/");
+        assert_eq!(collected.0[0].url, "vmux://agent/codex/cli");
         let prompts = app
             .world_mut()
             .query::<&vmux_core::agent::PendingAgentPrompt>()
