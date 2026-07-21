@@ -8,6 +8,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const FONT_PX: f64 = 16.0;
+const DROP_ROWS_PER_SECOND: f64 = 60.0;
+const RESET_RATE_PER_SECOND: f64 = 1.5;
 const GLYPHS: &str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789";
 
 /// Full-bleed Matrix rain. `accent_rgb` is a `"r g b"` triple (from
@@ -17,7 +19,8 @@ const GLYPHS: &str = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃ�
 pub fn MatrixRain(accent_rgb: String, words: Vec<String>) -> Element {
     let canvas_id = use_hook(|| format!("matrix-rain-{}", (js_sys::Math::random() * 1.0e9) as u64));
     let running: Rc<RefCell<bool>> = use_hook(|| Rc::new(RefCell::new(true)));
-    let raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = use_hook(|| Rc::new(RefCell::new(None)));
+    let raf: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> =
+        use_hook(|| Rc::new(RefCell::new(None)));
     let handle: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
 
     use_effect({
@@ -103,7 +106,7 @@ fn start_rain(
     accent_rgb: String,
     words: Vec<String>,
     running: Rc<RefCell<bool>>,
-    raf: Rc<RefCell<Option<Closure<dyn FnMut()>>>>,
+    raf: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>>,
     handle: Rc<RefCell<Option<i32>>>,
 ) {
     let Some(window) = web_sys::window() else {
@@ -176,11 +179,9 @@ fn start_rain(
     } else {
         format!("rgb({})", darken(&accent_rgb, 42))
     };
-    let trail_color = if dark {
-        format!("rgb({accent_rgb} / 0.85)")
-    } else {
-        format!("rgb({} / 0.8)", darken(&accent_rgb, 62))
-    };
+    let font = format!("{FONT_PX}px monospace");
+    ctx.set_font(&font);
+    ctx.set_text_baseline("top");
 
     let mut cols = (canvas.client_width().max(1) as f64 / FONT_PX)
         .floor()
@@ -194,18 +195,16 @@ fn start_rain(
     let running_inner = running.clone();
     let handle_inner = handle.clone();
     let mut last_frame_ms = 0.0;
-    let closure = Closure::wrap(Box::new(move || {
-        let now = js_sys::Date::now();
-        if now - last_frame_ms < 33.0 {
-            if *running_inner.borrow()
-                && let Some(cb) = raf_inner.borrow().as_ref()
-                && let Ok(id) = win.request_animation_frame(cb.as_ref().unchecked_ref())
-            {
-                *handle_inner.borrow_mut() = Some(id);
-            }
-            return;
-        }
+    let closure = Closure::wrap(Box::new(move |now: f64| {
+        let delta_ms = if last_frame_ms == 0.0 {
+            1000.0 / 60.0
+        } else {
+            (now - last_frame_ms).clamp(0.0, 50.0)
+        };
         last_frame_ms = now;
+        let delta_seconds = delta_ms / 1000.0;
+        let drop_step = DROP_ROWS_PER_SECOND * delta_seconds;
+        let reset_chance = 1.0 - (-RESET_RATE_PER_SECOND * delta_seconds).exp();
         let w = canvas.client_width().max(1) as f64;
         let h = canvas.client_height().max(1) as f64;
         let want_w = (w * dpr) as u32;
@@ -215,6 +214,8 @@ fn start_rain(
             canvas.set_height(want_h);
             let _ = ctx.reset_transform();
             let _ = ctx.scale(dpr, dpr);
+            ctx.set_font(&font);
+            ctx.set_text_baseline("top");
             let new_cols = (w / FONT_PX).floor().max(1.0) as usize;
             if new_cols != cols {
                 drops.resize_with(new_cols, || -(js_sys::Math::random() * 40.0));
@@ -222,27 +223,23 @@ fn start_rain(
             }
         }
 
-        ctx.set_font(&format!("{FONT_PX}px monospace"));
-        ctx.set_text_baseline("top");
-
         ctx.set_fill_style_str(fade);
         ctx.fill_rect(0.0, 0.0, w, h);
+        ctx.set_fill_style_str(&head_color);
 
         for (i, drop) in drops.iter_mut().enumerate().take(cols) {
             let x = i as f64 * FONT_PX;
             let head_row = *drop;
             let y = head_row * FONT_PX;
             if y >= 0.0 {
-                let ch = pick_glyph(&glyphs, &word_chars, i, head_row).to_string();
-                ctx.set_fill_style_str(&trail_color);
-                let _ = ctx.fill_text(&ch, x, y);
-                ctx.set_fill_style_str(&head_color);
-                let _ = ctx.fill_text(&ch, x, y);
+                let mut buffer = [0; 4];
+                let ch = pick_glyph(&glyphs, &word_chars, i, head_row);
+                let _ = ctx.fill_text(ch.encode_utf8(&mut buffer), x, y);
             }
-            if y > h && js_sys::Math::random() > 0.975 {
+            if y > h && js_sys::Math::random() < reset_chance {
                 *drop = 0.0;
             } else {
-                *drop += 1.0;
+                *drop += drop_step;
             }
         }
 
@@ -252,7 +249,7 @@ fn start_rain(
         {
             *handle_inner.borrow_mut() = Some(id);
         }
-    }) as Box<dyn FnMut()>);
+    }) as Box<dyn FnMut(f64)>);
 
     *raf.borrow_mut() = Some(closure);
     if let Some(cb) = raf.borrow().as_ref()

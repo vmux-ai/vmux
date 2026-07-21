@@ -362,7 +362,10 @@ fn load_file_buffers(
     for (entity, fv) in &q {
         if fv.path.is_dir() {
             let entries = list_dir(&fv.path);
-            commands.entity(entity).insert(FileDir { entries });
+            commands
+                .entity(entity)
+                .remove::<MissingFileView>()
+                .insert(FileDir { entries });
             continue;
         }
         let path_str = fv.path.to_string_lossy();
@@ -370,22 +373,34 @@ fn load_file_buffers(
             let mime = vmux_core::media::media_mime(&path_str)
                 .unwrap_or("application/octet-stream")
                 .to_string();
-            commands.entity(entity).insert(FileMedia { kind, mime });
+            commands
+                .entity(entity)
+                .remove::<MissingFileView>()
+                .insert(FileMedia { kind, mime });
             continue;
         }
         match std::fs::metadata(&fv.path).map(|m| m.len()) {
             Ok(len) if len > crate::highlight::FILE_VIEW_MAX_BYTES => {
-                commands.entity(entity).insert(FileBuffer::error(format!(
-                    "__error__:file too large ({len} bytes, max {})",
-                    crate::highlight::FILE_VIEW_MAX_BYTES
-                )));
+                commands
+                    .entity(entity)
+                    .remove::<MissingFileView>()
+                    .insert(FileBuffer::error(format!(
+                        "__error__:file too large ({len} bytes, max {})",
+                        crate::highlight::FILE_VIEW_MAX_BYTES
+                    )));
                 continue;
             }
             Err(e) => {
-                commands.entity(entity).insert(FileBuffer::error(format!(
+                let mut entity_commands = commands.entity(entity);
+                entity_commands.insert(FileBuffer::error(format!(
                     "__error__:cannot open {}: {e}",
                     fv.path.display()
                 )));
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    entity_commands.insert(MissingFileView);
+                } else {
+                    entity_commands.remove::<MissingFileView>();
+                }
                 continue;
             }
             _ => {}
@@ -394,18 +409,27 @@ fn load_file_buffers(
             Ok(bytes) => match String::from_utf8(bytes) {
                 Ok(t) => t,
                 Err(_) => {
-                    commands.entity(entity).insert(FileBuffer::error(format!(
-                        "__error__:not a UTF-8 text file: {}",
-                        fv.path.display()
-                    )));
+                    commands
+                        .entity(entity)
+                        .remove::<MissingFileView>()
+                        .insert(FileBuffer::error(format!(
+                            "__error__:not a UTF-8 text file: {}",
+                            fv.path.display()
+                        )));
                     continue;
                 }
             },
             Err(e) => {
-                commands.entity(entity).insert(FileBuffer::error(format!(
+                let mut entity_commands = commands.entity(entity);
+                entity_commands.insert(FileBuffer::error(format!(
                     "__error__:cannot read {}: {e}",
                     fv.path.display()
                 )));
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    entity_commands.insert(MissingFileView);
+                } else {
+                    entity_commands.remove::<MissingFileView>();
+                }
                 continue;
             }
         };
@@ -432,6 +456,7 @@ fn load_file_buffers(
                 dirty: false,
             },
         ));
+        commands.entity(entity).remove::<MissingFileView>();
     }
 }
 
@@ -1227,6 +1252,9 @@ fn on_file_open(
 #[derive(Component)]
 struct FileReloadRequested;
 
+#[derive(Component)]
+struct MissingFileView;
+
 struct FileWatch {
     watcher: RecommendedWatcher,
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
@@ -1238,30 +1266,42 @@ fn canon(p: &Path) -> PathBuf {
 }
 
 fn watch_dir_for(path: &Path) -> Option<PathBuf> {
-    if path.is_dir() {
-        Some(path.to_path_buf())
-    } else {
-        path.parent().map(Path::to_path_buf)
+    let mut dir = if path.is_dir() { path } else { path.parent()? };
+    loop {
+        if dir.is_dir() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
+fn ensure_file_watch(watch: &mut FileWatch, dir: PathBuf) {
+    if !watch.dirs.contains(&dir)
+        && watch
+            .watcher
+            .watch(&dir, RecursiveMode::NonRecursive)
+            .is_ok()
+    {
+        watch.dirs.insert(dir);
     }
 }
 
 fn reconcile_file_watches(
-    q: Query<(&FileView, &ExplorerState)>,
+    views: Query<&FileView>,
+    explorers: Query<&ExplorerState>,
     watch: Option<NonSendMut<FileWatch>>,
 ) {
     let Some(mut watch) = watch else {
         return;
     };
-    for (fv, st) in &q {
-        if let Some(dir) = watch_dir_for(&fv.path)
-            && watch.dirs.insert(dir.clone())
-        {
-            let _ = watch.watcher.watch(&dir, RecursiveMode::NonRecursive);
+    for fv in &views {
+        if let Some(dir) = watch_dir_for(&fv.path) {
+            ensure_file_watch(&mut watch, dir);
         }
+    }
+    for st in &explorers {
         for dir in st.expanded.iter() {
-            if watch.dirs.insert(dir.clone()) {
-                let _ = watch.watcher.watch(dir, RecursiveMode::NonRecursive);
-            }
+            ensure_file_watch(&mut watch, dir.clone());
         }
     }
 }
@@ -1269,7 +1309,8 @@ fn reconcile_file_watches(
 fn drain_file_changes(
     watch: Option<NonSend<FileWatch>>,
     self_writes: Option<NonSendMut<SelfWrites>>,
-    mut q: Query<(Entity, &FileView, &mut ExplorerState)>,
+    views: Query<(Entity, &FileView, Has<MissingFileView>)>,
+    mut explorers: Query<(Entity, &mut ExplorerState)>,
     mut commands: Commands,
 ) {
     let Some(watch) = watch else {
@@ -1290,15 +1331,18 @@ fn drain_file_changes(
     if let Some(sw) = sw.as_mut() {
         sw.0.retain(|_, t| t.elapsed() < std::time::Duration::from_secs(2));
     }
-    for (entity, fv, mut st) in &mut q {
+    for (entity, fv, missing) in &views {
         let cp = canon(&fv.path);
         let self_written = sw
             .as_ref()
             .map(|sw| sw.0.contains_key(&cp))
             .unwrap_or(false);
-        if changed.contains(&cp) && !self_written {
+        let ancestor_changed = missing && changed.iter().any(|path| cp.starts_with(path));
+        if (changed.contains(&cp) || ancestor_changed) && !self_written {
             commands.entity(entity).insert(FileReloadRequested);
         }
+    }
+    for (entity, mut st) in &mut explorers {
         let cached: Vec<PathBuf> = st.children.keys().cloned().collect();
         for d in cached {
             let dc = canon(&d);
@@ -2821,8 +2865,18 @@ impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         let (tx, rx) = mpsc::channel();
-        match notify::recommended_watcher(move |res| {
+        let proxy = app
+            .world()
+            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+            .map(|wrapper| (**wrapper).clone());
+        match notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            let wake = res
+                .as_ref()
+                .is_ok_and(|event| !matches!(event.kind, notify::EventKind::Access(_)));
             let _ = tx.send(res);
+            if wake && let Some(proxy) = proxy.as_ref() {
+                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
         }) {
             Ok(watcher) => {
                 app.insert_non_send(FileWatch {
@@ -2888,26 +2942,32 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 (
-                    load_file_buffers,
-                    send_initial_meta,
-                    send_initial_text_meta,
-                    send_initial_dir,
-                    sync_media_allowlist,
-                    send_initial_media.after(sync_media_allowlist),
+                    (
+                        reconcile_file_watches,
+                        drain_file_changes,
+                        reload_changed_files,
+                        load_file_buffers,
+                    )
+                        .chain(),
+                    send_initial_meta.after(load_file_buffers),
+                    send_initial_text_meta.after(load_file_buffers),
+                    send_initial_dir.after(load_file_buffers),
+                    sync_media_allowlist.after(load_file_buffers),
+                    send_initial_media
+                        .after(load_file_buffers)
+                        .after(sync_media_allowlist),
                     (detach_video_overlays, attach_video_overlays).chain(),
                     send_file_theme,
                     apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
-                    reconcile_file_watches,
                     flush_lsp_changes,
                     apply_goto,
                     apply_pending_goto,
                     reapply_keymap_on_change,
                     apply_lsp_folds,
                     persist_folds,
-                    (drain_file_changes, reload_changed_files).chain(),
                 ),
             )
             .add_systems(Update, (mark_note_dirty, send_note.after(mark_note_dirty)))
@@ -2994,6 +3054,72 @@ mod edit_flow_tests {
             FileViewMode::Diff
         );
         assert!(app.world().get::<FileView>(second).is_some());
+    }
+
+    #[test]
+    fn missing_file_view_loads_when_file_is_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("created-after-open");
+        let path = parent.join("file.txt");
+        let (tx, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(|_| {}).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (
+                reconcile_file_watches,
+                drain_file_changes,
+                reload_changed_files,
+                load_file_buffers,
+            )
+                .chain(),
+        );
+        app.world_mut().insert_non_send(FileWatch {
+            watcher,
+            rx,
+            dirs: HashSet::new(),
+        });
+        app.world_mut().insert_non_send(SelfWrites::default());
+        app.world_mut().insert_non_send(Browsers::default());
+        app.world_mut()
+            .insert_non_send(crate::lsp::manager::LspManager::default());
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                FileViewport {
+                    top_row: 0,
+                    rows: 0,
+                },
+            ))
+            .id();
+
+        app.update();
+        assert!(
+            app.world()
+                .get::<FileBuffer>(entity)
+                .unwrap()
+                .language
+                .starts_with("__error__:cannot open")
+        );
+
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::write(&path, "created\n").unwrap();
+        tx.send(Ok(
+            notify::Event::new(notify::EventKind::Any).add_path(parent)
+        ))
+        .unwrap();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<EditState>(entity)
+                .unwrap()
+                .core
+                .buffer
+                .text(),
+            "created\n"
+        );
     }
 
     #[test]

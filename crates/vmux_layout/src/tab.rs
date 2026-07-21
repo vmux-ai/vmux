@@ -51,7 +51,8 @@ impl Plugin for TabPlugin {
                 Update,
                 crate::archive::handle_close_tab_requests
                     .in_set(ReadAppCommands)
-                    .after(TabCommandSet),
+                    .after(TabCommandSet)
+                    .after(crate::stack::StackCommandSet),
             )
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
             .add_systems(PostUpdate, sync_tab_order);

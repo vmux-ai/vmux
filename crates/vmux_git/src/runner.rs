@@ -93,6 +93,19 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), 
     ))
 }
 
+fn git_read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+    let out = git_command(root)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .args(args)
+        .output()
+        .map_err(|e| GitError(format!("failed to run git: {e}")))?;
+    Ok((
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+        out.status.success(),
+    ))
+}
+
 pub(crate) fn git_err(stdout: &str, stderr: &str) -> GitError {
     let s = stderr.trim();
     GitError(if s.is_empty() {
@@ -142,28 +155,51 @@ fn rel(root: &Path, file: &Path) -> String {
 
 pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
     let root = repo_root(file)?;
-    let target = rel(&root, file);
-    let (stdout, stderr, ok) = git(&root, &["status", "--porcelain=v2", "--branch"])?;
+    statuses(&root, &[file.to_path_buf()])?
+        .pop()
+        .ok_or_else(|| GitError("missing git status result".into()))
+}
+
+pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
+    let (stdout, stderr, ok) = git_read(
+        root,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+        ],
+    )?;
     if !ok {
         return Err(GitError(stderr.trim().to_string()));
     }
-    let p = parse::parse_porcelain_v2(&stdout, &target);
-    Ok(GitStatusEvent {
-        branch: p.branch,
-        ahead: p.ahead,
-        behind: p.behind,
-        has_upstream: p.has_upstream,
-        file_status: p.file_status,
-        staged_count: p.staged_count,
-        repo_root: root.to_string_lossy().into_owned(),
-    })
+    let repo_root = root.to_string_lossy().into_owned();
+    let parsed = parse::parse_porcelain_v2_statuses(&stdout);
+    Ok(files
+        .iter()
+        .map(|file| {
+            let target = rel(root, file);
+            GitStatusEvent {
+                branch: parsed.branch.clone(),
+                ahead: parsed.ahead,
+                behind: parsed.behind,
+                has_upstream: parsed.has_upstream,
+                file_status: parsed.file_status(&target),
+                staged_count: parsed.staged_count,
+                repo_root: repo_root.clone(),
+            }
+        })
+        .collect())
 }
 
 /// Repo root plus the set of repo-relative paths `git status --porcelain=v2`
 /// reports as changed (modified/staged/untracked/renamed/deleted/conflicted).
 pub fn dirty_set(file: &Path) -> Result<(PathBuf, std::collections::HashSet<String>), GitError> {
     let root = repo_root(file)?;
-    let (stdout, stderr, ok) = git(&root, &["status", "--porcelain=v2"])?;
+    let (stdout, stderr, ok) = git_read(
+        &root,
+        &["status", "--porcelain=v2", "--untracked-files=all"],
+    )?;
     if !ok {
         return Err(GitError(stderr.trim().to_string()));
     }
@@ -564,6 +600,56 @@ mod tests {
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Modified);
         stage(&file).unwrap();
         assert_eq!(status(&file).unwrap().file_status, FileStatus::Staged);
+    }
+
+    #[test]
+    fn status_reports_nested_untracked_file() {
+        let repo = test_repo::init();
+        std::fs::create_dir(repo.path().join("nested")).unwrap();
+        let file = test_repo::write(repo.path(), "nested/new.txt", "new\n");
+
+        assert_eq!(status(&file).unwrap().file_status, FileStatus::Untracked);
+    }
+
+    #[test]
+    fn status_batch_reports_each_requested_path() {
+        let repo = test_repo::init();
+        let modified = test_repo::write(repo.path(), "modified.txt", "one\n");
+        let staged = test_repo::write(repo.path(), "staged.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "."]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        test_repo::write(repo.path(), "modified.txt", "two\n");
+        test_repo::write(repo.path(), "staged.txt", "two\n");
+        test_repo::run(repo.path(), &["add", "staged.txt"]);
+
+        let events = statuses(repo.path(), &[modified, staged]).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].file_status, FileStatus::Modified);
+        assert_eq!(events[1].file_status, FileStatus::Staged);
+    }
+
+    #[test]
+    fn background_status_does_not_refresh_index() {
+        use std::fs::{FileTimes, OpenOptions};
+        use std::time::{Duration, SystemTime};
+
+        let repo = test_repo::init();
+        let file = test_repo::write(repo.path(), "a.txt", "one\n");
+        test_repo::run(repo.path(), &["add", "a.txt"]);
+        test_repo::run(repo.path(), &["commit", "-qm", "init"]);
+        let index = repo.path().join(".git/index");
+        let before = std::fs::read(&index).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(SystemTime::now() + Duration::from_secs(3600)))
+            .unwrap();
+
+        assert_eq!(status(&file).unwrap().file_status, FileStatus::Clean);
+
+        assert_eq!(std::fs::read(index).unwrap(), before);
     }
 
     #[test]

@@ -4684,7 +4684,6 @@ mod tests {
         assert!(rain.contains("use_drop"));
         assert!(rain.contains("prefers-reduced-motion"));
         assert!(rain.contains("device_pixel_ratio().clamp(1.0, 1.5)"));
-        assert!(rain.contains("now - last_frame_ms < 33.0"));
     }
 
     #[test]

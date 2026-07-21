@@ -25,6 +25,16 @@ if [[ -f "$ROOT/.env" ]]; then
     done < "$ROOT/.env"
 fi
 
+if [[ "$PROFILE" == "local" ]]; then
+    export SKIP_NOTARIZE="${SKIP_NOTARIZE:-1}"
+    if [[ -z "${APPLE_CERTIFICATE:-}" \
+        && -z "${APPLE_CERTIFICATE_PASSWORD:-}" \
+        && -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+        APPLE_SIGNING_IDENTITY="$("$ROOT/scripts/ensure-local-codesign-identity.sh")"
+        export APPLE_SIGNING_IDENTITY
+    fi
+fi
+
 TMP_DIR=""
 KEYCHAIN=""
 ORIGINAL_KEYCHAINS=()

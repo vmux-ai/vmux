@@ -622,6 +622,7 @@ pub fn Page() -> Element {
         });
 
     let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+        error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
         reset_file_scroll();
@@ -740,6 +741,7 @@ pub fn Page() -> Element {
     });
 
     let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+        error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
@@ -780,6 +782,7 @@ pub fn Page() -> Element {
     });
 
     let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
+        error.set(String::new());
         clear_blob_state(preview, thumbs);
         let kind = e.kind;
         media.set(Some(e));
