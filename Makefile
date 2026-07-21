@@ -151,18 +151,47 @@ cleanup:
 	echo "cleanup: reset vmux dev storage (kept ~/.vmux settings + spaces + dev browser profiles)"
 
 cleanup-local:
-	@pkill -f "/Applications/Vmux.app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
-	@pkill -f "target/release/Vmux .*app/Contents/MacOS/vmux_desktop" 2>/dev/null || true
-	@sleep 1
-	@case "$$(uname -s)" in \
+	@set -eu; \
+	pkill -f "/Applications/Vmux.app/Contents/MacOS/vmux_desktop" 2>/dev/null || true; \
+	pkill -f "target/release/Vmux .*app/Contents/MacOS/vmux_desktop" 2>/dev/null || true; \
+	pkill -x "Vmux Service" 2>/dev/null || true; \
+	if [ "$$(uname -s)" = Darwin ]; then \
+		uid="$$(id -u)"; \
+		launchctl bootout "gui/$$uid/ai.vmux.service" 2>/dev/null || true; \
+		launchctl list 2>/dev/null | awk '{print $$3}' | while IFS= read -r label; do \
+			case "$$label" in \
+				ai.vmux.service.dev|ai.vmux.service) ;; \
+				ai.vmux.service.*) launchctl bootout "gui/$$uid/$$label" 2>/dev/null || true ;; \
+			esac; \
+		done; \
+	fi; \
+	for _ in 1 2 3 4 5; do \
+		if ! pgrep -x "Vmux Service" >/dev/null 2>&1; then break; fi; \
+		sleep 1; \
+	done; \
+	if pgrep -x "Vmux Service" >/dev/null 2>&1; then \
+		echo "cleanup-local: vmux service is still running" >&2; \
+		exit 1; \
+	fi; \
+	case "$$(uname -s)" in \
 		Darwin) base="$$HOME/Library/Application Support/Vmux" ;; \
 		*) base="$${TMPDIR:-/tmp}/Vmux" ;; \
 	esac; stamp="$$(date +%Y%m%d-%H%M%S)"; \
 	if [ -f "$$base/store.ron" ]; then \
-		mv "$$base/store.ron" "$$base/store.ron.cleanup-$$stamp"; \
+		store_backup="$$base/store.ron.cleanup-$$stamp"; \
+		version_backup="$$base/store.version.cleanup-$$stamp"; \
+		cp -p "$$base/store.ron" "$$store_backup"; \
+		if [ -f "$$base/store.version" ]; then \
+			if ! cp -p "$$base/store.version" "$$version_backup"; then \
+				rm -f "$$store_backup"; \
+				exit 1; \
+			fi; \
+		fi; \
+		rm -f "$$base/store.ron" "$$base/store.version"; \
 		echo "cleanup-local: backed up layout to $$base/store.ron.cleanup-$$stamp"; \
+	else \
+		rm -f "$$base/store.version"; \
 	fi; \
-	rm -f "$$base/store.version"; \
 	rm -f "$$base/profiles/"*/session.ron; \
 	rm -f "$$base/services/"vmux-local.* "$$base/services/"vmux-local-*; \
 	echo "cleanup-local: reset local/release layout (kept settings and browser profiles)"

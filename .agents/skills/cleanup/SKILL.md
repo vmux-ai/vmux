@@ -40,6 +40,9 @@ bash -c '
 pkill -f vmux_desktop 2>/dev/null; pkill -f "Vmux.app" 2>/dev/null; pkill -f vmux_service 2>/dev/null; sleep 1
 launchctl bootout "gui/$(id -u)/ai.vmux.service" 2>/dev/null
 launchctl bootout "gui/$(id -u)/ai.vmux.service.dev" 2>/dev/null
+launchctl list 2>/dev/null | awk '$3 ~ /^ai\.vmux\.service\./ {print $3}' | while IFS= read -r label; do
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null
+done
 rm -rf ~/Library/"Application Support/Vmux"
 echo "full reset (first-run)"
 '

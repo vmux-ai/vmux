@@ -174,18 +174,18 @@ pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEv
         return Err(GitError(stderr.trim().to_string()));
     }
     let repo_root = root.to_string_lossy().into_owned();
+    let parsed = parse::parse_porcelain_v2_statuses(&stdout);
     Ok(files
         .iter()
         .map(|file| {
             let target = rel(root, file);
-            let p = parse::parse_porcelain_v2(&stdout, &target);
             GitStatusEvent {
-                branch: p.branch,
-                ahead: p.ahead,
-                behind: p.behind,
-                has_upstream: p.has_upstream,
-                file_status: p.file_status,
-                staged_count: p.staged_count,
+                branch: parsed.branch.clone(),
+                ahead: parsed.ahead,
+                behind: parsed.behind,
+                has_upstream: parsed.has_upstream,
+                file_status: parsed.file_status(&target),
+                staged_count: parsed.staged_count,
                 repo_root: repo_root.clone(),
             }
         })

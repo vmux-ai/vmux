@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::event::{DiffKind, DiffLine, FileStatus, StyledSpan};
 
 pub struct ParsedStatus {
@@ -7,6 +9,24 @@ pub struct ParsedStatus {
     pub has_upstream: bool,
     pub file_status: FileStatus,
     pub staged_count: u32,
+}
+
+pub struct ParsedStatuses {
+    pub branch: String,
+    pub ahead: u32,
+    pub behind: u32,
+    pub has_upstream: bool,
+    pub staged_count: u32,
+    file_statuses: HashMap<String, FileStatus>,
+}
+
+impl ParsedStatuses {
+    pub fn file_status(&self, target_rel: &str) -> FileStatus {
+        self.file_statuses
+            .get(target_rel)
+            .copied()
+            .unwrap_or(FileStatus::Clean)
+    }
 }
 
 fn entry_path(line: &str, kind_tokens: usize) -> &str {
@@ -29,13 +49,13 @@ fn xy_status(xy: &str) -> FileStatus {
     }
 }
 
-pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
+pub fn parse_porcelain_v2_statuses(out: &str) -> ParsedStatuses {
     let mut branch = String::new();
     let mut ahead = 0u32;
     let mut behind = 0u32;
     let mut has_upstream = false;
     let mut staged_count = 0u32;
-    let mut file_status = FileStatus::Clean;
+    let mut file_statuses = HashMap::new();
 
     for line in out.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
@@ -60,36 +80,50 @@ pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
                 .split('\t')
                 .next()
                 .unwrap_or("");
-            if path == target_rel {
-                file_status = xy_status(xy);
+            if !path.is_empty() {
+                file_statuses.insert(path.to_string(), xy_status(xy));
             }
         } else if let Some(rest) = line.strip_prefix("u ") {
             let _ = rest;
             let path = entry_path(line, 10);
-            if path == target_rel {
-                file_status = FileStatus::Conflicted;
+            if !path.is_empty() {
+                file_statuses.insert(path.to_string(), FileStatus::Conflicted);
             }
-        } else if let Some(path) = line.strip_prefix("? ")
-            && path.trim() == target_rel
-        {
-            file_status = FileStatus::Untracked;
+        } else if let Some(path) = line.strip_prefix("? ") {
+            let path = path.trim();
+            if !path.is_empty() {
+                file_statuses.insert(path.to_string(), FileStatus::Untracked);
+            }
         }
     }
 
-    ParsedStatus {
+    ParsedStatuses {
         branch,
         ahead,
         behind,
         has_upstream,
-        file_status,
         staged_count,
+        file_statuses,
+    }
+}
+
+pub fn parse_porcelain_v2(out: &str, target_rel: &str) -> ParsedStatus {
+    let parsed = parse_porcelain_v2_statuses(out);
+    let file_status = parsed.file_status(target_rel);
+    ParsedStatus {
+        branch: parsed.branch,
+        ahead: parsed.ahead,
+        behind: parsed.behind,
+        has_upstream: parsed.has_upstream,
+        file_status,
+        staged_count: parsed.staged_count,
     }
 }
 
 /// Repo-relative paths of every changed entry in `git status --porcelain=v2`
 /// output — one per `1 `/`2 `/`u `/`? ` line (untracked files included).
-pub fn changed_paths(out: &str) -> std::collections::HashSet<String> {
-    let mut set = std::collections::HashSet::new();
+pub fn changed_paths(out: &str) -> HashSet<String> {
+    let mut set = HashSet::new();
     for line in out.lines() {
         let path = if line.starts_with("1 ") || line.starts_with("2 ") {
             let kind_tokens = if line.starts_with("2 ") { 9 } else { 8 };
