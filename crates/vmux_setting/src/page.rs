@@ -24,6 +24,7 @@ pub fn Page() -> Element {
     use_theme();
     let mut snapshot = use_signal(|| Value::Null);
     let mut schema = use_signal(SettingsSchema::default);
+    let mut search = use_signal(String::new);
 
     let _values =
         use_bin_event_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
@@ -52,7 +53,8 @@ pub fn Page() -> Element {
         Some(obj) => obj.clone(),
         None => Map::new(),
     };
-    let sections = compute_sections(&top, &sch);
+    let sections = filter_sections(compute_sections(&top, &sch), &sch, &search());
+    let search_placeholder = format!("{}…", translate("command-search"));
 
     rsx! {
         div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
@@ -80,6 +82,13 @@ pub fn Page() -> Element {
                             {translate("settings-stored")}
                         }
                     }
+                    input {
+                        r#type: "search",
+                        class: "sticky top-0 z-10 mb-6 w-full rounded-xl bg-background/95 px-4 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-border backdrop-blur-xl transition-colors placeholder:text-muted-foreground/60 focus:bg-muted/40 focus:ring-cyan-400/40",
+                        placeholder: "{search_placeholder}",
+                        value: "{search}",
+                        oninput: move |event: FormEvent| search.set(event.value()),
+                    }
                     div { class: "flex flex-col gap-8",
                         for sec in sections {
                             SectionView {
@@ -97,6 +106,83 @@ pub fn Page() -> Element {
             }
         }
     }
+}
+
+fn filter_sections(
+    sections: Vec<PreparedSection>,
+    schema: &SettingsSchema,
+    query: &str,
+) -> Vec<PreparedSection> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return sections;
+    }
+    sections
+        .into_iter()
+        .filter(|section| section_matches(section, schema, &query))
+        .collect()
+}
+
+fn section_matches(section: &PreparedSection, schema: &SettingsSchema, query: &str) -> bool {
+    text_matches(&section.id, query)
+        || text_matches(&section.title, query)
+        || section
+            .description
+            .as_deref()
+            .is_some_and(|description| text_matches(description, query))
+        || text_matches(&section.root_path, query)
+        || value_matches(&section.value, &section.root_path, schema, query)
+}
+
+fn value_matches(value: &Value, parent_path: &str, schema: &SettingsSchema, query: &str) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, value)| {
+            let path = if parent_path.is_empty() {
+                key.clone()
+            } else {
+                format!("{parent_path}.{key}")
+            };
+            text_matches(key, query)
+                || text_matches(&path, query)
+                || schema
+                    .field(&path)
+                    .is_some_and(|spec| field_spec_matches(spec, query))
+                || value_matches(value, &path, schema, query)
+        }),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| value_matches(item, parent_path, schema, query)),
+        Value::String(value) => text_matches(value, query),
+        Value::Number(value) => text_matches(&value.to_string(), query),
+        Value::Bool(value) => text_matches(&value.to_string(), query),
+        Value::Null => false,
+    }
+}
+
+fn field_spec_matches(spec: &crate::schema::FieldSpec, query: &str) -> bool {
+    spec.label
+        .as_deref()
+        .is_some_and(|value| text_matches(value, query))
+        || spec
+            .description
+            .as_deref()
+            .is_some_and(|value| text_matches(value, query))
+        || spec
+            .hint
+            .as_deref()
+            .is_some_and(|value| text_matches(value, query))
+        || spec
+            .placeholder
+            .as_deref()
+            .is_some_and(|value| text_matches(value, query))
+        || spec
+            .options
+            .iter()
+            .any(|option| text_matches(&option.value, query) || text_matches(&option.label, query))
+}
+
+fn text_matches(value: &str, query: &str) -> bool {
+    value.to_lowercase().contains(query)
 }
 
 fn emit_update(path: &str, value: Value) {

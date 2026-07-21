@@ -9,7 +9,7 @@ use vmux_layout::{
     stack::FocusedStack,
     warm_page::WarmPage,
 };
-use vmux_ui::i18n::{register_catalog, requested_locale, translate_for};
+use vmux_ui::i18n::{available_locales, register_catalog, requested_locale, translate_for};
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
@@ -288,6 +288,15 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
         let _ = register_catalog(locale, &source);
     }
     let t = |id| translate_for(locale, id);
+    let locale_options = std::iter::once(SelectOption {
+        value: "system".to_string(),
+        label: "system".to_string(),
+    })
+    .chain(available_locales().iter().map(|locale| SelectOption {
+        value: (*locale).to_string(),
+        label: (*locale).to_string(),
+    }))
+    .collect::<Vec<_>>();
     SettingsSchema {
         sections: vec![
             SectionSpec {
@@ -369,6 +378,8 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                 FieldSpec {
                     label: Some(t("schema-language")),
                     hint: Some(t("schema-language-detail")),
+                    widget: Some(WidgetKind::Select),
+                    options: locale_options,
                     ..Default::default()
                 },
             ),
@@ -578,6 +589,20 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+
+    #[test]
+    fn schema_exposes_every_bundled_language() {
+        let schema = build_settings_schema();
+        let language = schema.field("appearance.locale").expect("language field");
+        assert_eq!(language.widget, Some(WidgetKind::Select));
+        let values = language
+            .options
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(values.first(), Some(&"system"));
+        assert_eq!(&values[1..], available_locales());
     }
 
     #[test]
