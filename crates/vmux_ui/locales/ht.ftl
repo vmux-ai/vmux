@@ -1,3 +1,4 @@
+locale-name = Kreyòl ayisyen
 common-open = Louvri
 common-close = Fèmen
 common-install = Enstale

@@ -1,3 +1,4 @@
+locale-name = ئۇيغۇرچە
 common-open = ئېچىش
 common-close = تاقاش
 common-install = ئورنىتىش

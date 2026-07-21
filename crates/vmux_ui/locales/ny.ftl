@@ -1,3 +1,4 @@
+locale-name = Chichewa
 common-open = Tsegula
 common-close = Tseka
 common-install = Ikani

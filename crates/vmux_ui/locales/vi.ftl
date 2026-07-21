@@ -1,3 +1,4 @@
+locale-name = Tiếng Việt
 common-open = Mở
 common-close = Đóng
 common-install = Cài đặt

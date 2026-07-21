@@ -1,3 +1,4 @@
+locale-name = Ikinyarwanda
 common-open = Fungura
 common-close = Funga
 common-install = Shyiramo

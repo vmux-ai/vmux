@@ -1,3 +1,4 @@
+locale-name = فارسی
 common-open = باز کردن
 common-close = بستن
 common-install = نصب

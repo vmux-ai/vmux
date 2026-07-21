@@ -1,3 +1,4 @@
+locale-name = shqip
 common-open = Hap
 common-close = Mbyll
 common-install = Instalo

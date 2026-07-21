@@ -1,3 +1,4 @@
+locale-name = پښتو
 common-open = پرانیزئ
 common-close = وتړئ
 common-install = ولګوئ

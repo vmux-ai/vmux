@@ -1,3 +1,4 @@
+locale-name = українська
 common-open = Відкрити
 common-close = Закрити
 common-install = Інсталювати

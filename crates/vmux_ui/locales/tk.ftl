@@ -1,3 +1,4 @@
+locale-name = Türkmençe
 common-open = Aç
 common-close = Ýap
 common-install = Gurna

@@ -1,3 +1,4 @@
+locale-name = svenska
 common-open = Öppna
 common-close = Stäng
 common-install = Installera

@@ -1,3 +1,4 @@
+locale-name = Èdè Yorùbá
 common-open = Ṣí
 common-close = Tì
 common-install = Fi sílẹ̀

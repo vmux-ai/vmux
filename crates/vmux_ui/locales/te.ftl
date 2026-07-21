@@ -1,3 +1,4 @@
+locale-name = తెలుగు
 common-open = తెరవండి
 common-close = మూసివేయండి
 common-install = ఇన్‌స్టాల్ చేయండి

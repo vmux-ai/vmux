@@ -1,3 +1,4 @@
+locale-name = русский
 common-open = Открыть
 common-close = Закрыть
 common-install = Установить

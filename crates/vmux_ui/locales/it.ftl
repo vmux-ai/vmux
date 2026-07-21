@@ -1,3 +1,4 @@
+locale-name = italiano
 common-open = Apri
 common-close = Chiudi
 common-install = Installa

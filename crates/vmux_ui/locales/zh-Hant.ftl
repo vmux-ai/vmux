@@ -1,3 +1,4 @@
+locale-name = 繁體中文
 common-open = 開啟
 common-close = 關閉
 common-install = 安裝

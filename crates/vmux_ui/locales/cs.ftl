@@ -1,3 +1,4 @@
+locale-name = čeština
 common-open = Otevřít
 common-close = Zavřít
 common-install = Nainstalovat

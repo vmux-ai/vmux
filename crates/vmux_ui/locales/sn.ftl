@@ -1,3 +1,4 @@
+locale-name = chiShona
 common-open = Vhura
 common-close = Vhara
 common-install = Isa

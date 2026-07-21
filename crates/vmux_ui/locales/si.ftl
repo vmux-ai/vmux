@@ -1,3 +1,4 @@
+locale-name = සිංහල
 common-open = විවෘත කරන්න
 common-close = වසන්න
 common-install = ස්ථාපනය කරන්න

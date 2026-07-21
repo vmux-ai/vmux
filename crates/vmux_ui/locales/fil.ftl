@@ -1,3 +1,4 @@
+locale-name = Filipino
 common-open = Buksan
 common-close = Isara
 common-install = I-install

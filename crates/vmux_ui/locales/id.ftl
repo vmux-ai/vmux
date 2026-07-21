@@ -1,3 +1,4 @@
+locale-name = Bahasa Indonesia
 common-open = Buka
 common-close = Tutup
 common-install = Instal

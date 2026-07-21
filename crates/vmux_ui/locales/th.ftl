@@ -1,3 +1,4 @@
+locale-name = ไทย
 common-open = เปิด
 common-close = ปิด
 common-install = ติดตั้ง

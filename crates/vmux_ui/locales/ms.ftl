@@ -1,3 +1,4 @@
+locale-name = Bahasa Melayu
 common-open = Buka
 common-close = Tutup
 common-install = Pasang

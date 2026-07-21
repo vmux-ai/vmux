@@ -1,3 +1,4 @@
+locale-name = қазақ тілі
 common-open = Ашу
 common-close = Жабу
 common-install = Орнату

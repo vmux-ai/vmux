@@ -1,3 +1,4 @@
+locale-name = Gàidhlig
 common-open = Fosgail
 common-close = Dùin
 common-install = Stàlaich

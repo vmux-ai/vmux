@@ -1,3 +1,4 @@
+locale-name = bosanski
 common-open = Otvori
 common-close = Zatvori
 common-install = Instaliraj

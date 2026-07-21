@@ -1,3 +1,4 @@
+locale-name = ייִדיש
 common-open = עפֿן
 common-close = פֿאַרמאַכן
 common-install = אינסטאַלירן

@@ -1,3 +1,4 @@
+locale-name = norsk bokmål
 common-open = Åpne
 common-close = Lukk
 common-install = Installer

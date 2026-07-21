@@ -1,3 +1,4 @@
+locale-name = Frysk
 common-open = Iepenje
 common-close = Slute
 common-install = Ynstallearje

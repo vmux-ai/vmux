@@ -1,3 +1,4 @@
+locale-name = Malagasy
 common-open = Sokafy
 common-close = Akatony
 common-install = Apetraho

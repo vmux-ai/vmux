@@ -1,3 +1,4 @@
+locale-name = հայերեն
 common-open = Բացել
 common-close = Փակել
 common-install = Տեղադրել

@@ -1,3 +1,4 @@
+locale-name = Türkçe
 common-open = Aç
 common-close = Kapat
 common-install = Yükle

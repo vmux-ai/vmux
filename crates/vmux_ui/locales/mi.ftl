@@ -1,3 +1,4 @@
+locale-name = te reo Māori
 common-open = Huaki
 common-close = Katia
 common-install = Tāuta

@@ -1,3 +1,4 @@
+locale-name = eesti
 common-open = Ava
 common-close = Sulge
 common-install = Paigalda

@@ -1,3 +1,4 @@
+locale-name = Sesotho
 common-open = Bula
 common-close = Kwala
 common-install = Kenya

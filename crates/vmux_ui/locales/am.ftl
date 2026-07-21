@@ -1,3 +1,4 @@
+locale-name = አማርኛ
 common-open = ክፈት
 common-close = ዝጋ
 common-install = ጫን

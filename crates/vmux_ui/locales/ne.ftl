@@ -1,3 +1,4 @@
+locale-name = नेपाली
 common-open = खोल्नुहोस्
 common-close = बन्द गर्नुहोस्
 common-install = स्थापना गर्नुहोस्

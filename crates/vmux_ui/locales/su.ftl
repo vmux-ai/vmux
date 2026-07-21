@@ -1,3 +1,4 @@
+locale-name = Basa Sunda
 common-open = Buka
 common-close = Tutup
 common-install = Pasang

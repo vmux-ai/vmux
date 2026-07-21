@@ -1,3 +1,4 @@
+locale-name = kurdî (kurmancî)
 common-open = کردنەوە
 common-close = داخستن
 common-install = دامەزراندن

@@ -1,3 +1,4 @@
+locale-name = català
 common-open = Obre
 common-close = Tanca
 common-install = Instal·la

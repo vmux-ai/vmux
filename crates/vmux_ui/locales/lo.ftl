@@ -1,3 +1,4 @@
+locale-name = ລາວ
 common-open = ເປີດ
 common-close = ປິດ
 common-install = ຕິດຕັ້ງ

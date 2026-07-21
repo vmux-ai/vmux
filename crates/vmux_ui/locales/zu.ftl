@@ -1,3 +1,4 @@
+locale-name = isiZulu
 common-open = Vula
 common-close = Vala
 common-install = Faka

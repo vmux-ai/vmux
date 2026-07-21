@@ -1,3 +1,4 @@
+locale-name = سنڌي
 common-open = کوليو
 common-close = بند ڪريو
 common-install = انسٽال ڪريو

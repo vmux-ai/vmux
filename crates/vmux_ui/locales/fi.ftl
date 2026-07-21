@@ -1,3 +1,4 @@
+locale-name = suomi
 common-open = Avaa
 common-close = Sulje
 common-install = Asenna

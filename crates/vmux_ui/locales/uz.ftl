@@ -1,3 +1,4 @@
+locale-name = o‘zbek
 common-open = Ochish
 common-close = Yopish
 common-install = O‘rnatish

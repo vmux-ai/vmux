@@ -1,3 +1,4 @@
+locale-name = slovenčina
 common-open = Otvoriť
 common-close = Zavrieť
 common-install = Nainštalovať

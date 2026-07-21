@@ -1,3 +1,4 @@
+locale-name = မြန်မာ
 common-open = ဖွင့်မည်
 common-close = ပိတ်မည်
 common-install = ထည့်သွင်းမည်

@@ -1,3 +1,4 @@
+locale-name = монгол
 common-open = Нээх
 common-close = Хаах
 common-install = Суулгах

@@ -4,6 +4,8 @@
 
 Every bundled catalog has the same message IDs and variables as English. All non-English catalogs, including Japanese, are context-aware LLM localizations rather than literal translations. Native corrections are welcome.
 
+Each catalog's `locale-name` is its autonym and is shown unchanged in the language picker.
+
 Custom languages and overrides do not require code changes. Copy the English catalog to `~/.vmux/locales/<BCP-47-tag>.ftl`, translate values without changing message IDs or variables, then set:
 
 ```ron

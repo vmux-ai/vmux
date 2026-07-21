@@ -1,3 +1,4 @@
+locale-name = Afrikaans
 common-open = Maak oop
 common-close = Sluit
 common-install = Installeer

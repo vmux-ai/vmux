@@ -1,3 +1,4 @@
+locale-name = ქართული
 common-open = გახსნა
 common-close = დახურვა
 common-install = დაყენება

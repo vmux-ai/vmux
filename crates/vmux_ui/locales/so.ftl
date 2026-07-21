@@ -1,3 +1,4 @@
+locale-name = Soomaali
 common-open = Fur
 common-close = Xir
 common-install = Rakib

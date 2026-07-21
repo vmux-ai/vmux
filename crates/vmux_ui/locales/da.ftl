@@ -1,3 +1,4 @@
+locale-name = dansk
 common-open = Åbn
 common-close = Luk
 common-install = Installer

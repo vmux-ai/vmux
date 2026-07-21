@@ -1,3 +1,4 @@
+locale-name = اردو
 common-open = کھولیں
 common-close = بند کریں
 common-install = انسٹال کریں

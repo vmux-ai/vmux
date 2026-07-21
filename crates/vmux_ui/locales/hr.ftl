@@ -1,3 +1,4 @@
+locale-name = hrvatski
 common-open = Otvori
 common-close = Zatvori
 common-install = Instaliraj

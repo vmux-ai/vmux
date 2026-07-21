@@ -1,3 +1,4 @@
+locale-name = кыргызча
 common-open = Ачуу
 common-close = Жабуу
 common-install = Орнотуу

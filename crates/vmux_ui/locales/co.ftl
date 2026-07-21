@@ -1,3 +1,4 @@
+locale-name = corsu
 common-open = Apre
 common-close = Chjode
 common-install = Stallà

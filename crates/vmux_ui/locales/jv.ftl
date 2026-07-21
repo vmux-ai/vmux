@@ -1,3 +1,4 @@
+locale-name = Basa Jawa
 common-open = Bukak
 common-close = Tutup
 common-install = Pasang

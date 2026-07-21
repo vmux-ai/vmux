@@ -1,3 +1,4 @@
+locale-name = मराठी
 common-open = उघडा
 common-close = बंद करा
 common-install = इंस्टॉल करा

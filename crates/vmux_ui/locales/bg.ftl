@@ -1,3 +1,4 @@
+locale-name = български
 common-open = Отвори
 common-close = Затвори
 common-install = Инсталирай

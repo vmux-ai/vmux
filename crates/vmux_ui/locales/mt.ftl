@@ -1,3 +1,4 @@
+locale-name = Malti
 common-open = Iftaħ
 common-close = Agħlaq
 common-install = Installa

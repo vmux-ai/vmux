@@ -1,3 +1,4 @@
+locale-name = latviešu
 common-open = Atvērt
 common-close = Aizvērt
 common-install = Instalēt

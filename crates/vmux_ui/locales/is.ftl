@@ -1,3 +1,4 @@
+locale-name = íslenska
 common-open = Opna
 common-close = Loka
 common-install = Setja upp

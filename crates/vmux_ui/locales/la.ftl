@@ -1,3 +1,4 @@
+locale-name = lingua Latina
 common-open = Aperi
 common-close = Claude
 common-install = Installa

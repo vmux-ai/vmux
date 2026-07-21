@@ -1,3 +1,4 @@
+locale-name = slovenščina
 common-open = Odpri
 common-close = Zapri
 common-install = Namesti

@@ -1,3 +1,4 @@
+locale-name = Lëtzebuergesch
 common-open = Opmaachen
 common-close = Zoumaachen
 common-install = Installéieren

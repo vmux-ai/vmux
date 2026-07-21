@@ -1,3 +1,4 @@
+locale-name = עברית
 common-open = פתח
 common-close = סגור
 common-install = התקן

@@ -1,3 +1,4 @@
+locale-name = 한국어
 common-open = 열기
 common-close = 닫기
 common-install = 설치

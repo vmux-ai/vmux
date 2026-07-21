@@ -1,3 +1,4 @@
+locale-name = тоҷикӣ
 common-open = Кушодан
 common-close = Пӯшидан
 common-install = Насб кардан

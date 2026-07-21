@@ -1,3 +1,4 @@
+locale-name = العربية
 common-open = فتح
 common-close = إغلاق
 common-install = تثبيت

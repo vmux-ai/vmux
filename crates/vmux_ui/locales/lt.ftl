@@ -1,3 +1,4 @@
+locale-name = lietuvių
 common-open = Atidaryti
 common-close = Uždaryti
 common-install = Įdiegti

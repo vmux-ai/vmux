@@ -1,3 +1,4 @@
+locale-name = Cymraeg
 common-open = Agor
 common-close = Cau
 common-install = Gosod

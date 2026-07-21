@@ -1,3 +1,4 @@
+locale-name = Ελληνικά
 common-open = Άνοιγμα
 common-close = Κλείσιμο
 common-install = Εγκατάσταση

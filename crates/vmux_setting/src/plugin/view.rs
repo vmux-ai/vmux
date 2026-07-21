@@ -9,7 +9,9 @@ use vmux_layout::{
     stack::FocusedStack,
     warm_page::WarmPage,
 };
-use vmux_ui::i18n::{available_locales, register_catalog, requested_locale, translate_for};
+use vmux_ui::i18n::{
+    available_locales, locale_name, register_catalog, requested_locale, translate_for,
+};
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
@@ -294,7 +296,7 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
     })
     .chain(available_locales().iter().map(|locale| SelectOption {
         value: (*locale).to_string(),
-        label: (*locale).to_string(),
+        label: locale_name(locale).to_string(),
     }))
     .collect::<Vec<_>>();
     SettingsSchema {
@@ -603,6 +605,14 @@ mod appearance_schema_tests {
             .collect::<Vec<_>>();
         assert_eq!(values.first(), Some(&"system"));
         assert_eq!(&values[1..], available_locales());
+        assert_eq!(
+            language
+                .options
+                .iter()
+                .find(|option| option.value == "ja")
+                .map(|option| option.label.as_str()),
+            Some("日本語")
+        );
     }
 
     #[test]

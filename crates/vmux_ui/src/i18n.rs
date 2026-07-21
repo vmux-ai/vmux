@@ -85,6 +85,18 @@ pub fn available_locales() -> &'static [&'static str] {
     AVAILABLE_LOCALES
 }
 
+pub fn locale_name(locale: &str) -> &str {
+    embedded_catalog_source(locale)
+        .and_then(|source| {
+            source
+                .lines()
+                .find_map(|line| line.strip_prefix("locale-name = "))
+        })
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(locale)
+}
+
 pub fn register_catalog(locale: &str, source: &str) -> Result<(), String> {
     let locale = normalize_locale(locale);
     let bundle = build_bundle_from_source(&locale, source)?;
@@ -228,6 +240,17 @@ mod tests {
                 "message IDs differ for {locale}"
             );
         }
+    }
+
+    #[test]
+    fn bundled_locales_expose_native_names() {
+        for locale in available_locales() {
+            assert_ne!(locale_name(locale), *locale, "missing autonym for {locale}");
+        }
+        assert_eq!(locale_name("en-US"), "English (US)");
+        assert_eq!(locale_name("ja"), "日本語");
+        assert_eq!(locale_name("fr"), "français");
+        assert_eq!(locale_name("ar"), "العربية");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+locale-name = Gaeilge
 common-open = Oscail
 common-close = Dún
 common-install = Suiteáil

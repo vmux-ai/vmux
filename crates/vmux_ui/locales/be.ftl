@@ -1,3 +1,4 @@
+locale-name = беларуская
 common-open = Адкрыць
 common-close = Закрыць
 common-install = Усталяваць

@@ -1,3 +1,4 @@
+locale-name = हिन्दी
 common-open = खोलें
 common-close = बंद करें
 common-install = इंस्टॉल करें

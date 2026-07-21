@@ -1,3 +1,4 @@
+locale-name = isiXhosa
 common-open = Vula
 common-close = Vala
 common-install = Faka

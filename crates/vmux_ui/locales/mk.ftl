@@ -1,3 +1,4 @@
+locale-name = македонски
 common-open = Отвори
 common-close = Затвори
 common-install = Инсталирај

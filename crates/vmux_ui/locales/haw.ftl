@@ -1,3 +1,4 @@
+locale-name = ʻŌlelo Hawaiʻi
 common-open = Wehe
 common-close = Pani
 common-install = Hoʻouka

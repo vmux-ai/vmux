@@ -1,3 +1,4 @@
+locale-name = Gagana Sāmoa
 common-open = Tatala
 common-close = Tapuni
 common-install = Faapipii

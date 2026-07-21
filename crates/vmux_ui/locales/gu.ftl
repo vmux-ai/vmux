@@ -1,3 +1,4 @@
+locale-name = ગુજરાતી
 common-open = ખોલો
 common-close = બંધ કરો
 common-install = ઇન્સ્ટોલ કરો

@@ -1,3 +1,4 @@
+locale-name = Hausa
 common-open = Buɗe
 common-close = Rufe
 common-install = Shigar

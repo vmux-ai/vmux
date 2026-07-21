@@ -1,3 +1,4 @@
+locale-name = മലയാളം
 common-open = തുറക്കുക
 common-close = അടയ്ക്കുക
 common-install = ഇൻസ്റ്റാൾ ചെയ്യുക

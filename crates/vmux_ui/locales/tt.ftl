@@ -1,3 +1,4 @@
+locale-name = татарча
 common-open = Ачу
 common-close = Ябу
 common-install = Урнаштыру

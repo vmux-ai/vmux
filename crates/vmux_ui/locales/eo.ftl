@@ -1,3 +1,4 @@
+locale-name = Esperanto
 common-open = Malfermi
 common-close = Fermi
 common-install = Instali

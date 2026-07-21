@@ -1,3 +1,4 @@
+locale-name = ਪੰਜਾਬੀ
 common-open = ਖੋਲ੍ਹੋ
 common-close = ਬੰਦ ਕਰੋ
 common-install = ਇੰਸਟਾਲ ਕਰੋ

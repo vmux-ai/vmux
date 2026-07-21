@@ -1,3 +1,4 @@
+locale-name = Igbo
 common-open = Mepee
 common-close = Mechie
 common-install = Wụnye

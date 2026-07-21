@@ -1,3 +1,4 @@
+locale-name = Kiswahili
 common-open = Fungua
 common-close = Funga
 common-install = Sakinisha

@@ -1,3 +1,4 @@
+locale-name = தமிழ்
 common-open = திற
 common-close = மூடு
 common-install = நிறுவு

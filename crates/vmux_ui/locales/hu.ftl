@@ -1,3 +1,4 @@
+locale-name = magyar
 common-open = Megnyitás
 common-close = Bezárás
 common-install = Telepítés

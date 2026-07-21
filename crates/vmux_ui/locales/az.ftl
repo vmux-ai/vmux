@@ -1,3 +1,4 @@
+locale-name = azərbaycan
 common-open = Aç
 common-close = Bağla
 common-install = Quraşdır

@@ -1,3 +1,4 @@
+locale-name = বাংলা
 common-open = খুলুন
 common-close = বন্ধ করুন
 common-install = ইনস্টল করুন

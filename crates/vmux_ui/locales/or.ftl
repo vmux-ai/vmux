@@ -1,3 +1,4 @@
+locale-name = ଓଡ଼ିଆ
 common-open = ଖୋଲନ୍ତୁ
 common-close = ବନ୍ଦ କରନ୍ତୁ
 common-install = ଇନ୍‌ଷ୍ଟଲ୍ କରନ୍ତୁ

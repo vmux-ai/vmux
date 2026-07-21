@@ -1,3 +1,4 @@
+locale-name = 日本語
 common-open = 開く
 common-close = 閉じる
 common-install = インストール

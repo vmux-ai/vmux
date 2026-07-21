@@ -1,3 +1,4 @@
+locale-name = Nederlands
 common-open = Openen
 common-close = Sluiten
 common-install = Installeren

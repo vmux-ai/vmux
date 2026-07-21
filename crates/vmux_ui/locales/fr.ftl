@@ -1,3 +1,4 @@
+locale-name = français
 common-open = Ouvrir
 common-close = Fermer
 common-install = Installer

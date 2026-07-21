@@ -1,3 +1,4 @@
+locale-name = Hmoob
 common-open = Qhib
 common-close = Kaw
 common-install = Nruab

@@ -1,3 +1,4 @@
+locale-name = Sinugboanon
 common-open = Ablihi
 common-close = Sirad-i
 common-install = I-install

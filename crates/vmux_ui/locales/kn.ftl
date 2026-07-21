@@ -1,3 +1,4 @@
+locale-name = ಕನ್ನಡ
 common-open = ತೆರೆಯಿರಿ
 common-close = ಮುಚ್ಚಿ
 common-install = ಸ್ಥಾಪಿಸಿ

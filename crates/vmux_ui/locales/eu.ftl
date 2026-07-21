@@ -1,3 +1,4 @@
+locale-name = euskara
 common-open = Ireki
 common-close = Itxi
 common-install = Instalatu

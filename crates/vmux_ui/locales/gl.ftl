@@ -1,3 +1,4 @@
+locale-name = galego
 common-open = Abrir
 common-close = Pechar
 common-install = Instalar

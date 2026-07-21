@@ -1,3 +1,4 @@
+locale-name = română
 common-open = Deschide
 common-close = Închide
 common-install = Instalează

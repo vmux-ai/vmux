@@ -1,3 +1,4 @@
+locale-name = ខ្មែរ
 common-open = បើក
 common-close = បិទ
 common-install = ដំឡើង
