@@ -30,7 +30,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use vmux_core::ProcessId;
 
-use super::projector::{AcpProjector, Intent};
+use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
 use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
@@ -624,6 +624,16 @@ pub async fn run(
                     let projector = perm_shared.projector.lock().unwrap();
                     approval_details(&req, &projector)
                 };
+                if is_conversation_title_tool(&name) {
+                    let outcome =
+                        match pick_permission_option(&req.options, ApprovalDecision::Allow) {
+                            Some(id) => RequestPermissionOutcome::Selected(
+                                SelectedPermissionOutcome::new(id),
+                            ),
+                            None => RequestPermissionOutcome::Cancelled,
+                        };
+                    return responder.respond(RequestPermissionResponse::new(outcome));
+                }
                 perm_shared.emit(ServiceMessage::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
@@ -1096,6 +1106,7 @@ watch and take over. Use mcp__vmux__read_terminal to inspect continued output. O
 argument because it targets your own terminal pane. Do ALL web access via the vmux browser tools. \
 If you invoke a required Skill tool, continue the original user request in the same turn after \
 the skill loads. Never end the turn after skill activation or answer only Ready.";
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "Immediately after every user message, call mcp__vmux__set_conversation_title as the first tool of the turn, before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim. Update the title even when the user sends a short follow-up.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
@@ -1117,9 +1128,11 @@ fn session_meta_for_agent_with_knowledge(
     } else {
         knowledge.to_string()
     };
-    if prompt.is_empty() {
-        return None;
-    }
+    let prompt = if prompt.is_empty() {
+        CONVERSATION_TITLE_STEER_PROMPT.to_string()
+    } else {
+        format!("{prompt}\n\n{CONVERSATION_TITLE_STEER_PROMPT}")
+    };
     if agent_id != "claude" {
         let serde_json::Value::Object(meta) = serde_json::json!({
             "systemPrompt": {
@@ -1138,6 +1151,7 @@ fn session_meta_for_agent_with_knowledge(
             "options": {
                 "disallowedTools": ["Bash", "Monitor", "WebSearch", "WebFetch"],
                 "allowedTools": [
+                    "mcp__vmux__set_conversation_title",
                     "mcp__vmux__run",
                     "mcp__vmux__read_terminal",
                     "mcp__vmux__browser_navigate",
@@ -2146,16 +2160,28 @@ mod tests {
                 .iter()
                 .any(|tool| tool == "mcp__vmux__run")
         );
+        assert!(
+            options["allowedTools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool == "mcp__vmux__set_conversation_title")
+        );
         let prompt = meta["systemPrompt"]["append"].as_str().unwrap();
         assert!(prompt.contains("mcp__vmux__run"));
         assert!(prompt.contains("continue the original user request"));
         assert!(prompt.contains("memory context"));
-        assert!(session_meta_for_agent_with_knowledge("vibe-acp", "").is_none());
-        assert_eq!(
-            session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()["systemPrompt"]
-                ["append"],
-            "skill context"
-        );
+        assert!(prompt.contains("mcp__vmux__set_conversation_title"));
+        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()
+            ["systemPrompt"]["append"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(generic.starts_with("skill context\n\n"));
+        assert!(generic.contains("mcp__vmux__set_conversation_title"));
+        assert!(generic.contains("first tool of the turn"));
+        assert!(generic.contains("Correct spelling and grammar"));
+        assert!(generic.contains("Never copy the user's prompt verbatim"));
     }
 
     #[test]

@@ -1436,6 +1436,8 @@ fn spawn_beside_stack(
     open_or_prompt_stack(
         new_stack,
         Some(req.url.clone()),
+        (!req.url.starts_with("file:") && !req.url.starts_with("vmux://"))
+            .then_some(req.request_id),
         new_stack_ctx,
         page_open_requests,
     );
@@ -1882,6 +1884,7 @@ fn handle_open_in_pane(
             open_or_prompt_stack(
                 new_stack,
                 resolved,
+                None,
                 &mut new_stack_ctx,
                 &mut page_open_requests,
             );
@@ -1894,6 +1897,7 @@ fn handle_open_in_pane(
                         open_or_prompt_stack(
                             stack,
                             resolved,
+                            None,
                             &mut new_stack_ctx,
                             &mut page_open_requests,
                         );
@@ -1906,6 +1910,7 @@ fn handle_open_in_pane(
                     open_or_prompt_stack(
                         new_stack,
                         resolved,
+                        None,
                         &mut new_stack_ctx,
                         &mut page_open_requests,
                     );
@@ -1919,6 +1924,7 @@ fn handle_open_in_pane(
 fn open_or_prompt_stack(
     stack: Entity,
     url: Option<String>,
+    request_id: Option<[u8; 16]>,
     new_stack_ctx: &mut NewStackContext,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
 ) {
@@ -1929,7 +1935,7 @@ fn open_or_prompt_stack(
         page_open_requests.write(PageOpenRequest {
             target: PageOpenTarget::Stack(stack),
             url,
-            request_id: None,
+            request_id,
         });
     } else {
         new_stack_ctx.stack = Some(stack);
@@ -4530,7 +4536,11 @@ mod tests {
             .world()
             .get::<PaneSplit>(browser)
             .expect("newest non-agent (browser) leaf must split for the new terminal type");
-        assert_eq!(split.direction, PaneSplitDirection::Row, "wide => Row");
+        assert_eq!(
+            split.direction,
+            PaneSplitDirection::Column,
+            "first terminal stacks below the browser"
+        );
         assert!(
             app.world().get::<PaneSplit>(agent).is_none(),
             "agent pane untouched"

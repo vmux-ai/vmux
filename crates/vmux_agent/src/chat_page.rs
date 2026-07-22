@@ -25,24 +25,27 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_MAX_PAGE_SIZE,
     CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
-    ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue, ChatEscape, ChatHistoryPage,
+    ChatChoiceSelected, ChatClearQueue, ChatCreateWorktree, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit, MODEL_STATE_EVENT, ModelOptionEntry,
-    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
-    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands,
+    ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ComposerContext,
+    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item_count};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::components::{AgentMessages, AgentSession, PromptQueue};
+use crate::components::{
+    AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{
-    AgentApprovalReply, AgentChoiceSelected, ApprovalDecision, WorkspacePickerStartRequest,
+    AgentApprovalReply, AgentChoiceSelected, AgentCommandRequest, ApprovalDecision, CommandOrigin,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context};
@@ -59,7 +62,9 @@ use vmux_core::team::Profile;
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_service::client::ServiceClient;
 #[cfg(not(target_arch = "wasm32"))]
-use vmux_service::protocol::{AgentAttachment, ClientMessage};
+use vmux_service::protocol::{
+    AgentAttachment, AgentCommand as ServiceAgentCommand, AgentRequestId, ClientMessage,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
@@ -179,7 +184,6 @@ impl Plugin for AgentChatPagePlugin {
                 ResumeSession,
                 RuntimeSwitchRequest,
                 SelectModel,
-                ChatChooseWorkspace,
             )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
@@ -189,6 +193,8 @@ impl Plugin for AgentChatPagePlugin {
                 ChatAttachmentPreviewRequest,
                 ChatChoiceSelected,
                 ChatHistoryRequest,
+                ChatSelectWorkspace,
+                ChatCreateWorktree,
             )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
@@ -197,7 +203,6 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_clear_queue)
             .add_observer(on_chat_cancel_queued_prompt)
             .add_observer(on_chat_escape)
-            .add_observer(on_chat_choose_workspace)
             .add_observer(on_chat_choice_selected)
             .add_observer(on_chat_history_request)
             .add_observer(on_chat_pick_files)
@@ -209,6 +214,8 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
             .add_observer(on_select_model)
+            .add_observer(on_chat_select_workspace)
+            .add_observer(on_chat_create_worktree)
             .add_observer(reset_chat_synced_on_page_ready)
             .add_systems(
                 Update,
@@ -217,6 +224,7 @@ impl Plugin for AgentChatPagePlugin {
                     sync_chat_to_ready_views,
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
+                    push_composer_context_to_page,
                     send_acp_model_requests,
                     drain_chat_attachment_tasks,
                     drain_chat_media_list_tasks,
@@ -634,13 +642,6 @@ fn on_chat_attachment_preview_request(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn on_chat_choose_workspace(trigger: On<BinReceive<ChatChooseWorkspace>>, mut commands: Commands) {
-    commands.trigger(WorkspacePickerStartRequest {
-        webview: trigger.event().webview,
-    });
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
@@ -751,9 +752,9 @@ fn sync_chat_to_ready_views(
         Option<&PageMetadata>,
         &PromptQueue,
         Option<&ImportedConversation>,
+        Option<&AgentConversationTitle>,
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
-    workspace_selections: Query<(), With<crate::plugin::PendingWorkspaceSelection>>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
@@ -763,7 +764,8 @@ fn sync_chat_to_ready_views(
             continue;
         };
         let stack = parent.parent();
-        let Ok((messages, state, turn_meta, profile, meta, queue, imported)) = sessions.get(stack)
+        let Ok((messages, state, turn_meta, profile, meta, queue, imported, title)) =
+            sessions.get(stack)
         else {
             continue;
         };
@@ -781,7 +783,7 @@ fn sync_chat_to_ready_views(
                 meta,
                 queue,
                 imported,
-                workspace_selections.contains(webview),
+                title,
                 choices.get(webview).ok(),
             ),
         ));
@@ -841,6 +843,187 @@ fn emit_model_state(
             commands: slash_commands_for(cross_runtime, model_state.is_some()),
         },
     ));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ComposerContextInput {
+    cwd: std::path::PathBuf,
+    workspace_selected: bool,
+    worktree: Option<vmux_layout::tab::TabWorktree>,
+    can_manage_workspace: bool,
+    auto_allow_count: u32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct ComposerContextCache {
+    entries: std::collections::HashMap<Entity, ComposerContextCacheEntry>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ComposerContextCacheEntry {
+    input: ComposerContextInput,
+    context: ComposerContext,
+    refreshed_at: f32,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn composer_context_input(
+    stack: Entity,
+    acp: Option<&AcpSession>,
+    policy: Option<&AgentApprovalPolicy>,
+    child_of: &Query<&ChildOf>,
+    tabs: &Query<(
+        &vmux_layout::tab::Tab,
+        Option<&vmux_layout::tab::TabWorkspace>,
+        Option<&vmux_layout::tab::TabWorktree>,
+    )>,
+) -> ComposerContextInput {
+    let mut current = stack;
+    let mut tab_dir = None;
+    let mut workspace_selected = false;
+    let mut worktree = None;
+    loop {
+        if let Ok((tab, workspace, managed)) = tabs.get(current) {
+            tab_dir = tab.startup_dir.as_ref().map(std::path::PathBuf::from);
+            workspace_selected = workspace.is_some() || tab.startup_dir.is_some();
+            worktree = managed.cloned();
+            break;
+        }
+        let Ok(parent) = child_of.get(current) else {
+            break;
+        };
+        current = parent.parent();
+    }
+    ComposerContextInput {
+        cwd: tab_dir
+            .or_else(|| acp.map(|session| session.cwd.clone()))
+            .unwrap_or_default(),
+        workspace_selected,
+        worktree,
+        can_manage_workspace: acp.is_some(),
+        auto_allow_count: policy
+            .map(|policy| u32::try_from(policy.auto.len()).unwrap_or(u32::MAX))
+            .unwrap_or_default(),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext {
+    let info = (!input.cwd.as_os_str().is_empty())
+        .then(|| vmux_git::worktree::repo_info(&input.cwd))
+        .flatten();
+    let is_git_repo = info.is_some() || input.cwd.join(".git").exists();
+    let branch = info
+        .as_ref()
+        .map(|info| info.branch.clone())
+        .filter(|branch| !branch.is_empty())
+        .or_else(|| {
+            input
+                .worktree
+                .as_ref()
+                .map(|worktree| worktree.branch.clone())
+        })
+        .or_else(|| {
+            is_git_repo
+                .then(|| vmux_git::worktree::head_ref(&input.cwd).ok())
+                .flatten()
+        })
+        .unwrap_or_default();
+    let workspace_name = input
+        .cwd
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| input.cwd.to_string_lossy().into_owned());
+    ComposerContext {
+        cwd: input.cwd.to_string_lossy().into_owned(),
+        workspace_name,
+        workspace_selected: input.workspace_selected,
+        is_git_repo,
+        is_worktree: info.as_ref().is_some_and(|info| info.is_worktree) || input.worktree.is_some(),
+        branch,
+        base_ref: input
+            .worktree
+            .as_ref()
+            .map(|worktree| worktree.base_ref.clone())
+            .unwrap_or_default(),
+        uncommitted: info
+            .as_ref()
+            .map(|info| info.uncommitted)
+            .unwrap_or_default(),
+        ahead: info.as_ref().map(|info| info.ahead).unwrap_or_default(),
+        can_manage_workspace: input.can_manage_workspace,
+        auto_allow_count: input.auto_allow_count,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+fn push_composer_context_to_page(
+    views: Query<(Entity, &ChildOf, Ref<vmux_core::page::PageReady>), With<AgentChatView>>,
+    sessions: Query<(Option<&AcpSession>, Option<&AgentApprovalPolicy>)>,
+    child_of: Query<&ChildOf>,
+    tabs: Query<(
+        &vmux_layout::tab::Tab,
+        Option<&vmux_layout::tab::TabWorkspace>,
+        Option<&vmux_layout::tab::TabWorktree>,
+    )>,
+    browsers: NonSend<Browsers>,
+    time: Res<Time>,
+    mut cache: Local<ComposerContextCache>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs();
+    let live_views = views
+        .iter()
+        .map(|(webview, _, _)| webview)
+        .collect::<std::collections::HashSet<_>>();
+    cache
+        .entries
+        .retain(|webview, _| live_views.contains(webview));
+    for (webview, parent, ready) in &views {
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        let stack = parent.parent();
+        let Ok((acp, policy)) = sessions.get(stack) else {
+            continue;
+        };
+        let input = composer_context_input(stack, acp, policy, &child_of, &tabs);
+        let refresh = cache
+            .entries
+            .get(&webview)
+            .is_none_or(|entry| entry.input != input || now - entry.refreshed_at >= 3.0);
+        if !refresh && !ready.is_changed() {
+            continue;
+        }
+        let context = if refresh {
+            composer_context_from_input(&input)
+        } else {
+            cache.entries.get(&webview).unwrap().context.clone()
+        };
+        let changed = cache
+            .entries
+            .get(&webview)
+            .is_none_or(|entry| entry.context != context);
+        if changed || ready.is_changed() {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                webview,
+                COMPOSER_CONTEXT_EVENT,
+                &context,
+            ));
+        }
+        cache.entries.insert(
+            webview,
+            ComposerContextCacheEntry {
+                input,
+                context,
+                refreshed_at: now,
+            },
+        );
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -920,7 +1103,7 @@ fn snapshot_of(
     meta: Option<&PageMetadata>,
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
-    workspace_selection_pending: bool,
+    conversation_title: Option<&AgentConversationTitle>,
     choice: Option<&crate::plugin::PendingAgentChoice>,
 ) -> ChatSnapshot {
     let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
@@ -973,6 +1156,9 @@ fn snapshot_of(
         approval_name: name,
         approval_args_json: args_json,
         agent_name,
+        conversation_title: conversation_title
+            .map(|title| title.0.clone())
+            .unwrap_or_default(),
         agent_icon,
         accent_color,
         handoff_source: imported
@@ -984,7 +1170,6 @@ fn snapshot_of(
                 u32::try_from(grouped_item_count(&imported.messages, &[])).unwrap_or(u32::MAX)
             })
             .unwrap_or_default(),
-        workspace_selection_pending,
         choice_question: choice
             .map(|choice| choice.question.clone())
             .unwrap_or_default(),
@@ -1022,6 +1207,7 @@ fn push_chat_to_page(
             Option<&PageMetadata>,
             &PromptQueue,
             Option<&ImportedConversation>,
+            Option<&AgentConversationTitle>,
         ),
         Or<(
             Changed<AgentMessages>,
@@ -1030,16 +1216,16 @@ fn push_chat_to_page(
             Changed<PromptQueue>,
             Changed<Profile>,
             Changed<ImportedConversation>,
+            Changed<AgentConversationTitle>,
         )>,
     >,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
-    workspace_selections: Query<(), With<crate::plugin::PendingWorkspaceSelection>>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for (stack, messages, state, turn_meta, profile, meta, queue, imported) in &sessions {
+    for (stack, messages, state, turn_meta, profile, meta, queue, imported, title) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
         };
@@ -1060,7 +1246,7 @@ fn push_chat_to_page(
                 meta,
                 queue,
                 imported,
-                workspace_selections.contains(webview),
+                title,
                 choices.get(webview).ok(),
             ),
         ));
@@ -1377,6 +1563,50 @@ fn on_select_model(
     model_state.pending = Some(crate::client::acp::PendingAcpModelSelection {
         request_id,
         model_id,
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_select_workspace(
+    trigger: On<BinReceive<ChatSelectWorkspace>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<&AcpSession>,
+    mut requests: MessageWriter<AgentCommandRequest>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok(session) = sessions.get(parent.parent()) else {
+        return;
+    };
+    requests.write(AgentCommandRequest {
+        request_id: AgentRequestId::new(),
+        origin: CommandOrigin::User,
+        command: ServiceAgentCommand::ChooseWorkspace {
+            anchor: session.anchor,
+        },
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_create_worktree(
+    trigger: On<BinReceive<ChatCreateWorktree>>,
+    child_of: Query<&ChildOf>,
+    sessions: Query<&AcpSession>,
+    mut requests: MessageWriter<AgentCommandRequest>,
+) {
+    let Ok(parent) = child_of.get(trigger.event().webview) else {
+        return;
+    };
+    let Ok(session) = sessions.get(parent.parent()) else {
+        return;
+    };
+    requests.write(AgentCommandRequest {
+        request_id: AgentRequestId::new(),
+        origin: CommandOrigin::User,
+        command: ServiceAgentCommand::CreateWorktree {
+            anchor: session.anchor,
+        },
     });
 }
 
@@ -1848,6 +2078,51 @@ mod native_tests {
     }
 
     #[test]
+    fn composer_workspace_controls_dispatch_for_current_session() {
+        let mut app = App::new();
+        app.add_message::<AgentCommandRequest>()
+            .add_observer(on_chat_select_workspace)
+            .add_observer(on_chat_create_worktree);
+        let anchor = vmux_core::ProcessId::new();
+        let stack = app
+            .world_mut()
+            .spawn(AcpSession {
+                agent_id: "claude".into(),
+                sid: "s1".into(),
+                cwd: "/tmp".into(),
+                anchor,
+                resume: None,
+            })
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ChatSelectWorkspace,
+        });
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ChatCreateWorktree,
+        });
+
+        let requests = app
+            .world_mut()
+            .resource_mut::<Messages<AgentCommandRequest>>()
+            .drain()
+            .collect::<Vec<_>>();
+        assert_eq!(requests.len(), 2);
+        assert!(matches!(requests[0].origin, CommandOrigin::User));
+        assert!(matches!(
+            requests[0].command,
+            ServiceAgentCommand::ChooseWorkspace { anchor: got } if got == anchor
+        ));
+        assert!(matches!(
+            requests[1].command,
+            ServiceAgentCommand::CreateWorktree { anchor: got } if got == anchor
+        ));
+    }
+
+    #[test]
     fn resume_results_include_all_agent_kinds_with_source_labels() {
         use crate::client::cli::strategy::ResumableSession;
         use std::time::SystemTime;
@@ -1922,12 +2197,11 @@ mod native_tests {
             None,
             &PromptQueue::default(),
             Some(&imported),
-            true,
+            None,
             None,
         );
 
         assert_eq!(snapshot.handoff_message_count, 2);
-        assert!(snapshot.workspace_selection_pending);
     }
 
     #[test]
@@ -1944,7 +2218,7 @@ mod native_tests {
             None,
             &PromptQueue::default(),
             None,
-            false,
+            None,
             None,
         );
 
@@ -1952,6 +2226,27 @@ mod native_tests {
         assert_eq!(
             snapshot.approval_args_json,
             r#"{"command":"echo hi","focus":true}"#
+        );
+    }
+
+    #[test]
+    fn snapshot_includes_model_written_conversation_title() {
+        let title = AgentConversationTitle("Refine generated chat summaries".into());
+        let snapshot = snapshot_of(
+            &AgentMessages::default(),
+            &AgentRunState::Idle,
+            None,
+            None,
+            None,
+            &PromptQueue::default(),
+            None,
+            Some(&title),
+            None,
+        );
+
+        assert_eq!(
+            snapshot.conversation_title,
+            "Refine generated chat summaries"
         );
     }
 
@@ -2234,36 +2529,6 @@ mod native_tests {
     }
 
     #[test]
-    fn composer_auto_grows_and_contains_action_button() {
-        let source = include_str!("chat_page/page.rs");
-        let prompt_box = include_str!("../../vmux_ui/src/components/prompt_box.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
-        assert!(composer.contains("fn resize_prompt_textarea"));
-        assert!(composer.contains("textarea.scroll_height().clamp(40, 160)"));
-        assert!(composer.contains("max-h-40 min-h-10"));
-        assert!(source.contains("PromptComposer {"));
-        assert!(composer.contains("PromptBox {"));
-        assert!(source.contains("PromptPopup {"));
-        assert!(prompt_box.contains("rounded-2xl"));
-        assert!(prompt_box.contains("backdrop-blur-3xl backdrop-saturate-150"));
-        assert!(composer.contains("h-8 w-8 shrink-0 self-center items-center justify-center"));
-        assert!(source.contains("show_capability_examples"));
-        assert!(source.contains("attachments.read().is_empty()"));
-        assert!(source.contains("Type / for commands or @ for media"));
-        assert!(composer.contains("prompt_prefix_at_utf16"));
-        assert!(composer.contains("vmux-prompt-caret"));
-        assert!(composer.contains("caret-color:transparent"));
-        assert!(composer.contains("install_prompt_focus_tracking"));
-        assert!(composer.contains("document.has_focus().unwrap_or(false)"));
-        assert!(composer.contains("add_event_listener_with_callback(\"focus\""));
-        assert!(composer.contains("add_event_listener_with_callback(\"blur\""));
-        assert!(composer.contains("if caret().is_some()"));
-        assert!(composer.contains("onkeyup"));
-        assert!(composer.contains("onscroll"));
-        assert!(composer.contains("placeholder:text-transparent"));
-    }
-
-    #[test]
     fn composer_supports_history_uploads_and_clipboard_media() {
         let source = include_str!("chat_page/page.rs");
         let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
@@ -2284,21 +2549,6 @@ mod native_tests {
         assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
         assert!(source.contains("render_user_attachment"));
         assert!(source.contains("max-h-80 max-w-full object-contain"));
-    }
-
-    #[test]
-    fn workspace_selection_waits_for_inline_user_action() {
-        let page = include_str!("chat_page/page.rs");
-        let card = page
-            .find("if workspace_selection_pending()")
-            .expect("workspace card");
-        let composer = page.find("PromptComposer {").expect("composer");
-
-        assert!(card < composer);
-        assert!(page.contains("Choose repository folder"));
-        assert!(page.contains("Choose folder"));
-        assert!(page.contains("try_cef_bin_emit_rkyv(&ChatChooseWorkspace)"));
-        assert!(include_str!("chat_page.rs").contains("WorkspacePickerStartRequest"));
     }
 
     #[test]

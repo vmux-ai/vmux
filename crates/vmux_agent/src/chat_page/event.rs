@@ -5,6 +5,7 @@
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";
 pub const CHAT_HISTORY_PAGE_EVENT: &str = "chat_history_page";
+pub const COMPOSER_CONTEXT_EVENT: &str = "composer_context";
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
@@ -61,6 +62,8 @@ pub struct ChatSnapshot {
     pub paused: bool,
     /// Agent display name (from the session `Profile`), for the header/hero.
     pub agent_name: String,
+    /// Model-written summary used as the conversation header and page title.
+    pub conversation_title: String,
     /// Agent favicon URL (from `PageMetadata.icon`); may be empty (page falls back per url).
     pub agent_icon: String,
     /// Agent brand accent color (hex, from the avatar), for loading/status accents.
@@ -69,9 +72,34 @@ pub struct ChatSnapshot {
     pub handoff_truncated: bool,
     /// Number of rendered [`ChatItem`] entries originating from the imported conversation.
     pub handoff_message_count: u32,
-    pub workspace_selection_pending: bool,
     pub choice_question: String,
     pub choice_options: Vec<String>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ComposerContext {
+    pub cwd: String,
+    pub workspace_name: String,
+    pub workspace_selected: bool,
+    pub is_git_repo: bool,
+    pub is_worktree: bool,
+    pub branch: String,
+    pub base_ref: String,
+    pub uncommitted: u32,
+    pub ahead: u32,
+    pub can_manage_workspace: bool,
+    pub auto_allow_count: u32,
 }
 
 #[derive(
@@ -121,19 +149,6 @@ pub struct ChatSubmit {
     pub text: String,
     pub attachments: Vec<ChatSubmitAttachment>,
 }
-
-/// Page → native: open the workspace folder picker requested by the agent.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ChatChooseWorkspace;
 
 /// Page → native: answer the active agent-authored multiple-choice prompt.
 #[derive(
@@ -233,6 +248,30 @@ pub struct ChatCancelQueuedPrompt {
     rkyv::Deserialize,
 )]
 pub struct ChatEscape;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatSelectWorkspace;
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatCreateWorktree;
 
 /// Bin-event id: native → page, the resumable-session list (answer to [`ResumeListRequest`]).
 pub const RESUMABLE_SESSIONS_EVENT: &str = "resumable_sessions";
@@ -513,6 +552,18 @@ pub(crate) fn is_guardian_tool(name: &str) -> bool {
 }
 
 impl ChatTurn {
+    #[cfg(any(test, target_arch = "wasm32"))]
+    pub(crate) fn latest_top_level_tool_index(&self) -> Option<usize> {
+        self.blocks
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, block)| match block {
+                ChatBlock::ToolUse { .. } if self.parent_tool_index(index).is_none() => Some(index),
+                _ => None,
+            })
+    }
+
     pub(crate) fn parent_tool_index(&self, index: usize) -> Option<usize> {
         let mut parent = self.direct_parent_index(index)?;
         for _ in 0..self.blocks.len() {
@@ -570,6 +621,20 @@ impl ChatTurn {
     }
 }
 
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)> {
+    items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(item_index, item)| match item {
+            ChatItem::Turn(turn) => turn
+                .latest_top_level_tool_index()
+                .map(|block_index| (item_index, block_index)),
+            ChatItem::User { .. } => None,
+        })
+}
+
 /// The curated verbs the running-turn header cycles through (owned by the shared contract, not
 /// the view). The page picks one at random every few seconds while streaming.
 pub const WORKING_VERBS: &[&str] = &[
@@ -606,10 +671,10 @@ mod tests {
             messages_start: 12,
             messages_total: 60,
             status: "streaming".to_string(),
+            conversation_title: "Refine generated summaries".to_string(),
             handoff_source: "Codex".to_string(),
             handoff_truncated: true,
             handoff_message_count: 2,
-            workspace_selection_pending: true,
             choice_question: "Repository?".into(),
             choice_options: vec!["Local".into(), "Remote".into(), "Create".into()],
             queued: vec![
@@ -630,6 +695,7 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&v).unwrap();
         let back = rkyv::from_bytes::<ChatSnapshot, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(back.status, "streaming");
+        assert_eq!(back.conversation_title, "Refine generated summaries");
         assert_eq!(back.messages_start, 12);
         assert_eq!(back.messages_total, 60);
         assert_eq!(back.queued.len(), 2);
@@ -641,7 +707,6 @@ mod tests {
         assert_eq!(back.handoff_source, "Codex");
         assert!(back.handoff_truncated);
         assert_eq!(back.handoff_message_count, 2);
-        assert!(back.workspace_selection_pending);
         assert_eq!(back.choice_question, "Repository?");
         assert_eq!(back.choice_options.len(), 3);
     }
@@ -784,6 +849,67 @@ mod tests {
         assert_eq!(turn.parent_tool_index(1), Some(0));
         assert_eq!(turn.parent_tool_index(2), Some(0));
         assert_eq!(turn.parent_tool_index(3), Some(0));
+    }
+
+    #[test]
+    fn latest_top_level_tool_ignores_results_and_nested_tools() {
+        let turn = ChatTurn {
+            blocks: vec![
+                ChatBlock::ToolUse {
+                    call_id: "first".into(),
+                    name: "read_file".into(),
+                    args: "{}".into(),
+                    parent_call_id: None,
+                },
+                ChatBlock::ToolResult {
+                    call_id: "first".into(),
+                    content: "done".into(),
+                    is_error: false,
+                },
+                ChatBlock::ToolUse {
+                    call_id: "nested".into(),
+                    name: "guardian_review".into(),
+                    args: "{}".into(),
+                    parent_call_id: Some("first".into()),
+                },
+                ChatBlock::ToolUse {
+                    call_id: "second".into(),
+                    name: "run".into(),
+                    args: "{}".into(),
+                    parent_call_id: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert_eq!(turn.latest_top_level_tool_index(), Some(3));
+    }
+
+    #[test]
+    fn latest_tool_location_selects_only_the_newest_turn_tool() {
+        let tool = |call_id: &str| ChatBlock::ToolUse {
+            call_id: call_id.into(),
+            name: "run".into(),
+            args: "{}".into(),
+            parent_call_id: None,
+        };
+        let items = vec![
+            ChatItem::Turn(ChatTurn {
+                blocks: vec![tool("old")],
+                ..Default::default()
+            }),
+            ChatItem::User {
+                text: "next".into(),
+                context: None,
+                attachments: Vec::new(),
+            },
+            ChatItem::Turn(ChatTurn {
+                blocks: vec![ChatBlock::Text("working".into()), tool("new")],
+                ..Default::default()
+            }),
+        ];
+
+        assert_eq!(latest_tool_location(&items), Some((2, 1)));
     }
 
     #[test]

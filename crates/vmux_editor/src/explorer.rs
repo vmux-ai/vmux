@@ -3,6 +3,7 @@
 //! Explorer panel rendering, motion, context menus, and user intents.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
@@ -76,6 +77,23 @@ fn goto_line(line: u32) {
         path: String::new(),
         line,
     });
+}
+
+fn open_search_match(result: ExplorerSearchMatch) {
+    let _ = try_cef_bin_emit_rkyv(&ExplorerSearchOpen {
+        path: result.path,
+        line: result.line,
+        col: result.col,
+        end_col: result.end_col,
+    });
+}
+
+fn search_result_path(root: &str, path: &str) -> String {
+    Path::new(path)
+        .strip_prefix(root)
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
 }
 
 fn create_entry(parent: String, name: String, is_dir: bool) {
@@ -305,7 +323,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let focus_generation = use_signal(|| 0u32);
     let mut open_editors = use_signal(Vec::<OpenEditorItem>::new);
     let mut outline = use_signal(Vec::<OutlineRow>::new);
+    let mut search = use_signal(|| None::<ExplorerSearchEvent>);
     let mut show_open = use_signal(|| true);
+    let mut show_search = use_signal(|| true);
     let mut show_files = use_signal(|| true);
     let mut show_outline = use_signal(|| true);
     let mut menu = use_signal(|| None::<TreeMenu>);
@@ -345,6 +365,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     let _outline = use_bin_event_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
         outline.set(e.items);
     });
+    let _search =
+        use_bin_event_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |e| {
+            search.set(Some(e));
+            show_search.set(true);
+        });
     let _fs_result =
         use_bin_event_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
             if e.ok && !e.open_path.is_empty() {
@@ -366,6 +391,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
     };
     let files_body = if show_files() {
+        "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+    } else {
+        "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+    };
+    let search_body = if show_search() {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
     } else {
         "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
@@ -413,6 +443,48 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                         span { class: "truncate", "{it.name}" }
                                         if dirty {
                                             span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let Some(results) = search() {
+                    {section_header("Search".to_string(), show_search, EventHandler::new(move |_| show_search.set(!show_search())))}
+                    div { class: "{search_body}",
+                        div { class: "min-h-0 overflow-hidden pb-1",
+                            div { class: "mx-2 mb-1 flex h-7 items-center gap-2 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10",
+                                svg {
+                                    class: "h-3.5 w-3.5 shrink-0 text-cyan-400",
+                                    view_box: "0 0 24 24",
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.8",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                    circle { cx: "11", cy: "11", r: "8" }
+                                    path { d: "m21 21-4.35-4.35" }
+                                }
+                                span { class: "min-w-0 flex-1 truncate font-mono", "{results.query}" }
+                                span { class: "shrink-0 text-[10px] tabular-nums text-muted-foreground", "{results.matches.len()}" }
+                            }
+                            for result in results.matches.clone() {
+                                {
+                                    let display_path = search_result_path(&results.root, &result.path);
+                                    let open_result = result.clone();
+                                    rsx! {
+                                        button {
+                                            key: "{result.path}:{result.line}:{result.col}",
+                                            class: "flex w-full min-w-0 flex-col gap-0.5 px-3 py-1 text-left text-foreground/75 transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
+                                            title: "{result.path}:{result.line}",
+                                            onclick: move |_| open_search_match(open_result.clone()),
+                                            span { class: "flex min-w-0 items-baseline gap-1.5",
+                                                span { class: "truncate text-[11px]", "{display_path}" }
+                                                span { class: "shrink-0 text-[10px] tabular-nums text-cyan-400/80", "{result.line}" }
+                                            }
+                                            span { class: "w-full truncate font-mono text-[10px] text-muted-foreground", "{result.preview}" }
                                         }
                                     }
                                 }

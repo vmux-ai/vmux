@@ -9,7 +9,7 @@ use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::active_panes::ActivePanes;
 use vmux_layout::pane::{Pane, PaneSplit};
 use vmux_layout::stack::{Stack, active_stack_in_pane};
-use vmux_layout::target::{active_webview_for_tab, parse_pane_target};
+use vmux_layout::target::active_webview_for_tab;
 use vmux_layout::{Browser, Loading};
 
 fn hex(id: &[u8; 16]) -> String {
@@ -40,21 +40,38 @@ pub(crate) fn start_snapshots(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     pane_children: Query<&Children, With<Pane>>,
+    stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut writer: MessageWriter<BrowserSnapshotResponse>,
 ) {
     for request in reader.read() {
-        let target = match request.pane.as_deref() {
-            Some(s) => parse_pane_target(s, &panes),
-            None => active.local().pane.filter(|p| panes.contains(*p)),
-        };
-        let webview = target
-            .and_then(|pane| {
-                active_webview_for_tab(
-                    active_stack_in_pane(pane, &pane_children, &stack_ts),
+        let webview = request
+            .webview
+            .filter(|webview| browsers.contains(*webview))
+            .or_else(|| {
+                let target = request.pane.as_deref().and_then(|target| {
+                    vmux_layout::target::parse_browser_target(target, &panes, &stacks)
+                })?;
+                vmux_layout::target::webview_for_target(
+                    target,
+                    &pane_children,
+                    &stack_ts,
                     &browsers,
                     &terminals,
                 )
+            })
+            .or_else(|| {
+                active
+                    .local()
+                    .pane
+                    .filter(|p| panes.contains(*p))
+                    .and_then(|pane| {
+                        active_webview_for_tab(
+                            active_stack_in_pane(pane, &pane_children, &stack_ts),
+                            &browsers,
+                            &terminals,
+                        )
+                    })
             })
             .or_else(|| most_recent_browser(&browsers, &terminals, &stack_ts));
         let sent = webview
@@ -96,6 +113,7 @@ pub(crate) fn drive_pending_nav_snapshots(
     mut pending: ResMut<PendingNavSnapshots>,
     loading_q: Query<(), With<Loading>>,
     alive_q: Query<(), With<Browser>>,
+    ready_q: Query<(), With<vmux_core::page::PageReady>>,
     mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
     mut snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
 ) {
@@ -106,6 +124,7 @@ pub(crate) fn drive_pending_nav_snapshots(
     let mut done: Vec<Entity> = Vec::new();
     for (webview, nav) in pending.0.iter_mut() {
         let alive = alive_q.contains(*webview);
+        let ready = ready_q.contains(*webview);
         let loading = loading_q.contains(*webview);
         if loading {
             nav.saw_loading = true;
@@ -114,11 +133,12 @@ pub(crate) fn drive_pending_nav_snapshots(
         let settled = nav.saw_loading && !loading;
         let assume_instant = !nav.saw_loading && elapsed > 2.0;
         let timed_out = elapsed > 10.0;
-        if !alive || settled || assume_instant || timed_out {
+        if !alive || ready && (settled || assume_instant) || timed_out {
             nav_awaiting.0.insert(nav.request_id);
             snapshot_writer.write(BrowserSnapshotRequest {
                 request_id: nav.request_id,
                 pane: nav.pane.clone(),
+                webview: Some(*webview),
             });
             done.push(*webview);
         }

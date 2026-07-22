@@ -151,6 +151,7 @@ pub fn Page() -> Element {
         listener_ready(spaces_state_received(), &spaces_error),
     );
     let radius_px = state.radius;
+    let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
     use_effect(move || {
         if let Some(doc) = web_sys::window().and_then(|w| w.document())
             && let Some(root) = doc.document_element()
@@ -162,6 +163,9 @@ pub fn Page() -> Element {
         }
     });
     use_effect(move || {
+        if !layout_state().side_sheet_open {
+            return;
+        }
         let PaneTreeEvent { panes } = pane_tree_state();
         let active_pane = panes.iter().find(|p| p.is_active);
         let target = active_pane
@@ -182,6 +186,9 @@ pub fn Page() -> Element {
         let Some((pane_id, stack_index)) = target else {
             return;
         };
+        if last_scrolled_stack() == Some((pane_id, stack_index)) {
+            return;
+        }
         if let Some(el) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.get_element_by_id(&format!("sidesheet-stack-{pane_id}-{stack_index}")))
@@ -189,6 +196,7 @@ pub fn Page() -> Element {
             let opts = web_sys::ScrollIntoViewOptions::new();
             opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
             el.scroll_into_view_with_scroll_into_view_options(&opts);
+            last_scrolled_stack.set(Some((pane_id, stack_index)));
         }
     });
     let side_sheet_vars = format!(
@@ -1037,8 +1045,8 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Unfold knowledge" } else { "Fold knowledge" },
-                    title: if folded() { "Unfold knowledge" } else { "Fold knowledge" },
+                    aria_label: if folded() { "Expand knowledge" } else { "Collapse knowledge" },
+                    title: if folded() { "Expand knowledge" } else { "Collapse knowledge" },
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -1645,6 +1653,7 @@ fn commit_folder_rename(uuid: String, name: String) {
 fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode>) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
+    let mut folded = use_signal(|| false);
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| "New Folder".to_string());
     let folders = bookmark_folder_choices(&roots);
@@ -1662,7 +1671,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
     rsx! {
         div {
             "data-bookmark-drop": "root",
-            class: "glass relative z-30 mb-2 flex flex-col rounded-lg p-1.5",
+            class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
                 let data = e.data();
                 let on_card = data
@@ -1677,87 +1686,114 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
             div {
                 "data-bookmark-drop": "root",
                 class: if root_targeted {
-                    "mb-0.5 flex h-8 items-center gap-1 rounded-md bg-foreground/10 px-2 ring-1 ring-ring"
+                    "flex items-center bg-foreground/10 ring-1 ring-inset ring-ring"
                 } else {
-                    "mb-0.5 flex h-8 items-center gap-1 rounded-md px-2"
+                    "flex items-center transition-colors hover:bg-glass-hover"
                 },
-                if let Some(label) = root_drop_label {
-                    Icon { class: "h-3.5 w-3.5 shrink-0",
-                        path { d: "m9 14-4-4 4-4" }
-                        path { d: "M5 10h11a4 4 0 0 1 4 4v4" }
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        Icon { class: "h-3.5 w-3.5",
+                            path { d: "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" }
+                        }
                     }
-                    span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
-                } else {
-                    span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
-                    button {
-                        r#type: "button",
-                        aria_label: "New bookmark folder",
-                        title: "New Folder",
-                        class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                        onclick: move |event| {
-                            event.prevent_default();
-                            event.stop_propagation();
-                            begin_new_folder(creating_folder, new_folder_draft);
-                        },
-                        Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            path { d: "M12 10v6" }
-                            path { d: "M9 13h6" }
+                    if let Some(label) = root_drop_label {
+                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
+                    } else {
+                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
+                        button {
+                            r#type: "button",
+                            aria_label: "New bookmark folder",
+                            title: "New Folder",
+                            class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                            onclick: move |event| {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                begin_new_folder(creating_folder, new_folder_draft);
+                            },
+                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                path { d: "M12 10v6" }
+                                path { d: "M9 13h6" }
+                            }
                         }
                     }
                 }
-            }
-            if !pins.is_empty() {
-                div {
-                    "data-bookmark-drop": "",
-                    class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
-                    for p in pins.iter() {
-                        PinTile { key: "{p.uuid}", row: p.clone() }
+                button {
+                    r#type: "button",
+                    aria_label: if folded() { "Expand bookmarks" } else { "Collapse bookmarks" },
+                    title: if folded() { "Expand bookmarks" } else { "Collapse bookmarks" },
+                    class: if folded() {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    onclick: move |_| folded.set(!folded()),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
                     }
                 }
             }
-            if creating_folder() {
-                div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-                    Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
-                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                    }
-                    BookmarkNameInput {
-                        draft: new_folder_draft,
-                        class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
-                        placeholder: "Folder name".to_string(),
-                        on_commit: move |name| {
-                            creating_folder.set(false);
-                            create_bookmark_folder(name, None);
-                        },
-                        on_cancel: move |_| creating_folder.set(false),
-                    }
-                }
-            }
-            if pins.is_empty() && roots.is_empty() && !creating_folder() {
-                div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No pins or bookmarks" }
-            } else {
-                div { class: "flex flex-col gap-1",
-                    for node in roots.iter() {
-                        match node {
-                            BookmarkNode::Folder(f) if f.parent.is_none() => rsx! {
-                                BookmarkFolder {
-                                    key: "{f.uuid}",
-                                    folder: f.clone(),
-                                    parent_uuid: None,
-                                    folders: folders.clone(),
-                                    folder_rows: folder_rows.clone(),
-                                    active_page: active_page.clone(),
+            div { class: if folded() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "border-t border-foreground/10 p-1.5",
+                        if !pins.is_empty() {
+                            div {
+                                "data-bookmark-drop": "",
+                                class: "mb-1 grid grid-cols-4 gap-1.5 p-1",
+                                for p in pins.iter() {
+                                    PinTile { key: "{p.uuid}", row: p.clone() }
                                 }
-                            },
-                            BookmarkNode::Folder(_) => rsx! {},
-                            BookmarkNode::Entry(b) => rsx! {
-                                BookmarkEntry {
-                                    key: "{b.uuid}",
-                                    row: b.clone(),
-                                    folder_uuid: None,
-                                    folders: folders.clone(),
+                            }
+                        }
+                        if creating_folder() {
+                            div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+                                Icon { class: "h-4 w-4 shrink-0 text-muted-foreground",
+                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                                 }
-                            },
+                                BookmarkNameInput {
+                                    draft: new_folder_draft,
+                                    class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                                    placeholder: "Folder name".to_string(),
+                                    on_commit: move |name| {
+                                        creating_folder.set(false);
+                                        create_bookmark_folder(name, None);
+                                    },
+                                    on_cancel: move |_| creating_folder.set(false),
+                                }
+                            }
+                        }
+                        if pins.is_empty() && roots.is_empty() && !creating_folder() {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No pins or bookmarks" }
+                        } else {
+                            div { class: "flex flex-col gap-1",
+                                for node in roots.iter() {
+                                    match node {
+                                        BookmarkNode::Folder(f) if f.parent.is_none() => rsx! {
+                                            BookmarkFolder {
+                                                key: "{f.uuid}",
+                                                folder: f.clone(),
+                                                parent_uuid: None,
+                                                folders: folders.clone(),
+                                                folder_rows: folder_rows.clone(),
+                                                active_page: active_page.clone(),
+                                            }
+                                        },
+                                        BookmarkNode::Folder(_) => rsx! {},
+                                        BookmarkNode::Entry(b) => rsx! {
+                                            BookmarkEntry {
+                                                key: "{b.uuid}",
+                                                row: b.clone(),
+                                                folder_uuid: None,
+                                                folders: folders.clone(),
+                                            }
+                                        },
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2271,35 +2307,41 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     let label = format!("Stack {}", index + 1);
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
-    let folded_stack = pane.stacks.iter().find(|stack| stack.is_active).cloned();
     let mut folded = use_signal(|| false);
 
     rsx! {
         div { class: if pane.is_active && any_loading {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 pane-loading-ring"
+                "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
             } else if pane.is_active {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5 ring-2 ring-ring"
+                "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg ring-2 ring-ring"
             } else {
-                "glass group mb-2 flex shrink-0 flex-col rounded-lg p-1.5"
+                "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg"
             },
             div {
-                class: "mb-0.5 flex items-center gap-1 rounded-md px-2 py-1",
-                span {
-                    class: if pane.is_active {
-                        "min-w-0 flex-1 text-ui font-semibold text-foreground"
-                    } else {
-                        "min-w-0 flex-1 text-ui font-medium text-muted-foreground"
-                    },
-                    "{label}"
+                class: "flex items-center transition-colors hover:bg-glass-hover",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        Icon { class: "h-3.5 w-3.5",
+                            path { d: "M4 6h16M4 12h16M4 18h16" }
+                        }
+                    }
+                    span {
+                        class: if pane.is_active {
+                            "min-w-0 flex-1 text-ui font-semibold text-foreground"
+                        } else {
+                            "min-w-0 flex-1 text-ui font-medium text-muted-foreground"
+                        },
+                        "{label}"
+                    }
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Unfold stack" } else { "Fold stack" },
-                    title: if folded() { "Unfold stack" } else { "Fold stack" },
+                    aria_label: if folded() { "Expand stack" } else { "Collapse stack" },
+                    title: if folded() { "Expand stack" } else { "Collapse stack" },
                     class: if folded() {
-                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
-                        "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
                     },
                     onclick: move |_| {
                         let next = !folded();
@@ -2310,20 +2352,22 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     }
                 }
             }
-            if folded() {
-                if let Some(stack) = folded_stack {
-                    SideSheetStackRow { stack, pane_id }
-                }
-            } else {
-                div { class: "flex flex-col gap-1",
-                    for stack in pane
-                        .stacks
-                        .iter()
-                        .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
-                    {
-                        SideSheetStackRow { stack: stack.clone(), pane_id }
+            div { class: if folded() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "flex flex-col gap-1 border-t border-foreground/10 p-1.5",
+                        for stack in pane
+                            .stacks
+                            .iter()
+                            .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
+                        {
+                            SideSheetStackRow { stack: stack.clone(), pane_id }
+                        }
+                        NewStackRow { pane_id }
                     }
-                    NewStackRow { pane_id }
                 }
             }
         }

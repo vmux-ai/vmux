@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use vmux_command::event::{CommandBarRecentFile, CommandBarWorkDir};
+use vmux_command::event::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use vmux_command::snapshot::CommandBarWorkSnapshot;
 use vmux_core::terminal::{Terminal, TerminalLaunch};
 use vmux_core::{LastVisitedAt, PageMetadata, Url, VisitCount};
@@ -140,8 +140,29 @@ pub fn update_recent_files_snapshot(
         .take(RECENT_FILES_CAP)
         .map(|(_, f)| f)
         .collect();
+    let mut engine_recency = SearchEngine::ALL
+        .into_iter()
+        .map(|engine| {
+            let latest = urls
+                .iter()
+                .filter_map(|(meta, _, visited)| {
+                    (SearchEngine::from_url(&meta.url) == Some(engine)).then_some(visited.0)
+                })
+                .max()
+                .unwrap_or(i64::MIN);
+            (engine, latest)
+        })
+        .collect::<Vec<_>>();
+    engine_recency.sort_by_key(|(_, visited)| std::cmp::Reverse(*visited));
+    let search_engines = engine_recency
+        .into_iter()
+        .map(|(engine, _)| engine)
+        .collect::<Vec<_>>();
     if recent_files != snapshot.recent_files {
         snapshot.recent_files = recent_files;
+    }
+    if search_engines != snapshot.search_engines {
+        snapshot.search_engines = search_engines;
     }
 }
 
@@ -274,5 +295,44 @@ mod tests {
         let snap = app.world().resource::<CommandBarWorkSnapshot>();
         assert_eq!(snap.recent_files.len(), 1);
         assert_eq!(snap.recent_files[0].title, "main.rs");
+    }
+
+    #[test]
+    fn search_engines_are_ordered_by_most_recent_visit() {
+        use vmux_core::CreatedAt;
+        let mut app = App::new();
+        app.init_resource::<CommandBarWorkSnapshot>()
+            .add_systems(Update, update_recent_files_snapshot);
+        for (url, visited) in [
+            ("https://www.google.com/search?q=old", 1000),
+            ("https://kagi.com/search?q=new", 3000),
+            ("https://search.brave.com/search?q=middle", 2000),
+        ] {
+            app.world_mut().spawn((
+                Url,
+                PageMetadata {
+                    url: url.into(),
+                    ..default()
+                },
+                VisitCount(1),
+                LastVisitedAt(visited),
+                CreatedAt(0),
+            ));
+        }
+        app.update();
+
+        let engines = &app
+            .world()
+            .resource::<CommandBarWorkSnapshot>()
+            .search_engines;
+        assert_eq!(engines.len(), SearchEngine::ALL.len());
+        assert_eq!(
+            &engines[..3],
+            &[
+                SearchEngine::Kagi,
+                SearchEngine::Brave,
+                SearchEngine::Google
+            ]
+        );
     }
 }

@@ -9,7 +9,8 @@ use crate::command_bar::keyboard::{
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_results, agent_page_url, filter_results, space_switch_results, start_page_results,
+    agent_page_results, agent_page_url, filter_results, prepend_prompt_agent, space_switch_results,
+    start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -18,6 +19,7 @@ use crate::command_bar::style::{
     result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
     result_trailing_slot_class,
 };
+use crate::start::event::StartSelectWorkspace;
 use dioxus::prelude::*;
 use vmux_command::event::{
     CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
@@ -45,7 +47,7 @@ use vmux_ui::icon::PageIconView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-const HOST_SEARCH_DEBOUNCE_MS: i32 = 150;
+const HOST_SEARCH_DEBOUNCE_MS: i32 = 300;
 
 type HostSearchTimer = Rc<RefCell<Option<(i32, js_sys::Function, Rc<Cell<bool>>)>>>;
 
@@ -149,6 +151,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut media_loading = use_signal(|| false);
     let mut media_selected = use_signal(|| 0usize);
+    let mut start_agent_url = use_signal(String::new);
+    let mut start_agent_menu_open = use_signal(|| false);
 
     let path_search_effect_timer = path_search_timer.clone();
     use_effect(move || {
@@ -233,6 +237,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let suggestions_search_effect_timer = suggestions_search_timer.clone();
     use_effect(move || {
+        if is_start {
+            cancel_host_search(&suggestions_search_effect_timer);
+            history_suggestions.set(Vec::new());
+            return;
+        }
         let q = query();
         let trimmed = q.trim();
         let id = (*suggestions_request_id.peek()).wrapping_add(1).max(1);
@@ -339,6 +348,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let pages = state_val.pages.clone();
     let work_dirs = state_val.work_dirs.clone();
     let recent_files = state_val.recent_files.clone();
+    let search_engines = state_val.search_engines.clone();
+    let prompt_context = state_val.prompt_context.clone();
     let open_target = state_val.target;
     let space_switch = state_val.space_switch;
     let is_new_tab = matches!(open_target, Some(OpenTarget::InNewStack));
@@ -360,12 +371,22 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
-    let results: Vec<ResultItem> = if space_switch {
+    let start_agent_items = if is_start {
+        agent_page_results(&pages, "")
+    } else {
+        Vec::new()
+    };
+    let default_agent_item = start_agent_items
+        .iter()
+        .find(|item| agent_page_url(item) == Some(start_agent_url().as_str()))
+        .cloned()
+        .or_else(|| start_agent_items.first().cloned());
+    let mut results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
     } else if is_start && q.trim().is_empty() {
         Vec::new()
     } else if start_prompt_mode {
-        start_page_results(&pages, &q)
+        start_page_results(&pages, &work_dirs, &recent_files, &search_engines, &q)
     } else {
         let history = history_suggestions();
         let r = filter_results(
@@ -412,23 +433,35 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             r
         }
     };
-    let default_agent_item = is_start
-        .then(|| agent_page_results(&pages, "").into_iter().next())
-        .flatten();
+    if start_prompt_mode {
+        prepend_prompt_agent(&mut results, default_agent_item.as_ref(), &q);
+    }
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
-    let active_agent_accent = active_item
+    let nav = nav_mode();
+    let selected_agent_accent = default_agent_item
         .as_ref()
         .and_then(agent_page_url)
         .and_then(|url| url.strip_prefix("vmux://agent/"))
         .and_then(|path| path.split('/').next())
         .filter(|agent| !agent.is_empty())
         .map(agent_accent);
-    let nav = nav_mode();
+    let active_agent_accent = if nav {
+        active_item.as_ref()
+    } else {
+        default_agent_item.as_ref()
+    }
+    .and_then(agent_page_url)
+    .and_then(|url| url.strip_prefix("vmux://agent/"))
+    .and_then(|path| path.split('/').next())
+    .filter(|agent| !agent.is_empty())
+    .map(agent_accent)
+    .or(selected_agent_accent);
     let display_text = if nav && !start_prompt_mode {
         match &active_item {
             Some(ResultItem::Command { name, .. }) => format!("> {name}"),
             Some(ResultItem::Navigate { url }) => url.clone(),
+            Some(ResultItem::Search { query, .. }) => query.clone(),
             Some(ResultItem::Stack { url, .. }) => url.clone(),
             Some(ResultItem::Space { name, .. }) => name.clone(),
             Some(ResultItem::Page { title, .. }) => title.clone(),
@@ -564,6 +597,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     emit_action_with_target("open", url, open_target);
                 }
             }
+            ResultItem::Search { engine, query } => {
+                emit_action_with_target("open", &engine.search_url(query), open_target);
+            }
             ResultItem::History { url, .. } => {
                 if !url.is_empty() {
                     emit_action_with_target("open", url, open_target);
@@ -612,9 +648,148 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
+    let selected_agent_title = default_agent_item
+        .as_ref()
+        .and_then(|item| match item {
+            ResultItem::Page { title, .. } => Some(title.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "Agent".to_string());
+    let selected_agent_url_value = default_agent_item
+        .as_ref()
+        .and_then(agent_page_url)
+        .unwrap_or_default()
+        .to_string();
+    let workspace_label = if prompt_context.workspace_name.is_empty() {
+        "Select workspace".to_string()
+    } else {
+        prompt_context.workspace_name.clone()
+    };
+    let branch_title = if prompt_context.branch.is_empty() {
+        "Git repository".to_string()
+    } else {
+        format!("Branch {}", prompt_context.branch)
+    };
+    let worktree_title = if prompt_context.base_ref.is_empty() {
+        "Linked worktree".to_string()
+    } else {
+        format!("Worktree from {}", prompt_context.base_ref)
+    };
+    let start_composer_footer = rsx! {
+        div { class: "flex min-w-0 items-center justify-between gap-1",
+            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+                button {
+                    class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+                    title: "Choose agent",
+                    onmousedown: move |event| event.prevent_default(),
+                    onclick: move |_| {
+                        start_agent_menu_open.set(!start_agent_menu_open());
+                        focus_prompt_end(PROMPT_INPUT_ID);
+                    },
+                    svg {
+                        class: "h-3.5 w-3.5 shrink-0",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
+                        path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
+                    }
+                    span { class: "truncate", "{selected_agent_title}" }
+                    svg {
+                        class: "h-3 w-3 shrink-0 opacity-50",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        path { d: "m8 10 4 4 4-4" }
+                    }
+                }
+                span {
+                    class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
+                    title: "Tools ask before protected actions",
+                    svg {
+                        class: "h-3.5 w-3.5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M12 3 5 6v5c0 4.8 2.9 8.2 7 10 4.1-1.8 7-5.2 7-10V6l-7-3Z" }
+                        path { d: "m9 12 2 2 4-4" }
+                    }
+                    "Ask"
+                }
+                button {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
+                        title: if prompt_context.cwd.is_empty() { "Create or select workspace" } else { "{prompt_context.cwd}" },
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&StartSelectWorkspace {
+                                current_dir: prompt_context.cwd.clone(),
+                            });
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
+                        }
+                        span { class: "truncate", "{workspace_label}" }
+                }
+                if prompt_context.is_git_repo {
+                    span {
+                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground",
+                        title: "{branch_title}",
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "6", cy: "5", r: "2" }
+                            circle { cx: "6", cy: "19", r: "2" }
+                            circle { cx: "18", cy: "12", r: "2" }
+                            path { d: "M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3" }
+                            path { d: "M6 7v10" }
+                        }
+                        span { class: "truncate", if prompt_context.branch.is_empty() { "Git" } else { "{prompt_context.branch}" } }
+                    }
+                    if prompt_context.is_worktree {
+                        span {
+                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
+                            title: "{worktree_title}",
+                            "Worktree"
+                        }
+                    }
+                    if prompt_context.uncommitted > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "● {prompt_context.uncommitted}" }
+                    }
+                    if prompt_context.ahead > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "↑{prompt_context.ahead}" }
+                    }
+                } else if !prompt_context.cwd.is_empty() {
+                    span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+                }
+            }
+            span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
+                span { class: "h-1.5 w-1.5 rounded-full bg-emerald-500" }
+                "Ready"
+            }
+        }
+    };
     let start_keydown_q = q.clone();
     let start_keydown_results = results.clone();
     let start_keydown_default_agent = default_agent_item.clone();
+    let start_keydown_nav = nav;
     let start_keydown_ghost = ghost_text.clone();
     let start_keydown = move |e: KeyboardEvent| {
         if e.key() == Key::Tab {
@@ -714,7 +889,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     execute(item);
                 }
             } else if start_prompt_mode {
-                if let Some(item) = start_keydown_results.get(sel) {
+                if let Some(item) = start_keydown_results.get(sel).filter(|item| {
+                    start_keydown_nav
+                        || agent_page_matches_query(item, &start_keydown_q)
+                        || (matches!(item, ResultItem::Terminal { .. })
+                            && start_keydown_q.trim().eq_ignore_ascii_case("terminal"))
+                }) {
+                    execute(item);
+                } else if let Some(item) = start_keydown_default_agent.as_ref() {
                     execute(item);
                 } else {
                     on_close.call(());
@@ -847,6 +1029,51 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             if is_start {
+                if start_agent_menu_open() {
+                    PromptPopup {
+                        placement: PromptPopupPlacement::Upward,
+                        id: "start-agent-selector",
+                        div { class: "p-1.5",
+                            div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", "Agent" }
+                            for item in start_agent_items.iter() {
+                                if let ResultItem::Page { url, title, .. } = item {
+                                    {
+                                        let option_url = url.clone();
+                                        let option_selected = url == &selected_agent_url_value;
+                                        rsx! {
+                                            button {
+                                                key: "{url}",
+                                                class: if option_selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-2 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                                onmousedown: move |event| event.prevent_default(),
+                                                onclick: move |_| {
+                                                    start_agent_url.set(option_url.clone());
+                                                    start_agent_menu_open.set(false);
+                                                    selected.set(0);
+                                                    nav_mode.set(false);
+                                                    focus_prompt_end(PROMPT_INPUT_ID);
+                                                },
+                                                span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-foreground/[0.07] text-[10px] font-semibold uppercase", "{title.chars().next().unwrap_or('A')}" }
+                                                span { class: "min-w-0 flex-1 truncate", "{title}" }
+                                                if option_selected {
+                                                    svg {
+                                                        class: "h-3.5 w-3.5 shrink-0 text-emerald-500",
+                                                        view_box: "0 0 24 24",
+                                                        fill: "none",
+                                                        stroke: "currentColor",
+                                                        stroke_width: "2.2",
+                                                        stroke_linecap: "round",
+                                                        stroke_linejoin: "round",
+                                                        path { d: "m5 12 4 4L19 6" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 PromptComposer {
                     value: display_text.clone(),
                     completion: ghost_text.clone(),
@@ -856,9 +1083,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     accent_bg: start_accent.accent_bg.to_string(),
                     accent_color: format!("rgb({})", start_accent.rain_rgb),
                     accent_gradient: start_accent.grad.to_string(),
+                    footer: Some(start_composer_footer),
                     action_title: "Send (Enter)".to_string(),
                     action_enabled: start_action_enabled,
                     on_input: move |value| {
+                        start_agent_menu_open.set(false);
                         query.set(value);
                         selected.set(0);
                         nav_mode.set(false);
@@ -881,15 +1110,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         let action_results = results.clone();
                         let action_query = q.clone();
                         let action_default_agent = default_agent_item.clone();
+                        let action_nav = nav;
                         move |_| {
-                            if let Some(item) = action_results.get(sel) {
+                            if let Some(item) = action_results.get(sel).filter(|item| {
+                                !start_prompt_mode
+                                    || action_nav
+                                    || agent_page_matches_query(item, &action_query)
+                                    || (matches!(item, ResultItem::Terminal { .. })
+                                        && action_query.trim().eq_ignore_ascii_case("terminal"))
+                            }) {
                                 execute(item);
                             } else if !action_query.trim().is_empty()
                                 || !attachments.peek().is_empty()
                             {
-                                if action_query.trim().is_empty()
-                                    && let Some(item) = action_default_agent.as_ref()
-                                {
+                                if let Some(item) = action_default_agent.as_ref() {
                                     execute(item);
                                 } else {
                                     on_close.call(());
@@ -932,6 +1166,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                             || (url.contains('.') && !url.contains(' '));
                                         (false, false, is_url)
                                     }
+                                    Some(ResultItem::Search { .. }) => (false, false, false),
                                     Some(ResultItem::History { .. }) => (false, false, true),
                                     Some(ResultItem::File { .. }) => (false, true, false),
                                     Some(ResultItem::WorkDir { .. }) => (false, true, false),
@@ -1021,7 +1256,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if media_menu_open {
+            if !start_agent_menu_open() && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -1038,7 +1273,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !media_menu_open && !results.is_empty() {
+            if !start_agent_menu_open() && !media_menu_open && !results.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
@@ -1137,8 +1372,15 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         icon_class: result_leading_icon_class().to_string(),
                                     }
                                     div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        span { class: result_primary_text_class(), "{title}" }
-                                        span { class: result_secondary_text_class(), "{url}" }
+                                        if start_prompt_mode
+                                            && agent_page_url(item).is_some()
+                                            && !agent_page_matches_query(item, &q)
+                                        {
+                                            span { class: result_primary_text_class(), "Ask {title}" }
+                                        } else {
+                                            span { class: result_primary_text_class(), "{title}" }
+                                            span { class: result_secondary_text_class(), "{url}" }
+                                        }
                                     }
                                 }
                                 span { class: result_trailing_slot_class(),
@@ -1173,6 +1415,21 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 } else {
                                     span { class: result_trailing_slot_class() }
                                 }
+                            },
+                            ResultItem::Search { engine, query } => rsx! {
+                                div { class: result_content_row_class(),
+                                    Favicon {
+                                        favicon_url: String::new(),
+                                        url: engine.search_url(query),
+                                        class: result_favicon_class().to_string(),
+                                        globe_class: result_leading_icon_class().to_string(),
+                                    }
+                                    div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
+                                        span { class: result_primary_text_class(), "Search with {engine.name()}" }
+                                        span { class: result_secondary_text_class(), "{query}" }
+                                    }
+                                }
+                                span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },
                             ResultItem::File { path, is_dir } => {
                                 let name = path

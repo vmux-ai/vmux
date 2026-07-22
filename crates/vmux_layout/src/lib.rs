@@ -218,6 +218,8 @@ pub struct BrowserNavigateRequest {
     pub url: String,
     pub pane: Option<String>,
     pub request_id: Option<[u8; 16]>,
+    pub new_stack: bool,
+    pub profile: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

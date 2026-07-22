@@ -1,4 +1,4 @@
-use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir};
+use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
@@ -74,6 +74,7 @@ pub struct CommandBarPagesSnapshot {
 pub struct CommandBarWorkSnapshot {
     pub work_dirs: Vec<CommandBarWorkDir>,
     pub recent_files: Vec<CommandBarRecentFile>,
+    pub search_engines: Vec<SearchEngine>,
 }
 
 pub fn update_pages_snapshot(

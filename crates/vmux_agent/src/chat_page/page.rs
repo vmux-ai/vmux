@@ -2,22 +2,23 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, ToolActivity,
-    chat_page_title, choice_number_index, edit_prompt, filter_models, filter_sessions,
-    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
+    approval_decision_for_index, chat_page_title, choice_number_index, edit_prompt, filter_models,
+    filter_sessions, is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
     prompt_history_direction, resume_menu_state, selector_mode, should_clear_draft_on_escape,
     should_expand_thinking, should_fetch_resume, tool_activity,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
-    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, ChatApproval,
-    ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments, ChatBlock,
-    ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatChooseWorkspace, ChatClearQueue,
-    ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, ChatResume, ChatSnapshot, ChatSubmit,
-    ChatSubmitAttachment, ChatTurn, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
-    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
-    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
-    SlashCommandEntry, SlashCommands, WORKING_VERBS,
+    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
+    ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
+    ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
+    ChatCreateWorktree, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
+    ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
+    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands, WORKING_VERBS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::borrow::Cow;
@@ -33,10 +34,14 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
     focus_prompt_end, prompt_textarea,
 };
+
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
+use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+
+const APPROVAL_OPTION_COUNT: usize = 3;
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -201,6 +206,31 @@ fn prompt_history(items: &[ChatItem], queued: &[QueuedPromptSnapshot]) -> Vec<St
     history
 }
 
+fn composer_activity_counts(items: &[ChatItem]) -> (usize, usize) {
+    let mut subagents = 0usize;
+    let mut tasks = 0usize;
+    for item in items {
+        let ChatItem::Turn(turn) = item else {
+            continue;
+        };
+        for block in &turn.blocks {
+            match block {
+                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
+                    subagents += 1;
+                }
+                ChatBlock::Plan { steps } => {
+                    tasks += steps
+                        .iter()
+                        .filter(|step| step.status != "completed")
+                        .count();
+                }
+                _ => {}
+            }
+        }
+    }
+    (subagents, tasks)
+}
+
 fn file_extension_label(name: &str) -> String {
     std::path::Path::new(name)
         .extension()
@@ -270,6 +300,8 @@ fn install_global_prompt_input(
     draft: Signal<String>,
     slash_cmds: Signal<Vec<SlashCommandEntry>>,
     choice_options: Signal<Vec<String>>,
+    mut approval: Signal<Option<(String, String, String)>>,
+    mut approval_sel: Signal<usize>,
 ) {
     let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
         let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID) else {
@@ -300,6 +332,8 @@ fn install_global_prompt_input(
                 }
         };
         let key = event.key();
+        let active_approval = approval.peek().clone();
+        let approval_open = active_approval.is_some();
         let choice_len = choice_options.peek().len();
         let choice_open = choice_len > 0;
         let direction = if event.meta_key() || event.alt_key() {
@@ -317,6 +351,32 @@ fn install_global_prompt_input(
                 && !event.ctrl_key()
                 && !event.alt_key()
                 && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
+        let approval_key = direction.is_some()
+            || (!event.meta_key()
+                && !event.ctrl_key()
+                && !event.alt_key()
+                && (key == "Enter" || choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some()));
+        if approval_open && approval_key {
+            event.prevent_default();
+            event.stop_propagation();
+            if let Some(direction) = direction {
+                approval_sel.set(move_selection(
+                    approval_sel(),
+                    APPROVAL_OPTION_COUNT,
+                    direction,
+                ));
+            } else if let Some((call_id, _, _)) = active_approval {
+                let index =
+                    choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
+                if let Some(decision) = approval_decision_for_index(index)
+                    && send_approval(call_id, decision)
+                {
+                    approval.set(None);
+                    approval_sel.set(0);
+                }
+            }
+            return;
+        }
         if (choice_open && choice_key) || direction.is_some() || (selector_open && selector_key) {
             event.prevent_default();
             event.stop_propagation();
@@ -375,14 +435,14 @@ pub fn Page(
     let mut status = use_signal(|| "installing".to_string());
     let mut error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
+    let mut approval_sel = use_signal(|| 0usize);
     let mut agent_name = use_signal(String::new);
+    let mut conversation_title = use_signal(String::new);
     let mut agent_icon = use_signal(String::new);
     let mut accent = use_signal(String::new);
     let mut handoff_source = use_signal(String::new);
     let mut handoff_truncated = use_signal(|| false);
     let mut handoff_message_count = use_signal(|| 0u32);
-    let mut workspace_selection_pending = use_signal(|| false);
-    let mut workspace_picker_open = use_signal(|| false);
     let mut choice_question = use_signal(String::new);
     let mut choice_options = use_signal(Vec::<String>::new);
     let mut draft = use_signal(String::new);
@@ -404,11 +464,14 @@ pub fn Page(
     let mut media_loading = use_signal(|| false);
     let mut current_model_id = use_signal(String::new);
     let mut current_model = use_signal(String::new);
+    let mut composer_context = use_signal(ComposerContext::default);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
 
-    use_effect(move || install_global_prompt_input(draft, slash_cmds, choice_options));
+    use_effect(move || {
+        install_global_prompt_input(draft, slash_cmds, choice_options, approval, approval_sel)
+    });
     use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
 
     use_effect(move || {
@@ -450,28 +513,33 @@ pub fn Page(
         transition_attachments.set(Vec::new());
         paused.set(snap.paused);
         agent_name.set(snap.agent_name.clone());
+        conversation_title.set(snap.conversation_title.clone());
         agent_icon.set(snap.agent_icon.clone());
         accent.set(snap.accent_color.clone());
         handoff_source.set(snap.handoff_source.clone());
         handoff_truncated.set(snap.handoff_truncated);
         handoff_message_count.set(snap.handoff_message_count);
-        workspace_selection_pending.set(snap.workspace_selection_pending);
         if choice_options.peek().as_slice() != snap.choice_options.as_slice() {
             menu_sel.set(0);
         }
         choice_question.set(snap.choice_question.clone());
         choice_options.set(snap.choice_options.clone());
-        if !snap.workspace_selection_pending {
-            workspace_picker_open.set(false);
-        }
         if snap.status == "awaiting" {
+            let changed = approval
+                .peek()
+                .as_ref()
+                .is_none_or(|(call_id, _, _)| call_id != &snap.approval_call_id);
             approval.set(Some((
                 snap.approval_call_id.clone(),
                 snap.approval_name.clone(),
                 snap.approval_args_json.clone(),
             )));
+            if changed {
+                approval_sel.set(0);
+            }
         } else {
             approval.set(None);
+            approval_sel.set(0);
         }
     });
     let _history =
@@ -536,6 +604,10 @@ pub fn Page(
         current_model.set(state.current_model_name.clone());
         menu_sel.set(0);
     });
+    let _composer_context =
+        use_bin_event_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
+            composer_context.set(context.clone())
+        });
     let _sess =
         use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
             sessions.set(s.sessions.clone());
@@ -587,9 +659,9 @@ pub fn Page(
             let n = agent_name();
             if n.is_empty() { current_agent() } else { n }
         };
+        let title = chat_page_title(&conversation_title(), &name);
         let status = status();
         let items = items.read();
-        let title = chat_page_title(&items, &status, &name);
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             if document.title() != title {
                 document.set_title(&title);
@@ -610,6 +682,7 @@ pub fn Page(
         let n = agent_name();
         if n.is_empty() { agent.clone() } else { n }
     };
+    let conversation_title = chat_page_title(&conversation_title(), &header_name);
     let agent_accent = agent_accent(&agent);
     let profile_accent = accent();
     let theme_accent = normalized_accent(&profile_accent, agent_accent.rain_rgb);
@@ -664,6 +737,10 @@ pub fn Page(
     let session_menu_open = resume_query.is_some();
     let model_menu_open = model_query.is_some();
     let media_menu_open = media_query.is_some();
+    let latest_tool = {
+        let items = items.read();
+        latest_tool_location(&items)
+    };
     let resume_state = resume_query.map(|_| {
         resume_menu_state(
             resume_requested(),
@@ -721,10 +798,47 @@ pub fn Page(
     } else {
         "Send (Enter)"
     };
-    let choice_pending = !choice_options.read().is_empty();
+    let choice_pending = !choice_options.read().is_empty() || approval.read().is_some();
     let prompt_action_enabled = !choice_pending
         && (prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty());
     let prompt_keydown = move |e: KeyboardEvent| {
+        let active_approval = { approval.peek().clone() };
+        if let Some((call_id, _, _)) = active_approval {
+            let key = e.key().to_string();
+            if !e.modifiers().meta()
+                && !e.modifiers().alt()
+                && let Some(direction) = menu_direction(&key, e.modifiers().ctrl())
+            {
+                e.prevent_default();
+                approval_sel.set(move_selection(
+                    approval_sel(),
+                    APPROVAL_OPTION_COUNT,
+                    direction,
+                ));
+                return;
+            }
+            let numbered = !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt()
+                && choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some();
+            let entered = e.key() == Key::Enter
+                && !e.modifiers().shift()
+                && !e.modifiers().meta()
+                && !e.modifiers().ctrl()
+                && !e.modifiers().alt();
+            if numbered || entered {
+                e.prevent_default();
+                let index =
+                    choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
+                if let Some(decision) = approval_decision_for_index(index)
+                    && send_approval(call_id, decision)
+                {
+                    approval.set(None);
+                    approval_sel.set(0);
+                }
+                return;
+            }
+        }
         let pending_choices = choice_options.peek().clone();
         if !pending_choices.is_empty() {
             let key = e.key().to_string();
@@ -960,6 +1074,210 @@ pub fn Page(
         }
     });
 
+    let context = composer_context();
+    let model_name = current_model();
+    let (active_subagents, active_tasks) = composer_activity_counts(&items.read());
+    let queued_count = queued.read().len();
+    let workspace_label = if context.workspace_selected && !context.workspace_name.is_empty() {
+        context.workspace_name.clone()
+    } else {
+        "Select workspace".to_string()
+    };
+    let access_label = if context.auto_allow_count == 0 {
+        "Ask".to_string()
+    } else {
+        format!("Ask · {} allowed", context.auto_allow_count)
+    };
+    let workspace_title = if context.cwd.is_empty() {
+        "Create or select workspace".to_string()
+    } else {
+        format!("Create or select workspace · {}", context.cwd)
+    };
+    let branch_title = if context.branch.is_empty() {
+        "Git repository".to_string()
+    } else {
+        format!("Branch {}", context.branch)
+    };
+    let worktree_title = if context.base_ref.is_empty() {
+        "Linked worktree".to_string()
+    } else {
+        format!("Worktree from {}", context.base_ref)
+    };
+    let run_label = match status().as_str() {
+        "streaming" => "Running",
+        "awaiting" => "Approval",
+        "installing" => "Starting",
+        "errored" => "Error",
+        _ => "Ready",
+    };
+    let composer_footer = rsx! {
+        div { class: "flex min-w-0 items-center justify-between gap-1",
+            div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+                if !model_name.is_empty() {
+                    button {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+                        title: "Change model",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            draft.set("/model ".to_string());
+                            menu_sel.set(0);
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
+                            path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
+                        }
+                        span { class: "truncate", "{model_name}" }
+                        svg {
+                            class: "h-3 w-3 shrink-0 opacity-50",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "2",
+                            path { d: "m8 10 4 4 4-4" }
+                        }
+                    }
+                }
+                span {
+                    class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
+                    title: "Tools ask before protected actions; Allow always is remembered per tool",
+                    svg {
+                        class: "h-3.5 w-3.5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "1.8",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M12 3 5 6v5c0 4.8 2.9 8.2 7 10 4.1-1.8 7-5.2 7-10V6l-7-3Z" }
+                        path { d: "m9 12 2 2 4-4" }
+                    }
+                    "{access_label}"
+                }
+                if context.can_manage_workspace {
+                    button {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
+                        title: "{workspace_title}",
+                        onmousedown: move |event| event.prevent_default(),
+                        onclick: move |_| {
+                            let _ = try_cef_bin_emit_rkyv(&ChatSelectWorkspace);
+                            focus_prompt_end(PROMPT_INPUT_ID);
+                        },
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
+                        }
+                        span { class: "truncate", "{workspace_label}" }
+                    }
+                } else if !context.cwd.is_empty() {
+                    span {
+                        class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
+                        title: "{context.cwd}",
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            path { d: "M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" }
+                        }
+                        span { class: "truncate", "{workspace_label}" }
+                    }
+                }
+                if context.is_git_repo {
+                    span {
+                        class: "flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-lg px-2 font-mono text-[10px] text-muted-foreground",
+                        title: "{branch_title}",
+                        svg {
+                            class: "h-3.5 w-3.5 shrink-0",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "6", cy: "5", r: "2" }
+                            circle { cx: "6", cy: "19", r: "2" }
+                            circle { cx: "18", cy: "12", r: "2" }
+                            path { d: "M8 5h3a3 3 0 0 1 3 3v1a3 3 0 0 0 3 3" }
+                            path { d: "M6 7v10" }
+                        }
+                        span { class: "truncate", if context.branch.is_empty() { "Git" } else { "{context.branch}" } }
+                    }
+                    if context.is_worktree {
+                        span {
+                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg bg-violet-500/[0.08] px-2 text-[10px] font-medium text-violet-600 ring-1 ring-inset ring-violet-500/15 dark:text-violet-300",
+                            title: "{worktree_title}",
+                            "Worktree"
+                        }
+                    } else if context.can_manage_workspace {
+                        button {
+                            class: "flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-medium text-muted-foreground transition hover:bg-violet-500/[0.08] hover:text-violet-600 dark:hover:text-violet-300",
+                            title: "Create or select a worktree for this workspace",
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                let _ = try_cef_bin_emit_rkyv(&ChatCreateWorktree);
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            "+ Worktree"
+                        }
+                    }
+                    if context.uncommitted > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-amber-500", title: "Uncommitted changes", "● {context.uncommitted}" }
+                    }
+                    if context.ahead > 0 {
+                        span { class: "shrink-0 font-mono text-[10px] text-sky-500", title: "Commits ahead of upstream", "↑{context.ahead}" }
+                    }
+                } else if context.workspace_selected {
+                    span { class: "h-7 shrink-0 content-center rounded-lg px-2 text-[10px] text-muted-foreground/70", "No Git" }
+                }
+            }
+            div { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground",
+                span { class: "flex h-7 items-center gap-1.5 rounded-lg px-2",
+                    span { class: "h-1.5 w-1.5 rounded-full {status_dot_class(&status())}" }
+                    "{run_label}"
+                }
+                if active_subagents > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg bg-violet-500/[0.07] px-2 text-violet-600 dark:text-violet-300", title: "Active subagents",
+                        svg {
+                            class: "h-3.5 w-3.5",
+                            view_box: "0 0 24 24",
+                            fill: "none",
+                            stroke: "currentColor",
+                            stroke_width: "1.8",
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            circle { cx: "9", cy: "8", r: "3" }
+                            path { d: "M3.5 19a5.5 5.5 0 0 1 11 0" }
+                            circle { cx: "17", cy: "9", r: "2.5" }
+                            path { d: "M15.5 14.5A4.5 4.5 0 0 1 21 19" }
+                        }
+                        "{active_subagents}"
+                    }
+                }
+                if active_tasks > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg px-2", title: "Open plan tasks", "{active_tasks} tasks" }
+                }
+                if queued_count > 0 {
+                    span { class: "flex h-7 items-center gap-1 rounded-lg px-2", title: "Queued prompts", "{queued_count} queued" }
+                }
+            }
+        }
+    };
+
     rsx! {
         main {
             class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
@@ -973,16 +1291,14 @@ pub fn Page(
                     }
                 }
             }
-            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
-                span { class: "bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold capitalize text-transparent",
-                    "{header_name}"
-                }
-                if !current_model().is_empty() {
-                    span { class: "min-w-0 truncate rounded-md bg-foreground/[0.06] px-2 py-0.5 font-mono text-[10px] text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                        "{current_model}"
+                div { class: "min-w-0 flex-1",
+                    div { class: "truncate bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold text-transparent", title: "{conversation_title}",
+                        "{conversation_title}"
                     }
+                    div { class: "truncate text-[10px] text-muted-foreground/60", "{header_name}" }
                 }
             }
             div {
@@ -1038,7 +1354,14 @@ pub fn Page(
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
-                        {render_item(loaded_start() as usize + i, item, attachment_previews)}
+                        {render_item(
+                            loaded_start() as usize + i,
+                            item,
+                            attachment_previews,
+                            latest_tool
+                                .filter(|(item_index, _)| *item_index == i)
+                                .map(|(_, block_index)| block_index),
+                        )}
                         if !handoff_source().is_empty()
                             && is_handoff_boundary(
                                 loaded_start() as usize + i,
@@ -1095,31 +1418,27 @@ pub fn Page(
                                         }
                                     }
                                 }
-                                div { class: "flex justify-end gap-2",
-                                    button {
-                                        class: "rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-foreground/10",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 0)
-                                        },
-                                        "Deny"
+                                div { class: "flex flex-col gap-1.5",
+                                    for (index , label) in ["Allow", "Allow always", "Deny"].into_iter().enumerate() {
+                                        button {
+                                            key: "approval-option-{index}",
+                                            class: if approval_sel() == index { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                                            onclick: {
+                                                let call_id = call_id.clone();
+                                                move |_| {
+                                                    if let Some(decision) = approval_decision_for_index(index)
+                                                        && send_approval(call_id.clone(), decision)
+                                                    {
+                                                        approval.set(None);
+                                                        approval_sel.set(0);
+                                                    }
+                                                }
+                                            },
+                                            span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
+                                            span { class: "min-w-0 flex-1", "{label}" }
+                                        }
                                     }
-                                    button {
-                                        class: "rounded-lg bg-foreground/10 px-3 py-1.5 text-sm hover:bg-foreground/20",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 2)
-                                        },
-                                        "Allow always"
-                                    }
-                                    button {
-                                        class: "rounded-lg bg-foreground px-3 py-1.5 text-sm font-medium text-background",
-                                        onclick: {
-                                            let call_id = call_id.clone();
-                                            move |_| send_approval(call_id.clone(), 1)
-                                        },
-                                        "Allow"
-                                    }
+                                    div { class: "mt-1 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–3 · Enter" }
                                 }
                             }
                         }
@@ -1252,54 +1571,6 @@ pub fn Page(
                             div { class: "mt-2.5 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–9 · Enter" }
                         }
                     }
-                    if workspace_selection_pending() {
-                        div { class: "flex items-center gap-3 rounded-2xl border border-foreground/10 bg-background/95 p-2.5 pl-3.5 shadow-sm",
-                            div { class: "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-foreground/[0.07] text-foreground/55 ring-1 ring-inset ring-foreground/10",
-                                svg {
-                                    class: "h-4 w-4",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                }
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "text-sm font-medium text-foreground", "Choose repository folder" }
-                                div { class: "truncate text-xs text-muted-foreground", "Select the local Git repository the agent should use." }
-                            }
-                            button {
-                                class: if workspace_picker_open() { "flex h-8 shrink-0 cursor-default items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 text-xs font-medium text-muted-foreground/60" } else { "flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-foreground px-2.5 text-xs font-medium text-background transition hover:opacity-85 active:scale-[0.98]" },
-                                disabled: workspace_picker_open(),
-                                onclick: move |_| {
-                                    if workspace_picker_open() {
-                                        return;
-                                    }
-                                    workspace_picker_open.set(true);
-                                    if try_cef_bin_emit_rkyv(&ChatChooseWorkspace).is_err() {
-                                        workspace_picker_open.set(false);
-                                    }
-                                },
-                                svg {
-                                    class: "h-3.5 w-3.5",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "2",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M3 6h6l2 2h10v10H3z" }
-                                }
-                                if workspace_picker_open() {
-                                    span { "Choosing…" }
-                                } else {
-                                    span { "Choose folder" }
-                                }
-                            }
-                        }
-                    }
                     if transition_preview.read().is_empty() && !queued.read().is_empty() {
                         div { class: "flex flex-col items-end gap-1.5",
                             for queued_prompt in queued.read().iter().cloned() {
@@ -1390,6 +1661,7 @@ pub fn Page(
                         accent_bg: agent_accent.accent_bg.to_string(),
                         accent_color: theme_accent.clone(),
                         accent_gradient: agent_accent.grad.to_string(),
+                        footer: Some(composer_footer),
                         action: prompt_action,
                         action_title: prompt_action_title.to_string(),
                         action_enabled: prompt_action_enabled,
@@ -1520,14 +1792,15 @@ fn do_submit(
     history_scratch.set(String::new());
 }
 
-fn send_approval(call_id: String, decision: u8) {
-    let _ = try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision });
+fn send_approval(call_id: String, decision: u8) -> bool {
+    try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision }).is_ok()
 }
 
 fn render_item(
     key: usize,
     item: &ChatItem,
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+    latest_tool_block: Option<usize>,
 ) -> Element {
     match item {
         ChatItem::User {
@@ -1572,7 +1845,7 @@ fn render_item(
                 }
             }
         },
-        ChatItem::Turn(turn) => render_turn(key, turn),
+        ChatItem::Turn(turn) => render_turn(key, turn, latest_tool_block),
     }
 }
 
@@ -1611,7 +1884,7 @@ fn render_user_attachment(
     }
 }
 
-fn render_turn(key: usize, turn: &ChatTurn) -> Element {
+fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) -> Element {
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
     let block_count = turn.blocks.len();
     let blocks = turn
@@ -1645,20 +1918,26 @@ fn render_turn(key: usize, turn: &ChatTurn) -> Element {
         }
     });
     rsx! {
-        div { key: "{key}", class: "chat-assistant-turn relative flex max-w-[92%] flex-col gap-2.5 self-start overflow-hidden rounded-2xl border px-3.5 py-3",
-            for (j , block , children) in blocks {
-                {render_block(j, block, &children, should_expand_thinking(j, block_count))}
+        div { key: "{key}", class: "flex max-w-[92%] flex-col gap-2 self-start",
+            if !blocks.is_empty() {
+                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
+                    for (j , block , children) in blocks {
+                        {render_block(
+                            j,
+                            block,
+                            &children,
+                            should_expand_thinking(j, block_count),
+                            latest_tool_index == Some(j),
+                        )}
+                    }
+                }
             }
             if turn.running && !reconnecting {
                 WorkingIndicator {}
-            }
-            if !turn.running && let Some(label) = duration_label {
-                div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 pt-0.5 text-[11px] text-muted-foreground/70",
-                    span {}
-                    span { class: "agent-turn-meta inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-1 tabular-nums",
-                        span { class: "agent-turn-meta-dot h-1.5 w-1.5 rounded-full" }
-                        "{label}"
-                    }
+            } else if let Some(label) = duration_label {
+                div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground/70",
+                    span { class: "h-1.5 w-1.5 rounded-full bg-[color:var(--agent-accent)]" }
+                    span { class: "tabular-nums", "{label}" }
                 }
             }
         }
@@ -1695,18 +1974,14 @@ fn WorkingIndicator() -> Element {
     let verb_text = verb();
     let elapsed_text = fmt_elapsed(elapsed());
     rsx! {
-        div { class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 py-1 text-sm text-muted-foreground",
-            span { class: "agent-themed-activity flex h-6 w-6 items-center justify-center rounded-lg",
-                span { class: "flex items-end gap-0.5",
-                    span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
-                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:120ms]" }
-                    span { class: "agent-working-dot h-1 w-1 rounded-full [animation-delay:240ms]" }
-                }
+        div { class: "flex items-center gap-2 px-1 text-sm text-muted-foreground",
+            span { class: "agent-working-label font-medium", "{verb_text}" }
+            span { class: "flex items-end gap-0.5 text-[color:var(--agent-accent)]",
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current" }
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:120ms]" }
+                span { class: "agent-working-dot h-1 w-1 rounded-full bg-current [animation-delay:240ms]" }
             }
-            div { class: "flex items-baseline gap-2",
-                span { class: "agent-working-label font-medium", "{verb_text}" }
-                span { class: "tabular-nums text-xs", "{elapsed_text}" }
-            }
+            span { class: "tabular-nums text-xs", "{elapsed_text}" }
         }
     }
 }
@@ -1719,8 +1994,13 @@ enum ActivityIcon {
     Awaiting,
     Python,
     ReadFile,
+    WriteFile,
+    Layout,
+    Worktree,
     Search,
     Image,
+    Screenshot,
+    OpenPage,
     Command,
     Browser,
     Guardian,
@@ -1759,11 +2039,28 @@ fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
             "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
             "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
         ],
+        ActivityIcon::WriteFile => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+        ActivityIcon::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+        ActivityIcon::Worktree => &[
+            "M6 3v12",
+            "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+            "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+            "M6 15c0 3 2 5 5 5h4",
+        ],
         ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
         ActivityIcon::Image => &[
             "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
             "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
             "m21 15-5-5L5 21",
+        ],
+        ActivityIcon::Screenshot => &[
+            "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
+            "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+        ],
+        ActivityIcon::OpenPage => &[
+            "M14 3h7v7",
+            "m21 3-9 9",
+            "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
         ],
         ActivityIcon::Command => &["m4 17 6-6-6-6", "M12 19h8"],
         ActivityIcon::Browser => &[
@@ -1844,8 +2141,23 @@ fn render_activity_icon(kind: ActivityIcon) -> Element {
         | ActivityIcon::Awaiting => "agent-themed-activity",
         ActivityIcon::Python => unreachable!(),
         ActivityIcon::ReadFile => "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300",
+        ActivityIcon::WriteFile => {
+            "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
+        }
+        ActivityIcon::Layout => {
+            "bg-violet-500/10 text-violet-600 ring-violet-500/20 dark:text-violet-300"
+        }
+        ActivityIcon::Worktree => {
+            "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+        }
         ActivityIcon::Search => "bg-cyan-500/10 text-cyan-600 ring-cyan-500/20 dark:text-cyan-300",
         ActivityIcon::Image => "bg-pink-500/10 text-pink-600 ring-pink-500/20 dark:text-pink-300",
+        ActivityIcon::Screenshot => {
+            "bg-fuchsia-500/10 text-fuchsia-600 ring-fuchsia-500/20 dark:text-fuchsia-300"
+        }
+        ActivityIcon::OpenPage => {
+            "bg-blue-500/10 text-blue-600 ring-blue-500/20 dark:text-blue-300"
+        }
         ActivityIcon::Command => {
             "bg-amber-500/10 text-amber-600 ring-amber-500/20 dark:text-amber-300"
         }
@@ -1893,7 +2205,12 @@ fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
     match activity {
         ToolActivity::Guardian => ActivityIcon::Guardian,
         ToolActivity::ReadFile => ActivityIcon::ReadFile,
+        ToolActivity::WriteFile => ActivityIcon::WriteFile,
+        ToolActivity::Layout => ActivityIcon::Layout,
+        ToolActivity::Worktree => ActivityIcon::Worktree,
         ToolActivity::Image => ActivityIcon::Image,
+        ToolActivity::Screenshot => ActivityIcon::Screenshot,
+        ToolActivity::OpenPage => ActivityIcon::OpenPage,
         ToolActivity::Browser => ActivityIcon::Browser,
         ToolActivity::Search => ActivityIcon::Search,
         ToolActivity::Command => ActivityIcon::Command,
@@ -1905,6 +2222,78 @@ fn language_activity_icon(value: &str) -> Option<ActivityIcon> {
     let lower = value.to_ascii_lowercase();
     (lower.contains(".py") || lower == "py" || lower.contains("python"))
         .then_some(ActivityIcon::Python)
+}
+
+fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["path", "file_path", "filename", "file"] {
+                if let Some(path) = map.get(key).and_then(serde_json::Value::as_str)
+                    && !path.trim().is_empty()
+                {
+                    return Some(path.to_string());
+                }
+            }
+            map.values().find_map(file_path_from_value)
+        }
+        serde_json::Value::Array(values) => values.iter().find_map(file_path_from_value),
+        serde_json::Value::String(text) => file_path_from_text(text),
+        _ => None,
+    }
+}
+
+fn file_path_from_text(text: &str) -> Option<String> {
+    for marker in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
+        if let Some(path) = text.lines().find_map(|line| line.strip_prefix(marker)) {
+            return Some(path.trim().to_string());
+        }
+    }
+    text.split_whitespace()
+        .map(|token| token.trim_matches(['"', '\'', ',', ':', ';', '(', ')']))
+        .find(|token| {
+            if token.contains("://") {
+                return false;
+            }
+            let name = token.rsplit('/').next().unwrap_or(token);
+            name.rsplit_once('.')
+                .is_some_and(|(_, ext)| !ext.is_empty() && ext.len() <= 12)
+        })
+        .map(ToOwned::to_owned)
+}
+
+fn tool_file_path(args: &str) -> Option<String> {
+    serde_json::from_str(args)
+        .ok()
+        .and_then(|value| file_path_from_value(&value))
+        .or_else(|| file_path_from_text(args))
+}
+
+fn render_file_activity_icon(path: &str, write: bool) -> Element {
+    let tone = if write {
+        "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
+    } else {
+        "bg-sky-500/10 text-sky-600 ring-sky-500/20 dark:text-sky-300"
+    };
+    rsx! {
+        span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset {tone}", aria_hidden: "true",
+            {type_icon(path, false, "h-4 w-4")}
+        }
+    }
+}
+
+fn render_tool_activity_icon(name: &str, args: &str, fallback: ActivityIcon) -> Element {
+    let activity = tool_activity(name);
+    if matches!(
+        activity,
+        ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
+    ) && let Some(path) = tool_file_path(args)
+    {
+        return render_file_activity_icon(&path, activity == ToolActivity::WriteFile);
+    }
+    if matches!(file_icon_kind(name, false), FileIcon::Logo(_)) {
+        return render_file_activity_icon(name, false);
+    }
+    render_activity_icon(fallback)
 }
 
 fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
@@ -2004,7 +2393,12 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
     match activity {
         ToolActivity::Guardian => (icon, Cow::Borrowed("Guardian Review")),
         ToolActivity::ReadFile => (icon, Cow::Borrowed("Read files")),
+        ToolActivity::WriteFile => (icon, Cow::Borrowed("Editing files")),
+        ToolActivity::Layout => (icon, Cow::Borrowed("Managed layout")),
+        ToolActivity::Worktree => (icon, Cow::Borrowed("Managed workspace")),
         ToolActivity::Image => (icon, Cow::Borrowed("Viewed image")),
+        ToolActivity::Screenshot => (icon, Cow::Borrowed("Captured screenshot")),
+        ToolActivity::OpenPage => (icon, Cow::Borrowed("Opened page")),
         ToolActivity::Browser => (icon, Cow::Borrowed("Used browser")),
         ToolActivity::Search => (icon, Cow::Borrowed("Searched files")),
         ToolActivity::Command => (icon, Cow::Borrowed("Ran commands")),
@@ -2020,11 +2414,162 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>
     }
 }
 
+fn normalized_tool_args(args: &str) -> Option<serde_json::Value> {
+    let mut value = serde_json::from_str::<serde_json::Value>(args).ok()?;
+    while let serde_json::Value::Object(map) = &value {
+        let Some(arguments) = map.get("arguments") else {
+            break;
+        };
+        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
+            value = arguments.clone();
+        } else {
+            break;
+        }
+    }
+    Some(value)
+}
+
+fn tool_arg_label(key: &str) -> String {
+    let mut label = key.replace('_', " ");
+    if let Some(first) = label.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    label
+}
+
+fn tool_arg_is_path(key: &str, value: &str) -> bool {
+    matches!(
+        key,
+        "path" | "file" | "file_path" | "cwd" | "dir" | "directory" | "workdir"
+    ) || value.starts_with('/')
+}
+
+fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
+    let label = tool_arg_label(&key);
+    let row_class = "relative flex min-w-0 items-center gap-3 py-1.5 pl-1 before:absolute before:-left-3 before:top-1/2 before:h-px before:w-2 before:bg-foreground/20";
+    let label_class =
+        "shrink-0 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground/80";
+    match value {
+        serde_json::Value::String(text) if tool_arg_is_path(&key, &text) => rsx! {
+            div { class: "{row_class}",
+                {type_icon(&text, false, "h-4 w-4 shrink-0 opacity-85")}
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
+            }
+        },
+        serde_json::Value::String(text)
+            if matches!(
+                key.as_str(),
+                "cmd" | "command" | "script" | "patch" | "text" | "content"
+            ) || text.contains('\n') =>
+        {
+            rsx! {
+                div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                    if !key.is_empty() {
+                        div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
+                            span { class: "h-1.5 w-1.5 rounded-full bg-emerald-400/70" }
+                            "{label}"
+                        }
+                    }
+                    pre { class: "max-h-56 overflow-auto whitespace-pre-wrap break-words border-l border-foreground/20 py-1 pl-3 font-mono text-[11px] leading-relaxed text-foreground/80", "{text}" }
+                }
+            }
+        }
+        serde_json::Value::String(text) => rsx! {
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                code { class: "min-w-0 flex-1 truncate text-right font-mono text-[11px] text-foreground/80", title: "{text}", "{text}" }
+            }
+        },
+        serde_json::Value::Bool(value) => {
+            let tone = if value {
+                "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+            } else {
+                "bg-foreground/[0.04] text-muted-foreground ring-foreground/10"
+            };
+            rsx! {
+                div { class: "{row_class}",
+                    if !key.is_empty() {
+                        span { class: "{label_class}", "{label}" }
+                    }
+                    span { class: "rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset {tone}", "{value}" }
+                }
+            }
+        }
+        serde_json::Value::Number(value) => rsx! {
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                code { class: "ml-auto font-mono text-[11px] tabular-nums text-cyan-600 dark:text-cyan-300", "{value}" }
+            }
+        },
+        serde_json::Value::Array(values) => rsx! {
+            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                if !key.is_empty() {
+                    div { class: "mb-1 {label_class}", "{label}" }
+                }
+                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
+                    for (index , value) in values.into_iter().enumerate() {
+                        {render_tool_arg(format!("{}", index + 1), value)}
+                    }
+                }
+            }
+        },
+        serde_json::Value::Object(values) => rsx! {
+            div { class: "relative py-1 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
+                if !key.is_empty() {
+                    div { class: "mb-1 {label_class}", "{label}" }
+                }
+                div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
+                    for (child_key , child_value) in values {
+                        {render_tool_arg(child_key, child_value)}
+                    }
+                }
+            }
+        },
+        serde_json::Value::Null => rsx! {
+            div { class: "{row_class}",
+                if !key.is_empty() {
+                    span { class: "{label_class}", "{label}" }
+                }
+                span { class: "ml-auto text-[10px] italic text-muted-foreground/70", "None" }
+            }
+        },
+    }
+}
+
+fn render_tool_args(args: &str) -> Element {
+    let Some(value) = normalized_tool_args(args) else {
+        return rsx! {
+            pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{args}" }
+        };
+    };
+    match value {
+        serde_json::Value::Object(map) if map.is_empty() => rsx! {},
+        serde_json::Value::Object(map) => rsx! {
+            div { class: "ml-1 mt-2 flex flex-col border-l border-foreground/20 pl-3", aria_label: "Tool arguments",
+                for (key , value) in map {
+                    {render_tool_arg(key, value)}
+                }
+            }
+        },
+        value => rsx! {
+            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3", {render_tool_arg(String::new(), value)} }
+        },
+    }
+}
+
 fn render_block(
     key: usize,
     block: &ChatBlock,
     children: &[(usize, &ChatBlock)],
-    latest: bool,
+    latest_thinking: bool,
+    latest_tool: bool,
 ) -> Element {
     match block {
         ChatBlock::Text(text) => rsx! {
@@ -2037,7 +2582,7 @@ fn render_block(
         ChatBlock::Thinking(text) => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
                 {render_activity_icon(ActivityIcon::Thinking)}
-                details { open: latest, class: "disclosure min-w-0 text-sm text-muted-foreground",
+                details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "Thinking" }
                         {render_disclosure_icon()}
@@ -2050,16 +2595,16 @@ fn render_block(
             let (icon, label) = tool_presentation(name, args);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
-                    {render_activity_icon(icon)}
+                    {render_tool_activity_icon(name, args, icon)}
                     div { class: "min-w-0",
-                        details { class: "disclosure text-sm text-muted-foreground",
+                        details { open: latest_tool, class: "disclosure text-sm text-muted-foreground",
                             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                                 span { class: "font-medium", "{label}" }
                                 {render_disclosure_icon()}
                             }
                             div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                             if !args.is_empty() && args != "{}" {
-                                pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
+                                {render_tool_args(args)}
                             }
                         }
                         if !children.is_empty() {
@@ -2193,10 +2738,9 @@ fn render_block(
                     })
                     .collect();
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
-            let icon = language_activity_icon(path).unwrap_or(ActivityIcon::Diff);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
-                    {render_activity_icon(icon)}
+                    {render_file_activity_icon(path, true)}
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", "Edited " }
@@ -2238,7 +2782,7 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                     }
                     div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                     if !args.is_empty() && args != "{}" {
-                        pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{args}" }
+                        {render_tool_args(args)}
                     }
                 }
             }

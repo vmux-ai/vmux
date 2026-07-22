@@ -1,6 +1,6 @@
 use vmux_command::event::{
     CommandBarCommandEntry, CommandBarPage, CommandBarRecentFile, CommandBarSpace, CommandBarTab,
-    CommandBarWorkDir, HistoryEntry,
+    CommandBarWorkDir, HistoryEntry, SearchEngine,
 };
 use vmux_core::PageIcon;
 
@@ -37,6 +37,10 @@ pub enum CommandBarResultItem {
     },
     Navigate {
         url: String,
+    },
+    Search {
+        engine: SearchEngine,
+        query: String,
     },
     File {
         path: String,
@@ -155,7 +159,6 @@ pub fn agent_page_url(item: &CommandBarResultItem) -> Option<&str> {
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
     let CommandBarResultItem::Page { url, title, .. } = item else {
         return false;
@@ -169,12 +172,45 @@ pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str)
             || url.to_lowercase().contains(&search_lower))
 }
 
-pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn prepend_prompt_agent(
+    results: &mut Vec<CommandBarResultItem>,
+    agent: Option<&CommandBarResultItem>,
+    query: &str,
+) {
+    if !vmux_command::event::is_start_prompt_query(query)
+        || results
+            .iter()
+            .any(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
+        || results.iter().any(|item| agent_page_url(item).is_some())
+    {
+        return;
+    }
+    if let Some(agent) = agent {
+        results.insert(0, agent.clone());
+    }
+}
+
+pub fn start_page_results(
+    pages: &[CommandBarPage],
+    work_dirs: &[CommandBarWorkDir],
+    recent_files: &[CommandBarRecentFile],
+    search_engines: &[SearchEngine],
+    query: &str,
+) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
-    let mut results = agent_page_results(pages, query);
+    if !search_lower.is_empty() && "terminal".starts_with(&search_lower) {
+        return vec![CommandBarResultItem::Terminal {
+            path: String::new(),
+        }];
+    }
+    let mut results = agent_page_results(pages, query)
+        .into_iter()
+        .filter(|item| agent_page_matches_query(item, query))
+        .collect::<Vec<_>>();
     let mut app_pages: Vec<_> = pages
         .iter()
-        .filter(|page| page.host != "agent" && page.host != "start")
+        .filter(|page| page.host != "agent" && page.host != "start" && page.host != "terminal")
         .filter(|page| page_matches(page, &search_lower))
         .collect();
     app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
@@ -188,8 +224,25 @@ pub fn start_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
                 shortcut: page.shortcut.clone(),
             }),
     );
+    results.extend(work_dir_results(work_dirs, &search_lower));
+    results.extend(recent_file_results(recent_files, &search_lower));
     let trimmed = query.trim();
-    if !trimmed.is_empty() {
+    if vmux_command::event::is_start_prompt_query(trimmed) {
+        let engines = if search_engines.is_empty() {
+            SearchEngine::ALL.as_slice()
+        } else {
+            search_engines
+        };
+        results.extend(
+            engines
+                .iter()
+                .copied()
+                .map(|engine| CommandBarResultItem::Search {
+                    engine,
+                    query: trimmed.to_string(),
+                }),
+        );
+    } else if !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
             url: trimmed.to_string(),
         });
@@ -770,8 +823,8 @@ mod tests {
     }
 
     #[test]
-    fn start_page_lists_agents_before_other_vmux_pages() {
-        let results = start_page_results(&sample_pages(), "");
+    fn start_page_does_not_show_unmatched_agents() {
+        let results = start_page_results(&sample_pages(), &[], &[], &[], "settings");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -780,39 +833,100 @@ mod tests {
             })
             .collect();
 
+        assert_eq!(urls, vec!["vmux://settings/"]);
+    }
+
+    #[test]
+    fn start_page_offers_each_search_engine_in_supplied_order() {
+        let engines = [SearchEngine::Kagi, SearchEngine::Google, SearchEngine::Bing];
+        let results =
+            start_page_results(&sample_pages(), &[], &[], &engines, "fix the failing test");
+        let actual = results
+            .iter()
+            .filter_map(|result| match result {
+                CommandBarResultItem::Search { engine, .. } => Some(*engine),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, engines);
+    }
+
+    #[test]
+    fn selected_agent_precedes_web_search_for_prompt_text() {
+        let agent = agent_page_results(&sample_pages(), "").remove(0);
+        let mut results = start_page_results(
+            &sample_pages(),
+            &[],
+            &[],
+            &[SearchEngine::Google, SearchEngine::Bing],
+            "show me something fun",
+        );
+
+        prepend_prompt_agent(&mut results, Some(&agent), "show me something fun");
+
+        assert_eq!(agent_page_url(&results[0]), Some("vmux://agent/vibe/"));
+        assert!(matches!(results[1], CommandBarResultItem::Search { .. }));
+    }
+
+    #[test]
+    fn terminal_stays_the_only_result() {
+        let agent = agent_page_results(&sample_pages(), "").remove(0);
+        let mut results = start_page_results(&sample_pages(), &[], &[], &[], "terminal");
+
+        prepend_prompt_agent(&mut results, Some(&agent), "terminal");
+
         assert_eq!(
-            urls,
-            vec![
-                "vmux://agent/vibe/",
-                "vmux://history/",
-                "vmux://settings/",
-                "vmux://spaces/"
-            ]
+            results,
+            vec![CommandBarResultItem::Terminal {
+                path: String::new()
+            }]
         );
     }
 
     #[test]
-    fn start_page_filters_vmux_pages_but_keeps_prompt_agents() {
-        let results = start_page_results(&sample_pages(), "settings");
-        let urls: Vec<_> = results
-            .iter()
-            .filter_map(|result| match result {
-                CommandBarResultItem::Page { url, .. } => Some(url.as_str()),
-                _ => None,
-            })
-            .collect();
-
-        assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://settings/"]);
+    fn start_page_suggests_terminal_by_name() {
+        let mut pages = sample_pages();
+        pages.push(CommandBarPage {
+            host: "terminal".into(),
+            url: "vmux://terminal/".into(),
+            title: "Terminal".into(),
+            keywords: vec!["shell".into()],
+            icon: vmux_core::PageIcon::None,
+            shortcut: String::new(),
+        });
+        let results = start_page_results(&pages, &[], &[], &[], "terminal");
+        assert_eq!(
+            results,
+            vec![CommandBarResultItem::Terminal {
+                path: String::new()
+            }]
+        );
     }
 
     #[test]
-    fn start_page_offers_web_search_for_prompt_text() {
-        let results = start_page_results(&sample_pages(), "fix the failing test");
-
-        assert!(matches!(
-            results.last(),
-            Some(CommandBarResultItem::Navigate { url }) if url == "fix the failing test"
-        ));
+    fn start_page_searches_work_dirs_and_recent_files() {
+        let work_dirs = vec![CommandBarWorkDir {
+            path: "/work/vmux".into(),
+            is_dir: true,
+        }];
+        let recent_files = vec![CommandBarRecentFile {
+            url: "file:///work/vmux/README.md".into(),
+            title: "README.md".into(),
+        }];
+        let dir_results =
+            start_page_results(&sample_pages(), &work_dirs, &recent_files, &[], "vmux");
+        assert!(dir_results.iter().any(|result| matches!(
+            result,
+            CommandBarResultItem::WorkDir { path, .. } if path == "/work/vmux"
+        )));
+        let file_results =
+            start_page_results(&sample_pages(), &work_dirs, &recent_files, &[], "readme");
+        assert!(file_results.iter().any(|result| matches!(
+            result,
+            CommandBarResultItem::RecentFile { url, .. }
+                if url == "file:///work/vmux/README.md"
+        )));
     }
 
     #[test]

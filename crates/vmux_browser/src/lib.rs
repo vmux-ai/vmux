@@ -11,6 +11,7 @@ use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     input::{
         ButtonState, InputSystems,
+        keyboard::KeyboardInput,
         mouse::{MouseButton, MouseButtonInput, MouseWheel},
     },
     material::AlphaMode,
@@ -335,7 +336,9 @@ impl Plugin for BrowserPlugin {
             )
             .init_resource::<HostFocusIntent>()
             .init_resource::<PendingNavSnapshots>()
+            .init_resource::<RecentBrowserInteraction>()
             .init_resource::<HostSpawnRegistry>()
+            .add_systems(Update, track_browser_interaction)
             .add_systems(
                 PostUpdate,
                 (
@@ -4313,17 +4316,23 @@ pub fn handle_browser_go_back_requests(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     pane_children: Query<&Children, With<Pane>>,
+    stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
         let target = match request.pane.as_deref() {
-            Some(s) => vmux_layout::target::parse_pane_target(s, &panes),
-            None => focus.pane.filter(|p| panes.contains(*p)),
+            Some(s) => vmux_layout::target::parse_browser_target(s, &panes, &stacks),
+            None => focus
+                .pane
+                .filter(|p| panes.contains(*p))
+                .map(vmux_layout::target::BrowserTarget::Pane),
         };
-        let Some(pane_entity) = target else { continue };
-        let Some(webview) = vmux_layout::target::active_webview_for_tab(
-            active_stack_in_pane(pane_entity, &pane_children, &stack_ts),
+        let Some(target) = target else { continue };
+        let Some(webview) = vmux_layout::target::webview_for_target(
+            target,
+            &pane_children,
+            &stack_ts,
             &browsers,
             &terminals,
         ) else {
@@ -4340,17 +4349,23 @@ pub fn handle_browser_go_forward_requests(
     terminals: Query<(Entity, &ChildOf), (With<Terminal>, Without<terminal::ProcessExited>)>,
     browsers: Query<(Entity, &ChildOf), With<Browser>>,
     pane_children: Query<&Children, With<Pane>>,
+    stacks: Query<Entity, With<Stack>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
         let target = match request.pane.as_deref() {
-            Some(s) => vmux_layout::target::parse_pane_target(s, &panes),
-            None => focus.pane.filter(|p| panes.contains(*p)),
+            Some(s) => vmux_layout::target::parse_browser_target(s, &panes, &stacks),
+            None => focus
+                .pane
+                .filter(|p| panes.contains(*p))
+                .map(vmux_layout::target::BrowserTarget::Pane),
         };
-        let Some(pane_entity) = target else { continue };
-        let Some(webview) = vmux_layout::target::active_webview_for_tab(
-            active_stack_in_pane(pane_entity, &pane_children, &stack_ts),
+        let Some(target) = target else { continue };
+        let Some(webview) = vmux_layout::target::webview_for_target(
+            target,
+            &pane_children,
+            &stack_ts,
             &browsers,
             &terminals,
         ) else {
@@ -4390,6 +4405,7 @@ fn handle_page_open_requests(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_filter: Query<Entity, With<Stack>>,
     service: Option<Res<vmux_service::client::ServiceClient>>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for request in reader.read() {
@@ -4408,12 +4424,22 @@ fn handle_page_open_requests(
                 continue;
             }
         };
-        commands.spawn(PageOpenTask {
+        let task = PageOpenTask {
             id: PageOpenId::new(),
             stack,
             url: normalize_vmux_url(&request.url),
             request_id: request.request_id,
-        });
+        };
+        if request.request_id.is_some() {
+            commands.spawn((
+                task,
+                PageOpenAwaitSnapshot {
+                    started: time.elapsed(),
+                },
+            ));
+        } else {
+            commands.spawn(task);
+        }
     }
 }
 
@@ -4509,6 +4535,11 @@ fn attach_cef_page_requests(
 #[derive(Component, Clone, Debug)]
 struct PageOpenFallbackDeferred;
 
+#[derive(Component, Clone, Debug)]
+struct PageOpenAwaitSnapshot {
+    started: std::time::Duration,
+}
+
 fn handle_unclaimed_page_open_tasks(
     mut tasks: Query<
         (
@@ -4587,17 +4618,66 @@ fn handle_unclaimed_page_open_tasks(
 }
 
 fn respond_page_open_tasks(
-    tasks: Query<(Entity, &PageOpenTask, Option<&PageOpenError>), With<PageOpenHandled>>,
+    tasks: Query<
+        (
+            Entity,
+            &PageOpenTask,
+            Option<&PageOpenError>,
+            Option<&PageOpenAwaitSnapshot>,
+        ),
+        With<PageOpenHandled>,
+    >,
     service: Option<Res<vmux_service::client::ServiceClient>>,
+    time: Res<Time>,
+    children: Query<&Children>,
+    browsers: Query<(), With<Browser>>,
+    child_of: Query<&ChildOf>,
+    mut pending_nav: ResMut<PendingNavSnapshots>,
     mut commands: Commands,
 ) {
-    for (entity, task, error) in &tasks {
-        let result = match error {
-            Some(error) => Err(error.message.clone()),
-            None => Ok(()),
+    for (entity, task, error, await_snapshot) in &tasks {
+        if let Some(error) = error {
+            send_page_open_response(&service, task.request_id, Err(error.message.clone()));
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let Some(await_snapshot) = await_snapshot else {
+            send_page_open_response(&service, task.request_id, Ok(()));
+            commands.entity(entity).despawn();
+            continue;
         };
-        send_page_open_response(&service, task.request_id, result);
-        commands.entity(entity).despawn();
+        let webview = children
+            .get(task.stack)
+            .ok()
+            .and_then(|children| children.iter().find(|child| browsers.contains(*child)));
+        if let (Some(webview), Some(request_id)) = (webview, task.request_id) {
+            let pane = child_of
+                .get(task.stack)
+                .ok()
+                .map(|child_of| child_of.get().to_bits().to_string());
+            pending_nav.0.insert(
+                webview,
+                NavPending {
+                    request_id,
+                    started: await_snapshot.started,
+                    saw_loading: false,
+                    pane,
+                },
+            );
+            commands.entity(entity).despawn();
+        } else if time
+            .elapsed()
+            .saturating_sub(await_snapshot.started)
+            .as_secs_f32()
+            > 10.0
+        {
+            send_page_open_response(
+                &service,
+                task.request_id,
+                Err("page opened without a snapshot-capable webview".to_string()),
+            );
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -4629,7 +4709,7 @@ fn attach_cef_page_to_stack(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
+) -> Entity {
     clear_stack_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
         url: url.to_string(),
@@ -4644,6 +4724,7 @@ fn attach_cef_page_to_stack(
         ))
         .id();
     commands.entity(browser).insert(CefKeyboardTarget);
+    browser
 }
 
 fn attach_error_page_to_stack(
@@ -4734,6 +4815,46 @@ pub struct NavPending {
 #[derive(Resource, Default)]
 pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>);
 
+#[derive(Resource, Default)]
+pub struct RecentBrowserInteraction {
+    stack: Option<Entity>,
+    at: Option<std::time::Instant>,
+}
+
+impl RecentBrowserInteraction {
+    fn active(&self, stack: Entity) -> bool {
+        self.stack == Some(stack)
+            && self
+                .at
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(2))
+    }
+}
+
+fn track_browser_interaction(
+    mut mouse_buttons: MessageReader<MouseButtonInput>,
+    mut mouse_wheels: MessageReader<MouseWheel>,
+    mut keyboard: MessageReader<KeyboardInput>,
+    focus: Res<vmux_layout::stack::FocusedStack>,
+    browsers: Query<&ChildOf, With<Browser>>,
+    mut recent: ResMut<RecentBrowserInteraction>,
+) {
+    let interacted = mouse_buttons
+        .read()
+        .any(|event| event.state == ButtonState::Pressed)
+        || mouse_wheels.read().next().is_some()
+        || keyboard
+            .read()
+            .any(|event| event.state == ButtonState::Pressed);
+    if !interacted {
+        return;
+    }
+    let Some(stack) = focus.stack else { return };
+    if browsers.iter().any(|child_of| child_of.get() == stack) {
+        recent.stack = Some(stack);
+        recent.at = Some(std::time::Instant::now());
+    }
+}
+
 pub fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -4747,16 +4868,54 @@ pub fn handle_browser_navigate_requests(
     time: Res<Time>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &vmux_core::LastActivatedAt), With<vmux_layout::stack::Stack>>,
+    recent_interaction: Res<RecentBrowserInteraction>,
+    mut activate: MessageWriter<vmux_layout::active_panes::ActivatePane>,
 ) {
     for request in reader.read() {
         let vmux_layout::BrowserNavigateRequest {
             url,
             pane,
             request_id,
+            new_stack,
+            profile,
         } = request.clone();
 
         if let Some(s) = pane.as_deref() {
             if let Some(target) = vmux_layout::target::parse_pane_target(s, &panes) {
+                if new_stack && !url.starts_with("vmux://") && !url.starts_with("file:") {
+                    let active_stack =
+                        vmux_layout::stack::active_stack_in_pane(target, &pane_children, &stack_ts);
+                    let activate_new =
+                        active_stack.is_none_or(|stack| !recent_interaction.active(stack));
+                    let stack = commands
+                        .spawn((
+                            vmux_layout::stack::stack_bundle(),
+                            if activate_new {
+                                LastActivatedAt::now()
+                            } else {
+                                LastActivatedAt(0)
+                            },
+                            ChildOf(target),
+                        ))
+                        .id();
+                    if let Some(profile) = profile {
+                        activate.write(vmux_layout::active_panes::ActivatePane {
+                            profile: vmux_layout::active_panes::ProfileId::Agent(profile),
+                            active: vmux_layout::active_panes::ActiveStack {
+                                tab: None,
+                                pane: Some(target),
+                                stack: Some(stack),
+                                kind: None,
+                            },
+                        });
+                    }
+                    page_open_writer.write(PageOpenRequest {
+                        target: PageOpenTarget::Stack(stack),
+                        url,
+                        request_id,
+                    });
+                    continue;
+                }
                 let in_place = if url.starts_with("vmux://") || url.starts_with("file:") {
                     None
                 } else {
@@ -6573,6 +6732,7 @@ mod tests {
     }
 
     mod browser_navigate_flow {
+        use crate::{Browser, PendingNavSnapshots, RecentBrowserInteraction};
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
         use bevy_cef::prelude::WebviewExtendStandardMaterial;
@@ -6580,8 +6740,8 @@ mod tests {
         use vmux_agent::plugin::AgentPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_core::{
-            CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenId,
-            PageOpenRequest, PageOpenSet, PageOpenTask,
+            CefPageAttachRequest, LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled,
+            PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTask,
         };
         use vmux_layout::pane::Pane;
         use vmux_layout::settings::{
@@ -6633,7 +6793,9 @@ mod tests {
                 .add_message::<vmux_setting::SettingsWriteRequest>()
                 .add_message::<vmux_space::SpaceCommandRequest>()
                 .add_message::<vmux_history::query::HistoryOpenIntent>()
+                .add_message::<vmux_layout::active_panes::ActivatePane>()
                 .init_resource::<crate::PendingNavSnapshots>()
+                .init_resource::<crate::RecentBrowserInteraction>()
                 .configure_sets(
                     Update,
                     (
@@ -6669,7 +6831,7 @@ mod tests {
             for (entity, task) in &tasks {
                 if task.url.starts_with("vmux://terminal/") {
                     crate::clear_stack_children(task.stack, &children_q, &mut commands);
-                    commands.spawn((Terminal, ChildOf(task.stack)));
+                    commands.spawn((Browser, Terminal, ChildOf(task.stack)));
                     commands.entity(entity).insert(PageOpenHandled);
                 } else if task.url.starts_with("vmux://agent/") {
                     crate::clear_stack_children(task.stack, &children_q, &mut commands);
@@ -6791,6 +6953,115 @@ mod tests {
         }
 
         #[test]
+        fn agent_browser_navigate_stacks_new_page_and_waits_for_snapshot() {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            add_consumer_systems(&mut app);
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+            let pane = app.world_mut().spawn(Pane).id();
+            let first_stack = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt(1),
+                    ChildOf(pane),
+                ))
+                .id();
+            app.world_mut().spawn((Browser, ChildOf(first_stack)));
+            let request_id = [7; 16];
+            app.world_mut()
+                .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
+                .write(vmux_layout::BrowserNavigateRequest {
+                    url: "https://second.example".into(),
+                    pane: Some(pane.to_bits().to_string()),
+                    request_id: Some(request_id),
+                    new_stack: true,
+                    profile: Some("agent-1".into()),
+                });
+
+            app.update();
+            app.update();
+
+            let world = app.world_mut();
+            let mut stacks = world.query_filtered::<
+                (Entity, &PageMetadata, &LastActivatedAt),
+                With<vmux_layout::stack::Stack>,
+            >();
+            let second = stacks
+                .iter(world)
+                .find(|(_, metadata, _)| metadata.url == "https://second.example")
+                .map(|(entity, _, activated)| (entity, activated.0))
+                .expect("new browser stack");
+            assert_ne!(second.0, first_stack);
+            assert!(second.1 > 1);
+            assert_eq!(world.resource::<PendingNavSnapshots>().0.len(), 1);
+            assert_eq!(
+                world
+                    .resource::<PendingNavSnapshots>()
+                    .0
+                    .values()
+                    .next()
+                    .unwrap()
+                    .request_id,
+                request_id
+            );
+        }
+
+        #[test]
+        fn agent_browser_navigate_does_not_raise_new_stack_during_user_interaction() {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins);
+            add_consumer_systems(&mut app);
+            app.insert_resource(FocusedStack::default())
+                .insert_resource(test_settings())
+                .init_resource::<Assets<Mesh>>()
+                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+
+            let pane = app.world_mut().spawn(Pane).id();
+            let first_stack = app
+                .world_mut()
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt(10),
+                    ChildOf(pane),
+                ))
+                .id();
+            app.world_mut().spawn((Browser, ChildOf(first_stack)));
+            app.insert_resource(RecentBrowserInteraction {
+                stack: Some(first_stack),
+                at: Some(std::time::Instant::now()),
+            });
+            app.world_mut()
+                .resource_mut::<Messages<vmux_layout::BrowserNavigateRequest>>()
+                .write(vmux_layout::BrowserNavigateRequest {
+                    url: "https://second.example".into(),
+                    pane: Some(pane.to_bits().to_string()),
+                    request_id: None,
+                    new_stack: true,
+                    profile: Some("agent-1".into()),
+                });
+
+            app.update();
+            app.update();
+
+            let world = app.world_mut();
+            let mut stacks = world.query_filtered::<
+                (&PageMetadata, &LastActivatedAt),
+                With<vmux_layout::stack::Stack>,
+            >();
+            let activated = stacks
+                .iter(world)
+                .find(|(metadata, _)| metadata.url == "https://second.example")
+                .map(|(_, activated)| activated.0)
+                .expect("new browser stack");
+            assert_eq!(activated, 0);
+        }
+
+        #[test]
         fn browser_navigate_targets_specific_pane_when_id_provided() {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
@@ -6847,11 +7118,12 @@ mod tests {
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
+            let request_id = AgentRequestId::new();
 
             app.world_mut()
                 .resource_mut::<Messages<AgentCommandRequest>>()
                 .write(AgentCommandRequest {
-                    request_id: AgentRequestId::new(),
+                    request_id,
                     origin: vmux_service::agent_events::CommandOrigin::User,
                     command: ServiceAgentCommand::BrowserNavigate {
                         url: "vmux://terminal/".to_string(),
@@ -6867,6 +7139,14 @@ mod tests {
             assert!(
                 terminal_count >= 1,
                 "terminal should be spawned in focused pane"
+            );
+            assert!(
+                world
+                    .resource::<PendingNavSnapshots>()
+                    .0
+                    .values()
+                    .any(|pending| pending.request_id == request_id.0),
+                "terminal navigation should wait for its snapshot"
             );
         }
 

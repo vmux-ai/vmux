@@ -1018,6 +1018,7 @@ fn command_bar_open_payload(
     pages: Vec<CommandBarPage>,
     work_dirs: Vec<vmux_command::event::CommandBarWorkDir>,
     recent_files: Vec<vmux_command::event::CommandBarRecentFile>,
+    search_engines: Vec<SearchEngine>,
 ) -> CommandBarOpenEvent {
     CommandBarOpenEvent {
         open_id,
@@ -1030,6 +1031,8 @@ fn command_bar_open_payload(
         pages,
         work_dirs,
         recent_files,
+        search_engines,
+        prompt_context: default(),
         target,
         space_switch: false,
     }
@@ -1189,6 +1192,7 @@ pub(crate) fn build_command_bar_open_payload(
         pages,
         work_snapshot.work_dirs.clone(),
         work_snapshot.recent_files.clone(),
+        work_snapshot.search_engines.clone(),
     )
 }
 
@@ -2526,6 +2530,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         );
 
         assert_eq!(payload.space_name, "Work");
@@ -2551,6 +2556,7 @@ mod tests {
             Vec::new(),
             Vec::new(),
             None,
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),

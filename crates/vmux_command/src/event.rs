@@ -31,6 +31,37 @@ pub enum SearchEngine {
 }
 
 impl SearchEngine {
+    pub const ALL: [Self; 5] = [
+        Self::Google,
+        Self::Bing,
+        Self::DuckDuckGo,
+        Self::Brave,
+        Self::Kagi,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Google => "Google",
+            Self::Bing => "Bing",
+            Self::DuckDuckGo => "DuckDuckGo",
+            Self::Brave => "Brave Search",
+            Self::Kagi => "Kagi",
+        }
+    }
+
+    pub fn from_url(url: &str) -> Option<Self> {
+        let parsed = url::Url::parse(url).ok()?;
+        let host = parsed.host_str()?.trim_start_matches("www.");
+        match host {
+            "google.com" => Some(Self::Google),
+            "bing.com" => Some(Self::Bing),
+            "duckduckgo.com" => Some(Self::DuckDuckGo),
+            "search.brave.com" => Some(Self::Brave),
+            "kagi.com" => Some(Self::Kagi),
+            _ => None,
+        }
+    }
+
     /// Build a search result URL for `query`.
     pub fn search_url(self, query: &str) -> String {
         let query: String = url::form_urlencoded::byte_serialize(query.trim().as_bytes()).collect();
@@ -72,9 +103,36 @@ pub struct CommandBarOpenEvent {
     pub work_dirs: Vec<CommandBarWorkDir>,
     #[serde(default)]
     pub recent_files: Vec<CommandBarRecentFile>,
+    #[serde(default)]
+    pub search_engines: Vec<SearchEngine>,
+    #[serde(default)]
+    pub prompt_context: CommandBarPromptContext,
     pub target: Option<crate::open_target::OpenTarget>,
     #[serde(default)]
     pub space_switch: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarPromptContext {
+    pub cwd: String,
+    pub workspace_name: String,
+    pub is_git_repo: bool,
+    pub is_worktree: bool,
+    pub branch: String,
+    pub base_ref: String,
+    pub uncommitted: u32,
+    pub ahead: u32,
 }
 
 #[derive(
