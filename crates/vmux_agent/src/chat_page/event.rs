@@ -297,8 +297,9 @@ pub struct ResumableSessionEntry {
     pub sid: String,
     pub cwd: String,
     pub title: String,
-    /// Native-formatted "2h ago · proj".
+    /// Directory basename shown beside the localized last-modified age.
     pub subtitle: String,
+    pub age_seconds: u64,
     /// Human-readable active ACP agent name.
     pub agent_name: String,
     pub cross_runtime: bool,
@@ -637,27 +638,27 @@ pub(crate) fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)>
 
 /// The curated verbs the running-turn header cycles through (owned by the shared contract, not
 /// the view). The page picks one at random every few seconds while streaming.
-pub const WORKING_VERBS: &[&str] = &[
-    "Working",
-    "Thinking",
-    "Pondering",
-    "Noodling",
-    "Percolating",
-    "Conjuring",
-    "Cooking",
-    "Brewing",
-    "Musing",
-    "Ruminating",
-    "Scheming",
-    "Synthesizing",
-    "Tinkering",
-    "Churning",
-    "Vibing",
-    "Simmering",
-    "Crafting",
-    "Divining",
-    "Mulling",
-    "Spelunking",
+pub const WORKING_VERB_IDS: &[&str] = &[
+    "agent-working-working",
+    "agent-working-thinking",
+    "agent-working-pondering",
+    "agent-working-noodling",
+    "agent-working-percolating",
+    "agent-working-conjuring",
+    "agent-working-cooking",
+    "agent-working-brewing",
+    "agent-working-musing",
+    "agent-working-ruminating",
+    "agent-working-scheming",
+    "agent-working-synthesizing",
+    "agent-working-tinkering",
+    "agent-working-churning",
+    "agent-working-vibing",
+    "agent-working-simmering",
+    "agent-working-crafting",
+    "agent-working-divining",
+    "agent-working-mulling",
+    "agent-working-spelunking",
 ];
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -812,7 +813,7 @@ mod tests {
 
     #[test]
     fn working_verbs_nonempty() {
-        assert!(!WORKING_VERBS.is_empty());
+        assert!(!WORKING_VERB_IDS.is_empty());
     }
 
     #[test]
@@ -966,7 +967,8 @@ mod tests {
                 sid: "sid-9".into(),
                 cwd: "/w".into(),
                 title: "fix bug".into(),
-                subtitle: "2h ago · w".into(),
+                subtitle: "w".into(),
+                age_seconds: 7200,
                 agent_name: "Claude".into(),
                 cross_runtime: true,
             }],

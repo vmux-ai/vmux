@@ -1,0 +1,602 @@
+locale-name = тоҷикӣ
+common-open = Кушодан
+common-close = Пӯшидан
+common-install = Насб кардан
+common-uninstall = Ҳазф кардан
+common-update = Навсозӣ
+common-retry = Такрор кардан
+common-refresh = Нав кардан
+common-remove = Нест кардан
+common-enable = Фаъол кардан
+common-disable = Ғайрифаъол кардан
+common-new = Нав
+common-active = фаъол
+common-running = иҷро шуда истодааст
+common-done = анҷом ёфт
+common-failed = Ноком шуд
+common-installed = Насб шудааст
+common-items = { $count ->
+    [one] { $count } адад
+   *[other] { $count } адад
+}
+start-title = Оғоз
+start-tagline = Як prompt. Ҳар кор — анҷом.
+
+agents-title = Агентҳо
+agents-search = Ҷустуҷӯи агентҳои ACP ва CLI…
+agents-empty = Агенти мувофиқ ёфт нашуд
+agents-empty-detail = Ном, муҳити иҷро ё ACP/CLI-ро санҷед.
+agents-install-failed = Насб ноком шуд
+agents-updating = Навсозӣ мешавад…
+agents-retrying = Такрор мешавад…
+agents-preparing = Омода мешавад…
+
+extensions-title = Васеъкуниҳо
+extensions-search = Ҷустуҷӯ дар насбшудаҳо ё Chrome Web Store…
+extensions-relaunch = Барои татбиқ дубора оғоз кунед
+extensions-empty = Васеъкунӣ насб нашудааст
+extensions-no-match = Васеъкунии мувофиқ ёфт нашуд
+extensions-empty-detail = Дар боло Chrome Web Store-ро ҷустуҷӯ кунед ва Return-ро пахш кунед.
+extensions-no-match-detail = Ном ё ID-и васеъкунии дигарро санҷед.
+extensions-on = Фаъол
+extensions-off = Хомӯш
+extensions-enable-confirm = { $name }-ро фаъол мекунед?
+extensions-enable-permissions = { $name }-ро фаъол карда, иҷозат диҳед:
+
+lsp-title = Серверҳои забон
+lsp-search = Ҷустуҷӯи серверҳои забон, линтерҳо, форматтерҳо…
+lsp-loading = Каталог бор мешавад…
+lsp-empty = Сервери забони мувофиқ ёфт нашуд
+lsp-empty-detail = Забон, линтер ё форматтери дигарро санҷед.
+lsp-needs = ба { $tool } ниёз дорад
+lsp-status-available = Дастрас
+lsp-status-on-path = Дар PATH
+lsp-status-installing = Насб мешавад…
+lsp-status-installed = Насб шудааст
+lsp-status-outdated = Навсозӣ дастрас аст
+lsp-status-running = Иҷро мешавад
+lsp-status-failed = Ноком шуд
+
+spaces-title = Фазоҳо
+spaces-new-placeholder = Номи фазои нав
+spaces-empty = Фазо нест
+spaces-default-name = Фазо { $number }
+spaces-tabs = { $count ->
+    [one] 1 варақа
+   *[other] { $count } варақа
+}
+spaces-delete = Нест кардани фазо
+
+team-title = Даста
+team-just-you = Дар ин фазо танҳо шумо ҳастед
+team-agents = { $count ->
+    [one] Шумо ва 1 агент
+   *[other] Шумо ва { $count } агент
+}
+team-empty = Ҳоло касе ин ҷо нест
+team-you = Шумо
+team-agent = Агент
+
+services-title = Хидматҳои пасзамина
+services-processes = { $count ->
+    [one] 1 раванд
+   *[other] { $count } раванд
+}
+services-kill-all = Ҳамаро қатъ кардан
+services-not-running = Хидмат иҷро намешавад
+services-start-with = Оғоз бо:
+services-empty = Раванди фаъол нест
+services-filter = Филтр кардани равандҳо…
+services-no-match = Раванди мувофиқ ёфт нашуд
+services-connected = Пайваст
+services-disconnected = Қатъ
+services-attached = пайвастшуда
+services-kill = Маҷбуран қатъ кардан
+services-memory = Хотира
+services-size = Андоза
+services-shell = Shell
+
+error-title = Хато
+
+history-search = Ҷустуҷӯи таърих
+history-clear-all = Ҳамаро пок кардан
+history-clear-confirm = Тамоми таърих пок карда шавад?
+history-clear-warning = Ин амалро баргардондан намешавад.
+history-cancel = Бекор кардан
+history-today = Имрӯз
+history-yesterday = Дирӯз
+history-days-ago = { $count } рӯз пеш
+history-day-offset = Рӯз -{ $count }
+
+settings-title = Танзимот
+settings-loading = Танзимот бор мешавад…
+settings-stored = Дар ~/.vmux/settings.ron нигоҳ дошта мешавад
+settings-other = Дигар
+settings-software-update = Навсозии нармафзор
+settings-check-updates = Санҷиши навсозиҳо
+settings-check-updates-hint = Ҳангоми оғоз ва ҳар соат, агар навсозии худкор фаъол бошад, худкор месанҷад.
+settings-update-unavailable = Дастнорас
+settings-update-unavailable-hint = Навсозанда ба ин сохт дохил нашудааст.
+settings-update-checking = Санҷида мешавад…
+settings-update-checking-hint = Навсозиҳо санҷида мешаванд…
+settings-update-check-again = Боз санҷидан
+settings-update-current = Vmux нав аст.
+settings-update-downloading = Боргирӣ мешавад…
+settings-update-downloading-hint = Vmux { $version } боргирӣ мешавад…
+settings-update-installing = Насб мешавад…
+settings-update-installing-hint = Vmux { $version } насб мешавад…
+settings-update-ready = Навсозӣ омода аст
+settings-update-ready-hint = Vmux { $version } омода аст. Барои татбиқ аз нав оғоз кунед.
+settings-update-try-again = Боз кӯшиш кунед
+settings-update-failed = Навсозиҳоро санҷида нашуд.
+settings-item = Банд
+settings-item-number = Банд { $number }
+settings-press-key = Тугмаро пахш кунед…
+settings-saved = Сабт шуд
+settings-record-key = Барои сабти комбинатсияи нави тугмаҳо клик кунед
+
+tray-open-window = Кушодани равзана
+tray-close-window = Пӯшидани равзана
+tray-pause-recording = Таваққуфи сабт
+tray-resume-recording = Идома додани сабт
+tray-finish-recording = Анҷоми сабт
+tray-quit = Баромадан аз Vmux
+
+composer-attach-files = Замима кардани файлҳо (/upload)
+composer-remove-attachment = Нест кардани замима
+
+layout-back = Бозгашт
+layout-forward = Ба пеш
+layout-reload = Аз нав бор кардан
+layout-bookmark-page = Ин саҳифаро ба хатчӯбҳо илова кунед
+layout-remove-bookmark = Нест кардани хатчӯб
+layout-pin-page = Ин саҳифаро маҳкам кардан
+layout-unpin-page = Аз маҳкам хориҷ кардан
+layout-manage-extensions = Идораи васеъкуниҳо
+layout-new-stack = Стэки нав
+layout-close-tab = Пӯшидани варақа
+layout-bookmark = Хатчӯб
+layout-pin = Маҳкам кардан
+layout-new-tab = Варақаи нав
+layout-team = Даста
+
+command-switch-space = Гузаштан ба фазо…
+command-search-ask = Ҷустуҷӯ ё пурсиш…
+command-new-tab-placeholder = Ҷустуҷӯ кунед, URL нависед ё Terminal-ро интихоб кунед…
+command-placeholder = URL нависед, варақаҳоро ҷустуҷӯ кунед ё барои фармонҳо > нависед…
+command-composer-placeholder = Барои фармонҳо / ё барои медиа @ нависед
+command-send = Фиристодан (Enter)
+command-terminal = Terminal
+command-open-terminal = Дар Terminal кушодан
+command-stack = Стэк
+command-tabs = { $count ->
+    [one] 1 варақа
+   *[other] { $count } варақа
+}
+command-prompt = Prompt
+command-new-tab = Варақаи нав
+command-search = Ҷустуҷӯ
+command-open-value = Кушодани “{ $value }”
+command-search-value = Ҷустуҷӯи “{ $value }”
+
+schema-appearance = Намуд
+schema-general = Умумӣ
+schema-layout = Ҷойгиршавӣ
+schema-layout-detail = Равзана, панелҳо, панели паҳлӯӣ ва ҳалқаи фокус.
+schema-agent = Агент
+schema-agent-detail = Рафтори агент ва иҷозатҳои абзорҳо.
+schema-shortcuts = Миёнабурҳо
+schema-shortcuts-detail = Намоиши танҳо-хондан. Барои тағйири бастҳо settings.ron-ро мустақим таҳрир кунед.
+schema-terminal = Terminal
+schema-browser = Браузер
+schema-mode = Реҷа
+schema-mode-detail = Нақшаи ранг барои саҳифаҳои веб. Device танзими системаро пайравӣ мекунад.
+schema-device = Device
+schema-light = Равшан
+schema-dark = Торик
+schema-language = Забон
+schema-language-detail = Аз системаи худ, en-US, ja ё ҳар теги BCP 47 бо каталоги мувофиқи ~/.vmux/locales/<tag>.ftl истифода баред.
+schema-auto-update = Навсозии худкор
+schema-auto-update-detail = Ҳангоми оғоз ва ҳар соат навсозиҳоро санҷида, насб мекунад.
+schema-startup-url = URL-и оғоз
+schema-startup-url-detail = Агар холӣ бошад, сатри фармон бо prompt кушода мешавад.
+schema-search-engine = Муҳаррики ҷустуҷӯ
+schema-search-engine-detail = Барои ҷустуҷӯҳои веб аз Оғоз ва сатри фармон истифода мешавад.
+schema-window = Равзана
+schema-pane = Панел
+schema-side-sheet = Лавҳаи паҳлӯӣ
+schema-focus-ring = Ҳалқаи фокус
+schema-run-placement = Иҷозати тағйири ҷойгиркунии иҷро
+schema-run-placement-detail = Ба агентҳо иҷозат диҳед, ки реҷаи панели иҷро, самт ва такягоҳро интихоб кунанд.
+schema-leader = Пешво
+schema-leader-detail = Тугмаи пешоянд барои миёнабурҳои пайдарпай.
+schema-chord-timeout = Мӯҳлати миёнабури пайдарпай
+schema-chord-timeout-detail = Миллисонияҳо то анҷоми эътибори пешоянди миёнабур.
+schema-bindings = Бастҳо
+schema-confirm-close = Тасдиқи пӯшидан
+schema-confirm-close-detail = Пеш аз пӯшидани Terminal бо раванди иҷрошаванда пурсад.
+schema-default-theme = Мавзӯи пешфарз
+schema-default-theme-detail = Номи мавзӯи фаъол аз рӯйхати мавзӯъҳо.
+
+settings-empty = (холӣ)
+settings-none = (нест)
+
+schema-system = Система
+schema-editor = Муҳаррир
+schema-recording = Сабт
+schema-radius = Радиус
+schema-padding = Фосилаи дохилӣ
+schema-gap = Фосила
+schema-width = Паҳно
+schema-color = Ранг
+schema-red = Сурх
+schema-green = Сабз
+schema-blue = Кабуд
+schema-follow-files = Пайгирии файлҳо
+schema-tidy-files = Мураттабсозии файлҳо
+schema-tidy-files-max = Ҳадди мураттабсозии файлҳо
+schema-tidy-files-auto = Мураттабсозии худкори файлҳо
+schema-app-providers = Таъминкунандагони барномаҳо
+schema-provider = Таъминкунанда
+schema-kind = Навъ
+schema-models = Моделҳо
+schema-acp = Агентҳои ACP
+schema-id = ID
+schema-name = Ном
+schema-command = Фармон
+schema-arguments = Аргументҳо
+schema-environment = Муҳит
+schema-working-directory = Директорияи корӣ
+schema-shell = Қишри фармонӣ
+schema-font-family = Хонаводаи ҳуруф
+schema-startup-directory = Директорияи оғоз
+schema-themes = Мавзӯъҳо
+schema-color-scheme = Нақшаи рангҳо
+schema-font-size = Андозаи ҳуруф
+schema-line-height = Баландии сатр
+schema-cursor-style = Услуби курсор
+schema-cursor-blink = Мижа задани курсор
+schema-custom-themes = Мавзӯъҳои фармоишӣ
+schema-foreground = Пешнамо
+schema-background = Паснамо
+schema-cursor = Курсор
+schema-ansi-colors = Рангҳои ANSI
+schema-keymap = Харитаи тугмаҳо
+schema-explorer = Паймоишгар
+schema-visible = Намоён
+schema-language-servers = Серверҳои забон
+schema-servers = Серверҳо
+schema-language-id = ID-и забон
+schema-root-markers = Нишонгарҳои реша
+schema-output-directory = Директорияи баромад
+
+menu-scene = Саҳна
+menu-layout = Тарҳ
+menu-terminal = Терминал
+menu-browser = Браузер
+menu-service = Хидмат
+menu-bookmark = Хатчӯб
+menu-edit = Таҳрир
+
+layout-knowledge = Дониш
+layout-open-knowledge = Кушодани Дониш
+layout-open-welcome-knowledge = Кушодани «Хуш омадед ба Дониш»
+layout-open-path = Кушодани { $path }
+layout-fold-knowledge = Ҷамъ кардани Дониш
+layout-unfold-knowledge = Боз кардани Дониш
+layout-bookmarks = Хатчӯбҳо
+layout-new-folder = Ҷузвдони нав
+layout-add-to-bookmarks = Илова ба хатчӯбҳо
+layout-move-to-bookmarks = Гузарондан ба хатчӯбҳо
+layout-stack-number = Стек { $number }
+layout-fold-stack = Ҷамъ кардани стек
+layout-unfold-stack = Боз кардани стек
+layout-close-stack = Пӯшидани стек
+layout-bookmark-in = Хатчӯб дар { $folder }
+
+common-cancel = Бекор
+common-delete = Нест кардан
+common-save = Захира кардан
+common-rename = Ном иваз кардан
+common-expand = Кушодан
+common-collapse = Пӯшондан
+common-loading = Бор шуда истодааст…
+common-error = Хато
+common-output = Натиҷа
+common-pending = Интизор
+common-current = ҷорӣ
+common-stop = Қатъ
+services-command = Хидмати Vmux
+services-uptime-seconds = { $seconds }с
+services-uptime-minutes = { $minutes }д { $seconds }с
+services-uptime-hours = { $hours }с { $minutes }д
+services-uptime-days = { $days }р { $hours }с
+
+error-page-failed-load = Саҳифа бор нашуд
+error-page-not-found = Саҳифа ёфт нашуд
+error-unknown-host = Мизбони номаълуми барномаи Vmux: { $host }
+
+history-title = Таърих
+
+command-new-app-chat = Чати нави { $provider }/{ $model } (Барнома)
+command-interactive-mode-user = Саҳна > Реҷаи интерактивӣ > Корбар
+command-interactive-mode-player = Саҳна > Реҷаи интерактивӣ > Плеер
+command-minimize-window = Тарҳ > Равзана > Пинҳон кардан
+command-toggle-layout = Тарҳ > Тарҳ > Иваз кардани тарҳ
+command-close-tab = Тарҳ > Варақа > Пӯшидани варақа
+command-new-task = Тарҳ > Варақа > Вазифаи нав…
+command-next-tab = Тарҳ > Варақа > Варақаи навбатӣ
+command-prev-tab = Тарҳ > Варақа > Варақаи қаблӣ
+command-rename-tab = Тарҳ > Варақа > Ном иваз кардани варақа
+command-tab-select-1 = Тарҳ > Варақа > Интихоби варақаи 1
+command-tab-select-2 = Тарҳ > Варақа > Интихоби варақаи 2
+command-tab-select-3 = Тарҳ > Варақа > Интихоби варақаи 3
+command-tab-select-4 = Тарҳ > Варақа > Интихоби варақаи 4
+command-tab-select-5 = Тарҳ > Варақа > Интихоби варақаи 5
+command-tab-select-6 = Тарҳ > Варақа > Интихоби варақаи 6
+command-tab-select-7 = Тарҳ > Варақа > Интихоби варақаи 7
+command-tab-select-8 = Тарҳ > Варақа > Интихоби варақаи 8
+command-tab-select-last = Тарҳ > Варақа > Интихоби варақаи охирин
+command-close-pane = Тарҳ > Панел > Пӯшидани панел
+command-select-pane-left = Тарҳ > Панел > Интихоби панели чап
+command-select-pane-right = Тарҳ > Панел > Интихоби панели рост
+command-select-pane-up = Тарҳ > Панел > Интихоби панели боло
+command-select-pane-down = Тарҳ > Панел > Интихоби панели поён
+command-swap-pane-prev = Тарҳ > Панел > Ҷойивазкунӣ бо панели қаблӣ
+command-swap-pane-next = Тарҳ > Панел > Ҷойивазкунӣ бо панели навбатӣ
+command-equalize-pane-size = Тарҳ > Панел > Баробар кардани андозаи панелҳо
+command-resize-pane-left = Тарҳ > Панел > Тағйири андоза ба чап
+command-resize-pane-right = Тарҳ > Панел > Тағйири андоза ба рост
+command-resize-pane-up = Тарҳ > Панел > Тағйири андоза ба боло
+command-resize-pane-down = Тарҳ > Панел > Тағйири андоза ба поён
+command-stack-close = Тарҳ > Стек > Пӯшидани стек
+command-stack-next = Тарҳ > Стек > Стеки навбатӣ
+command-stack-previous = Тарҳ > Стек > Стеки қаблӣ
+command-stack-reopen = Тарҳ > Стек > Боз кардани саҳифаи пӯшида
+command-stack-swap-prev = Тарҳ > Стек > Ба чап бурдани стек
+command-stack-swap-next = Тарҳ > Стек > Ба рост бурдани стек
+command-space-open = Тарҳ > Фазо > Фазоҳо
+command-terminal-close = Терминал > Пӯшидани терминал
+command-terminal-next = Терминал > Терминали навбатӣ
+command-terminal-prev = Терминал > Терминали қаблӣ
+command-terminal-clear = Терминал > Тоза кардани терминал
+command-browser-prev-page = Браузер > Паймоиш > Қафо
+command-browser-next-page = Браузер > Паймоиш > Пеш
+command-browser-reload = Браузер > Паймоиш > Аз нав бор кардан
+command-browser-hard-reload = Браузер > Паймоиш > Боркунии маҷбурӣ
+command-open-in-place = Браузер > Кушодан > Ҳамин ҷо кушодан
+command-open-in-new-stack = Браузер > Кушодан > Дар стеки нав кушодан
+command-open-in-pane-top = Браузер > Кушодан > Дар панели боло кушодан
+command-open-in-pane-right = Браузер > Кушодан > Дар панели рост кушодан
+command-open-in-pane-bottom = Браузер > Кушодан > Дар панели поён кушодан
+command-open-in-pane-left = Браузер > Кушодан > Дар панели чап кушодан
+command-open-in-new-tab = Браузер > Кушодан > Дар варақаи нав кушодан
+command-open-in-new-space = Браузер > Кушодан > Дар фазои нав кушодан
+command-browser-zoom-in = Браузер > Намоиш > Калон кардан
+command-browser-zoom-out = Браузер > Намоиш > Хурд кардан
+command-browser-zoom-reset = Браузер > Намоиш > Андозаи воқеӣ
+command-browser-dev-tools = Браузер > Намоиш > Абзорҳои таҳиягар
+command-browser-open-command-bar = Браузер > Сатр > Сатри фармонҳо
+command-browser-open-page-in-command-bar = Браузер > Сатр > Таҳрири саҳифа
+command-browser-open-path-bar = Браузер > Сатр > Паймоишгари масир
+command-browser-open-commands = Браузер > Сатр > Фармонҳо
+command-browser-open-history = Браузер > Сатр > Таърих
+command-service-open = Хидмат > Кушодани назоратгари хидматҳо
+command-bookmark-toggle-active = Замима > Замима кардани саҳифа
+command-bookmark-pin-active = Замима > Пайваст кардани саҳифа
+
+layout-tab = Варақа
+layout-no-stacks = Стек нест
+layout-loading = Бор шуда истодааст…
+layout-no-markdown-files = Файли Markdown нест
+layout-empty-folder = Ҷузвдони холӣ
+layout-worktree = дарахти корӣ
+layout-folder-name = Номи ҷузвдон
+layout-no-pins-bookmarks = Пин ё замима нест
+layout-move-to = Ба { $folder } бурдан
+layout-bookmark-current-page = Замима кардани саҳифаи ҷорӣ
+layout-rename-folder = Ном иваз кардани ҷузвдон
+layout-remove-folder = Хориҷ кардани ҷузвдон
+layout-update-downloading = Навсозӣ боргирӣ мешавад
+layout-update-installing = Навсозӣ насб мешавад…
+layout-update-ready = Версияи нав дастрас аст
+layout-restart-update = Барои навсозӣ бозоғозӣ кунед
+
+agent-preparing = Агент омода мешавад…
+agent-send-all-queued = Ҳамаи дархостҳои навбатро ҳозир фиристодан (Esc)
+agent-send = Фиристодан (Enter)
+agent-ready = Вақте омодаед.
+agent-loading-older = Паёмҳои кӯҳнатар бор мешаванд…
+agent-load-older = Бор кардани паёмҳои кӯҳнатар
+agent-continued-from = Идома аз { $source }
+agent-older-context-omitted = контексти кӯҳнатар партофта шуд
+agent-interrupted = қатъ шуд
+agent-allow-tool = Ба { $tool } иҷозат диҳед?
+agent-deny = Рад кардан
+agent-allow-always = Ҳамеша иҷозат додан
+agent-allow = Иҷозат додан
+agent-loading-sessions = Сессияҳо бор мешаванд…
+agent-no-resumable-sessions = Сессияи идомадодашаванда ёфт нашуд
+agent-no-matching-sessions = Сессияи мувофиқ нест
+agent-no-matching-models = Модели мувофиқ нест
+agent-choice-help = ↑/↓ ё Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Ҷузвдони репозиториро интихоб кунед
+agent-choose-repository-detail = Репозитории маҳаллии Git-ро, ки агент бояд истифода барад, интихоб кунед.
+agent-choosing = Интихоб мешавад…
+agent-choose-folder = Ҷузвдон интихоб кунед
+agent-queued = дар навбат
+agent-attached = Замима шуд:
+agent-cancel-queued = Бекор кардани дархости навбатӣ
+agent-resume-queued = Идома додани дархостҳои навбат
+agent-clear-queue = Тоза кардани навбат
+agent-send-all-now = ҳамаро ҳозир фиристодан
+agent-choose-option = Аз боло як интихобро интихоб кунед
+agent-loading-media = Медиа бор мешавад…
+agent-no-matching-media = Медияи мувофиқ нест
+agent-prompt-context = Контексти дархост
+agent-details = Тафсилот
+agent-path = Масир
+agent-tool = Абзор
+agent-server = Сервер
+agent-bytes = { $count } байт
+agent-worked-for = { $duration } кор кард
+agent-worked-for-steps = { $count ->
+    [one] { $duration } кор кард · 1 қадам
+   *[other] { $duration } кор кард · { $count } қадам
+}
+agent-tool-guardian-review = Баррасии Guardian
+agent-tool-read-files = Файлҳоро хонд
+agent-tool-viewed-image = Тасвирро дид
+agent-tool-used-browser = Браузерро истифода бурд
+agent-tool-searched-files = Файлҳоро ҷустуҷӯ кард
+agent-tool-ran-commands = Фармонҳоро иҷро кард
+agent-thinking = Фикр мекунад
+agent-subagent = Зерагент
+agent-prompt = Дархост
+agent-thread = Ришта
+agent-parent = Волидайн
+agent-children = Фарзандҳо
+agent-call = Даъват
+agent-raw-event = Рӯйдоди хом
+agent-plan = Нақша
+agent-tasks = { $count ->
+    [one] 1 вазифа
+   *[other] { $count } вазифа
+}
+agent-edited = Таҳрир шуд
+agent-reconnecting = Пайвастшавии дубора { $attempt }/{ $total }
+agent-status-running = Иҷро мешавад
+agent-status-done = Анҷом шуд
+agent-status-failed = Ноком шуд
+agent-status-pending = Интизор
+agent-slash-attach-files = Замима кардани файлҳо
+agent-slash-resume-session = Идома додани сессияи пешина
+agent-slash-select-model = Интихоби модел
+agent-slash-continue-cli = Идома додани ин сессия дар CLI
+agent-session-just-now = ҳозиракак
+agent-session-minutes-ago = { $count }д пеш
+agent-session-hours-ago = { $count }с пеш
+agent-session-days-ago = { $count }р пеш
+agent-working-working = Кор мекунад
+agent-working-thinking = Фикр мекунад
+agent-working-pondering = Андеша мекунад
+agent-working-noodling = Чора меҷӯяд
+agent-working-percolating = Пухта мерасонад
+agent-working-conjuring = Ба вуҷуд меорад
+agent-working-cooking = Омода мекунад
+agent-working-brewing = Мепазонад
+agent-working-musing = Тааммул мекунад
+agent-working-ruminating = Меандешад
+agent-working-scheming = Нақша мекашад
+agent-working-synthesizing = Ҷамъбаст мекунад
+agent-working-tinkering = Дасткорӣ мекунад
+agent-working-churning = Коркард мекунад
+agent-working-vibing = Бо ҷараён меравад
+agent-working-simmering = Оҳиста мепазонад
+agent-working-crafting = Месозад
+agent-working-divining = Кашф мекунад
+agent-working-mulling = Баррасӣ мекунад
+agent-working-spelunking = Чуқур мекобад
+
+editor-toggle-explorer = Намоиш/пинҳони Explorer (Cmd+B)
+editor-unsaved = захиранашуда
+editor-rendered-markdown = Markdown-и намоишшуда бо таҳрири зинда
+editor-note = Ёддошт
+editor-source-editor = Муҳаррири манбаъ
+editor-editor = Муҳаррир
+editor-git-diff = Фарқи Git
+editor-diff = Фарқ
+editor-tidy = Тозакунӣ
+editor-always = Ҳамеша
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 пешнамоиши бетағйир
+   *[other] ✦ { $count } пешнамоиши бетағйир
+}
+editor-open-externally = Берунӣ кушодан
+editor-changed-line = Сатри тағйирёфта
+editor-go-to-definition = Ба таъриф гузаштан
+editor-find-references = Ёфтани истинодҳо
+editor-references = { $count ->
+    [one] 1 истинод
+   *[other] { $count } истинод
+}
+editor-lsp-starting = { $server } оғоз мешавад…
+editor-lsp-not-installed = { $server } — насб нашудааст
+editor-explorer = Explorer
+editor-open-editors = Муҳаррирҳои кушода
+editor-outline = Сохтор
+editor-new-file = Файли нав
+editor-new-folder = Ҷузвдони нав
+editor-delete-confirm = “{ $name }”-ро нест кунед? Ин амалро бозгардонда намешавад.
+editor-created-folder = Ҷузвдони { $name } сохта шуд
+editor-created-file = Файли { $name } сохта шуд
+editor-renamed-to = Ном ба { $name } иваз шуд
+editor-deleted = { $name } нест шуд
+editor-failed-decode-image = Рамзкушоии тасвир ноком шуд
+editor-preview-large-image = тасвир (барои пешнамоиш хеле калон)
+editor-preview-binary = бинарӣ
+editor-preview-file = файл
+
+git-status-clean = тоза
+git-status-modified = тағйирёфта
+git-status-staged = омодашуда
+git-status-staged-modified = омодашуда*
+git-status-untracked = пайгиринашуда
+git-status-deleted = нестшуда
+git-status-conflict = ихтилоф
+git-accept-all = ✓ ҳамаро қабул кардан
+git-unstage = Аз омодагӣ баровардан
+git-confirm-deny-all = Тасдиқи рад кардани ҳама
+git-deny-all = ✗ ҳамаро рад кардан
+git-commit-message = паёми commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Фарқ бор мешавад…
+git-no-changes = Тағйироте барои намоиш нест
+git-accept = ✓ қабул кардан
+git-deny = ✗ рад кардан
+git-show-unchanged-lines = Намоиши { $count } сатри бетағйир
+
+terminal-loading = Бор шуда истодааст…
+terminal-runs-when-ready = вақте омода шуд, иҷро мешавад · Ctrl+C тоза мекунад · Esc мегузаронад
+terminal-booting = оғоз мешавад
+terminal-type-command = фармон нависед · вақте омода шуд, иҷро мешавад · Esc мегузаронад
+
+setup-tagline-claude = Агенти коднависии Anthropic, дар Vmux
+setup-tagline-codex = Агенти коднависии OpenAI, дар Vmux
+setup-tagline-vibe = Агенти коднависии Mistral, дар Vmux
+setup-install-title = Насби CLI-и { $name }
+setup-homebrew-required = Барои насби { $command } Homebrew лозим аст ва ҳоло танзим нашудааст. Vmux аввал Homebrew-ро насб мекунад, баъд { $name }-ро.
+setup-terminal-instructions = Дар терминал барои оғоз Return-ро пахш кунед, баъд ҳангоми дархост пароли Mac-и худро ворид кунед.
+setup-command-missing = Vmux ин саҳифаро кушод, зеро фармони маҳаллии { $command } ҳоло насб нашудааст. Барои гирифтани он фармони зеринро иҷро кунед.
+setup-install-failed = Насб ба анҷом нарасид. Барои тафсилот терминалро бинед, баъд дубора кӯшиш кунед.
+setup-installing = Насб мешавад…
+setup-install-homebrew = Насби Homebrew + { $name }
+setup-run-install = Иҷрои фармони насб
+setup-auto-reload = Vmux онро дар терминал иҷро мекунад ва вақте { $command } омода шуд, аз нав бор мекунад.
+
+debug-title = Ислоҳи хато
+debug-auto-update = Навсозии худкор
+debug-simulate-update = Шабеҳсозии дастрасии навсозӣ
+debug-simulate-download = Шабеҳсозии боргирӣ
+debug-clear-update = Тоза кардани навсозӣ
+debug-trigger-restart = Оғози бозоғозӣ
+
+command-manage-spaces = Идоракунии фазоҳо…
+command-pane-stack-location = панел { $pane } / стек { $stack }
+command-space-pane-stack-location = { $space } / панел { $pane } / стек { $stack }
+command-terminal-path = Терминал ({ $path })
+command-group-interactive-mode = Реҷаи интерактивӣ
+command-group-window = Равзана
+command-group-tab = Варақа
+command-group-pane = Панел
+command-group-stack = Стек
+command-group-space = Фазо
+command-group-navigation = Паймоиш
+command-group-open = Кушодан
+command-group-view = Намоиш
+command-group-bar = Навор
+
+menu-close-vmux = Бастани Vmux
+
+agents-terminal-coding-agent = Агенти барноманависӣ дар терминал

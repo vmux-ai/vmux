@@ -1,0 +1,602 @@
+locale-name = Kiswahili
+common-open = Fungua
+common-close = Funga
+common-install = Sakinisha
+common-uninstall = Sanidua
+common-update = Sasisha
+common-retry = Jaribu tena
+common-refresh = Onyesha upya
+common-remove = Ondoa
+common-enable = Washa
+common-disable = Zima
+common-new = Mpya
+common-active = inatumika
+common-running = inaendeshwa
+common-done = imekamilika
+common-failed = Imeshindikana
+common-installed = Imesakinishwa
+common-items = { $count ->
+    [one] kipengee { $count }
+   *[other] vipengee { $count }
+}
+start-title = Anza
+start-tagline = Maelekezo moja. Chochote, kimekamilika.
+
+agents-title = Ajenti
+agents-search = Tafuta ajenti za ACP na CLI…
+agents-empty = Hakuna ajenti zinazolingana
+agents-empty-detail = Jaribu jina, runtime, au ACP/CLI.
+agents-install-failed = Usakinishaji umeshindikana
+agents-updating = Inasasishwa…
+agents-retrying = Inajaribu tena…
+agents-preparing = Inaandaa…
+
+extensions-title = Viendelezi
+extensions-search = Tafuta vilivyosakinishwa au Chrome Web Store…
+extensions-relaunch = Zindua upya ili itumike
+extensions-empty = Hakuna viendelezi vilivyosakinishwa
+extensions-no-match = Hakuna viendelezi vinavyolingana
+extensions-empty-detail = Tafuta Chrome Web Store hapo juu kisha ubonyeze Enter.
+extensions-no-match-detail = Jaribu jina lingine au kitambulisho cha kiendelezi.
+extensions-on = Kimewashwa
+extensions-off = Kimezimwa
+extensions-enable-confirm = Uwashe { $name }?
+extensions-enable-permissions = Washa { $name } na uruhusu:
+
+lsp-title = Seva za Lugha
+lsp-search = Tafuta seva za lugha, linter, formatter…
+lsp-loading = Inapakia katalogi…
+lsp-empty = Hakuna seva za lugha zinazolingana
+lsp-empty-detail = Jaribu lugha nyingine, linter, au formatter.
+lsp-needs = inahitaji { $tool }
+lsp-status-available = Inapatikana
+lsp-status-on-path = Iko kwenye PATH
+lsp-status-installing = Inasakinishwa…
+lsp-status-installed = Imesakinishwa
+lsp-status-outdated = Sasisho linapatikana
+lsp-status-running = Inaendeshwa
+lsp-status-failed = Imeshindikana
+
+spaces-title = Nafasi
+spaces-new-placeholder = Jina la nafasi mpya
+spaces-empty = Hakuna nafasi
+spaces-default-name = Nafasi { $number }
+spaces-tabs = { $count ->
+    [one] kichupo 1
+   *[other] vichupo { $count }
+}
+spaces-delete = Futa nafasi
+
+team-title = Timu
+team-just-you = Ni wewe tu katika nafasi hii
+team-agents = { $count ->
+    [one] Wewe na ajenti 1
+   *[other] Wewe na ajenti { $count }
+}
+team-empty = Bado hakuna mtu hapa
+team-you = Wewe
+team-agent = Ajenti
+
+services-title = Huduma za Mandharinyuma
+services-processes = { $count ->
+    [one] mchakato 1
+   *[other] michakato { $count }
+}
+services-kill-all = Lazimisha zote zisimame
+services-not-running = Huduma haiendeshwi
+services-start-with = Anza kwa:
+services-empty = Hakuna michakato inayotumika
+services-filter = Chuja michakato…
+services-no-match = Hakuna michakato inayolingana
+services-connected = Imeunganishwa
+services-disconnected = Imetenganishwa
+services-attached = imeambatishwa
+services-kill = Lazimisha kusimama
+services-memory = Kumbukumbu
+services-size = Ukubwa
+services-shell = Shell
+
+error-title = Hitilafu
+
+history-search = Tafuta kwenye historia
+history-clear-all = Futa yote
+history-clear-confirm = Ufute historia yote?
+history-clear-warning = Hili haliwezi kutenduliwa.
+history-cancel = Ghairi
+history-today = Leo
+history-yesterday = Jana
+history-days-ago = siku { $count } zilizopita
+history-day-offset = Siku -{ $count }
+
+settings-title = Mipangilio
+settings-loading = Inapakia mipangilio…
+settings-stored = Imehifadhiwa katika ~/.vmux/settings.ron
+settings-other = Nyingine
+settings-software-update = Sasisho la programu
+settings-check-updates = Kagua masasisho
+settings-check-updates-hint = Hukagua kiotomatiki inapozinduliwa na kila saa wakati Usasishaji otomatiki umewashwa.
+settings-update-unavailable = Haipatikani
+settings-update-unavailable-hint = Kisasishaji hakijajumuishwa katika toleo hili.
+settings-update-checking = Inakagua…
+settings-update-checking-hint = Inakagua masasisho…
+settings-update-check-again = Kagua tena
+settings-update-current = Vmux imesasishwa kikamilifu.
+settings-update-downloading = Inapakua…
+settings-update-downloading-hint = Inapakua Vmux { $version }…
+settings-update-installing = Inasakinisha…
+settings-update-installing-hint = Inasakinisha Vmux { $version }…
+settings-update-ready = Sasisho liko tayari
+settings-update-ready-hint = Vmux { $version } iko tayari. Anzisha upya ili itumike.
+settings-update-try-again = Jaribu tena
+settings-update-failed = Imeshindikana kukagua masasisho.
+settings-item = Kipengee
+settings-item-number = Kipengee { $number }
+settings-press-key = Bonyeza kitufe…
+settings-saved = Imehifadhiwa
+settings-record-key = Bofya kurekodi mchanganyiko mpya wa vitufe
+
+tray-open-window = Fungua dirisha
+tray-close-window = Funga dirisha
+tray-pause-recording = Sitisha kurekodi
+tray-resume-recording = Endelea kurekodi
+tray-finish-recording = Maliza kurekodi
+tray-quit = Ondoka Vmux
+
+composer-attach-files = Ambatisha faili (/upload)
+composer-remove-attachment = Ondoa kiambatisho
+
+layout-back = Rudi
+layout-forward = Mbele
+layout-reload = Pakia upya
+layout-bookmark-page = Weka alamisho ukurasa huu
+layout-remove-bookmark = Ondoa alamisho
+layout-pin-page = Bandika ukurasa huu
+layout-unpin-page = Bandua ukurasa huu
+layout-manage-extensions = Dhibiti viendelezi
+layout-new-stack = Tabaka jipya
+layout-close-tab = Funga kichupo
+layout-bookmark = Alamisho
+layout-pin = Bandika
+layout-new-tab = Kichupo kipya
+layout-team = Timu
+
+command-switch-space = Badilisha nafasi…
+command-search-ask = Tafuta au uliza…
+command-new-tab-placeholder = Tafuta au andika URL, au chagua Terminal…
+command-placeholder = Andika URL, tafuta vichupo, au > kwa amri…
+command-composer-placeholder = Andika / kwa amri au @ kwa midia
+command-send = Tuma (Enter)
+command-terminal = Terminal
+command-open-terminal = Fungua kwenye Terminal
+command-stack = Tabaka
+command-tabs = { $count ->
+    [one] kichupo 1
+   *[other] vichupo { $count }
+}
+command-prompt = Maelekezo
+command-new-tab = Kichupo kipya
+command-search = Tafuta
+command-open-value = Fungua “{ $value }”
+command-search-value = Tafuta “{ $value }”
+
+schema-appearance = Mwonekano
+schema-general = Jumla
+schema-layout = Mpangilio
+schema-layout-detail = Dirisha, vidirisha, upau wa pembeni, na pete ya fokasi.
+schema-agent = Ajenti
+schema-agent-detail = Tabia ya ajenti na ruhusa za zana.
+schema-shortcuts = Njia za mkato
+schema-shortcuts-detail = Mwonekano wa kusoma pekee. Hariri settings.ron moja kwa moja kubadilisha vitufe.
+schema-terminal = Terminal
+schema-browser = Kivinjari
+schema-mode = Hali
+schema-mode-detail = Mpangilio wa rangi wa kurasa za wavuti. Kifaa hufuata mfumo wako.
+schema-device = Kifaa
+schema-light = Angavu
+schema-dark = Giza
+schema-language = Lugha
+schema-language-detail = Tumia lugha ya mfumo, en-US, ja, au tagi yoyote ya BCP 47 yenye katalogi inayolingana ya ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Usasishaji otomatiki
+schema-auto-update-detail = Kagua na usakinishe masasisho unapozindua na kila saa.
+schema-startup-url = URL ya kuanzia
+schema-startup-url-detail = Ikiwa tupu, hufungua sehemu ya maelekezo kwenye upau wa amri.
+schema-search-engine = Injini ya utafutaji
+schema-search-engine-detail = Hutumika kwa utafutaji wa wavuti kutoka Anza na upau wa amri.
+schema-window = Dirisha
+schema-pane = Kidirisha
+schema-side-sheet = Laha ya pembeni
+schema-focus-ring = Pete ya fokasi
+schema-run-placement = Ruhusu kubadilisha mahali pa kuendesha
+schema-run-placement-detail = Waruhusu ajenti wachague hali ya kidirisha cha kuendesha, mwelekeo, na nanga.
+schema-leader = Kitufe kiongozi
+schema-leader-detail = Kitufe cha kuanzia kwa njia za mkato za chord.
+schema-chord-timeout = Muda wa chord kuisha
+schema-chord-timeout-detail = Milisekunde kabla ya kiambishi cha chord kuisha.
+schema-bindings = Viungo vya vitufe
+schema-confirm-close = Thibitisha kufunga
+schema-confirm-close-detail = Uliza kabla ya kufunga terminal yenye mchakato unaoendelea.
+schema-default-theme = Mandhari chaguomsingi
+schema-default-theme-detail = Jina la mandhari inayotumika kutoka kwenye orodha ya mandhari.
+
+settings-empty = (tupu)
+settings-none = (hakuna)
+
+schema-system = Mfumo
+schema-editor = Kihariri
+schema-recording = Kurekodi
+schema-radius = Nusu kipenyo
+schema-padding = Nafasi ya ndani
+schema-gap = Pengo
+schema-width = Upana
+schema-color = Rangi
+schema-red = Nyekundu
+schema-green = Kijani
+schema-blue = Bluu
+schema-follow-files = Fuata faili
+schema-tidy-files = Safisha faili
+schema-tidy-files-max = Kizingiti cha kusafisha faili
+schema-tidy-files-auto = Safisha faili kiotomatiki
+schema-app-providers = Watoa programu
+schema-provider = Mtoa huduma
+schema-kind = Aina
+schema-models = Modeli
+schema-acp = Ajenti za ACP
+schema-id = ID
+schema-name = Jina
+schema-command = Amri
+schema-arguments = Hoja
+schema-environment = Mazingira
+schema-working-directory = Saraka ya kazi
+schema-shell = Gamba
+schema-font-family = Familia ya fonti
+schema-startup-directory = Saraka ya kuanzia
+schema-themes = Mandhari
+schema-color-scheme = Mpangilio wa rangi
+schema-font-size = Ukubwa wa fonti
+schema-line-height = Urefu wa mstari
+schema-cursor-style = Mtindo wa kishale
+schema-cursor-blink = Kumweka kwa kishale
+schema-custom-themes = Mandhari maalum
+schema-foreground = Mandhari ya mbele
+schema-background = Mandhari ya nyuma
+schema-cursor = Kishale
+schema-ansi-colors = Rangi za ANSI
+schema-keymap = Ramani ya vitufe
+schema-explorer = Kichunguzi
+schema-visible = Inaonekana
+schema-language-servers = Seva za lugha
+schema-servers = Seva
+schema-language-id = ID ya lugha
+schema-root-markers = Viashiria vya mzizi
+schema-output-directory = Saraka ya matokeo
+
+menu-scene = Mandhari
+menu-layout = Mpangilio
+menu-terminal = Teminali
+menu-browser = Kivinjari
+menu-service = Huduma
+menu-bookmark = Alamisho
+menu-edit = Hariri
+
+layout-knowledge = Maarifa
+layout-open-knowledge = Fungua Maarifa
+layout-open-welcome-knowledge = Fungua Karibu kwenye Maarifa
+layout-open-path = Fungua { $path }
+layout-fold-knowledge = Kunja maarifa
+layout-unfold-knowledge = Funua maarifa
+layout-bookmarks = Alamisho
+layout-new-folder = Folda Mpya
+layout-add-to-bookmarks = Ongeza kwenye Alamisho
+layout-move-to-bookmarks = Hamisha kwenye Alamisho
+layout-stack-number = Rundo { $number }
+layout-fold-stack = Kunja rundo
+layout-unfold-stack = Funua rundo
+layout-close-stack = Funga rundo
+layout-bookmark-in = Weka alamisho katika { $folder }
+
+common-cancel = Ghairi
+common-delete = Futa
+common-save = Hifadhi
+common-rename = Badili jina
+common-expand = Panua
+common-collapse = Kunja
+common-loading = Inapakia…
+common-error = Hitilafu
+common-output = Tokeo
+common-pending = Inasubiri
+common-current = ya sasa
+common-stop = Sitisha
+services-command = Huduma ya Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Ukurasa umeshindwa kupakia
+error-page-not-found = Ukurasa haukupatikana
+error-unknown-host = Mwenyeji wa programu ya Vmux hajulikani: { $host }
+
+history-title = Historia
+
+command-new-app-chat = Gumzo jipya la { $provider }/{ $model } (Programu)
+command-interactive-mode-user = Mandhari > Hali Shirikishi > Mtumiaji
+command-interactive-mode-player = Mandhari > Hali Shirikishi > Mchezaji
+command-minimize-window = Mpangilio > Dirisha > Punguza
+command-toggle-layout = Mpangilio > Mpangilio > Washa/zima Mpangilio
+command-close-tab = Mpangilio > Kichupo > Funga Kichupo
+command-new-task = Mpangilio > Kichupo > Kazi Mpya…
+command-next-tab = Mpangilio > Kichupo > Kichupo Kinachofuata
+command-prev-tab = Mpangilio > Kichupo > Kichupo Kilichotangulia
+command-rename-tab = Mpangilio > Kichupo > Badili Jina la Kichupo
+command-tab-select-1 = Mpangilio > Kichupo > Chagua Kichupo 1
+command-tab-select-2 = Mpangilio > Kichupo > Chagua Kichupo 2
+command-tab-select-3 = Mpangilio > Kichupo > Chagua Kichupo 3
+command-tab-select-4 = Mpangilio > Kichupo > Chagua Kichupo 4
+command-tab-select-5 = Mpangilio > Kichupo > Chagua Kichupo 5
+command-tab-select-6 = Mpangilio > Kichupo > Chagua Kichupo 6
+command-tab-select-7 = Mpangilio > Kichupo > Chagua Kichupo 7
+command-tab-select-8 = Mpangilio > Kichupo > Chagua Kichupo 8
+command-tab-select-last = Mpangilio > Kichupo > Chagua Kichupo cha Mwisho
+command-close-pane = Mpangilio > Kidirisha > Funga Kidirisha
+command-select-pane-left = Mpangilio > Kidirisha > Chagua Kidirisha cha Kushoto
+command-select-pane-right = Mpangilio > Kidirisha > Chagua Kidirisha cha Kulia
+command-select-pane-up = Mpangilio > Kidirisha > Chagua Kidirisha cha Juu
+command-select-pane-down = Mpangilio > Kidirisha > Chagua Kidirisha cha Chini
+command-swap-pane-prev = Mpangilio > Kidirisha > Badilisha na Kidirisha Kilichotangulia
+command-swap-pane-next = Mpangilio > Kidirisha > Badilisha na Kidirisha Kinachofuata
+command-equalize-pane-size = Mpangilio > Kidirisha > Sawazisha Ukubwa wa Vidirisha
+command-resize-pane-left = Mpangilio > Kidirisha > Badili Ukubwa Kushoto
+command-resize-pane-right = Mpangilio > Kidirisha > Badili Ukubwa Kulia
+command-resize-pane-up = Mpangilio > Kidirisha > Badili Ukubwa Juu
+command-resize-pane-down = Mpangilio > Kidirisha > Badili Ukubwa Chini
+command-stack-close = Mpangilio > Rundo > Funga Rundo
+command-stack-next = Mpangilio > Rundo > Rundo Linalofuata
+command-stack-previous = Mpangilio > Rundo > Rundo Lililotangulia
+command-stack-reopen = Mpangilio > Rundo > Fungua Upya Ukurasa Uliofungwa
+command-stack-swap-prev = Mpangilio > Rundo > Hamisha Rundo Kushoto
+command-stack-swap-next = Mpangilio > Rundo > Hamisha Rundo Kulia
+command-space-open = Mpangilio > Nafasi > Nafasi
+command-terminal-close = Teminali > Funga Teminali
+command-terminal-next = Teminali > Teminali Inayofuata
+command-terminal-prev = Teminali > Teminali Iliyotangulia
+command-terminal-clear = Teminali > Futa Teminali
+command-browser-prev-page = Kivinjari > Urambazaji > Nyuma
+command-browser-next-page = Kivinjari > Urambazaji > Mbele
+command-browser-reload = Kivinjari > Urambazaji > Pakia Upya
+command-browser-hard-reload = Kivinjari > Urambazaji > Pakia Upya Kabisa
+command-open-in-place = Kivinjari > Fungua > Fungua Hapa
+command-open-in-new-stack = Kivinjari > Fungua > Fungua kwenye Rundo Jipya
+command-open-in-pane-top = Kivinjari > Fungua > Fungua kwenye Kidirisha cha Juu
+command-open-in-pane-right = Kivinjari > Fungua > Fungua kwenye Kidirisha cha Kulia
+command-open-in-pane-bottom = Kivinjari > Fungua > Fungua kwenye Kidirisha cha Chini
+command-open-in-pane-left = Kivinjari > Fungua > Fungua kwenye Kidirisha cha Kushoto
+command-open-in-new-tab = Kivinjari > Fungua > Fungua kwenye Kichupo Kipya
+command-open-in-new-space = Kivinjari > Fungua > Fungua kwenye Nafasi Mpya
+command-browser-zoom-in = Kivinjari > Mwonekano > Kuza
+command-browser-zoom-out = Kivinjari > Mwonekano > Punguza
+command-browser-zoom-reset = Kivinjari > Mwonekano > Ukubwa Halisi
+command-browser-dev-tools = Kivinjari > Mwonekano > Zana za Wasanidi
+command-browser-open-command-bar = Kivinjari > Upau > Upau wa Amri
+command-browser-open-page-in-command-bar = Kivinjari > Upau > Hariri Ukurasa
+command-browser-open-path-bar = Kivinjari > Upau > Kinavigeta Njia
+command-browser-open-commands = Kivinjari > Upau > Amri
+command-browser-open-history = Kivinjari > Upau > Historia
+command-service-open = Huduma > Fungua Kifuatilia Huduma
+command-bookmark-toggle-active = Alamisho > Weka Ukurasa Alamisho
+command-bookmark-pin-active = Alamisho > Bandika Ukurasa
+
+layout-tab = Kichupo
+layout-no-stacks = Hakuna rundo
+layout-loading = Inapakia…
+layout-no-markdown-files = Hakuna faili za Markdown
+layout-empty-folder = Folda tupu
+layout-worktree = worktree
+layout-folder-name = Jina la folda
+layout-no-pins-bookmarks = Hakuna vilivyobandikwa au alamisho
+layout-move-to = Hamisha hadi { $folder }
+layout-bookmark-current-page = Weka Ukurasa wa Sasa Alamisho
+layout-rename-folder = Badili Jina la Folda
+layout-remove-folder = Ondoa Folda
+layout-update-downloading = Inapakua sasisho
+layout-update-installing = Inasakinisha sasisho…
+layout-update-ready = Toleo jipya linapatikana
+layout-restart-update = Anzisha upya ili kusasisha
+
+agent-preparing = Inaandaa ajenti…
+agent-send-all-queued = Tuma vidokezo vyote vilivyopangwa sasa (Esc)
+agent-send = Tuma (Enter)
+agent-ready = Tayari ukihitaji.
+agent-loading-older = Inapakia ujumbe wa zamani…
+agent-load-older = Pakia ujumbe wa zamani
+agent-continued-from = Imeendelezwa kutoka { $source }
+agent-older-context-omitted = muktadha wa zamani umeondolewa
+agent-interrupted = imekatizwa
+agent-allow-tool = Ruhusu { $tool }?
+agent-deny = Kataa
+agent-allow-always = Ruhusu kila mara
+agent-allow = Ruhusu
+agent-loading-sessions = Inapakia vipindi…
+agent-no-resumable-sessions = Hakuna vipindi vinavyoweza kuendelezwa vilivyopatikana
+agent-no-matching-sessions = Hakuna vipindi vinavyolingana
+agent-no-matching-models = Hakuna modeli zinazolingana
+agent-choice-help = ↑/↓ au Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Chagua folda ya hifadhi
+agent-choose-repository-detail = Chagua hifadhi ya ndani ya Git ambayo ajenti itatumia.
+agent-choosing = Inachagua…
+agent-choose-folder = Chagua folda
+agent-queued = imepangwa
+agent-attached = Imeambatishwa:
+agent-cancel-queued = Ghairi kidokezo kilichopangwa
+agent-resume-queued = Endeleza vidokezo vilivyopangwa
+agent-clear-queue = Futa foleni
+agent-send-all-now = tuma vyote sasa
+agent-choose-option = Chagua chaguo hapo juu
+agent-loading-media = Inapakia midia…
+agent-no-matching-media = Hakuna midia inayolingana
+agent-prompt-context = Muktadha wa kidokezo
+agent-details = Maelezo
+agent-path = Njia
+agent-tool = Zana
+agent-server = Seva
+agent-bytes = baiti { $count }
+agent-worked-for = Imefanya kazi kwa { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Imefanya kazi kwa { $duration } · hatua 1
+   *[other] Imefanya kazi kwa { $duration } · hatua { $count }
+}
+agent-tool-guardian-review = Ukaguzi wa Guardian
+agent-tool-read-files = Imesoma faili
+agent-tool-viewed-image = Imetazama picha
+agent-tool-used-browser = Imetumia kivinjari
+agent-tool-searched-files = Imetafuta faili
+agent-tool-ran-commands = Imeendesha amri
+agent-thinking = Inafikiria
+agent-subagent = Ajenti msaidizi
+agent-prompt = Kidokezo
+agent-thread = Uzi
+agent-parent = Mzazi
+agent-children = Watoto
+agent-call = Wito
+agent-raw-event = Tukio ghafi
+agent-plan = Mpango
+agent-tasks = { $count ->
+    [one] kazi 1
+   *[other] kazi { $count }
+}
+agent-edited = Imehaririwa
+agent-reconnecting = Inaunganisha upya { $attempt }/{ $total }
+agent-status-running = Inaendelea
+agent-status-done = Imekamilika
+agent-status-failed = Imeshindwa
+agent-status-pending = Inasubiri
+agent-slash-attach-files = Ambatisha faili
+agent-slash-resume-session = Endeleza kipindi cha awali
+agent-slash-select-model = Chagua modeli
+agent-slash-continue-cli = Endeleza kipindi hiki kwenye CLI
+agent-session-just-now = sasa hivi
+agent-session-minutes-ago = dakika { $count } zilizopita
+agent-session-hours-ago = saa { $count } zilizopita
+agent-session-days-ago = siku { $count } zilizopita
+agent-working-working = Inafanya kazi
+agent-working-thinking = Inafikiria
+agent-working-pondering = Inatafakari
+agent-working-noodling = Inachakata mawazo
+agent-working-percolating = Inachuja mawazo
+agent-working-conjuring = Inabuni
+agent-working-cooking = Inapika
+agent-working-brewing = Inaandaa
+agent-working-musing = Inawaza
+agent-working-ruminating = Inatafakari kwa kina
+agent-working-scheming = Inapanga
+agent-working-synthesizing = Inaunganisha
+agent-working-tinkering = Inajaribujaribu
+agent-working-churning = Inachakata
+agent-working-vibing = Inaingia kwenye mtiririko
+agent-working-simmering = Inachemsha taratibu
+agent-working-crafting = Inaunda
+agent-working-divining = Inabashiri
+agent-working-mulling = Inatafakari
+agent-working-spelunking = Inachimbua
+
+editor-toggle-explorer = Washa/zima Kichunguzi (Cmd+B)
+editor-unsaved = haijahifadhiwa
+editor-rendered-markdown = Markdown iliyotolewa na uhariri wa moja kwa moja
+editor-note = Dokezo
+editor-source-editor = Kihariri cha chanzo
+editor-editor = Kihariri
+editor-git-diff = Tofauti ya Git
+editor-diff = Tofauti
+editor-tidy = Pangilia
+editor-always = Kila mara
+editor-unchanged-previews = { $count ->
+    [one] ✦ onyesho 1 la awali lisilobadilika
+   *[other] ✦ maonyesho { $count } ya awali yasiyobadilika
+}
+editor-open-externally = Fungua nje
+editor-changed-line = Mstari uliobadilishwa
+editor-go-to-definition = Nenda kwenye Fasili
+editor-find-references = Tafuta Marejeleo
+editor-references = { $count ->
+    [one] rejeleo 1
+   *[other] marejeleo { $count }
+}
+editor-lsp-starting = { $server } inaanza…
+editor-lsp-not-installed = { $server } — haijasakinishwa
+editor-explorer = Kichunguzi
+editor-open-editors = Vihariri Vilivyofunguliwa
+editor-outline = Muhtasari
+editor-new-file = Faili Mpya
+editor-new-folder = Folda Mpya
+editor-delete-confirm = Ungependa kufuta “{ $name }”? Hili haliwezi kutenduliwa.
+editor-created-folder = Folda { $name } imeundwa
+editor-created-file = Faili { $name } imeundwa
+editor-renamed-to = Imebadilishwa jina kuwa { $name }
+editor-deleted = { $name } imefutwa
+editor-failed-decode-image = Imeshindwa kusimbua picha
+editor-preview-large-image = picha (kubwa mno kuonyeshwa awali)
+editor-preview-binary = jozi
+editor-preview-file = faili
+
+git-status-clean = safi
+git-status-modified = imebadilishwa
+git-status-staged = imewekwa tayari
+git-status-staged-modified = imewekwa tayari*
+git-status-untracked = haifuatiliwi
+git-status-deleted = imefutwa
+git-status-conflict = mgongano
+git-accept-all = ✓ kubali yote
+git-unstage = Ondoa kwenye tayari
+git-confirm-deny-all = Thibitisha kukataa yote
+git-deny-all = ✗ kataa yote
+git-commit-message = ujumbe wa commit
+git-commit = Commit ({ $count })
+git-push = ↑ Sukuma
+git-loading-diff = Inapakia tofauti…
+git-no-changes = Hakuna mabadiliko ya kuonyesha
+git-accept = ✓ kubali
+git-deny = ✗ kataa
+git-show-unchanged-lines = Onyesha mistari { $count } isiyobadilika
+
+terminal-loading = Inapakia…
+terminal-runs-when-ready = huendeshwa ikiwa tayari · Ctrl+C hufuta · Esc huruka
+terminal-booting = inaanza
+terminal-type-command = andika amri · huendeshwa ikiwa tayari · Esc huruka
+
+setup-tagline-claude = Ajenti wa usimbaji wa Anthropic, ndani ya Vmux
+setup-tagline-codex = Ajenti wa usimbaji wa OpenAI, ndani ya Vmux
+setup-tagline-vibe = Ajenti wa usimbaji wa Mistral, ndani ya Vmux
+setup-install-title = Sakinisha CLI ya { $name }
+setup-homebrew-required = Homebrew inahitajika kusakinisha { $command } na bado haijasanidiwa. Vmux itasakinisha Homebrew kwanza, kisha { $name }.
+setup-terminal-instructions = Kwenye teminali, bonyeza Return ili kuanza, kisha weka nenosiri lako la Mac ukiombwa.
+setup-command-missing = Vmux imefungua ukurasa huu kwa sababu amri ya ndani ya { $command } bado haijasakinishwa. Endesha amri iliyo hapa chini ili kuipata.
+setup-install-failed = Usakinishaji haukukamilika. Angalia teminali kwa maelezo, kisha jaribu tena.
+setup-installing = Inasakinisha…
+setup-install-homebrew = Sakinisha Homebrew + { $name }
+setup-run-install = Endesha amri ya kusakinisha
+setup-auto-reload = Vmux huiendesha kwenye teminali na kupakia upya { $command } ikiwa tayari.
+
+debug-title = Tatua
+debug-auto-update = Sasisho otomatiki
+debug-simulate-update = Iga sasisho linapatikana
+debug-simulate-download = Iga upakuaji
+debug-clear-update = Futa sasisho
+debug-trigger-restart = Anzisha upya sasa
+
+command-manage-spaces = Dhibiti nafasi…
+command-pane-stack-location = kidirisha { $pane } / tabaka { $stack }
+command-space-pane-stack-location = { $space } / kidirisha { $pane } / tabaka { $stack }
+command-terminal-path = Terminali ({ $path })
+command-group-interactive-mode = Hali shirikishi
+command-group-window = Dirisha
+command-group-tab = Kichupo
+command-group-pane = Kidirisha
+command-group-stack = Tabaka
+command-group-space = Nafasi
+command-group-navigation = Urambazaji
+command-group-open = Fungua
+command-group-view = Mwonekano
+command-group-bar = Upau
+
+menu-close-vmux = Funga Vmux
+
+agents-terminal-coding-agent = Ajenti wa kusimba anayetumia Terminali

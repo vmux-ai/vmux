@@ -1,0 +1,602 @@
+locale-name = العربية
+common-open = فتح
+common-close = إغلاق
+common-install = تثبيت
+common-uninstall = إلغاء التثبيت
+common-update = تحديث
+common-retry = إعادة المحاولة
+common-refresh = تحديث
+common-remove = إزالة
+common-enable = تفعيل
+common-disable = تعطيل
+common-new = جديد
+common-active = نشط
+common-running = قيد التشغيل
+common-done = تم
+common-failed = فشل
+common-installed = مثبّت
+common-items = { $count ->
+    [one] عنصر واحد
+   *[other] { $count } عناصر
+}
+start-title = البدء
+start-tagline = موجّه واحد. وأنجز أي شيء.
+
+agents-title = الوكلاء
+agents-search = ابحث في وكلاء ACP وCLI…
+agents-empty = لا توجد وكلاء مطابقة
+agents-empty-detail = جرّب اسمًا أو بيئة تشغيل أو ACP/CLI.
+agents-install-failed = فشل التثبيت
+agents-updating = جارٍ التحديث…
+agents-retrying = جارٍ إعادة المحاولة…
+agents-preparing = جارٍ التحضير…
+
+extensions-title = الإضافات
+extensions-search = ابحث في المثبّتة أو في Chrome Web Store…
+extensions-relaunch = أعد التشغيل للتطبيق
+extensions-empty = لا توجد إضافات مثبّتة
+extensions-no-match = لا توجد إضافات مطابقة
+extensions-empty-detail = ابحث في Chrome Web Store أعلاه واضغط رجوع.
+extensions-no-match-detail = جرّب اسمًا آخر أو معرّف إضافة آخر.
+extensions-on = مفعّل
+extensions-off = معطّل
+extensions-enable-confirm = هل تريد تفعيل { $name }؟
+extensions-enable-permissions = فعّل { $name } واسمح بـ:
+
+lsp-title = خوادم اللغات
+lsp-search = ابحث عن خوادم لغات أو مدقّقات أو منسّقات…
+lsp-loading = جارٍ تحميل الفهرس…
+lsp-empty = لا توجد خوادم لغات مطابقة
+lsp-empty-detail = جرّب لغة أو مدقّقًا أو منسّقًا آخر.
+lsp-needs = يتطلب { $tool }
+lsp-status-available = متاح
+lsp-status-on-path = على PATH
+lsp-status-installing = جارٍ التثبيت…
+lsp-status-installed = مثبّت
+lsp-status-outdated = يتوفر تحديث
+lsp-status-running = قيد التشغيل
+lsp-status-failed = فشل
+
+spaces-title = مساحات العمل
+spaces-new-placeholder = اسم مساحة العمل الجديدة
+spaces-empty = لا توجد مساحات عمل
+spaces-default-name = مساحة العمل { $number }
+spaces-tabs = { $count ->
+    [one] تبويب واحد
+   *[other] { $count } تبويبات
+}
+spaces-delete = حذف مساحة العمل
+
+team-title = الفريق
+team-just-you = أنت وحدك في مساحة العمل هذه
+team-agents = { $count ->
+    [one] أنت ووكيل واحد
+   *[other] أنت و{ $count } وكلاء
+}
+team-empty = لا أحد هنا بعد
+team-you = أنت
+team-agent = وكيل
+
+services-title = خدمات الخلفية
+services-processes = { $count ->
+    [one] عملية واحدة
+   *[other] { $count } عمليات
+}
+services-kill-all = إنهاء الكل قسرًا
+services-not-running = الخدمة لا تعمل
+services-start-with = البدء باستخدام:
+services-empty = لا توجد عمليات نشطة
+services-filter = تصفية العمليات…
+services-no-match = لا توجد عمليات مطابقة
+services-connected = متصل
+services-disconnected = غير متصل
+services-attached = مرفق
+services-kill = إنهاء قسرًا
+services-memory = الذاكرة
+services-size = الحجم
+services-shell = الصَدفة
+
+error-title = خطأ
+
+history-search = البحث في السجل
+history-clear-all = مسح الكل
+history-clear-confirm = هل تريد مسح السجل كله؟
+history-clear-warning = لا يمكن التراجع عن هذا الإجراء.
+history-cancel = إلغاء
+history-today = اليوم
+history-yesterday = أمس
+history-days-ago = منذ { $count } أيام
+history-day-offset = اليوم -{ $count }
+
+settings-title = الإعدادات
+settings-loading = جارٍ تحميل الإعدادات…
+settings-stored = محفوظة في ~/.vmux/settings.ron
+settings-other = أخرى
+settings-software-update = تحديث البرنامج
+settings-check-updates = التحقق من التحديثات
+settings-check-updates-hint = يتم التحقق تلقائيًا عند التشغيل وكل ساعة عند تفعيل التحديث التلقائي.
+settings-update-unavailable = غير متاح
+settings-update-unavailable-hint = أداة التحديث غير مضمنة في هذا الإصدار.
+settings-update-checking = جارٍ التحقق…
+settings-update-checking-hint = جارٍ التحقق من التحديثات…
+settings-update-check-again = التحقق مجددًا
+settings-update-current = Vmux محدّث.
+settings-update-downloading = جارٍ التنزيل…
+settings-update-downloading-hint = جارٍ تنزيل Vmux { $version }…
+settings-update-installing = جارٍ التثبيت…
+settings-update-installing-hint = جارٍ تثبيت Vmux { $version }…
+settings-update-ready = التحديث جاهز
+settings-update-ready-hint = Vmux { $version } جاهز. أعد التشغيل لتطبيقه.
+settings-update-try-again = حاول مجددًا
+settings-update-failed = تعذّر التحقق من التحديثات.
+settings-item = عنصر
+settings-item-number = العنصر { $number }
+settings-press-key = اضغط مفتاحًا…
+settings-saved = تم الحفظ
+settings-record-key = انقر لتسجيل تركيبة مفاتيح جديدة
+
+tray-open-window = فتح النافذة
+tray-close-window = إغلاق النافذة
+tray-pause-recording = إيقاف التسجيل مؤقتًا
+tray-resume-recording = استئناف التسجيل
+tray-finish-recording = إنهاء التسجيل
+tray-quit = إنهاء Vmux
+
+composer-attach-files = إرفاق ملفات (/upload)
+composer-remove-attachment = إزالة المرفق
+
+layout-back = رجوع
+layout-forward = إلى الأمام
+layout-reload = إعادة التحميل
+layout-bookmark-page = إضافة هذه الصفحة إلى المفضلة
+layout-remove-bookmark = إزالة من المفضلة
+layout-pin-page = تثبيت هذه الصفحة
+layout-unpin-page = إلغاء تثبيت هذه الصفحة
+layout-manage-extensions = إدارة الإضافات
+layout-new-stack = طبقة جديدة
+layout-close-tab = إغلاق التبويب
+layout-bookmark = إضافة إلى المفضلة
+layout-pin = تثبيت
+layout-new-tab = تبويب جديد
+layout-team = الفريق
+
+command-switch-space = تبديل مساحة العمل…
+command-search-ask = ابحث أو اسأل…
+command-new-tab-placeholder = ابحث أو اكتب عنوان URL، أو اختر الطرفية…
+command-placeholder = اكتب عنوان URL أو ابحث في التبويبات، أو > للأوامر…
+command-composer-placeholder = اكتب / للأوامر أو @ للوسائط
+command-send = إرسال (Enter)
+command-terminal = الطرفية
+command-open-terminal = فتح في الطرفية
+command-stack = طبقة
+command-tabs = { $count ->
+    [one] تبويب واحد
+   *[other] { $count } تبويبات
+}
+command-prompt = موجّه
+command-new-tab = تبويب جديد
+command-search = بحث
+command-open-value = فتح “{ $value }”
+command-search-value = البحث عن “{ $value }”
+
+schema-appearance = المظهر
+schema-general = عام
+schema-layout = التخطيط
+schema-layout-detail = النافذة، الأجزاء، الشريط الجانبي، وإطار التركيز.
+schema-agent = الوكيل
+schema-agent-detail = سلوك الوكيل وأذونات الأدوات.
+schema-shortcuts = الاختصارات
+schema-shortcuts-detail = عرض للقراءة فقط. عدّل settings.ron مباشرة لتغيير الارتباطات.
+schema-terminal = الطرفية
+schema-browser = المتصفح
+schema-mode = الوضع
+schema-mode-detail = نظام ألوان صفحات الويب. الجهاز يتبع نظامك.
+schema-device = الجهاز
+schema-light = فاتح
+schema-dark = داكن
+schema-language = اللغة
+schema-language-detail = استخدم لغة النظام أو en-US أو ja أو أي وسم BCP 47 مع فهرس ~/.vmux/locales/<tag>.ftl مطابق.
+schema-auto-update = التحديث التلقائي
+schema-auto-update-detail = التحقق من التحديثات وتثبيتها عند التشغيل وكل ساعة.
+schema-startup-url = عنوان URL عند البدء
+schema-startup-url-detail = اتركه فارغًا لفتح موجّه شريط الأوامر.
+schema-search-engine = محرك البحث
+schema-search-engine-detail = يُستخدم لعمليات بحث الويب من شاشة البدء وشريط الأوامر.
+schema-window = النافذة
+schema-pane = جزء
+schema-side-sheet = اللوحة الجانبية
+schema-focus-ring = إطار التركيز
+schema-run-placement = السماح بتجاوز موضع التشغيل
+schema-run-placement-detail = السماح للوكلاء باختيار وضع جزء التشغيل واتجاهه ومرساه.
+schema-leader = مفتاح بادئ
+schema-leader-detail = مفتاح تمهيدي لاختصارات التتابع.
+schema-chord-timeout = مهلة التتابع
+schema-chord-timeout-detail = عدد الملّي ثوانٍ قبل انتهاء صلاحية بادئة التتابع.
+schema-bindings = الارتباطات
+schema-confirm-close = تأكيد الإغلاق
+schema-confirm-close-detail = طلب التأكيد قبل إغلاق طرفية تتضمن عملية قيد التشغيل.
+schema-default-theme = السمة الافتراضية
+schema-default-theme-detail = اسم السمة النشطة من قائمة السمات.
+
+settings-empty = (فارغ)
+settings-none = (لا شيء)
+
+schema-system = النظام
+schema-editor = المحرر
+schema-recording = التسجيل
+schema-radius = نصف القطر
+schema-padding = الحشو
+schema-gap = التباعد
+schema-width = العرض
+schema-color = اللون
+schema-red = الأحمر
+schema-green = الأخضر
+schema-blue = الأزرق
+schema-follow-files = متابعة الملفات
+schema-tidy-files = ترتيب الملفات
+schema-tidy-files-max = حد ترتيب الملفات
+schema-tidy-files-auto = ترتيب الملفات تلقائيًا
+schema-app-providers = موفرو التطبيقات
+schema-provider = الموفر
+schema-kind = النوع
+schema-models = النماذج
+schema-acp = وكلاء ACP
+schema-id = ID
+schema-name = الاسم
+schema-command = الأمر
+schema-arguments = الوسائط
+schema-environment = البيئة
+schema-working-directory = دليل العمل
+schema-shell = الصدفة
+schema-font-family = عائلة الخط
+schema-startup-directory = دليل بدء التشغيل
+schema-themes = السمات
+schema-color-scheme = نظام الألوان
+schema-font-size = حجم الخط
+schema-line-height = ارتفاع السطر
+schema-cursor-style = نمط المؤشر
+schema-cursor-blink = وميض المؤشر
+schema-custom-themes = سمات مخصصة
+schema-foreground = المقدمة
+schema-background = الخلفية
+schema-cursor = المؤشر
+schema-ansi-colors = ألوان ANSI
+schema-keymap = خريطة المفاتيح
+schema-explorer = المستكشف
+schema-visible = مرئي
+schema-language-servers = خوادم اللغة
+schema-servers = الخوادم
+schema-language-id = ID اللغة
+schema-root-markers = علامات الجذر
+schema-output-directory = دليل الإخراج
+
+menu-scene = مشهد
+menu-layout = التخطيط
+menu-terminal = الطرفية
+menu-browser = المتصفح
+menu-service = الخدمة
+menu-bookmark = الإشارة المرجعية
+menu-edit = تحرير
+
+layout-knowledge = المعرفة
+layout-open-knowledge = فتح المعرفة
+layout-open-welcome-knowledge = فتح مرحبًا بك في المعرفة
+layout-open-path = فتح { $path }
+layout-fold-knowledge = طي المعرفة
+layout-unfold-knowledge = توسيع المعرفة
+layout-bookmarks = الإشارات المرجعية
+layout-new-folder = مجلد جديد
+layout-add-to-bookmarks = إضافة إلى الإشارات المرجعية
+layout-move-to-bookmarks = نقل إلى الإشارات المرجعية
+layout-stack-number = المكدس { $number }
+layout-fold-stack = طي المكدس
+layout-unfold-stack = توسيع المكدس
+layout-close-stack = إغلاق المكدس
+layout-bookmark-in = إشارة مرجعية في { $folder }
+
+common-cancel = إلغاء
+common-delete = حذف
+common-save = حفظ
+common-rename = إعادة تسمية
+common-expand = توسيع
+common-collapse = طيّ
+common-loading = جارٍ التحميل…
+common-error = خطأ
+common-output = المخرجات
+common-pending = معلّق
+common-current = الحالي
+common-stop = إيقاف
+services-command = خدمة Vmux
+services-uptime-seconds = { $seconds }ث
+services-uptime-minutes = { $minutes }د { $seconds }ث
+services-uptime-hours = { $hours }س { $minutes }د
+services-uptime-days = { $days }ي { $hours }س
+
+error-page-failed-load = تعذّر تحميل الصفحة
+error-page-not-found = الصفحة غير موجودة
+error-unknown-host = مضيف تطبيق Vmux غير معروف: { $host }
+
+history-title = السجل
+
+command-new-app-chat = محادثة { $provider }/{ $model } جديدة (تطبيق)
+command-interactive-mode-user = المشهد > الوضع التفاعلي > المستخدم
+command-interactive-mode-player = المشهد > الوضع التفاعلي > المشغّل
+command-minimize-window = التخطيط > النافذة > تصغير
+command-toggle-layout = التخطيط > التخطيط > تبديل التخطيط
+command-close-tab = التخطيط > علامة التبويب > إغلاق علامة التبويب
+command-new-task = التخطيط > علامة التبويب > مهمة جديدة…
+command-next-tab = التخطيط > علامة التبويب > علامة التبويب التالية
+command-prev-tab = التخطيط > علامة التبويب > علامة التبويب السابقة
+command-rename-tab = التخطيط > علامة التبويب > إعادة تسمية علامة التبويب
+command-tab-select-1 = التخطيط > علامة التبويب > اختيار علامة التبويب 1
+command-tab-select-2 = التخطيط > علامة التبويب > اختيار علامة التبويب 2
+command-tab-select-3 = التخطيط > علامة التبويب > اختيار علامة التبويب 3
+command-tab-select-4 = التخطيط > علامة التبويب > اختيار علامة التبويب 4
+command-tab-select-5 = التخطيط > علامة التبويب > اختيار علامة التبويب 5
+command-tab-select-6 = التخطيط > علامة التبويب > اختيار علامة التبويب 6
+command-tab-select-7 = التخطيط > علامة التبويب > اختيار علامة التبويب 7
+command-tab-select-8 = التخطيط > علامة التبويب > اختيار علامة التبويب 8
+command-tab-select-last = التخطيط > علامة التبويب > اختيار آخر علامة تبويب
+command-close-pane = التخطيط > الجزء > إغلاق الجزء
+command-select-pane-left = التخطيط > الجزء > اختيار الجزء الأيسر
+command-select-pane-right = التخطيط > الجزء > اختيار الجزء الأيمن
+command-select-pane-up = التخطيط > الجزء > اختيار الجزء العلوي
+command-select-pane-down = التخطيط > الجزء > اختيار الجزء السفلي
+command-swap-pane-prev = التخطيط > الجزء > تبديل الجزء مع السابق
+command-swap-pane-next = التخطيط > الجزء > تبديل الجزء مع التالي
+command-equalize-pane-size = التخطيط > الجزء > مساواة حجم الأجزاء
+command-resize-pane-left = التخطيط > الجزء > تغيير حجم الجزء يسارًا
+command-resize-pane-right = التخطيط > الجزء > تغيير حجم الجزء يمينًا
+command-resize-pane-up = التخطيط > الجزء > تغيير حجم الجزء للأعلى
+command-resize-pane-down = التخطيط > الجزء > تغيير حجم الجزء للأسفل
+command-stack-close = التخطيط > المكدس > إغلاق المكدس
+command-stack-next = التخطيط > المكدس > المكدس التالي
+command-stack-previous = التخطيط > المكدس > المكدس السابق
+command-stack-reopen = التخطيط > المكدس > إعادة فتح الصفحة المغلقة
+command-stack-swap-prev = التخطيط > المكدس > نقل المكدس لليسار
+command-stack-swap-next = التخطيط > المكدس > نقل المكدس لليمين
+command-space-open = التخطيط > المساحة > المساحات
+command-terminal-close = الطرفية > إغلاق الطرفية
+command-terminal-next = الطرفية > الطرفية التالية
+command-terminal-prev = الطرفية > الطرفية السابقة
+command-terminal-clear = الطرفية > مسح الطرفية
+command-browser-prev-page = المتصفح > التنقل > رجوع
+command-browser-next-page = المتصفح > التنقل > للأمام
+command-browser-reload = المتصفح > التنقل > إعادة تحميل
+command-browser-hard-reload = المتصفح > التنقل > إعادة تحميل كاملة
+command-open-in-place = المتصفح > فتح > فتح هنا
+command-open-in-new-stack = المتصفح > فتح > فتح في مكدس جديد
+command-open-in-pane-top = المتصفح > فتح > فتح في الجزء العلوي
+command-open-in-pane-right = المتصفح > فتح > فتح في الجزء الأيمن
+command-open-in-pane-bottom = المتصفح > فتح > فتح في الجزء السفلي
+command-open-in-pane-left = المتصفح > فتح > فتح في الجزء الأيسر
+command-open-in-new-tab = المتصفح > فتح > فتح في علامة تبويب جديدة
+command-open-in-new-space = المتصفح > فتح > فتح في مساحة جديدة
+command-browser-zoom-in = المتصفح > العرض > تكبير
+command-browser-zoom-out = المتصفح > العرض > تصغير
+command-browser-zoom-reset = المتصفح > العرض > الحجم الفعلي
+command-browser-dev-tools = المتصفح > العرض > أدوات المطوّر
+command-browser-open-command-bar = المتصفح > الشريط > شريط الأوامر
+command-browser-open-page-in-command-bar = المتصفح > الشريط > تعديل الصفحة
+command-browser-open-path-bar = المتصفح > الشريط > متصفح المسار
+command-browser-open-commands = المتصفح > الشريط > الأوامر
+command-browser-open-history = المتصفح > الشريط > السجل
+command-service-open = الخدمة > فتح مراقب الخدمات
+command-bookmark-toggle-active = الإشارة المرجعية > حفظ الصفحة كإشارة مرجعية
+command-bookmark-pin-active = الإشارة المرجعية > تثبيت الصفحة
+
+layout-tab = علامة تبويب
+layout-no-stacks = لا توجد مكدسات
+layout-loading = جارٍ التحميل…
+layout-no-markdown-files = لا توجد ملفات Markdown
+layout-empty-folder = مجلد فارغ
+layout-worktree = شجرة العمل
+layout-folder-name = اسم المجلد
+layout-no-pins-bookmarks = لا توجد تثبيتات أو إشارات مرجعية
+layout-move-to = نقل إلى { $folder }
+layout-bookmark-current-page = حفظ الصفحة الحالية كإشارة مرجعية
+layout-rename-folder = إعادة تسمية المجلد
+layout-remove-folder = إزالة المجلد
+layout-update-downloading = جارٍ تنزيل التحديث
+layout-update-installing = جارٍ تثبيت التحديث…
+layout-update-ready = يتوفر إصدار جديد
+layout-restart-update = أعد التشغيل للتحديث
+
+agent-preparing = جارٍ تجهيز الوكيل…
+agent-send-all-queued = إرسال كل المطالبات في الصف الآن (Esc)
+agent-send = إرسال (Enter)
+agent-ready = جاهز عندما تكون جاهزًا.
+agent-loading-older = جارٍ تحميل الرسائل الأقدم…
+agent-load-older = تحميل الرسائل الأقدم
+agent-continued-from = متابعة من { $source }
+agent-older-context-omitted = تم حذف السياق الأقدم
+agent-interrupted = توقّف
+agent-allow-tool = السماح بـ { $tool }؟
+agent-deny = رفض
+agent-allow-always = السماح دائمًا
+agent-allow = السماح
+agent-loading-sessions = جارٍ تحميل الجلسات…
+agent-no-resumable-sessions = لم يتم العثور على جلسات قابلة للاستئناف
+agent-no-matching-sessions = لا توجد جلسات مطابقة
+agent-no-matching-models = لا توجد نماذج مطابقة
+agent-choice-help = ↑/↓ أو Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = اختر مجلد المستودع
+agent-choose-repository-detail = اختر مستودع Git المحلي الذي يجب أن يستخدمه الوكيل.
+agent-choosing = جارٍ الاختيار…
+agent-choose-folder = اختر مجلدًا
+agent-queued = في الصف
+agent-attached = مرفق:
+agent-cancel-queued = إلغاء المطالبة في الصف
+agent-resume-queued = استئناف المطالبات في الصف
+agent-clear-queue = مسح الصف
+agent-send-all-now = إرسال الكل الآن
+agent-choose-option = اختر خيارًا أعلاه
+agent-loading-media = جارٍ تحميل الوسائط…
+agent-no-matching-media = لا توجد وسائط مطابقة
+agent-prompt-context = سياق المطالبة
+agent-details = التفاصيل
+agent-path = المسار
+agent-tool = الأداة
+agent-server = الخادم
+agent-bytes = { $count } بايت
+agent-worked-for = عمل لمدة { $duration }
+agent-worked-for-steps = { $count ->
+    [one] عمل لمدة { $duration } · خطوة واحدة
+   *[other] عمل لمدة { $duration } · { $count } خطوة
+}
+agent-tool-guardian-review = مراجعة الحارس
+agent-tool-read-files = قراءة الملفات
+agent-tool-viewed-image = عرض صورة
+agent-tool-used-browser = استخدم المتصفح
+agent-tool-searched-files = بحث في الملفات
+agent-tool-ran-commands = شغّل أوامر
+agent-thinking = يفكّر
+agent-subagent = وكيل فرعي
+agent-prompt = المطالبة
+agent-thread = السلسلة
+agent-parent = الأصل
+agent-children = الفروع
+agent-call = الاستدعاء
+agent-raw-event = الحدث الخام
+agent-plan = الخطة
+agent-tasks = { $count ->
+    [one] مهمة واحدة
+   *[other] { $count } مهمة
+}
+agent-edited = تم التعديل
+agent-reconnecting = جارٍ إعادة الاتصال { $attempt }/{ $total }
+agent-status-running = قيد التشغيل
+agent-status-done = تم
+agent-status-failed = فشل
+agent-status-pending = معلّق
+agent-slash-attach-files = إرفاق ملفات
+agent-slash-resume-session = استئناف جلسة سابقة
+agent-slash-select-model = اختيار نموذج
+agent-slash-continue-cli = متابعة هذه الجلسة في CLI
+agent-session-just-now = الآن للتو
+agent-session-minutes-ago = قبل { $count }د
+agent-session-hours-ago = قبل { $count }س
+agent-session-days-ago = قبل { $count }ي
+agent-working-working = يعمل
+agent-working-thinking = يفكّر
+agent-working-pondering = يتأمل
+agent-working-noodling = يستكشف
+agent-working-percolating = ينضج الفكرة
+agent-working-conjuring = يستحضر
+agent-working-cooking = يطبخها
+agent-working-brewing = يخمّرها
+agent-working-musing = يسترسل
+agent-working-ruminating = يمحّص
+agent-working-scheming = يخطط
+agent-working-synthesizing = يركّب
+agent-working-tinkering = يجرّب
+agent-working-churning = يعالج
+agent-working-vibing = يلتقط الإيقاع
+agent-working-simmering = يتركها على نار هادئة
+agent-working-crafting = يصوغ
+agent-working-divining = يستشف
+agent-working-mulling = يمعن النظر
+agent-working-spelunking = ينقّب
+
+editor-toggle-explorer = تبديل المستكشف (Cmd+B)
+editor-unsaved = غير محفوظ
+editor-rendered-markdown = Markdown معروض مع تحرير مباشر
+editor-note = ملاحظة
+editor-source-editor = محرر المصدر
+editor-editor = المحرر
+editor-git-diff = فرق Git
+editor-diff = الفرق
+editor-tidy = ترتيب
+editor-always = دائمًا
+editor-unchanged-previews = { $count ->
+    [one] ✦ معاينة واحدة بلا تغييرات
+   *[other] ✦ { $count } معاينة بلا تغييرات
+}
+editor-open-externally = فتح خارجيًا
+editor-changed-line = سطر متغيّر
+editor-go-to-definition = الانتقال إلى التعريف
+editor-find-references = البحث عن المراجع
+editor-references = { $count ->
+    [one] مرجع واحد
+   *[other] { $count } مرجع
+}
+editor-lsp-starting = جارٍ تشغيل { $server }…
+editor-lsp-not-installed = { $server } — غير مثبّت
+editor-explorer = المستكشف
+editor-open-editors = المحررات المفتوحة
+editor-outline = المخطط
+editor-new-file = ملف جديد
+editor-new-folder = مجلد جديد
+editor-delete-confirm = حذف “{ $name }”؟ لا يمكن التراجع عن ذلك.
+editor-created-folder = تم إنشاء المجلد { $name }
+editor-created-file = تم إنشاء الملف { $name }
+editor-renamed-to = تمت إعادة التسمية إلى { $name }
+editor-deleted = تم حذف { $name }
+editor-failed-decode-image = تعذّر فك ترميز الصورة
+editor-preview-large-image = صورة (كبيرة جدًا للمعاينة)
+editor-preview-binary = ثنائي
+editor-preview-file = ملف
+
+git-status-clean = نظيف
+git-status-modified = معدّل
+git-status-staged = مرحّل
+git-status-staged-modified = مرحّل*
+git-status-untracked = غير متتبّع
+git-status-deleted = محذوف
+git-status-conflict = تعارض
+git-accept-all = ✓ قبول الكل
+git-unstage = إلغاء الترحيل
+git-confirm-deny-all = تأكيد رفض الكل
+git-deny-all = ✗ رفض الكل
+git-commit-message = رسالة الإيداع
+git-commit = إيداع ({ $count })
+git-push = ↑ دفع
+git-loading-diff = جارٍ تحميل الفرق…
+git-no-changes = لا توجد تغييرات لعرضها
+git-accept = ✓ قبول
+git-deny = ✗ رفض
+git-show-unchanged-lines = عرض { $count } أسطر بلا تغييرات
+
+terminal-loading = جارٍ التحميل…
+terminal-runs-when-ready = يعمل عند الجاهزية · Ctrl+C يمسح · Esc يتخطى
+terminal-booting = جارٍ التمهيد
+terminal-type-command = اكتب أمرًا · يعمل عند الجاهزية · Esc يتخطى
+
+setup-tagline-claude = وكيل البرمجة من Anthropic، داخل Vmux
+setup-tagline-codex = وكيل البرمجة من OpenAI، داخل Vmux
+setup-tagline-vibe = وكيل البرمجة من Mistral، داخل Vmux
+setup-install-title = تثبيت CLI الخاص بـ { $name }
+setup-homebrew-required = يلزم Homebrew لتثبيت { $command } ولم يتم إعداده بعد. سيقوم Vmux بتثبيت Homebrew أولًا، ثم { $name }.
+setup-terminal-instructions = في الطرفية، اضغط Return للبدء، ثم أدخل كلمة مرور Mac عند الطلب.
+setup-command-missing = فتح Vmux هذه الصفحة لأن الأمر المحلي { $command } غير مثبّت بعد. شغّل الأمر أدناه للحصول عليه.
+setup-install-failed = لم يكتمل التثبيت. راجع الطرفية للتفاصيل، ثم أعد المحاولة.
+setup-installing = جارٍ التثبيت…
+setup-install-homebrew = تثبيت Homebrew + { $name }
+setup-run-install = تشغيل أمر التثبيت
+setup-auto-reload = يشغّله Vmux في طرفية ويعيد التحميل عندما يصبح { $command } جاهزًا.
+
+debug-title = تصحيح الأخطاء
+debug-auto-update = التحديث التلقائي
+debug-simulate-update = محاكاة توفر تحديث
+debug-simulate-download = محاكاة التنزيل
+debug-clear-update = مسح التحديث
+debug-trigger-restart = تشغيل إعادة التشغيل
+
+command-manage-spaces = إدارة المساحات…
+command-pane-stack-location = الجزء { $pane } / المكدس { $stack }
+command-space-pane-stack-location = { $space } / الجزء { $pane } / المكدس { $stack }
+command-terminal-path = الطرفية ({ $path })
+command-group-interactive-mode = الوضع التفاعلي
+command-group-window = النافذة
+command-group-tab = علامة التبويب
+command-group-pane = الجزء
+command-group-stack = المكدس
+command-group-space = المساحة
+command-group-navigation = التنقل
+command-group-open = فتح
+command-group-view = عرض
+command-group-bar = الشريط
+
+menu-close-vmux = إغلاق Vmux
+
+agents-terminal-coding-agent = وكيل برمجة يعمل في الطرفية

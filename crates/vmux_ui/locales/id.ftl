@@ -1,0 +1,602 @@
+locale-name = Bahasa Indonesia
+common-open = Buka
+common-close = Tutup
+common-install = Instal
+common-uninstall = Hapus instalasi
+common-update = Perbarui
+common-retry = Coba lagi
+common-refresh = Segarkan
+common-remove = Hapus
+common-enable = Aktifkan
+common-disable = Nonaktifkan
+common-new = Baru
+common-active = aktif
+common-running = berjalan
+common-done = selesai
+common-failed = Gagal
+common-installed = Terinstal
+common-items = { $count ->
+    [one] { $count } item
+   *[other] { $count } item
+}
+start-title = Mulai
+start-tagline = Satu prompt. Apa pun beres.
+
+agents-title = Agen
+agents-search = Cari agen ACP dan CLI…
+agents-empty = Tidak ada agen yang cocok
+agents-empty-detail = Coba nama, runtime, atau ACP/CLI.
+agents-install-failed = Instalasi gagal
+agents-updating = Memperbarui…
+agents-retrying = Mencoba lagi…
+agents-preparing = Menyiapkan…
+
+extensions-title = Ekstensi
+extensions-search = Cari yang terinstal atau di Chrome Web Store…
+extensions-relaunch = Buka ulang untuk menerapkan
+extensions-empty = Belum ada ekstensi terinstal
+extensions-no-match = Tidak ada ekstensi yang cocok
+extensions-empty-detail = Cari di Chrome Web Store di atas, lalu tekan Return.
+extensions-no-match-detail = Coba nama atau ID ekstensi lain.
+extensions-on = Nyala
+extensions-off = Mati
+extensions-enable-confirm = Aktifkan { $name }?
+extensions-enable-permissions = Aktifkan { $name } dan izinkan:
+
+lsp-title = Server Bahasa
+lsp-search = Cari server bahasa, linter, formatter…
+lsp-loading = Memuat katalog…
+lsp-empty = Tidak ada server bahasa yang cocok
+lsp-empty-detail = Coba bahasa, linter, atau formatter lain.
+lsp-needs = memerlukan { $tool }
+lsp-status-available = Tersedia
+lsp-status-on-path = Di PATH
+lsp-status-installing = Menginstal…
+lsp-status-installed = Terinstal
+lsp-status-outdated = Pembaruan tersedia
+lsp-status-running = Berjalan
+lsp-status-failed = Gagal
+
+spaces-title = Ruang
+spaces-new-placeholder = Nama ruang baru
+spaces-empty = Belum ada ruang
+spaces-default-name = Ruang { $number }
+spaces-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+spaces-delete = Hapus ruang
+
+team-title = Tim
+team-just-you = Hanya Anda di ruang ini
+team-agents = { $count ->
+    [one] Anda dan 1 agen
+   *[other] Anda dan { $count } agen
+}
+team-empty = Belum ada siapa pun di sini
+team-you = Anda
+team-agent = Agen
+
+services-title = Layanan Latar Belakang
+services-processes = { $count ->
+    [one] 1 proses
+   *[other] { $count } proses
+}
+services-kill-all = Hentikan Semua Paksa
+services-not-running = Layanan tidak berjalan
+services-start-with = Mulai dengan:
+services-empty = Tidak ada proses aktif
+services-filter = Filter proses…
+services-no-match = Tidak ada proses yang cocok
+services-connected = Terhubung
+services-disconnected = Terputus
+services-attached = terlampir
+services-kill = Hentikan paksa
+services-memory = Memori
+services-size = Ukuran
+services-shell = Shell
+
+error-title = Kesalahan
+
+history-search = Cari riwayat
+history-clear-all = Hapus semua
+history-clear-confirm = Hapus semua riwayat?
+history-clear-warning = Tindakan ini tidak dapat dibatalkan.
+history-cancel = Batal
+history-today = Hari ini
+history-yesterday = Kemarin
+history-days-ago = { $count } hari lalu
+history-day-offset = Hari -{ $count }
+
+settings-title = Pengaturan
+settings-loading = Memuat pengaturan…
+settings-stored = Disimpan di ~/.vmux/settings.ron
+settings-other = Lainnya
+settings-software-update = Pembaruan Perangkat Lunak
+settings-check-updates = Periksa Pembaruan
+settings-check-updates-hint = Diperiksa otomatis saat diluncurkan dan setiap jam jika Pembaruan otomatis aktif.
+settings-update-unavailable = Tidak tersedia
+settings-update-unavailable-hint = Pembaru tidak disertakan dalam build ini.
+settings-update-checking = Memeriksa…
+settings-update-checking-hint = Memeriksa pembaruan…
+settings-update-check-again = Periksa Lagi
+settings-update-current = Vmux sudah versi terbaru.
+settings-update-downloading = Mengunduh…
+settings-update-downloading-hint = Mengunduh Vmux { $version }…
+settings-update-installing = Menginstal…
+settings-update-installing-hint = Menginstal Vmux { $version }…
+settings-update-ready = Pembaruan Siap
+settings-update-ready-hint = Vmux { $version } siap. Mulai ulang untuk menerapkannya.
+settings-update-try-again = Coba Lagi
+settings-update-failed = Tidak dapat memeriksa pembaruan.
+settings-item = Item
+settings-item-number = Item { $number }
+settings-press-key = Tekan tombol…
+settings-saved = Tersimpan
+settings-record-key = Klik untuk merekam kombinasi tombol baru
+
+tray-open-window = Buka Jendela
+tray-close-window = Tutup Jendela
+tray-pause-recording = Jeda Perekaman
+tray-resume-recording = Lanjutkan Perekaman
+tray-finish-recording = Selesaikan Perekaman
+tray-quit = Keluar dari Vmux
+
+composer-attach-files = Lampirkan file (/upload)
+composer-remove-attachment = Hapus lampiran
+
+layout-back = Kembali
+layout-forward = Maju
+layout-reload = Muat ulang
+layout-bookmark-page = Tandai halaman ini
+layout-remove-bookmark = Hapus markah
+layout-pin-page = Sematkan halaman ini
+layout-unpin-page = Lepas sematan halaman ini
+layout-manage-extensions = Kelola ekstensi
+layout-new-stack = Tumpukan baru
+layout-close-tab = Tutup tab
+layout-bookmark = Markah
+layout-pin = Sematkan
+layout-new-tab = Tab baru
+layout-team = Tim
+
+command-switch-space = Beralih ruang…
+command-search-ask = Cari atau tanya…
+command-new-tab-placeholder = Cari atau ketik URL, atau pilih Terminal…
+command-placeholder = Ketik URL, cari tab, atau > untuk perintah…
+command-composer-placeholder = Ketik / untuk perintah atau @ untuk media
+command-send = Kirim (Enter)
+command-terminal = Terminal
+command-open-terminal = Buka di Terminal
+command-stack = Tumpukan
+command-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+command-prompt = Prompt
+command-new-tab = Tab baru
+command-search = Cari
+command-open-value = Buka “{ $value }”
+command-search-value = Cari “{ $value }”
+
+schema-appearance = Tampilan
+schema-general = Umum
+schema-layout = Tata letak
+schema-layout-detail = Jendela, panel, bilah sisi, dan cincin fokus.
+schema-agent = Agen
+schema-agent-detail = Perilaku agen dan izin alat.
+schema-shortcuts = Pintasan
+schema-shortcuts-detail = Tampilan hanya-baca. Edit settings.ron langsung untuk mengubah binding.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Mode
+schema-mode-detail = Skema warna untuk halaman web. Perangkat mengikuti sistem Anda.
+schema-device = Perangkat
+schema-light = Terang
+schema-dark = Gelap
+schema-language = Bahasa
+schema-language-detail = Gunakan sistem, en-US, ja, atau tag BCP 47 apa pun dengan katalog ~/.vmux/locales/<tag>.ftl yang sesuai.
+schema-auto-update = Pembaruan otomatis
+schema-auto-update-detail = Periksa dan instal pembaruan saat diluncurkan dan setiap jam.
+schema-startup-url = URL awal
+schema-startup-url-detail = Kosongkan untuk membuka prompt bilah perintah.
+schema-search-engine = Mesin telusur
+schema-search-engine-detail = Digunakan untuk pencarian web dari Mulai dan bilah perintah.
+schema-window = Jendela
+schema-pane = Panel
+schema-side-sheet = Lembar samping
+schema-focus-ring = Cincin fokus
+schema-run-placement = Izinkan penggantian penempatan run
+schema-run-placement-detail = Izinkan agen memilih mode panel run, arah, dan jangkar.
+schema-leader = Leader
+schema-leader-detail = Tombol awalan untuk pintasan chord.
+schema-chord-timeout = Waktu habis chord
+schema-chord-timeout-detail = Milidetik sebelum awalan chord kedaluwarsa.
+schema-bindings = Binding
+schema-confirm-close = Konfirmasi saat menutup
+schema-confirm-close-detail = Minta konfirmasi sebelum menutup terminal dengan proses yang sedang berjalan.
+schema-default-theme = Tema default
+schema-default-theme-detail = Nama tema aktif dari daftar tema.
+
+settings-empty = (kosong)
+settings-none = (tidak ada)
+
+schema-system = Sistem
+schema-editor = Editor
+schema-recording = Perekaman
+schema-radius = Radius
+schema-padding = Padding
+schema-gap = Jarak
+schema-width = Lebar
+schema-color = Warna
+schema-red = Merah
+schema-green = Hijau
+schema-blue = Biru
+schema-follow-files = Ikuti file
+schema-tidy-files = Bersihkan file
+schema-tidy-files-max = Ambang pembersihan file
+schema-tidy-files-auto = Bersihkan file otomatis
+schema-app-providers = Penyedia aplikasi
+schema-provider = Penyedia
+schema-kind = Jenis
+schema-models = Model
+schema-acp = Agen ACP
+schema-id = ID
+schema-name = Nama
+schema-command = Perintah
+schema-arguments = Argumen
+schema-environment = Lingkungan
+schema-working-directory = Direktori kerja
+schema-shell = Shell
+schema-font-family = Keluarga font
+schema-startup-directory = Direktori awal
+schema-themes = Tema
+schema-color-scheme = Skema warna
+schema-font-size = Ukuran font
+schema-line-height = Tinggi baris
+schema-cursor-style = Gaya kursor
+schema-cursor-blink = Kedipan kursor
+schema-custom-themes = Tema kustom
+schema-foreground = Latar depan
+schema-background = Latar belakang
+schema-cursor = Kursor
+schema-ansi-colors = Warna ANSI
+schema-keymap = Pemetaan tombol
+schema-explorer = Penjelajah
+schema-visible = Terlihat
+schema-language-servers = Server bahasa
+schema-servers = Server
+schema-language-id = ID bahasa
+schema-root-markers = Penanda root
+schema-output-directory = Direktori keluaran
+
+menu-scene = Adegan
+menu-layout = Tata Letak
+menu-terminal = Terminal
+menu-browser = Peramban
+menu-service = Layanan
+menu-bookmark = Markah
+menu-edit = Sunting
+
+layout-knowledge = Pengetahuan
+layout-open-knowledge = Buka Pengetahuan
+layout-open-welcome-knowledge = Buka Selamat Datang di Pengetahuan
+layout-open-path = Buka { $path }
+layout-fold-knowledge = Ciutkan pengetahuan
+layout-unfold-knowledge = Bentangkan pengetahuan
+layout-bookmarks = Markah
+layout-new-folder = Folder baru
+layout-add-to-bookmarks = Tambahkan ke Markah
+layout-move-to-bookmarks = Pindahkan ke Markah
+layout-stack-number = Tumpukan { $number }
+layout-fold-stack = Ciutkan tumpukan
+layout-unfold-stack = Bentangkan tumpukan
+layout-close-stack = Tutup tumpukan
+layout-bookmark-in = Markah di { $folder }
+
+common-cancel = Batal
+common-delete = Hapus
+common-save = Simpan
+common-rename = Ganti nama
+common-expand = Bentangkan
+common-collapse = Ciutkan
+common-loading = Memuat…
+common-error = Kesalahan
+common-output = Output
+common-pending = Tertunda
+common-current = saat ini
+common-stop = Hentikan
+services-command = Layanan Vmux
+services-uptime-seconds = { $seconds }d
+services-uptime-minutes = { $minutes }m { $seconds }d
+services-uptime-hours = { $hours }j { $minutes }m
+services-uptime-days = { $days }h { $hours }j
+
+error-page-failed-load = Halaman gagal dimuat
+error-page-not-found = Halaman tidak ditemukan
+error-unknown-host = Host aplikasi Vmux tidak dikenal: { $host }
+
+history-title = Riwayat
+
+command-new-app-chat = Chat { $provider }/{ $model } baru (Aplikasi)
+command-interactive-mode-user = Scene > Mode Interaktif > Pengguna
+command-interactive-mode-player = Scene > Mode Interaktif > Pemutar
+command-minimize-window = Layout > Jendela > Minimalkan
+command-toggle-layout = Layout > Layout > Alihkan Layout
+command-close-tab = Layout > Tab > Tutup Tab
+command-new-task = Layout > Tab > Tugas Baru…
+command-next-tab = Layout > Tab > Tab Berikutnya
+command-prev-tab = Layout > Tab > Tab Sebelumnya
+command-rename-tab = Layout > Tab > Ganti Nama Tab
+command-tab-select-1 = Layout > Tab > Pilih Tab 1
+command-tab-select-2 = Layout > Tab > Pilih Tab 2
+command-tab-select-3 = Layout > Tab > Pilih Tab 3
+command-tab-select-4 = Layout > Tab > Pilih Tab 4
+command-tab-select-5 = Layout > Tab > Pilih Tab 5
+command-tab-select-6 = Layout > Tab > Pilih Tab 6
+command-tab-select-7 = Layout > Tab > Pilih Tab 7
+command-tab-select-8 = Layout > Tab > Pilih Tab 8
+command-tab-select-last = Layout > Tab > Pilih Tab Terakhir
+command-close-pane = Layout > Pane > Tutup Pane
+command-select-pane-left = Layout > Pane > Pilih Pane Kiri
+command-select-pane-right = Layout > Pane > Pilih Pane Kanan
+command-select-pane-up = Layout > Pane > Pilih Pane Atas
+command-select-pane-down = Layout > Pane > Pilih Pane Bawah
+command-swap-pane-prev = Layout > Pane > Tukar dengan Pane Sebelumnya
+command-swap-pane-next = Layout > Pane > Tukar dengan Pane Berikutnya
+command-equalize-pane-size = Layout > Pane > Samakan Ukuran Pane
+command-resize-pane-left = Layout > Pane > Ubah Ukuran Pane ke Kiri
+command-resize-pane-right = Layout > Pane > Ubah Ukuran Pane ke Kanan
+command-resize-pane-up = Layout > Pane > Ubah Ukuran Pane ke Atas
+command-resize-pane-down = Layout > Pane > Ubah Ukuran Pane ke Bawah
+command-stack-close = Layout > Stack > Tutup Stack
+command-stack-next = Layout > Stack > Stack Berikutnya
+command-stack-previous = Layout > Stack > Stack Sebelumnya
+command-stack-reopen = Layout > Stack > Buka Ulang Halaman yang Ditutup
+command-stack-swap-prev = Layout > Stack > Pindahkan Stack ke Kiri
+command-stack-swap-next = Layout > Stack > Pindahkan Stack ke Kanan
+command-space-open = Layout > Space > Spaces
+command-terminal-close = Terminal > Tutup Terminal
+command-terminal-next = Terminal > Terminal Berikutnya
+command-terminal-prev = Terminal > Terminal Sebelumnya
+command-terminal-clear = Terminal > Bersihkan Terminal
+command-browser-prev-page = Browser > Navigasi > Kembali
+command-browser-next-page = Browser > Navigasi > Maju
+command-browser-reload = Browser > Navigasi > Muat Ulang
+command-browser-hard-reload = Browser > Navigasi > Muat Ulang Paksa
+command-open-in-place = Browser > Buka > Buka di Sini
+command-open-in-new-stack = Browser > Buka > Buka di Stack Baru
+command-open-in-pane-top = Browser > Buka > Buka di Pane Atas
+command-open-in-pane-right = Browser > Buka > Buka di Pane Kanan
+command-open-in-pane-bottom = Browser > Buka > Buka di Pane Bawah
+command-open-in-pane-left = Browser > Buka > Buka di Pane Kiri
+command-open-in-new-tab = Browser > Buka > Buka di Tab Baru
+command-open-in-new-space = Browser > Buka > Buka di Space Baru
+command-browser-zoom-in = Browser > Tampilan > Perbesar
+command-browser-zoom-out = Browser > Tampilan > Perkecil
+command-browser-zoom-reset = Browser > Tampilan > Ukuran Sebenarnya
+command-browser-dev-tools = Browser > Tampilan > Alat Pengembang
+command-browser-open-command-bar = Browser > Bilah > Bilah Perintah
+command-browser-open-page-in-command-bar = Browser > Bilah > Edit Halaman
+command-browser-open-path-bar = Browser > Bilah > Navigator Path
+command-browser-open-commands = Browser > Bilah > Perintah
+command-browser-open-history = Browser > Bilah > Riwayat
+command-service-open = Service > Buka Monitor Layanan
+command-bookmark-toggle-active = Bookmark > Tandai Halaman
+command-bookmark-pin-active = Bookmark > Sematkan Halaman
+
+layout-tab = Tab
+layout-no-stacks = Tidak ada stack
+layout-loading = Memuat…
+layout-no-markdown-files = Tidak ada file Markdown
+layout-empty-folder = Folder kosong
+layout-worktree = worktree
+layout-folder-name = Nama folder
+layout-no-pins-bookmarks = Tidak ada pin atau bookmark
+layout-move-to = Pindahkan ke { $folder }
+layout-bookmark-current-page = Tandai Halaman Saat Ini
+layout-rename-folder = Ganti Nama Folder
+layout-remove-folder = Hapus Folder
+layout-update-downloading = Mengunduh pembaruan
+layout-update-installing = Menginstal pembaruan…
+layout-update-ready = Versi baru tersedia
+layout-restart-update = Mulai ulang untuk memperbarui
+
+agent-preparing = Menyiapkan agen…
+agent-send-all-queued = Kirim semua prompt antrean sekarang (Esc)
+agent-send = Kirim (Enter)
+agent-ready = Siap kapan saja.
+agent-loading-older = Memuat pesan lama…
+agent-load-older = Muat pesan lama
+agent-continued-from = Dilanjutkan dari { $source }
+agent-older-context-omitted = konteks lama dihilangkan
+agent-interrupted = terinterupsi
+agent-allow-tool = Izinkan { $tool }?
+agent-deny = Tolak
+agent-allow-always = Selalu izinkan
+agent-allow = Izinkan
+agent-loading-sessions = Memuat sesi…
+agent-no-resumable-sessions = Tidak ada sesi yang dapat dilanjutkan
+agent-no-matching-sessions = Tidak ada sesi yang cocok
+agent-no-matching-models = Tidak ada model yang cocok
+agent-choice-help = ↑/↓ atau Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Pilih folder repositori
+agent-choose-repository-detail = Pilih repositori Git lokal yang akan digunakan agen.
+agent-choosing = Memilih…
+agent-choose-folder = Pilih folder
+agent-queued = dalam antrean
+agent-attached = Terlampir:
+agent-cancel-queued = Batalkan prompt antrean
+agent-resume-queued = Lanjutkan prompt antrean
+agent-clear-queue = Bersihkan antrean
+agent-send-all-now = kirim semua sekarang
+agent-choose-option = Pilih opsi di atas
+agent-loading-media = Memuat media…
+agent-no-matching-media = Tidak ada media yang cocok
+agent-prompt-context = Konteks prompt
+agent-details = Detail
+agent-path = Path
+agent-tool = Alat
+agent-server = Server
+agent-bytes = { $count } byte
+agent-worked-for = Bekerja selama { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Bekerja selama { $duration } · 1 langkah
+   *[other] Bekerja selama { $duration } · { $count } langkah
+}
+agent-tool-guardian-review = Tinjauan Guardian
+agent-tool-read-files = Membaca file
+agent-tool-viewed-image = Melihat gambar
+agent-tool-used-browser = Menggunakan browser
+agent-tool-searched-files = Mencari file
+agent-tool-ran-commands = Menjalankan perintah
+agent-thinking = Berpikir
+agent-subagent = Subagen
+agent-prompt = Prompt
+agent-thread = Thread
+agent-parent = Induk
+agent-children = Turunan
+agent-call = Panggilan
+agent-raw-event = Event mentah
+agent-plan = Rencana
+agent-tasks = { $count ->
+    [one] 1 tugas
+   *[other] { $count } tugas
+}
+agent-edited = Diedit
+agent-reconnecting = Menghubungkan ulang { $attempt }/{ $total }
+agent-status-running = Berjalan
+agent-status-done = Selesai
+agent-status-failed = Gagal
+agent-status-pending = Tertunda
+agent-slash-attach-files = Lampirkan file
+agent-slash-resume-session = Lanjutkan sesi sebelumnya
+agent-slash-select-model = Pilih model
+agent-slash-continue-cli = Lanjutkan sesi ini di CLI
+agent-session-just-now = baru saja
+agent-session-minutes-ago = { $count } mnt lalu
+agent-session-hours-ago = { $count } jam lalu
+agent-session-days-ago = { $count } hari lalu
+agent-working-working = Bekerja
+agent-working-thinking = Berpikir
+agent-working-pondering = Merenung
+agent-working-noodling = Mengulik
+agent-working-percolating = Memproses
+agent-working-conjuring = Merangkai
+agent-working-cooking = Meracik
+agent-working-brewing = Menyeduh
+agent-working-musing = Merenung
+agent-working-ruminating = Memikirkan
+agent-working-scheming = Menyusun strategi
+agent-working-synthesizing = Menyintesis
+agent-working-tinkering = Mengutak-atik
+agent-working-churning = Mengolah
+agent-working-vibing = Menyetel rasa
+agent-working-simmering = Meresapkan
+agent-working-crafting = Merancang
+agent-working-divining = Menelisik
+agent-working-mulling = Menimbang
+agent-working-spelunking = Menelusuri
+
+editor-toggle-explorer = Alihkan Explorer (Cmd+B)
+editor-unsaved = belum disimpan
+editor-rendered-markdown = Markdown dirender dengan edit langsung
+editor-note = Catatan
+editor-source-editor = Editor sumber
+editor-editor = Editor
+editor-git-diff = Diff Git
+editor-diff = Diff
+editor-tidy = Rapikan
+editor-always = Selalu
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 pratinjau tanpa perubahan
+   *[other] ✦ { $count } pratinjau tanpa perubahan
+}
+editor-open-externally = Buka secara eksternal
+editor-changed-line = Baris berubah
+editor-go-to-definition = Buka Definisi
+editor-find-references = Cari Referensi
+editor-references = { $count ->
+    [one] 1 referensi
+   *[other] { $count } referensi
+}
+editor-lsp-starting = { $server } memulai…
+editor-lsp-not-installed = { $server } — belum terinstal
+editor-explorer = Explorer
+editor-open-editors = Editor Terbuka
+editor-outline = Outline
+editor-new-file = File Baru
+editor-new-folder = Folder Baru
+editor-delete-confirm = Hapus “{ $name }”? Tindakan ini tidak dapat dibatalkan.
+editor-created-folder = Folder { $name } dibuat
+editor-created-file = File { $name } dibuat
+editor-renamed-to = Diganti nama menjadi { $name }
+editor-deleted = { $name } dihapus
+editor-failed-decode-image = Gagal mendekode gambar
+editor-preview-large-image = gambar (terlalu besar untuk pratinjau)
+editor-preview-binary = biner
+editor-preview-file = file
+
+git-status-clean = bersih
+git-status-modified = diubah
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = belum dilacak
+git-status-deleted = dihapus
+git-status-conflict = konflik
+git-accept-all = ✓ terima semua
+git-unstage = Batalkan staging
+git-confirm-deny-all = Konfirmasi tolak semua
+git-deny-all = ✗ tolak semua
+git-commit-message = pesan commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Memuat diff…
+git-no-changes = Tidak ada perubahan untuk ditampilkan
+git-accept = ✓ terima
+git-deny = ✗ tolak
+git-show-unchanged-lines = Tampilkan { $count } baris tanpa perubahan
+
+terminal-loading = Memuat…
+terminal-runs-when-ready = berjalan saat siap · Ctrl+C membersihkan · Esc melewati
+terminal-booting = memulai
+terminal-type-command = ketik perintah · berjalan saat siap · Esc melewati
+
+setup-tagline-claude = Agen coding Anthropic, di Vmux
+setup-tagline-codex = Agen coding OpenAI, di Vmux
+setup-tagline-vibe = Agen coding Mistral, di Vmux
+setup-install-title = Instal CLI { $name }
+setup-homebrew-required = Homebrew diperlukan untuk menginstal { $command } dan belum disiapkan. Vmux akan menginstal Homebrew terlebih dahulu, lalu { $name }.
+setup-terminal-instructions = Di terminal, tekan Return untuk memulai, lalu masukkan kata sandi Mac Anda saat diminta.
+setup-command-missing = Vmux membuka halaman ini karena perintah lokal { $command } belum terinstal. Jalankan perintah di bawah untuk mendapatkannya.
+setup-install-failed = Instalasi tidak selesai. Periksa terminal untuk detailnya, lalu coba lagi.
+setup-installing = Menginstal…
+setup-install-homebrew = Instal Homebrew + { $name }
+setup-run-install = Jalankan perintah instalasi
+setup-auto-reload = Vmux menjalankannya di terminal dan memuat ulang saat { $command } siap.
+
+debug-title = Debug
+debug-auto-update = Pembaruan otomatis
+debug-simulate-update = Simulasikan pembaruan tersedia
+debug-simulate-download = Simulasikan unduhan
+debug-clear-update = Bersihkan pembaruan
+debug-trigger-restart = Picu mulai ulang
+
+command-manage-spaces = Kelola space…
+command-pane-stack-location = pane { $pane } / stack { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Mode Interaktif
+command-group-window = Jendela
+command-group-tab = Tab
+command-group-pane = Pane
+command-group-stack = Stack
+command-group-space = Space
+command-group-navigation = Navigasi
+command-group-open = Buka
+command-group-view = Tampilan
+command-group-bar = Bar
+
+menu-close-vmux = Tutup Vmux
+
+agents-terminal-coding-agent = Agen coding berbasis terminal

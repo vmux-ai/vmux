@@ -1,0 +1,602 @@
+locale-name = o‘zbek
+common-open = Ochish
+common-close = Yopish
+common-install = O‘rnatish
+common-uninstall = O‘chirish
+common-update = Yangilash
+common-retry = Qayta urinish
+common-refresh = Yangilash
+common-remove = Olib tashlash
+common-enable = Yoqish
+common-disable = O‘chirish
+common-new = Yangi
+common-active = faol
+common-running = ishlayapti
+common-done = tayyor
+common-failed = Xato
+common-installed = O‘rnatilgan
+common-items = { $count ->
+    [one] { $count } ta element
+   *[other] { $count } ta element
+}
+start-title = Boshlash
+start-tagline = Bitta prompt. Hammasi tayyor.
+
+agents-title = Agentlar
+agents-search = ACP va CLI agentlarini qidirish…
+agents-empty = Mos agent topilmadi
+agents-empty-detail = Nomi, runtime yoki ACP/CLI bo‘yicha urinib ko‘ring.
+agents-install-failed = O‘rnatilmadi
+agents-updating = Yangilanmoqda…
+agents-retrying = Qayta urinilmoqda…
+agents-preparing = Tayyorlanmoqda…
+
+extensions-title = Kengaytmalar
+extensions-search = O‘rnatilganlar yoki Chrome Web Store’dan qidirish…
+extensions-relaunch = Qo‘llash uchun qayta ishga tushiring
+extensions-empty = Kengaytma o‘rnatilmagan
+extensions-no-match = Mos kengaytma topilmadi
+extensions-empty-detail = Yuqoridagi Chrome Web Store’dan qidiring va Enter bosing.
+extensions-no-match-detail = Boshqa nom yoki kengaytma ID sini sinab ko‘ring.
+extensions-on = Yoqilgan
+extensions-off = O‘chirilgan
+extensions-enable-confirm = { $name } yoqilsinmi?
+extensions-enable-permissions = { $name } yoqilsin va quyidagilarga ruxsat berilsin:
+
+lsp-title = Til serverlari
+lsp-search = Til serverlari, linterlar, formatterlarni qidirish…
+lsp-loading = Katalog yuklanmoqda…
+lsp-empty = Mos til serveri topilmadi
+lsp-empty-detail = Boshqa til, linter yoki formatterni sinab ko‘ring.
+lsp-needs = { $tool } kerak
+lsp-status-available = Mavjud
+lsp-status-on-path = PATH’da bor
+lsp-status-installing = O‘rnatilmoqda…
+lsp-status-installed = O‘rnatilgan
+lsp-status-outdated = Yangilanish mavjud
+lsp-status-running = Ishlayapti
+lsp-status-failed = Xato
+
+spaces-title = Ish maydonlari
+spaces-new-placeholder = Yangi ish maydoni nomi
+spaces-empty = Ish maydonlari yo‘q
+spaces-default-name = Ish maydoni { $number }
+spaces-tabs = { $count ->
+    [one] 1 ta tab
+   *[other] { $count } ta tab
+}
+spaces-delete = Ish maydonini o‘chirish
+
+team-title = Jamoa
+team-just-you = Bu ish maydonida faqat siz
+team-agents = { $count ->
+    [one] Siz va 1 ta agent
+   *[other] Siz va { $count } ta agent
+}
+team-empty = Bu yerda hali hech kim yo‘q
+team-you = Siz
+team-agent = Agent
+
+services-title = Fon xizmatlari
+services-processes = { $count ->
+    [one] 1 ta jarayon
+   *[other] { $count } ta jarayon
+}
+services-kill-all = Hammasini majburan to‘xtatish
+services-not-running = Xizmat ishlamayapti
+services-start-with = Boshlash:
+services-empty = Faol jarayonlar yo‘q
+services-filter = Jarayonlarni filtrlash…
+services-no-match = Mos jarayon topilmadi
+services-connected = Ulangan
+services-disconnected = Uzilgan
+services-attached = biriktirilgan
+services-kill = Majburan to‘xtatish
+services-memory = Xotira
+services-size = Hajm
+services-shell = Shell
+
+error-title = Xato
+
+history-search = Tarixdan qidirish
+history-clear-all = Hammasini tozalash
+history-clear-confirm = Butun tarix tozalansinmi?
+history-clear-warning = Buni ortga qaytarib bo‘lmaydi.
+history-cancel = Bekor qilish
+history-today = Bugun
+history-yesterday = Kecha
+history-days-ago = { $count } kun oldin
+history-day-offset = Kun -{ $count }
+
+settings-title = Sozlamalar
+settings-loading = Sozlamalar yuklanmoqda…
+settings-stored = ~/.vmux/settings.ron faylida saqlanadi
+settings-other = Boshqa
+settings-software-update = Dastur yangilanishi
+settings-check-updates = Yangilanishlarni tekshirish
+settings-check-updates-hint = Avtoyangilash yoqilgan bo‘lsa, ishga tushganda va har soatda avtomatik tekshiradi.
+settings-update-unavailable = Mavjud emas
+settings-update-unavailable-hint = Yangilagich bu build tarkibiga kiritilmagan.
+settings-update-checking = Tekshirilmoqda…
+settings-update-checking-hint = Yangilanishlar tekshirilmoqda…
+settings-update-check-again = Qayta tekshirish
+settings-update-current = Vmux yangilangan.
+settings-update-downloading = Yuklab olinmoqda…
+settings-update-downloading-hint = Vmux { $version } yuklab olinmoqda…
+settings-update-installing = O‘rnatilmoqda…
+settings-update-installing-hint = Vmux { $version } o‘rnatilmoqda…
+settings-update-ready = Yangilanish tayyor
+settings-update-ready-hint = Vmux { $version } tayyor. Qo‘llash uchun qayta ishga tushiring.
+settings-update-try-again = Qayta urinish
+settings-update-failed = Yangilanishlarni tekshirib bo‘lmadi.
+settings-item = Element
+settings-item-number = Element { $number }
+settings-press-key = Tugmani bosing…
+settings-saved = Saqlandi
+settings-record-key = Yangi tugmalar kombinatsiyasini yozish uchun bosing
+
+tray-open-window = Oynani ochish
+tray-close-window = Oynani yopish
+tray-pause-recording = Yozishni pauza qilish
+tray-resume-recording = Yozishni davom ettirish
+tray-finish-recording = Yozishni tugatish
+tray-quit = Vmux’dan chiqish
+
+composer-attach-files = Fayllarni biriktirish (/upload)
+composer-remove-attachment = Biriktirmani olib tashlash
+
+layout-back = Orqaga
+layout-forward = Oldinga
+layout-reload = Qayta yuklash
+layout-bookmark-page = Bu sahifani xatcho‘pga qo‘shish
+layout-remove-bookmark = Xatcho‘pni olib tashlash
+layout-pin-page = Bu sahifani mahkamlash
+layout-unpin-page = Bu sahifani mahkamlashdan chiqarish
+layout-manage-extensions = Kengaytmalarni boshqarish
+layout-new-stack = Yangi qatlam
+layout-close-tab = Tabni yopish
+layout-bookmark = Xatcho‘p
+layout-pin = Mahkamlash
+layout-new-tab = Yangi tab
+layout-team = Jamoa
+
+command-switch-space = Ish maydonini almashtirish…
+command-search-ask = Qidirish yoki so‘rash…
+command-new-tab-placeholder = Qidiring yoki URL kiriting, yoki Terminalni tanlang…
+command-placeholder = URL kiriting, tablarni qidiring yoki buyruqlar uchun > bosing…
+command-composer-placeholder = Buyruqlar uchun / yoki media uchun @ kiriting
+command-send = Yuborish (Enter)
+command-terminal = Terminal
+command-open-terminal = Terminalda ochish
+command-stack = Qatlam
+command-tabs = { $count ->
+    [one] 1 ta tab
+   *[other] { $count } ta tab
+}
+command-prompt = Prompt
+command-new-tab = Yangi tab
+command-search = Qidirish
+command-open-value = “{ $value }”ni ochish
+command-search-value = “{ $value }”ni qidirish
+
+schema-appearance = Ko‘rinish
+schema-general = Umumiy
+schema-layout = Joylashuv
+schema-layout-detail = Oyna, panellar, yon panel va fokus halqasi.
+schema-agent = Agent
+schema-agent-detail = Agent xatti-harakati va asboblar ruxsatlari.
+schema-shortcuts = Qisqa tugmalar
+schema-shortcuts-detail = Faqat ko‘rish uchun. Bog‘lamalarni o‘zgartirish uchun settings.ron faylini bevosita tahrirlang.
+schema-terminal = Terminal
+schema-browser = Brauzer
+schema-mode = Rejim
+schema-mode-detail = Veb-sahifalar rang sxemasi. Qurilma tizimingizga ergashadi.
+schema-device = Qurilma
+schema-light = Yorug‘
+schema-dark = Qorong‘i
+schema-language = Til
+schema-language-detail = Tizim tili, en-US, ja yoki mos ~/.vmux/locales/<tag>.ftl katalogiga ega istalgan BCP 47 tegidan foydalaning.
+schema-auto-update = Avtoyangilash
+schema-auto-update-detail = Ishga tushganda va har soatda yangilanishlarni tekshirish va o‘rnatish.
+schema-startup-url = Boshlang‘ich URL
+schema-startup-url-detail = Bo‘sh bo‘lsa, buyruqlar paneli prompti ochiladi.
+schema-search-engine = Qidiruv tizimi
+schema-search-engine-detail = Start va buyruqlar panelidan veb-qidiruvlar uchun ishlatiladi.
+schema-window = Oyna
+schema-pane = Panel
+schema-side-sheet = Yon varaq
+schema-focus-ring = Fokus halqasi
+schema-run-placement = Ishga tushirish joylashuvini almashtirishga ruxsat berish
+schema-run-placement-detail = Agentlarga ishga tushirish paneli rejimi, yo‘nalishi va langarini tanlashga ruxsat berish.
+schema-leader = Lider
+schema-leader-detail = Chord qisqa tugmalari uchun prefiks tugma.
+schema-chord-timeout = Chord vaqti tugashi
+schema-chord-timeout-detail = Chord prefiksi tugashigacha bo‘lgan millisekundlar.
+schema-bindings = Bog‘lamalar
+schema-confirm-close = Yopishni tasdiqlash
+schema-confirm-close-detail = Ishlayotgan jarayoni bor terminalni yopishdan oldin so‘rash.
+schema-default-theme = Standart mavzu
+schema-default-theme-detail = Mavzular ro‘yxatidagi faol mavzu nomi.
+
+settings-empty = (bo‘sh)
+settings-none = (yo‘q)
+
+schema-system = Tizim
+schema-editor = Muharrir
+schema-recording = Yozib olish
+schema-radius = Radius
+schema-padding = Ichki chekinish
+schema-gap = Oraliq
+schema-width = Kenglik
+schema-color = Rang
+schema-red = Qizil
+schema-green = Yashil
+schema-blue = Ko‘k
+schema-follow-files = Fayllarni kuzatish
+schema-tidy-files = Fayllarni tartiblash
+schema-tidy-files-max = Fayl tartiblash chegarasi
+schema-tidy-files-auto = Fayllarni avtomatik tartiblash
+schema-app-providers = Ilova provayderlari
+schema-provider = Provayder
+schema-kind = Turi
+schema-models = Modellar
+schema-acp = ACP agentlari
+schema-id = ID
+schema-name = Nomi
+schema-command = Buyruq
+schema-arguments = Argumentlar
+schema-environment = Muhit
+schema-working-directory = Ishchi katalog
+schema-shell = Qobiq
+schema-font-family = Shrift oilasi
+schema-startup-directory = Boshlang‘ich katalog
+schema-themes = Mavzular
+schema-color-scheme = Rang sxemasi
+schema-font-size = Shrift o‘lchami
+schema-line-height = Qator balandligi
+schema-cursor-style = Kursor uslubi
+schema-cursor-blink = Kursor miltillashi
+schema-custom-themes = Maxsus mavzular
+schema-foreground = Old plan
+schema-background = Orqa fon
+schema-cursor = Kursor
+schema-ansi-colors = ANSI ranglari
+schema-keymap = Klaviatura xaritasi
+schema-explorer = Kuzatuvchi
+schema-visible = Ko‘rinadi
+schema-language-servers = Til serverlari
+schema-servers = Serverlar
+schema-language-id = Til ID
+schema-root-markers = Ildiz belgilari
+schema-output-directory = Chiqish katalogi
+
+menu-scene = Sahna
+menu-layout = Tartib
+menu-terminal = Terminal
+menu-browser = Brauzer
+menu-service = Xizmat
+menu-bookmark = Xatcho‘p
+menu-edit = Tahrir
+
+layout-knowledge = Bilim
+layout-open-knowledge = Bilimni ochish
+layout-open-welcome-knowledge = Bilimga xush kelibsizni ochish
+layout-open-path = { $path } ni ochish
+layout-fold-knowledge = Bilimni yig‘ish
+layout-unfold-knowledge = Bilimni yoyish
+layout-bookmarks = Xatcho‘plar
+layout-new-folder = Yangi jild
+layout-add-to-bookmarks = Xatcho‘plarga qo‘shish
+layout-move-to-bookmarks = Xatcho‘plarga ko‘chirish
+layout-stack-number = Stek { $number }
+layout-fold-stack = Stekni yig‘ish
+layout-unfold-stack = Stekni yoyish
+layout-close-stack = Stekni yopish
+layout-bookmark-in = { $folder } ichida xatcho‘p qilish
+
+common-cancel = Bekor qilish
+common-delete = O‘chirish
+common-save = Saqlash
+common-rename = Nomini o‘zgartirish
+common-expand = Yoyish
+common-collapse = Yig‘ish
+common-loading = Yuklanmoqda…
+common-error = Xato
+common-output = Chiqish
+common-pending = Kutilmoqda
+common-current = joriy
+common-stop = To‘xtatish
+services-command = Vmux xizmati
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }soat { $minutes }m
+services-uptime-days = { $days }kun { $hours }soat
+
+error-page-failed-load = Sahifani yuklab bo‘lmadi
+error-page-not-found = Sahifa topilmadi
+error-unknown-host = Noma’lum Vmux ilova hosti: { $host }
+
+history-title = Tarix
+
+command-new-app-chat = Yangi { $provider }/{ $model } chati (Ilova)
+command-interactive-mode-user = Sahna > Interaktiv rejim > Foydalanuvchi
+command-interactive-mode-player = Sahna > Interaktiv rejim > Ijrochi
+command-minimize-window = Maket > Oyna > Kichraytirish
+command-toggle-layout = Maket > Maket > Maketni almashtirish
+command-close-tab = Maket > Varaq > Varaqni yopish
+command-new-task = Maket > Varaq > Yangi vazifa…
+command-next-tab = Maket > Varaq > Keyingi varaq
+command-prev-tab = Maket > Varaq > Oldingi varaq
+command-rename-tab = Maket > Varaq > Varaq nomini o‘zgartirish
+command-tab-select-1 = Maket > Varaq > 1-varaqni tanlash
+command-tab-select-2 = Maket > Varaq > 2-varaqni tanlash
+command-tab-select-3 = Maket > Varaq > 3-varaqni tanlash
+command-tab-select-4 = Maket > Varaq > 4-varaqni tanlash
+command-tab-select-5 = Maket > Varaq > 5-varaqni tanlash
+command-tab-select-6 = Maket > Varaq > 6-varaqni tanlash
+command-tab-select-7 = Maket > Varaq > 7-varaqni tanlash
+command-tab-select-8 = Maket > Varaq > 8-varaqni tanlash
+command-tab-select-last = Maket > Varaq > Oxirgi varaqni tanlash
+command-close-pane = Maket > Panel > Panelni yopish
+command-select-pane-left = Maket > Panel > Chap panelni tanlash
+command-select-pane-right = Maket > Panel > O‘ng panelni tanlash
+command-select-pane-up = Maket > Panel > Yuqoridagi panelni tanlash
+command-select-pane-down = Maket > Panel > Pastdagi panelni tanlash
+command-swap-pane-prev = Maket > Panel > Oldingi panel bilan almashtirish
+command-swap-pane-next = Maket > Panel > Keyingi panel bilan almashtirish
+command-equalize-pane-size = Maket > Panel > Panel o‘lchamlarini tenglashtirish
+command-resize-pane-left = Maket > Panel > Panelni chapga o‘lchash
+command-resize-pane-right = Maket > Panel > Panelni o‘ngga o‘lchash
+command-resize-pane-up = Maket > Panel > Panelni yuqoriga o‘lchash
+command-resize-pane-down = Maket > Panel > Panelni pastga o‘lchash
+command-stack-close = Maket > Stek > Stekni yopish
+command-stack-next = Maket > Stek > Keyingi stek
+command-stack-previous = Maket > Stek > Oldingi stek
+command-stack-reopen = Maket > Stek > Yopilgan sahifani qayta ochish
+command-stack-swap-prev = Maket > Stek > Stekni chapga ko‘chirish
+command-stack-swap-next = Maket > Stek > Stekni o‘ngga ko‘chirish
+command-space-open = Maket > Makon > Makonlar
+command-terminal-close = Terminal > Terminalni yopish
+command-terminal-next = Terminal > Keyingi terminal
+command-terminal-prev = Terminal > Oldingi terminal
+command-terminal-clear = Terminal > Terminalni tozalash
+command-browser-prev-page = Brauzer > Navigatsiya > Orqaga
+command-browser-next-page = Brauzer > Navigatsiya > Oldinga
+command-browser-reload = Brauzer > Navigatsiya > Qayta yuklash
+command-browser-hard-reload = Brauzer > Navigatsiya > Majburan qayta yuklash
+command-open-in-place = Brauzer > Ochish > Shu yerda ochish
+command-open-in-new-stack = Brauzer > Ochish > Yangi stekda ochish
+command-open-in-pane-top = Brauzer > Ochish > Yuqoridagi panelda ochish
+command-open-in-pane-right = Brauzer > Ochish > O‘ng panelda ochish
+command-open-in-pane-bottom = Brauzer > Ochish > Pastdagi panelda ochish
+command-open-in-pane-left = Brauzer > Ochish > Chap panelda ochish
+command-open-in-new-tab = Brauzer > Ochish > Yangi varaqda ochish
+command-open-in-new-space = Brauzer > Ochish > Yangi makonda ochish
+command-browser-zoom-in = Brauzer > Ko‘rinish > Kattalashtirish
+command-browser-zoom-out = Brauzer > Ko‘rinish > Kichraytirish
+command-browser-zoom-reset = Brauzer > Ko‘rinish > Haqiqiy o‘lcham
+command-browser-dev-tools = Brauzer > Ko‘rinish > Dasturchi vositalari
+command-browser-open-command-bar = Brauzer > Panel > Buyruqlar paneli
+command-browser-open-page-in-command-bar = Brauzer > Panel > Sahifani tahrirlash
+command-browser-open-path-bar = Brauzer > Panel > Yo‘l navigatori
+command-browser-open-commands = Brauzer > Panel > Buyruqlar
+command-browser-open-history = Brauzer > Panel > Tarix
+command-service-open = Xizmat > Xizmat monitorini ochish
+command-bookmark-toggle-active = Xatcho‘p > Sahifani xatcho‘pga qo‘shish
+command-bookmark-pin-active = Xatcho‘p > Sahifani qadash
+
+layout-tab = Varaq
+layout-no-stacks = Steklar yo‘q
+layout-loading = Yuklanmoqda…
+layout-no-markdown-files = Markdown fayllari yo‘q
+layout-empty-folder = Papka bo‘sh
+layout-worktree = ish daraxti
+layout-folder-name = Papka nomi
+layout-no-pins-bookmarks = Qadalganlar yoki xatcho‘plar yo‘q
+layout-move-to = { $folder } papkasiga ko‘chirish
+layout-bookmark-current-page = Joriy sahifani xatcho‘pga qo‘shish
+layout-rename-folder = Papka nomini o‘zgartirish
+layout-remove-folder = Papkani olib tashlash
+layout-update-downloading = Yangilanish yuklab olinmoqda
+layout-update-installing = Yangilanish o‘rnatilmoqda…
+layout-update-ready = Yangi versiya mavjud
+layout-restart-update = Yangilash uchun qayta ishga tushiring
+
+agent-preparing = Agent tayyorlanmoqda…
+agent-send-all-queued = Navbatdagi barcha promptlarni hozir yuborish (Esc)
+agent-send = Yuborish (Enter)
+agent-ready = Tayyor bo‘lsangiz, boshlaymiz.
+agent-loading-older = Eski xabarlar yuklanmoqda…
+agent-load-older = Eski xabarlarni yuklash
+agent-continued-from = { $source } dan davom ettirildi
+agent-older-context-omitted = eski kontekst tushirib qoldirildi
+agent-interrupted = uzildi
+agent-allow-tool = { $tool } vositasiga ruxsat berilsinmi?
+agent-deny = Rad etish
+agent-allow-always = Har doim ruxsat berish
+agent-allow = Ruxsat berish
+agent-loading-sessions = Sessiyalar yuklanmoqda…
+agent-no-resumable-sessions = Davom ettiriladigan sessiyalar topilmadi
+agent-no-matching-sessions = Mos sessiyalar yo‘q
+agent-no-matching-models = Mos modellar yo‘q
+agent-choice-help = ↑/↓ yoki Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Repozitoriy papkasini tanlang
+agent-choose-repository-detail = Agent ishlatishi kerak bo‘lgan lokal Git repozitoriyni tanlang.
+agent-choosing = Tanlanmoqda…
+agent-choose-folder = Papkani tanlash
+agent-queued = navbatda
+agent-attached = Biriktirilgan:
+agent-cancel-queued = Navbatdagi promptni bekor qilish
+agent-resume-queued = Navbatdagi promptlarni davom ettirish
+agent-clear-queue = Navbatni tozalash
+agent-send-all-now = barchasini hozir yuborish
+agent-choose-option = Yuqoridan variant tanlang
+agent-loading-media = Media yuklanmoqda…
+agent-no-matching-media = Mos media yo‘q
+agent-prompt-context = Prompt konteksti
+agent-details = Tafsilotlar
+agent-path = Yo‘l
+agent-tool = Vosita
+agent-server = Server
+agent-bytes = { $count } bayt
+agent-worked-for = { $duration } ishladi
+agent-worked-for-steps = { $count ->
+    [one] { $duration } ishladi · 1 qadam
+   *[other] { $duration } ishladi · { $count } qadam
+}
+agent-tool-guardian-review = Himoyachi tekshiruvi
+agent-tool-read-files = Fayllarni o‘qidi
+agent-tool-viewed-image = Rasmni ko‘rdi
+agent-tool-used-browser = Brauzerdan foydalandi
+agent-tool-searched-files = Fayllardan qidirdi
+agent-tool-ran-commands = Buyruqlarni ishga tushirdi
+agent-thinking = O‘ylamoqda
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Tarmoq
+agent-parent = Yuqori
+agent-children = Quyi elementlar
+agent-call = Chaqiruv
+agent-raw-event = Xom hodisa
+agent-plan = Reja
+agent-tasks = { $count ->
+    [one] 1 vazifa
+   *[other] { $count } vazifa
+}
+agent-edited = Tahrirlandi
+agent-reconnecting = Qayta ulanmoqda { $attempt }/{ $total }
+agent-status-running = Ishlamoqda
+agent-status-done = Bajarildi
+agent-status-failed = Muvaffaqiyatsiz
+agent-status-pending = Kutilmoqda
+agent-slash-attach-files = Fayllarni biriktirish
+agent-slash-resume-session = Oldingi sessiyani davom ettirish
+agent-slash-select-model = Modelni tanlash
+agent-slash-continue-cli = Bu sessiyani CLI’da davom ettirish
+agent-session-just-now = hozirgina
+agent-session-minutes-ago = { $count } daqiqa oldin
+agent-session-hours-ago = { $count } soat oldin
+agent-session-days-ago = { $count } kun oldin
+agent-working-working = Ishlamoqda
+agent-working-thinking = O‘ylamoqda
+agent-working-pondering = Mulohaza qilmoqda
+agent-working-noodling = O‘ylab ko‘rmoqda
+agent-working-percolating = Pishitmoqda
+agent-working-conjuring = Topib chiqarmoqda
+agent-working-cooking = Tayyorlamoqda
+agent-working-brewing = Pishirmoqda
+agent-working-musing = Xayol surmoqda
+agent-working-ruminating = Chuqur o‘ylamoqda
+agent-working-scheming = Reja tuzmoqda
+agent-working-synthesizing = Sintez qilmoqda
+agent-working-tinkering = Mayda sozlamoqda
+agent-working-churning = Ishlab chiqmoqda
+agent-working-vibing = Kayfiyatni ushlamoqda
+agent-working-simmering = Dimlamoqda
+agent-working-crafting = Yasamoqda
+agent-working-divining = Fahmlamoqda
+agent-working-mulling = O‘ylab pishitmoqda
+agent-working-spelunking = Ichiga kirib tekshirmoqda
+
+editor-toggle-explorer = Explorer’ni ko‘rsatish/yashirish (Cmd+B)
+editor-unsaved = saqlanmagan
+editor-rendered-markdown = Jonli tahrir bilan ko‘rsatilgan Markdown
+editor-note = Eslatma
+editor-source-editor = Manba muharriri
+editor-editor = Muharrir
+editor-git-diff = Git farqi
+editor-diff = Farq
+editor-tidy = Tartiblash
+editor-always = Har doim
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 ta o‘zgarmagan oldindan ko‘rish
+   *[other] ✦ { $count } ta o‘zgarmagan oldindan ko‘rish
+}
+editor-open-externally = Tashqi ilovada ochish
+editor-changed-line = O‘zgargan qator
+editor-go-to-definition = Ta’rifga o‘tish
+editor-find-references = Havolalarni topish
+editor-references = { $count ->
+    [one] 1 ta havola
+   *[other] { $count } ta havola
+}
+editor-lsp-starting = { $server } ishga tushmoqda…
+editor-lsp-not-installed = { $server } — o‘rnatilmagan
+editor-explorer = Explorer
+editor-open-editors = Ochiq muharrirlar
+editor-outline = Tuzilma
+editor-new-file = Yangi fayl
+editor-new-folder = Yangi papka
+editor-delete-confirm = “{ $name }” o‘chirilsinmi? Buni ortga qaytarib bo‘lmaydi.
+editor-created-folder = { $name } papkasi yaratildi
+editor-created-file = { $name } fayli yaratildi
+editor-renamed-to = Nomi { $name } ga o‘zgartirildi
+editor-deleted = { $name } o‘chirildi
+editor-failed-decode-image = Rasmni dekodlab bo‘lmadi
+editor-preview-large-image = rasm (oldindan ko‘rish uchun juda katta)
+editor-preview-binary = binar
+editor-preview-file = fayl
+
+git-status-clean = toza
+git-status-modified = o‘zgartirilgan
+git-status-staged = indekslangan
+git-status-staged-modified = indekslangan*
+git-status-untracked = kuzatilmaydi
+git-status-deleted = o‘chirilgan
+git-status-conflict = konflikt
+git-accept-all = ✓ barchasini qabul qilish
+git-unstage = Indeksdan olib tashlash
+git-confirm-deny-all = Barchasini rad etishni tasdiqlash
+git-deny-all = ✗ barchasini rad etish
+git-commit-message = commit xabari
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Farq yuklanmoqda…
+git-no-changes = Ko‘rsatish uchun o‘zgarishlar yo‘q
+git-accept = ✓ qabul qilish
+git-deny = ✗ rad etish
+git-show-unchanged-lines = { $count } ta o‘zgarmagan qatorni ko‘rsatish
+
+terminal-loading = Yuklanmoqda…
+terminal-runs-when-ready = tayyor bo‘lganda ishga tushadi · Ctrl+C tozalaydi · Esc o‘tkazib yuboradi
+terminal-booting = ishga tushmoqda
+terminal-type-command = buyruq kiriting · tayyor bo‘lganda ishga tushadi · Esc o‘tkazib yuboradi
+
+setup-tagline-claude = Anthropic’ning kod yozuvchi agenti, Vmux ichida
+setup-tagline-codex = OpenAI’ning kod yozuvchi agenti, Vmux ichida
+setup-tagline-vibe = Mistral’ning kod yozuvchi agenti, Vmux ichida
+setup-install-title = { $name } CLI’ni o‘rnatish
+setup-homebrew-required = { $command } ni o‘rnatish uchun Homebrew kerak, lekin u hali sozlanmagan. Vmux avval Homebrew’ni, keyin { $name } ni o‘rnatadi.
+setup-terminal-instructions = Terminalda boshlash uchun Return tugmasini bosing, so‘ralganda Mac parolingizni kiriting.
+setup-command-missing = Lokal { $command } buyrug‘i hali o‘rnatilmagani uchun Vmux bu sahifani ochdi. Uni olish uchun quyidagi buyruqni ishga tushiring.
+setup-install-failed = O‘rnatish yakunlanmadi. Tafsilotlar uchun terminalni tekshiring, keyin qayta urinib ko‘ring.
+setup-installing = O‘rnatilmoqda…
+setup-install-homebrew = Homebrew + { $name } o‘rnatish
+setup-run-install = O‘rnatish buyrug‘ini ishga tushirish
+setup-auto-reload = Vmux uni terminalda ishga tushiradi va { $command } tayyor bo‘lganda qayta yuklaydi.
+
+debug-title = Nosozliklarni tuzatish
+debug-auto-update = Avtomatik yangilash
+debug-simulate-update = Yangilanish mavjudligini simulyatsiya qilish
+debug-simulate-download = Yuklab olishni simulyatsiya qilish
+debug-clear-update = Yangilanishni tozalash
+debug-trigger-restart = Qayta ishga tushirishni chaqirish
+
+command-manage-spaces = Speyslarni boshqarish…
+command-pane-stack-location = panel { $pane } / stek { $stack }
+command-space-pane-stack-location = { $space } / panel { $pane } / stek { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Interaktiv rejim
+command-group-window = Oyna
+command-group-tab = Varaq
+command-group-pane = Panel
+command-group-stack = Stek
+command-group-space = Speys
+command-group-navigation = Navigatsiya
+command-group-open = Ochish
+command-group-view = Ko‘rinish
+command-group-bar = Panel
+
+menu-close-vmux = Vmux’ni yopish
+
+agents-terminal-coding-agent = Terminalga asoslangan kodlash agenti

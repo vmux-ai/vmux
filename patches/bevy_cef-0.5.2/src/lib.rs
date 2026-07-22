@@ -23,8 +23,8 @@ use crate::prelude::{CefSystems, IpcPlugin, NavigationPlugin, WebviewPlugin};
 use crate::zoom::ZoomPlugin;
 use bevy::prelude::*;
 use bevy_cef_core::prelude::{
-    CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CommandLineConfig,
-    compile_time_cef_embedded_scheme, try_set_cef_embedded_page_config,
+    CefAcceptLanguageList, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions,
+    CommandLineConfig, compile_time_cef_embedded_scheme, try_set_cef_embedded_page_config,
 };
 use bevy_remote::RemotePlugin;
 
@@ -34,8 +34,8 @@ pub mod prelude {
         loading_state::*, navigation::*, popup_state::*, webview::prelude::*,
     };
     pub use bevy_cef_core::prelude::{
-        Browsers, CefColorMode, CefColorScheme, CefDiskProfileRoot, CefEmbeddedHost,
-        CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
+        Browsers, CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot,
+        CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
         CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, WebviewCefStateEvent,
         WebviewCommittedNavigationEvent, WebviewLoadingStateEvent, WebviewPopupEvent,
         compile_time_cef_embedded_scheme, resolve_media_permission,
@@ -50,6 +50,8 @@ pub struct CefPlugin {
     pub command_line_config: CommandLineConfig,
     pub extensions: CefExtensions,
     pub root_cache_path: Option<String>,
+    pub locale: String,
+    pub accept_language_list: String,
     pub embedded_scheme: String,
     pub embedded_hosts: CefEmbeddedHosts,
 }
@@ -60,6 +62,8 @@ impl Default for CefPlugin {
             command_line_config: CommandLineConfig::default(),
             extensions: CefExtensions::default(),
             root_cache_path: None,
+            locale: "en-US".to_string(),
+            accept_language_list: "en-US,en;q=0.9".to_string(),
             embedded_scheme: compile_time_cef_embedded_scheme().to_string(),
             embedded_hosts: CefEmbeddedHosts::default(),
         }
@@ -75,12 +79,15 @@ impl Plugin for CefPlugin {
         app.insert_resource(bevy_cef_core::prelude::CefDiskProfileRoot(
             self.root_cache_path.clone(),
         ))
+        .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
         .add_plugins((
             LocalHostPlugin,
             MessageLoopPlugin {
                 config: self.command_line_config.clone(),
                 extensions: self.extensions.clone(),
                 root_cache_path: self.root_cache_path.clone(),
+                locale: self.locale.clone(),
+                accept_language_list: self.accept_language_list.clone(),
             },
             WebviewCoreComponentsPlugin,
             WebviewPlugin,

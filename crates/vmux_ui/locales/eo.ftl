@@ -1,0 +1,602 @@
+locale-name = Esperanto
+common-open = Malfermi
+common-close = Fermi
+common-install = Instali
+common-uninstall = Malinstali
+common-update = Ĝisdatigi
+common-retry = Reprovi
+common-refresh = Aktualigi
+common-remove = Forigi
+common-enable = Ŝalti
+common-disable = Malŝalti
+common-new = Nova
+common-active = aktiva
+common-running = ruliĝanta
+common-done = preta
+common-failed = Malsukcesis
+common-installed = Instalita
+common-items = { $count ->
+    [one] { $count } ero
+   *[other] { $count } eroj
+}
+start-title = Komenco
+start-tagline = Unu invito. Ĉio farita.
+
+agents-title = Agentoj
+agents-search = Serĉi ACP- kaj CLI-agentojn…
+agents-empty = Neniuj kongruaj agentoj
+agents-empty-detail = Provu nomon, rultempon aŭ ACP/CLI.
+agents-install-failed = Instalado malsukcesis
+agents-updating = Ĝisdatigante…
+agents-retrying = Reprovante…
+agents-preparing = Preparante…
+
+extensions-title = Etendaĵoj
+extensions-search = Serĉi instalitajn aŭ en Chrome Web Store…
+extensions-relaunch = Relanĉu por apliki
+extensions-empty = Neniuj etendaĵoj instalitaj
+extensions-no-match = Neniuj kongruaj etendaĵoj
+extensions-empty-detail = Serĉu supre en Chrome Web Store kaj premu Revenklavon.
+extensions-no-match-detail = Provu alian nomon aŭ etendaĵan ID.
+extensions-on = Ŝaltita
+extensions-off = Malŝaltita
+extensions-enable-confirm = Ĉu ŝalti { $name }?
+extensions-enable-permissions = Ŝalti { $name } kaj permesi:
+
+lsp-title = Lingvoserviloj
+lsp-search = Serĉi lingvoservilojn, kontrolilojn, formatilojn…
+lsp-loading = Ŝargante katalogon…
+lsp-empty = Neniuj kongruaj lingvoserviloj
+lsp-empty-detail = Provu alian lingvon, kontrolilon aŭ formatilon.
+lsp-needs = bezonas { $tool }
+lsp-status-available = Disponebla
+lsp-status-on-path = En PATH
+lsp-status-installing = Instalante…
+lsp-status-installed = Instalita
+lsp-status-outdated = Ĝisdatigo disponeblas
+lsp-status-running = Ruliĝanta
+lsp-status-failed = Malsukcesis
+
+spaces-title = Spacoj
+spaces-new-placeholder = Nomo de nova spaco
+spaces-empty = Neniuj spacoj
+spaces-default-name = Spaco { $number }
+spaces-tabs = { $count ->
+    [one] 1 langeto
+   *[other] { $count } langetoj
+}
+spaces-delete = Forigi spacon
+
+team-title = Teamo
+team-just-you = Nur vi en ĉi tiu spaco
+team-agents = { $count ->
+    [one] Vi kaj 1 agento
+   *[other] Vi kaj { $count } agentoj
+}
+team-empty = Ankoraŭ neniu ĉi tie
+team-you = Vi
+team-agent = Agento
+
+services-title = Fonaj servoj
+services-processes = { $count ->
+    [one] 1 procezo
+   *[other] { $count } procezoj
+}
+services-kill-all = Mortigi ĉiujn
+services-not-running = Servo ne ruliĝas
+services-start-with = Lanĉi per:
+services-empty = Neniuj aktivaj procezoj
+services-filter = Filtri procezojn…
+services-no-match = Neniuj kongruaj procezoj
+services-connected = Konektita
+services-disconnected = Malkonektita
+services-attached = alkroĉita
+services-kill = Mortigi
+services-memory = Memoro
+services-size = Grando
+services-shell = Ŝelo
+
+error-title = Eraro
+
+history-search = Serĉi historion
+history-clear-all = Forviŝi ĉion
+history-clear-confirm = Ĉu forviŝi la tutan historion?
+history-clear-warning = Tio ne povas esti malfarita.
+history-cancel = Nuligi
+history-today = Hodiaŭ
+history-yesterday = Hieraŭ
+history-days-ago = Antaŭ { $count } tagoj
+history-day-offset = Tago -{ $count }
+
+settings-title = Agordoj
+settings-loading = Ŝargante agordojn…
+settings-stored = Konservita en ~/.vmux/settings.ron
+settings-other = Alia
+settings-software-update = Programara ĝisdatigo
+settings-check-updates = Kontroli ĝisdatigojn
+settings-check-updates-hint = Kontrolas aŭtomate ĉe lanĉo kaj ĉiuhore kiam aŭtomata ĝisdatigo estas ŝaltita.
+settings-update-unavailable = Nedisponebla
+settings-update-unavailable-hint = La ĝisdatigilo ne estas inkluzivita en ĉi tiu versio.
+settings-update-checking = Kontrolante…
+settings-update-checking-hint = Kontrolante ĝisdatigojn…
+settings-update-check-again = Kontroli denove
+settings-update-current = Vmux estas ĝisdata.
+settings-update-downloading = Elŝutante…
+settings-update-downloading-hint = Elŝutante Vmux { $version }…
+settings-update-installing = Instalante…
+settings-update-installing-hint = Instalante Vmux { $version }…
+settings-update-ready = Ĝisdatigo preta
+settings-update-ready-hint = Vmux { $version } estas preta. Restartigu por apliki ĝin.
+settings-update-try-again = Provi denove
+settings-update-failed = Ne eblas kontroli ĝisdatigojn.
+settings-item = Ero
+settings-item-number = Ero { $number }
+settings-press-key = Premu klavon…
+settings-saved = Konservita
+settings-record-key = Alklaku por registri novan klavkombinon
+
+tray-open-window = Malfermi fenestron
+tray-close-window = Fermi fenestron
+tray-pause-recording = Paŭzigi registradon
+tray-resume-recording = Daŭrigi registradon
+tray-finish-recording = Fini registradon
+tray-quit = Eliri el Vmux
+
+composer-attach-files = Aldoni dosierojn (/upload)
+composer-remove-attachment = Forigi aldonaĵon
+
+layout-back = Reen
+layout-forward = Antaŭen
+layout-reload = Reŝargi
+layout-bookmark-page = Legosigni ĉi tiun paĝon
+layout-remove-bookmark = Forigi legosignon
+layout-pin-page = Fiksi ĉi tiun paĝon
+layout-unpin-page = Malfiksi ĉi tiun paĝon
+layout-manage-extensions = Administri etendaĵojn
+layout-new-stack = Nova stako
+layout-close-tab = Fermi langeton
+layout-bookmark = Legosigni
+layout-pin = Fiksi
+layout-new-tab = Nova langeto
+layout-team = Teamo
+
+command-switch-space = Ŝanĝi spacon…
+command-search-ask = Serĉi aŭ demandi…
+command-new-tab-placeholder = Serĉu aŭ tajpu URL, aŭ elektu Terminalon…
+command-placeholder = Tajpu URL, serĉu langetojn aŭ > por komandoj…
+command-composer-placeholder = Tajpu / por komandoj aŭ @ por aŭdvidaĵoj
+command-send = Sendi (Enigo)
+command-terminal = Terminalo
+command-open-terminal = Malfermi en terminalo
+command-stack = Stako
+command-tabs = { $count ->
+    [one] 1 langeto
+   *[other] { $count } langetoj
+}
+command-prompt = Invito
+command-new-tab = Nova langeto
+command-search = Serĉi
+command-open-value = Malfermi “{ $value }”
+command-search-value = Serĉi “{ $value }”
+
+schema-appearance = Aspekto
+schema-general = Ĝenerala
+schema-layout = Aranĝo
+schema-layout-detail = Fenestro, paneloj, flanka breto kaj fokusa ringo.
+schema-agent = Agento
+schema-agent-detail = Konduto de agentoj kaj permesoj por iloj.
+schema-shortcuts = Klavkomandoj
+schema-shortcuts-detail = Nurlega vido. Redaktu settings.ron rekte por ŝanĝi ligilojn.
+schema-terminal = Terminalo
+schema-browser = Retumilo
+schema-mode = Reĝimo
+schema-mode-detail = Kolorskemo por retpaĝoj. Aparato sekvas vian sistemon.
+schema-device = Aparato
+schema-light = Hela
+schema-dark = Malhela
+schema-language = Lingvo
+schema-language-detail = Uzu la sisteman lingvon, en-US, ja, aŭ iun ajn BCP 47-etikedon kun kongrua katalogo ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Aŭtomata ĝisdatigo
+schema-auto-update-detail = Kontroli kaj instali ĝisdatigojn ĉe lanĉo kaj ĉiuhore.
+schema-startup-url = Komenca URL
+schema-startup-url-detail = Malplena malfermas la invitan kampon de la komandbreto.
+schema-search-engine = Serĉilo
+schema-search-engine-detail = Uzata por retserĉoj el Komenco kaj la komandbreto.
+schema-window = Fenestro
+schema-pane = Panelo
+schema-side-sheet = Flanka folio
+schema-focus-ring = Fokusa ringo
+schema-run-placement = Permesi superregi ruligan lokon
+schema-run-placement-detail = Permesi al agentoj elekti reĝimon, direkton kaj ankron de ruliga panelo.
+schema-leader = Gvida klavo
+schema-leader-detail = Prefiksa klavo por kordaj klavkomandoj.
+schema-chord-timeout = Korda tempolimo
+schema-chord-timeout-detail = Milisekundoj antaŭ ol korda prefikso eksvalidiĝas.
+schema-bindings = Ligiloj
+schema-confirm-close = Konfirmi fermon
+schema-confirm-close-detail = Demandi antaŭ fermi terminalon kun ruliĝanta procezo.
+schema-default-theme = Defaŭlta etoso
+schema-default-theme-detail = Nomo de la aktiva etoso el la listo de etosoj.
+
+settings-empty = (malplena)
+settings-none = (neniu)
+
+schema-system = Sistemo
+schema-editor = Redaktilo
+schema-recording = Registrado
+schema-radius = Radiuso
+schema-padding = Interna marĝeno
+schema-gap = Interspaco
+schema-width = Larĝo
+schema-color = Koloro
+schema-red = Ruĝo
+schema-green = Verdo
+schema-blue = Bluo
+schema-follow-files = Sekvi dosierojn
+schema-tidy-files = Ordigi dosierojn
+schema-tidy-files-max = Sojlo por dosierordigo
+schema-tidy-files-auto = Aŭtomate ordigi dosierojn
+schema-app-providers = Aplikaĵaj provizantoj
+schema-provider = Provizanto
+schema-kind = Tipo
+schema-models = Modeloj
+schema-acp = ACP-agentoj
+schema-id = ID
+schema-name = Nomo
+schema-command = Komando
+schema-arguments = Argumentoj
+schema-environment = Medio
+schema-working-directory = Labordosierujo
+schema-shell = Ŝelo
+schema-font-family = Tiparfamilio
+schema-startup-directory = Starta dosierujo
+schema-themes = Etosoj
+schema-color-scheme = Kolorskemo
+schema-font-size = Tipargrando
+schema-line-height = Linialto
+schema-cursor-style = Kursora stilo
+schema-cursor-blink = Kursora pulsado
+schema-custom-themes = Propraj etosoj
+schema-foreground = Malfono
+schema-background = Fono
+schema-cursor = Kursoro
+schema-ansi-colors = ANSI-koloroj
+schema-keymap = Klavmapo
+schema-explorer = Esplorilo
+schema-visible = Videbla
+schema-language-servers = Lingvoserviloj
+schema-servers = Serviloj
+schema-language-id = Lingva ID
+schema-root-markers = Radikaj markiloj
+schema-output-directory = Eliga dosierujo
+
+menu-scene = Sceno
+menu-layout = Aranĝo
+menu-terminal = Terminalo
+menu-browser = Retumilo
+menu-service = Servo
+menu-bookmark = Legosigno
+menu-edit = Redakto
+
+layout-knowledge = Scioj
+layout-open-knowledge = Malfermi Sciojn
+layout-open-welcome-knowledge = Malfermi Bonvenon al Scioj
+layout-open-path = Malfermi { $path }
+layout-fold-knowledge = Faldi sciojn
+layout-unfold-knowledge = Malfaldi sciojn
+layout-bookmarks = Legosignoj
+layout-new-folder = Nova dosierujo
+layout-add-to-bookmarks = Aldoni al Legosignoj
+layout-move-to-bookmarks = Movi al Legosignoj
+layout-stack-number = Stako { $number }
+layout-fold-stack = Faldi stakon
+layout-unfold-stack = Malfaldi stakon
+layout-close-stack = Fermi stakon
+layout-bookmark-in = Legosigni en { $folder }
+
+common-cancel = Nuligi
+common-delete = Forigi
+common-save = Konservi
+common-rename = Renomi
+common-expand = Etendi
+common-collapse = Maletendi
+common-loading = Ŝargante…
+common-error = Eraro
+common-output = Eligo
+common-pending = Atendanta
+common-current = aktuala
+common-stop = Halti
+services-command = Vmux-servo
+services-uptime-seconds = { $seconds } s
+services-uptime-minutes = { $minutes } min { $seconds } s
+services-uptime-hours = { $hours } h { $minutes } min
+services-uptime-days = { $days } t { $hours } h
+
+error-page-failed-load = Paĝo ne ŝargiĝis
+error-page-not-found = Paĝo ne trovita
+error-unknown-host = Nekonata Vmux-aplikaĵa gastiganto: { $host }
+
+history-title = Historio
+
+command-new-app-chat = Nova { $provider }/{ $model }-babilejo (Aplikaĵo)
+command-interactive-mode-user = Sceno > Interaga reĝimo > Uzanto
+command-interactive-mode-player = Sceno > Interaga reĝimo > Ludanto
+command-minimize-window = Aranĝo > Fenestro > Minimumigi
+command-toggle-layout = Aranĝo > Aranĝo > Baskuligi aranĝon
+command-close-tab = Aranĝo > Langeto > Fermi langeton
+command-new-task = Aranĝo > Langeto > Nova tasko…
+command-next-tab = Aranĝo > Langeto > Sekva langeto
+command-prev-tab = Aranĝo > Langeto > Antaŭa langeto
+command-rename-tab = Aranĝo > Langeto > Renomi langeton
+command-tab-select-1 = Aranĝo > Langeto > Elekti langeton 1
+command-tab-select-2 = Aranĝo > Langeto > Elekti langeton 2
+command-tab-select-3 = Aranĝo > Langeto > Elekti langeton 3
+command-tab-select-4 = Aranĝo > Langeto > Elekti langeton 4
+command-tab-select-5 = Aranĝo > Langeto > Elekti langeton 5
+command-tab-select-6 = Aranĝo > Langeto > Elekti langeton 6
+command-tab-select-7 = Aranĝo > Langeto > Elekti langeton 7
+command-tab-select-8 = Aranĝo > Langeto > Elekti langeton 8
+command-tab-select-last = Aranĝo > Langeto > Elekti lastan langeton
+command-close-pane = Aranĝo > Panelo > Fermi panelon
+command-select-pane-left = Aranĝo > Panelo > Elekti maldekstran panelon
+command-select-pane-right = Aranĝo > Panelo > Elekti dekstran panelon
+command-select-pane-up = Aranĝo > Panelo > Elekti supran panelon
+command-select-pane-down = Aranĝo > Panelo > Elekti malsupran panelon
+command-swap-pane-prev = Aranĝo > Panelo > Interŝanĝi kun antaŭa panelo
+command-swap-pane-next = Aranĝo > Panelo > Interŝanĝi kun sekva panelo
+command-equalize-pane-size = Aranĝo > Panelo > Egaligi panelajn grandecojn
+command-resize-pane-left = Aranĝo > Panelo > Regrandigi panelon maldekstren
+command-resize-pane-right = Aranĝo > Panelo > Regrandigi panelon dekstren
+command-resize-pane-up = Aranĝo > Panelo > Regrandigi panelon supren
+command-resize-pane-down = Aranĝo > Panelo > Regrandigi panelon malsupren
+command-stack-close = Aranĝo > Stako > Fermi stakon
+command-stack-next = Aranĝo > Stako > Sekva stako
+command-stack-previous = Aranĝo > Stako > Antaŭa stako
+command-stack-reopen = Aranĝo > Stako > Remalfermi fermitan paĝon
+command-stack-swap-prev = Aranĝo > Stako > Movi stakon maldekstren
+command-stack-swap-next = Aranĝo > Stako > Movi stakon dekstren
+command-space-open = Aranĝo > Spaco > Spacoj
+command-terminal-close = Terminalo > Fermi terminalon
+command-terminal-next = Terminalo > Sekva terminalo
+command-terminal-prev = Terminalo > Antaŭa terminalo
+command-terminal-clear = Terminalo > Viŝi terminalon
+command-browser-prev-page = Retumilo > Navigado > Reen
+command-browser-next-page = Retumilo > Navigado > Antaŭen
+command-browser-reload = Retumilo > Navigado > Reŝargi
+command-browser-hard-reload = Retumilo > Navigado > Devige reŝargi
+command-open-in-place = Retumilo > Malfermi > Malfermi ĉi tie
+command-open-in-new-stack = Retumilo > Malfermi > Malfermi en nova stako
+command-open-in-pane-top = Retumilo > Malfermi > Malfermi en supra panelo
+command-open-in-pane-right = Retumilo > Malfermi > Malfermi en dekstra panelo
+command-open-in-pane-bottom = Retumilo > Malfermi > Malfermi en malsupra panelo
+command-open-in-pane-left = Retumilo > Malfermi > Malfermi en maldekstra panelo
+command-open-in-new-tab = Retumilo > Malfermi > Malfermi en nova langeto
+command-open-in-new-space = Retumilo > Malfermi > Malfermi en nova spaco
+command-browser-zoom-in = Retumilo > Vido > Zomi enen
+command-browser-zoom-out = Retumilo > Vido > Zomi elen
+command-browser-zoom-reset = Retumilo > Vido > Reala grandeco
+command-browser-dev-tools = Retumilo > Vido > Programistaj iloj
+command-browser-open-command-bar = Retumilo > Breto > Komandbreto
+command-browser-open-page-in-command-bar = Retumilo > Breto > Redakti paĝon
+command-browser-open-path-bar = Retumilo > Breto > Voja navigilo
+command-browser-open-commands = Retumilo > Breto > Komandoj
+command-browser-open-history = Retumilo > Breto > Historio
+command-service-open = Servo > Malfermi servomonitoron
+command-bookmark-toggle-active = Legosigno > Legosigni paĝon
+command-bookmark-pin-active = Legosigno > Alpingli paĝon
+
+layout-tab = Langeto
+layout-no-stacks = Neniuj stakoj
+layout-loading = Ŝargante…
+layout-no-markdown-files = Neniuj Markdown-dosieroj
+layout-empty-folder = Malplena dosierujo
+layout-worktree = laborarbo
+layout-folder-name = Dosieruja nomo
+layout-no-pins-bookmarks = Neniuj alpinglaĵoj aŭ legosignoj
+layout-move-to = Movi al { $folder }
+layout-bookmark-current-page = Legosigni aktualan paĝon
+layout-rename-folder = Renomi dosierujon
+layout-remove-folder = Forigi dosierujon
+layout-update-downloading = Elŝutante ĝisdatigon
+layout-update-installing = Instalante ĝisdatigon…
+layout-update-ready = Nova versio disponeblas
+layout-restart-update = Relanĉi por ĝisdatigi
+
+agent-preparing = Preparante agenton…
+agent-send-all-queued = Sendi ĉiujn vicigitajn invitojn nun (Esc)
+agent-send = Sendi (Enter)
+agent-ready = Preta kiam vi estas.
+agent-loading-older = Ŝargante pli malnovajn mesaĝojn…
+agent-load-older = Ŝargi pli malnovajn mesaĝojn
+agent-continued-from = Daŭrigita de { $source }
+agent-older-context-omitted = pli malnova kunteksto preterlasita
+agent-interrupted = interrompita
+agent-allow-tool = Ĉu permesi { $tool }?
+agent-deny = Rifuzi
+agent-allow-always = Ĉiam permesi
+agent-allow = Permesi
+agent-loading-sessions = Ŝargante sesiojn…
+agent-no-resumable-sessions = Neniuj daŭrigeblaj sesioj trovitaj
+agent-no-matching-sessions = Neniuj kongruaj sesioj
+agent-no-matching-models = Neniuj kongruaj modeloj
+agent-choice-help = ↑/↓ aŭ Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Elektu deponejan dosierujon
+agent-choose-repository-detail = Elektu la lokan Git-deponejon kiun la agento uzu.
+agent-choosing = Elektante…
+agent-choose-folder = Elekti dosierujon
+agent-queued = en vico
+agent-attached = Aldonitaj:
+agent-cancel-queued = Nuligi vicigitan inviton
+agent-resume-queued = Daŭrigi vicigitajn invitojn
+agent-clear-queue = Viŝi vicon
+agent-send-all-now = sendi ĉiujn nun
+agent-choose-option = Elektu opcion supre
+agent-loading-media = Ŝargante aŭdvidaĵojn…
+agent-no-matching-media = Neniuj kongruaj aŭdvidaĵoj
+agent-prompt-context = Invita kunteksto
+agent-details = Detaloj
+agent-path = Vojo
+agent-tool = Ilo
+agent-server = Servilo
+agent-bytes = { $count } bajtoj
+agent-worked-for = Laboris dum { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Laboris dum { $duration } · 1 paŝo
+   *[other] Laboris dum { $duration } · { $count } paŝoj
+}
+agent-tool-guardian-review = Gardista revizio
+agent-tool-read-files = Legis dosierojn
+agent-tool-viewed-image = Vidis bildon
+agent-tool-used-browser = Uzis retumilon
+agent-tool-searched-files = Serĉis dosierojn
+agent-tool-ran-commands = Rulis komandojn
+agent-thinking = Pensante
+agent-subagent = Subagento
+agent-prompt = Invito
+agent-thread = Fadeno
+agent-parent = Gepatro
+agent-children = Idoj
+agent-call = Voko
+agent-raw-event = Kruda evento
+agent-plan = Plano
+agent-tasks = { $count ->
+    [one] 1 tasko
+   *[other] { $count } taskoj
+}
+agent-edited = Redaktita
+agent-reconnecting = Rekonektante { $attempt }/{ $total }
+agent-status-running = Rulanta
+agent-status-done = Farita
+agent-status-failed = Malsukcesis
+agent-status-pending = Atendanta
+agent-slash-attach-files = Aldoni dosierojn
+agent-slash-resume-session = Daŭrigi antaŭan sesion
+agent-slash-select-model = Elekti modelon
+agent-slash-continue-cli = Daŭrigi ĉi tiun sesion en la CLI
+agent-session-just-now = ĵus
+agent-session-minutes-ago = antaŭ { $count } min
+agent-session-hours-ago = antaŭ { $count } h
+agent-session-days-ago = antaŭ { $count } t
+agent-working-working = Laborante
+agent-working-thinking = Pensante
+agent-working-pondering = Pripensante
+agent-working-noodling = Cerbumante
+agent-working-percolating = Maturiĝante
+agent-working-conjuring = Elvokante
+agent-working-cooking = Kuirante
+agent-working-brewing = Farante
+agent-working-musing = Meditante
+agent-working-ruminating = Repripensante
+agent-working-scheming = Planante
+agent-working-synthesizing = Sintezante
+agent-working-tinkering = Farante alĝustigojn
+agent-working-churning = Prilaborante
+agent-working-vibing = Vibe agordante
+agent-working-simmering = Boletante
+agent-working-crafting = Kreante
+agent-working-divining = Divenante
+agent-working-mulling = Pripesante
+agent-working-spelunking = Profundesplorante
+
+editor-toggle-explorer = Baskuligi Esplorilon (Cmd+B)
+editor-unsaved = nekonservita
+editor-rendered-markdown = Bildigita Markdown kun viva redaktado
+editor-note = Noto
+editor-source-editor = Fonta redaktilo
+editor-editor = Redaktilo
+editor-git-diff = Git-diferenco
+editor-diff = Diferenco
+editor-tidy = Ordigi
+editor-always = Ĉiam
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 neŝanĝita antaŭrigardo
+   *[other] ✦ { $count } neŝanĝitaj antaŭrigardoj
+}
+editor-open-externally = Malfermi ekstere
+editor-changed-line = Ŝanĝita linio
+editor-go-to-definition = Iri al difino
+editor-find-references = Trovi referencojn
+editor-references = { $count ->
+    [one] 1 referenco
+   *[other] { $count } referencoj
+}
+editor-lsp-starting = { $server } startas…
+editor-lsp-not-installed = { $server } — ne instalita
+editor-explorer = Esplorilo
+editor-open-editors = Malfermitaj redaktiloj
+editor-outline = Skemo
+editor-new-file = Nova dosiero
+editor-new-folder = Nova dosierujo
+editor-delete-confirm = Ĉu forigi “{ $name }”? Tio ne estas malfarebla.
+editor-created-folder = Kreis dosierujon { $name }
+editor-created-file = Kreis dosieron { $name }
+editor-renamed-to = Renomita al { $name }
+editor-deleted = Forigis { $name }
+editor-failed-decode-image = Malsukcesis malkodi bildon
+editor-preview-large-image = bildo (tro granda por antaŭrigardi)
+editor-preview-binary = duuma
+editor-preview-file = dosiero
+
+git-status-clean = pura
+git-status-modified = ŝanĝita
+git-status-staged = enscenigita
+git-status-staged-modified = enscenigita*
+git-status-untracked = nespurata
+git-status-deleted = forigita
+git-status-conflict = konflikto
+git-accept-all = ✓ akcepti ĉion
+git-unstage = Malenscenigi
+git-confirm-deny-all = Konfirmi rifuzon de ĉio
+git-deny-all = ✗ rifuzi ĉion
+git-commit-message = enmeta mesaĝo
+git-commit = Enmeti ({ $count })
+git-push = ↑ Puŝi
+git-loading-diff = Ŝargante diferencon…
+git-no-changes = Neniuj ŝanĝoj por montri
+git-accept = ✓ akcepti
+git-deny = ✗ rifuzi
+git-show-unchanged-lines = Montri { $count } neŝanĝitajn liniojn
+
+terminal-loading = Ŝargante…
+terminal-runs-when-ready = ruliĝos kiam preta · Ctrl+C viŝas · Esc preterlasas
+terminal-booting = startante
+terminal-type-command = tajpu komandon · ruliĝos kiam preta · Esc preterlasas
+
+setup-tagline-claude = La kodiga agento de Anthropic, en Vmux
+setup-tagline-codex = La kodiga agento de OpenAI, en Vmux
+setup-tagline-vibe = La kodiga agento de Mistral, en Vmux
+setup-install-title = Instali la CLI de { $name }
+setup-homebrew-required = Homebrew necesas por instali { $command } kaj ankoraŭ ne estas agordita. Vmux unue instalos Homebrew, poste { $name }.
+setup-terminal-instructions = En la terminalo, premu Return por komenci, poste enigu vian Mac-pasvorton kiam petate.
+setup-command-missing = Vmux malfermis ĉi tiun paĝon ĉar la loka komando { $command } ankoraŭ ne estas instalita. Rulu la suban komandon por akiri ĝin.
+setup-install-failed = Instalado ne finiĝis. Kontrolu la terminalon por detaloj, poste reprovu.
+setup-installing = Instalante…
+setup-install-homebrew = Instali Homebrew + { $name }
+setup-run-install = Ruli instal-komandon
+setup-auto-reload = Vmux rulas ĝin en terminalo kaj reŝargas kiam { $command } pretas.
+
+debug-title = Sencimigo
+debug-auto-update = Aŭtomata ĝisdatigo
+debug-simulate-update = Simuli disponeblan ĝisdatigon
+debug-simulate-download = Simuli elŝuton
+debug-clear-update = Viŝi ĝisdatigon
+debug-trigger-restart = Ekigi relanĉon
+
+command-manage-spaces = Administri spacojn…
+command-pane-stack-location = panelo { $pane } / stako { $stack }
+command-space-pane-stack-location = { $space } / panelo { $pane } / stako { $stack }
+command-terminal-path = Terminalo ({ $path })
+command-group-interactive-mode = Interaga reĝimo
+command-group-window = Fenestro
+command-group-tab = Langeto
+command-group-pane = Panelo
+command-group-stack = Stako
+command-group-space = Spaco
+command-group-navigation = Navigado
+command-group-open = Malfermi
+command-group-view = Vido
+command-group-bar = Breto
+
+menu-close-vmux = Fermi Vmux
+
+agents-terminal-coding-agent = Terminal-bazita kodada agento

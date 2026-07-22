@@ -1,0 +1,602 @@
+locale-name = Türkmençe
+common-open = Aç
+common-close = Ýap
+common-install = Gurna
+common-uninstall = Gurnawdan aýyr
+common-update = Täzele
+common-retry = Gaýtadan synan
+common-refresh = Täzele
+common-remove = Aýyr
+common-enable = Işlet
+common-disable = Öçür
+common-new = Täze
+common-active = işjeň
+common-running = işleýär
+common-done = tamamlandy
+common-failed = Şowsuz
+common-installed = Gurnalan
+common-items = { $count ->
+    [one] { $count } zat
+   *[other] { $count } zat
+}
+start-title = Başla
+start-tagline = Bir prompt. Islendik iş ýerine.
+
+agents-title = Agentler
+agents-search = ACP we CLI agentlerini gözle…
+agents-empty = Gabat gelýän agent ýok
+agents-empty-detail = At, ýerine ýetiriş gurşawy ýa-da ACP/CLI boýunça synap görüň.
+agents-install-failed = Gurnamak başartmady
+agents-updating = Täzelenýär…
+agents-retrying = Gaýtadan synalýar…
+agents-preparing = Taýýarlanýar…
+
+extensions-title = Giňeltmeler
+extensions-search = Gurnalanlardan ýa-da Chrome Web Store-dan gözle…
+extensions-relaunch = Ulanyş üçin täzeden aç
+extensions-empty = Gurnalan giňeltme ýok
+extensions-no-match = Gabat gelýän giňeltme ýok
+extensions-empty-detail = Ýokarda Chrome Web Store-dan gözläň we Enter basyň.
+extensions-no-match-detail = Başga at ýa-da giňeltme ID-sini synap görüň.
+extensions-on = Açyk
+extensions-off = Ýapyk
+extensions-enable-confirm = { $name } işletilsinmi?
+extensions-enable-permissions = { $name } işledilsin we şulara rugsat berilsin:
+
+lsp-title = Dil serwerleri
+lsp-search = Dil serwerlerini, linterleri, formatlaýjylary gözle…
+lsp-loading = Katalog ýüklenýär…
+lsp-empty = Gabat gelýän dil serweri ýok
+lsp-empty-detail = Başga dil, linter ýa-da formatlaýjy synap görüň.
+lsp-needs = { $tool } gerek
+lsp-status-available = Elýeterli
+lsp-status-on-path = PATH-da bar
+lsp-status-installing = Gurnalýar…
+lsp-status-installed = Gurnalan
+lsp-status-outdated = Täzelenme bar
+lsp-status-running = Işleýär
+lsp-status-failed = Şowsuz
+
+spaces-title = Iş giňişlikleri
+spaces-new-placeholder = Täze iş giňişliginiň ady
+spaces-empty = Iş giňişligi ýok
+spaces-default-name = Iş giňişligi { $number }
+spaces-tabs = { $count ->
+    [one] 1 goýma
+   *[other] { $count } goýma
+}
+spaces-delete = Iş giňişligini poz
+
+team-title = Topar
+team-just-you = Bu iş giňişliginde diňe siz bar
+team-agents = { $count ->
+    [one] Siz we 1 agent
+   *[other] Siz we { $count } agent
+}
+team-empty = Bu ýerde entek hiç kim ýok
+team-you = Siz
+team-agent = Agent
+
+services-title = Fon hyzmatlary
+services-processes = { $count ->
+    [one] 1 proses
+   *[other] { $count } proses
+}
+services-kill-all = Hemmesini mejbury ýatyr
+services-not-running = Hyzmat işlemeýär
+services-start-with = Şular bilen başlat:
+services-empty = Işjeň proses ýok
+services-filter = Prosesleri süz…
+services-no-match = Gabat gelýän proses ýok
+services-connected = Birikdirilen
+services-disconnected = Birikdirilmedik
+services-attached = dakylan
+services-kill = Mejbury ýatyr
+services-memory = Ýat
+services-size = Ölçeg
+services-shell = Shell
+
+error-title = Ýalňyşlyk
+
+history-search = Taryhda gözle
+history-clear-all = Hemmesini arassala
+history-clear-confirm = Ähli taryh arassalansynmy?
+history-clear-warning = Muny yzyna gaýtaryp bolmaz.
+history-cancel = Ýatyr
+history-today = Şu gün
+history-yesterday = Düýn
+history-days-ago = { $count } gün öň
+history-day-offset = Gün -{ $count }
+
+settings-title = Sazlamalar
+settings-loading = Sazlamalar ýüklenýär…
+settings-stored = ~/.vmux/settings.ron içinde saklanýar
+settings-other = Başga
+settings-software-update = Programma täzelenmesi
+settings-check-updates = Täzelenmeleri barla
+settings-check-updates-hint = Awto-täzelenme açyk bolsa, işe goýberilende we her sagat awtomatik barlaýar.
+settings-update-unavailable = Elýeterli däl
+settings-update-unavailable-hint = Bu ýygnama täzeläjini öz içine almaýar.
+settings-update-checking = Barlanýar…
+settings-update-checking-hint = Täzelenmeler barlanýar…
+settings-update-check-again = Ýene barla
+settings-update-current = Vmux iň soňky wersiýada.
+settings-update-downloading = Ýüklenýär…
+settings-update-downloading-hint = Vmux { $version } ýüklenýär…
+settings-update-installing = Gurnalýar…
+settings-update-installing-hint = Vmux { $version } gurnalýar…
+settings-update-ready = Täzelenme taýýar
+settings-update-ready-hint = Vmux { $version } taýýar. Ulanyş üçin täzeden açyň.
+settings-update-try-again = Ýene synan
+settings-update-failed = Täzelenmeleri barlamak başartmady.
+settings-item = Zat
+settings-item-number = Zat { $number }
+settings-press-key = Bir düwmä basyň…
+settings-saved = Saklandy
+settings-record-key = Täze düwme utgaşmasyny ýazmak üçin basyň
+
+tray-open-window = Penjiräni aç
+tray-close-window = Penjiräni ýap
+tray-pause-recording = Ýazgyny duruz
+tray-resume-recording = Ýazgyny dowam et
+tray-finish-recording = Ýazgyny tamamla
+tray-quit = Vmux-dan çyk
+
+composer-attach-files = Faýllary goş (/upload)
+composer-remove-attachment = Goşundyny aýyr
+
+layout-back = Yza
+layout-forward = Öňe
+layout-reload = Gaýtadan ýükle
+layout-bookmark-page = Bu sahypany belliklere goş
+layout-remove-bookmark = Bellikden aýyr
+layout-pin-page = Bu sahypany berkitle
+layout-unpin-page = Sahypany berkitmeden aýyr
+layout-manage-extensions = Giňeltmeleri dolandyr
+layout-new-stack = Täze gatlak
+layout-close-tab = Goýmany ýap
+layout-bookmark = Bellik
+layout-pin = Berkitle
+layout-new-tab = Täze goýma
+layout-team = Topar
+
+command-switch-space = Iş giňişligini çalyş…
+command-search-ask = Gözle ýa-da sora…
+command-new-tab-placeholder = Gözle ýa-da URL ýaz, ýa-da Terminal saýla…
+command-placeholder = URL ýaz, goýmalarda gözle ýa-da buýruklar üçin > ýaz…
+command-composer-placeholder = Buýruklar üçin / ýa-da media üçin @ ýaz
+command-send = Iber (Enter)
+command-terminal = Terminal
+command-open-terminal = Terminalda aç
+command-stack = Gatlak
+command-tabs = { $count ->
+    [one] 1 goýma
+   *[other] { $count } goýma
+}
+command-prompt = Prompt
+command-new-tab = Täze goýma
+command-search = Gözle
+command-open-value = “{ $value }” aç
+command-search-value = “{ $value }” gözle
+
+schema-appearance = Görnüş
+schema-general = Umumy
+schema-layout = Ýerleşim
+schema-layout-detail = Penjire, bölekler, gapdal panel we fokus halkasy.
+schema-agent = Agent
+schema-agent-detail = Agentiň hereketi we gural rugsatlary.
+schema-shortcuts = Gysga ýollar
+schema-shortcuts-detail = Diňe okamak üçin görnüş. Baglanyşyklary üýtgetmek üçin settings.ron faýlyny göni redaktirläň.
+schema-terminal = Terminal
+schema-browser = Brauzer
+schema-mode = Režim
+schema-mode-detail = Web sahypalar üçin reňk shemasy. Enjam ulgamyňyza eýerýär.
+schema-device = Enjam
+schema-light = Açyk
+schema-dark = Garaňky
+schema-language = Dil
+schema-language-detail = Ulgam dilini, en-US, ja ýa-da gabat gelýän ~/.vmux/locales/<tag>.ftl katalogy bolan islendik BCP 47 tegini ulanyň.
+schema-auto-update = Awto-täzelenme
+schema-auto-update-detail = Işe goýberilende we her sagat täzelenmeleri barla we gurna.
+schema-startup-url = Başlangyç URL
+schema-startup-url-detail = Boş bolsa, buýruk setiriniň promptyny açýar.
+schema-search-engine = Gözleg ulgamy
+schema-search-engine-detail = Başlangyçdan we buýruk setirinden web gözlegleri üçin ulanylýar.
+schema-window = Penjire
+schema-pane = Bölek
+schema-side-sheet = Gapdal panel
+schema-focus-ring = Fokus halkasy
+schema-run-placement = Işletme ýerleşimini üýtgetmäge rugsat ber
+schema-run-placement-detail = Agentlere işletme böleginiň režimini, ugruny we daýanjyny saýlamaga mümkinçilik ber.
+schema-leader = Leader
+schema-leader-detail = Chord gysga ýollary üçin prefiks düwmesi.
+schema-chord-timeout = Chord wagty
+schema-chord-timeout-detail = Chord prefiksi gutarýança geçýän millisekunt.
+schema-bindings = Baglanyşyklar
+schema-confirm-close = Ýapmagy tassykla
+schema-confirm-close-detail = Işleýän prosesi bolan terminal ýapylmazdan öň sora.
+schema-default-theme = Deslapky tema
+schema-default-theme-detail = Temalar sanawyndaky işjeň temanyň ady.
+
+settings-empty = (boş)
+settings-none = (ýok)
+
+schema-system = Ulgam
+schema-editor = Redaktor
+schema-recording = Ýazgy
+schema-radius = Radius
+schema-padding = Içki boşluk
+schema-gap = Aralyk
+schema-width = Ini
+schema-color = Reňk
+schema-red = Gyzyl
+schema-green = Ýaşyl
+schema-blue = Gök
+schema-follow-files = Faýllary yzarla
+schema-tidy-files = Faýllary tertiple
+schema-tidy-files-max = Faýl tertipleme çägi
+schema-tidy-files-auto = Faýllary awtomatik tertiple
+schema-app-providers = Programma üpjün edijileri
+schema-provider = Üpjin ediji
+schema-kind = Görnüş
+schema-models = Modeller
+schema-acp = ACP agentleri
+schema-id = ID
+schema-name = At
+schema-command = Buýruk
+schema-arguments = Argumentler
+schema-environment = Gurşaw
+schema-working-directory = Iş katalogy
+schema-shell = Gabyk
+schema-font-family = Şrift maşgalasy
+schema-startup-directory = Başlangyç katalogy
+schema-themes = Temalar
+schema-color-scheme = Reňk shemasy
+schema-font-size = Şrift ölçegi
+schema-line-height = Setir beýikligi
+schema-cursor-style = Kursor stili
+schema-cursor-blink = Kursoryň ýanyp-sönmegi
+schema-custom-themes = Hususy temalar
+schema-foreground = Öň plan
+schema-background = Arka plan
+schema-cursor = Kursor
+schema-ansi-colors = ANSI reňkleri
+schema-keymap = Klawiatura kartasy
+schema-explorer = Gözden geçiriji
+schema-visible = Görünýän
+schema-language-servers = Dil serwerleri
+schema-servers = Serwerler
+schema-language-id = Dil ID
+schema-root-markers = Kök belgileri
+schema-output-directory = Çykyş katalogy
+
+menu-scene = Sahna
+menu-layout = Ýerleşim
+menu-terminal = Terminal
+menu-browser = Brauzer
+menu-service = Hyzmat
+menu-bookmark = Bellik
+menu-edit = Düzet
+
+layout-knowledge = Bilim
+layout-open-knowledge = Bilimi aç
+layout-open-welcome-knowledge = Bilime hoş geldiňiz sahypasyny aç
+layout-open-path = { $path } aç
+layout-fold-knowledge = Bilimi ýygnat
+layout-unfold-knowledge = Bilimi aç
+layout-bookmarks = Bellikler
+layout-new-folder = Täze bukja
+layout-add-to-bookmarks = Belliklere goş
+layout-move-to-bookmarks = Belliklere geçir
+layout-stack-number = Gatlak { $number }
+layout-fold-stack = Gatlagy ýygnat
+layout-unfold-stack = Gatlagy aç
+layout-close-stack = Gatlagy ýap
+layout-bookmark-in = { $folder } içinde bellik et
+
+common-cancel = Ýatyr
+common-delete = Poz
+common-save = Ýatda sakla
+common-rename = Adyny üýtget
+common-expand = Giňelt
+common-collapse = Ýygna
+common-loading = Ýüklenýär…
+common-error = Ýalňyşlyk
+common-output = Çykyş
+common-pending = Garaşylýar
+common-current = häzirki
+common-stop = Duruz
+services-command = Vmux hyzmaty
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }sag { $minutes }m
+services-uptime-days = { $days }g { $hours }sag
+
+error-page-failed-load = Sahypa ýüklenmedi
+error-page-not-found = Sahypa tapylmady
+error-unknown-host = Näbelli Vmux programma hosty: { $host }
+
+history-title = Taryh
+
+command-new-app-chat = Täze { $provider }/{ $model } söhbeti (Programma)
+command-interactive-mode-user = Scene > Interaktiw režim > Ulanyjy
+command-interactive-mode-player = Scene > Interaktiw režim > Oýunçy
+command-minimize-window = Layout > Penjire > Kiçelt
+command-toggle-layout = Layout > Düzüliş > Düzülişi çalyş
+command-close-tab = Layout > Salgyt > Salgyty ýap
+command-new-task = Layout > Salgyt > Täze ýumuş…
+command-next-tab = Layout > Salgyt > Indiki salgyt
+command-prev-tab = Layout > Salgyt > Öňki salgyt
+command-rename-tab = Layout > Salgyt > Salgytyň adyny üýtget
+command-tab-select-1 = Layout > Salgyt > 1-nji salgyty saýla
+command-tab-select-2 = Layout > Salgyt > 2-nji salgyty saýla
+command-tab-select-3 = Layout > Salgyt > 3-nji salgyty saýla
+command-tab-select-4 = Layout > Salgyt > 4-nji salgyty saýla
+command-tab-select-5 = Layout > Salgyt > 5-nji salgyty saýla
+command-tab-select-6 = Layout > Salgyt > 6-njy salgyty saýla
+command-tab-select-7 = Layout > Salgyt > 7-nji salgyty saýla
+command-tab-select-8 = Layout > Salgyt > 8-nji salgyty saýla
+command-tab-select-last = Layout > Salgyt > Iň soňky salgyty saýla
+command-close-pane = Layout > Pane > Paneli ýap
+command-select-pane-left = Layout > Pane > Çep paneli saýla
+command-select-pane-right = Layout > Pane > Sag paneli saýla
+command-select-pane-up = Layout > Pane > Ýokarky paneli saýla
+command-select-pane-down = Layout > Pane > Aşaky paneli saýla
+command-swap-pane-prev = Layout > Pane > Paneli öňki bilen çalyş
+command-swap-pane-next = Layout > Pane > Paneli indiki bilen çalyş
+command-equalize-pane-size = Layout > Pane > Panel ölçeglerini deňle
+command-resize-pane-left = Layout > Pane > Paneli çepe ölçegle
+command-resize-pane-right = Layout > Pane > Paneli saga ölçegle
+command-resize-pane-up = Layout > Pane > Paneli ýokary ölçegle
+command-resize-pane-down = Layout > Pane > Paneli aşak ölçegle
+command-stack-close = Layout > Stack > Gatlagy ýap
+command-stack-next = Layout > Stack > Indiki gatlak
+command-stack-previous = Layout > Stack > Öňki gatlak
+command-stack-reopen = Layout > Stack > Ýapylan sahypany gaýtadan aç
+command-stack-swap-prev = Layout > Stack > Gatlagy çepe geçir
+command-stack-swap-next = Layout > Stack > Gatlagy saga geçir
+command-space-open = Layout > Space > Giňişlikler
+command-terminal-close = Terminal > Terminaly ýap
+command-terminal-next = Terminal > Indiki terminal
+command-terminal-prev = Terminal > Öňki terminal
+command-terminal-clear = Terminal > Terminaly arassala
+command-browser-prev-page = Browser > Nawigasiýa > Yza
+command-browser-next-page = Browser > Nawigasiýa > Öňe
+command-browser-reload = Browser > Nawigasiýa > Täzeden ýükle
+command-browser-hard-reload = Browser > Nawigasiýa > Doly täzeden ýükle
+command-open-in-place = Browser > Aç > Şu ýerde aç
+command-open-in-new-stack = Browser > Aç > Täze gatlakda aç
+command-open-in-pane-top = Browser > Aç > Ýokardaky panelde aç
+command-open-in-pane-right = Browser > Aç > Sag panelde aç
+command-open-in-pane-bottom = Browser > Aç > Aşakdaky panelde aç
+command-open-in-pane-left = Browser > Aç > Çep panelde aç
+command-open-in-new-tab = Browser > Aç > Täze salgytda aç
+command-open-in-new-space = Browser > Aç > Täze giňişlikde aç
+command-browser-zoom-in = Browser > Görnüş > Ulalt
+command-browser-zoom-out = Browser > Görnüş > Kiçelt
+command-browser-zoom-reset = Browser > Görnüş > Hakyky ölçeg
+command-browser-dev-tools = Browser > Görnüş > Öndüriji gurallary
+command-browser-open-command-bar = Browser > Zolak > Buýruk zolagy
+command-browser-open-page-in-command-bar = Browser > Zolak > Sahypany redaktirle
+command-browser-open-path-bar = Browser > Zolak > Ýol nawigatory
+command-browser-open-commands = Browser > Zolak > Buýruklar
+command-browser-open-history = Browser > Zolak > Taryh
+command-service-open = Service > Hyzmat gözegçisini aç
+command-bookmark-toggle-active = Bookmark > Sahypany bellik et
+command-bookmark-pin-active = Bookmark > Sahypany berkitle
+
+layout-tab = Salgyt
+layout-no-stacks = Gatlak ýok
+layout-loading = Ýüklenýär…
+layout-no-markdown-files = Markdown faýly ýok
+layout-empty-folder = Boş bukja
+layout-worktree = iş agajy
+layout-folder-name = Bukjanyň ady
+layout-no-pins-bookmarks = Berkidilenler ýa-da bellikler ýok
+layout-move-to = { $folder } bukjasyna geçir
+layout-bookmark-current-page = Häzirki sahypany bellik et
+layout-rename-folder = Bukjanyň adyny üýtget
+layout-remove-folder = Bukjany aýyr
+layout-update-downloading = Täzelenme göçürilýär
+layout-update-installing = Täzelenme gurulýar…
+layout-update-ready = Täze wersiýa bar
+layout-restart-update = Täzelemek üçin täzeden başlat
+
+agent-preparing = Agent taýýarlanýar…
+agent-send-all-queued = Nobatdaky ähli promptlary häzir iber (Esc)
+agent-send = Iber (Enter)
+agent-ready = Taýýar bolanyňyzda men taýýar.
+agent-loading-older = Köne habarlary ýükleýär…
+agent-load-older = Köne habarlary ýükle
+agent-continued-from = { $source } ýerinden dowam edildi
+agent-older-context-omitted = köne kontekst goýberildi
+agent-interrupted = kesildi
+agent-allow-tool = { $tool } rugsat berilsinmi?
+agent-deny = Ret et
+agent-allow-always = Elmydama rugsat ber
+agent-allow = Rugsat ber
+agent-loading-sessions = Sessiýalar ýüklenýär…
+agent-no-resumable-sessions = Dowam etdirip bolýan sessiýa tapylmady
+agent-no-matching-sessions = Gabat gelýän sessiýa ýok
+agent-no-matching-models = Gabat gelýän model ýok
+agent-choice-help = ↑/↓ ýa-da Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Repozitoriýa bukjasyny saýla
+agent-choose-repository-detail = Agentiň ulanjak ýerli Git repozitoriýasyny saýlaň.
+agent-choosing = Saýlanýar…
+agent-choose-folder = Bukja saýla
+agent-queued = nobatda
+agent-attached = Berkidildi:
+agent-cancel-queued = Nobatdaky prompty ýatyr
+agent-resume-queued = Nobatdaky promptlary dowam et
+agent-clear-queue = Nobaty arassala
+agent-send-all-now = ählisini häzir iber
+agent-choose-option = Ýokardaky warianty saýlaň
+agent-loading-media = Media ýüklenýär…
+agent-no-matching-media = Gabat gelýän media ýok
+agent-prompt-context = Prompt konteksti
+agent-details = Jikme-jiklikler
+agent-path = Ýol
+agent-tool = Gural
+agent-server = Serwer
+agent-bytes = { $count } baýt
+agent-worked-for = { $duration } işledi
+agent-worked-for-steps = { $count ->
+    [one] { $duration } işledi · 1 ädim
+   *[other] { $duration } işledi · { $count } ädim
+}
+agent-tool-guardian-review = Guardian barlagy
+agent-tool-read-files = Faýllary okady
+agent-tool-viewed-image = Surata seretdi
+agent-tool-used-browser = Brauzeri ulandy
+agent-tool-searched-files = Faýllarda gözledi
+agent-tool-ran-commands = Buýruklary işletdi
+agent-thinking = Oýlanýar
+agent-subagent = Kömekçi agent
+agent-prompt = Prompt
+agent-thread = Sapak
+agent-parent = Ene
+agent-children = Çagalar
+agent-call = Çagyryş
+agent-raw-event = Çig waka
+agent-plan = Plan
+agent-tasks = { $count ->
+    [one] 1 ýumuş
+   *[other] { $count } ýumuş
+}
+agent-edited = Redaktirlendi
+agent-reconnecting = Gaýtadan birikýär { $attempt }/{ $total }
+agent-status-running = Işleýär
+agent-status-done = Tamamlandy
+agent-status-failed = Şowsuz
+agent-status-pending = Garaşylýar
+agent-slash-attach-files = Faýl berkit
+agent-slash-resume-session = Öňki sessiýany dowam et
+agent-slash-select-model = Model saýla
+agent-slash-continue-cli = Bu sessiýany CLI-de dowam et
+agent-session-just-now = ýaňy
+agent-session-minutes-ago = { $count }m öň
+agent-session-hours-ago = { $count }sag öň
+agent-session-days-ago = { $count }g öň
+agent-working-working = Işleýär
+agent-working-thinking = Oýlanýar
+agent-working-pondering = Pikirlenýär
+agent-working-noodling = Oýlanyp görýär
+agent-working-percolating = Bişip barýar
+agent-working-conjuring = Döredýär
+agent-working-cooking = Taýýarlaýar
+agent-working-brewing = Demleýär
+agent-working-musing = Oýa batýar
+agent-working-ruminating = Ýene pikirlenýär
+agent-working-scheming = Plan düzýär
+agent-working-synthesizing = Jemleýär
+agent-working-tinkering = Synap görýär
+agent-working-churning = Işläp dur
+agent-working-vibing = Akymda
+agent-working-simmering = Haýal bişirýär
+agent-working-crafting = Ýasaýar
+agent-working-divining = Anyklaýar
+agent-working-mulling = Ölçerýär
+agent-working-spelunking = Çuňňur gözleýär
+
+editor-toggle-explorer = Explorer-i görkez/gizle (Cmd+B)
+editor-unsaved = ýatda saklanmadyk
+editor-rendered-markdown = Janly redaktirleme bilen görkezilen Markdown
+editor-note = Bellik
+editor-source-editor = Çeşme redaktory
+editor-editor = Redaktor
+editor-git-diff = Git tapawudy
+editor-diff = Tapawut
+editor-tidy = Tertiple
+editor-always = Elmydama
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 üýtgemedik öňden görüş
+   *[other] ✦ { $count } üýtgemedik öňden görüş
+}
+editor-open-externally = Daşarky programmada aç
+editor-changed-line = Üýtgedilen setir
+editor-go-to-definition = Kesgitlemä geç
+editor-find-references = Salgylanyşlary tap
+editor-references = { $count ->
+    [one] 1 salgylanyş
+   *[other] { $count } salgylanyş
+}
+editor-lsp-starting = { $server } işe başlaýar…
+editor-lsp-not-installed = { $server } — gurulmadyk
+editor-explorer = Explorer
+editor-open-editors = Açyk redaktorlar
+editor-outline = Gurluş
+editor-new-file = Täze faýl
+editor-new-folder = Täze bukja
+editor-delete-confirm = “{ $name }” pozulsynmy? Muny yzyna gaýtaryp bolmaz.
+editor-created-folder = { $name } bukjasy döredildi
+editor-created-file = { $name } faýly döredildi
+editor-renamed-to = Ady { $name } edildi
+editor-deleted = { $name } pozuldy
+editor-failed-decode-image = Surat dekodlanyp bilmedi
+editor-preview-large-image = surat (öňden görmek üçin juda uly)
+editor-preview-binary = binar
+editor-preview-file = faýl
+
+git-status-clean = arassa
+git-status-modified = üýtgedilen
+git-status-staged = sahnalanan
+git-status-staged-modified = sahnalanan*
+git-status-untracked = yzarlanmaýan
+git-status-deleted = pozulan
+git-status-conflict = gapma-garşylyk
+git-accept-all = ✓ ählisini kabul et
+git-unstage = Sahnadan aýyr
+git-confirm-deny-all = Ählisini ret etmegi tassykla
+git-deny-all = ✗ ählisini ret et
+git-commit-message = commit habary
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Tapawut ýüklenýär…
+git-no-changes = Görkezmäge üýtgeşme ýok
+git-accept = ✓ kabul et
+git-deny = ✗ ret et
+git-show-unchanged-lines = { $count } üýtgemedik setiri görkez
+
+terminal-loading = Ýüklenýär…
+terminal-runs-when-ready = taýýar bolanda işleýär · Ctrl+C arassalaýar · Esc geçirýär
+terminal-booting = işe girizilýär
+terminal-type-command = buýruk ýazyň · taýýar bolanda işleýär · Esc geçirýär
+
+setup-tagline-claude = Anthropic-iň kodlaýjy agenti, Vmux içinde
+setup-tagline-codex = OpenAI-iň kodlaýjy agenti, Vmux içinde
+setup-tagline-vibe = Mistral-iň kodlaýjy agenti, Vmux içinde
+setup-install-title = { $name } CLI gur
+setup-homebrew-required = { $command } gurmak üçin Homebrew gerek, emma entek sazlanmandyr. Vmux ilki Homebrew-i, soň { $name }-i gurar.
+setup-terminal-instructions = Terminalda başlamak üçin Return basyň, soň soralanda Mac parolyňyzy giriziň.
+setup-command-missing = Ýerli { $command } buýrugy entek gurulmandygy üçin Vmux bu sahypany açdy. Ony almak üçin aşakdaky buýrugy işlediň.
+setup-install-failed = Gurnama tamamlanmady. Jikme-jiklikler üçin terminaly barlaň, soň gaýtadan synanyşyň.
+setup-installing = Gurulýar…
+setup-install-homebrew = Homebrew + { $name } gur
+setup-run-install = Gurnama buýrugyny işlet
+setup-auto-reload = Vmux ony terminalda işledýär we { $command } taýýar bolanda täzeden ýükleýär.
+
+debug-title = Debug
+debug-auto-update = Awtomatiki täzelenme
+debug-simulate-update = Täzelenme bar ýaly görkez
+debug-simulate-download = Göçürmäni simulirle
+debug-clear-update = Täzelenmäni arassala
+debug-trigger-restart = Täzeden başlatmany işjeň et
+
+command-manage-spaces = Giňişlikleri dolandyr…
+command-pane-stack-location = panel { $pane } / gatlak { $stack }
+command-space-pane-stack-location = { $space } / panel { $pane } / gatlak { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Interaktiw tertip
+command-group-window = Penjire
+command-group-tab = Salgyt
+command-group-pane = Panel
+command-group-stack = Gatlak
+command-group-space = Giňişlik
+command-group-navigation = Nawigasiýa
+command-group-open = Aç
+command-group-view = Görnüş
+command-group-bar = Panel
+
+menu-close-vmux = Vmux-y ýap
+
+agents-terminal-coding-agent = Terminal esasly kodlama agenti

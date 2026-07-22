@@ -1,0 +1,602 @@
+locale-name = Hmoob
+common-open = Qhib
+common-close = Kaw
+common-install = Nruab
+common-uninstall = Tshem tawm
+common-update = Hloov tshiab
+common-retry = Sim dua
+common-refresh = Rov kho tshiab
+common-remove = Tshem
+common-enable = Qhib siv
+common-disable = Tua
+common-new = Tshiab
+common-active = tseem qhib
+common-running = tab tom khiav
+common-done = tiav
+common-failed = Ua tsis tiav
+common-installed = Tau nruab lawm
+common-items = { $count ->
+    [one] { $count } yam
+   *[other] { $count } yam
+}
+start-title = Pib
+start-tagline = Ib lo lus txib. Ua tau txhua yam, kom tiav.
+
+agents-title = AI Agent
+agents-search = Nrhiav ACP thiab CLI agents…
+agents-empty = Tsis muaj agent phim
+agents-empty-detail = Sim nrhiav npe, runtime, lossis ACP/CLI.
+agents-install-failed = Nruab tsis tiav
+agents-updating = Tab tom hloov tshiab…
+agents-retrying = Tab tom sim dua…
+agents-preparing = Tab tom npaj…
+
+extensions-title = Extensions
+extensions-search = Nrhiav cov uas twb nruab lossis Chrome Web Store…
+extensions-relaunch = Rov qhib kom hloov siv tau
+extensions-empty = Tsis tau nruab extension li
+extensions-no-match = Tsis muaj extension phim
+extensions-empty-detail = Nrhiav saum no hauv Chrome Web Store ces nias Return.
+extensions-no-match-detail = Sim lwm lub npe lossis extension ID.
+extensions-on = Qhib
+extensions-off = Tua
+extensions-enable-confirm = Qhib siv { $name }?
+extensions-enable-permissions = Qhib siv { $name } thiab tso cai:
+
+lsp-title = Language Servers
+lsp-search = Nrhiav language servers, linters, formatters…
+lsp-loading = Tab tom thauj catalog…
+lsp-empty = Tsis muaj language server phim
+lsp-empty-detail = Sim lwm yam lus, linter, lossis formatter.
+lsp-needs = yuav tsum muaj { $tool }
+lsp-status-available = Muaj
+lsp-status-on-path = Nyob hauv PATH
+lsp-status-installing = Tab tom nruab…
+lsp-status-installed = Tau nruab lawm
+lsp-status-outdated = Muaj hloov tshiab
+lsp-status-running = Tab tom khiav
+lsp-status-failed = Ua tsis tiav
+
+spaces-title = Chaw ua haujlwm
+spaces-new-placeholder = Npe chaw ua haujlwm tshiab
+spaces-empty = Tsis muaj chaw ua haujlwm
+spaces-default-name = Chaw ua haujlwm { $number }
+spaces-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+spaces-delete = Rho tawm chaw ua haujlwm
+
+team-title = Pab pawg
+team-just-you = Tsuas yog koj hauv qhov chaw ua haujlwm no
+team-agents = { $count ->
+    [one] Koj thiab 1 agent
+   *[other] Koj thiab { $count } agents
+}
+team-empty = Tseem tsis muaj leej twg nyob ntawm no
+team-you = Koj
+team-agent = Agent
+
+services-title = Cov kev pab khiav tom qab
+services-processes = { $count ->
+    [one] 1 process
+   *[other] { $count } process
+}
+services-kill-all = Tua tag nrho
+services-not-running = Kev pab no tsis khiav
+services-start-with = Pib nrog:
+services-empty = Tsis muaj process tab tom khiav
+services-filter = Lim processes…
+services-no-match = Tsis muaj process phim
+services-connected = Txuas lawm
+services-disconnected = Tsis txuas
+services-attached = tau txuas nrog
+services-kill = Tua
+services-memory = Cim xeeb
+services-size = Loj
+services-shell = Shell
+
+error-title = Yuam kev
+
+history-search = Nrhiav keeb kwm
+history-clear-all = Tshem tag nrho
+history-clear-confirm = Tshem tag nrho keeb kwm?
+history-clear-warning = Ua li no ces thim tsis tau.
+history-cancel = Tso tseg
+history-today = Hnub no
+history-yesterday = Nag hmo
+history-days-ago = { $count } hnub dhau los
+history-day-offset = Hnub -{ $count }
+
+settings-title = Chaw teeb
+settings-loading = Tab tom thauj chaw teeb…
+settings-stored = Khaws hauv ~/.vmux/settings.ron
+settings-other = Lwm yam
+settings-software-update = Hloov tshiab software
+settings-check-updates = Tshawb hloov tshiab
+settings-check-updates-hint = Tshawb nws tus kheej thaum qhib thiab txhua teev yog qhib Auto-update.
+settings-update-unavailable = Siv tsis tau
+settings-update-unavailable-hint = Updater tsis muaj nyob hauv build no.
+settings-update-checking = Tab tom tshawb…
+settings-update-checking-hint = Tab tom tshawb hloov tshiab…
+settings-update-check-again = Tshawb dua
+settings-update-current = Vmux yog version tshiab lawm.
+settings-update-downloading = Tab tom rub tawm…
+settings-update-downloading-hint = Tab tom rub tawm Vmux { $version }…
+settings-update-installing = Tab tom nruab…
+settings-update-installing-hint = Tab tom nruab Vmux { $version }…
+settings-update-ready = Hloov tshiab npaj lawm
+settings-update-ready-hint = Vmux { $version } npaj lawm. Rov pib kom siv tau.
+settings-update-try-again = Sim dua
+settings-update-failed = Tshawb hloov tshiab tsis tau.
+settings-item = Yam
+settings-item-number = Yam { $number }
+settings-press-key = Nias ib tus yuam sij…
+settings-saved = Khaws lawm
+settings-record-key = Nyem kom sau key combo tshiab
+
+tray-open-window = Qhib qhov rais
+tray-close-window = Kaw qhov rais
+tray-pause-recording = Nres kaw ib ntus
+tray-resume-recording = Rov pib kaw
+tray-finish-recording = Kaw kom tiav
+tray-quit = Tawm Vmux
+
+composer-attach-files = Ntxiv ntaub ntawv (/upload)
+composer-remove-attachment = Tshem attachment
+
+layout-back = Rov qab
+layout-forward = Mus tom ntej
+layout-reload = Rov thauj
+layout-bookmark-page = Cim nplooj ntawv no
+layout-remove-bookmark = Tshem bookmark
+layout-pin-page = Pin nplooj ntawv no
+layout-unpin-page = Unpin nplooj ntawv no
+layout-manage-extensions = Tswj extensions
+layout-new-stack = Stack tshiab
+layout-close-tab = Kaw tab
+layout-bookmark = Bookmark
+layout-pin = Pin
+layout-new-tab = Tab tshiab
+layout-team = Pab pawg
+
+command-switch-space = Hloov chaw ua haujlwm…
+command-search-ask = Nrhiav lossis nug…
+command-new-tab-placeholder = Nrhiav lossis ntaus URL, lossis xaiv Terminal…
+command-placeholder = Ntaus URL, nrhiav tabs, lossis > rau commands…
+command-composer-placeholder = Ntaus / rau commands lossis @ rau media
+command-send = Xa (Enter)
+command-terminal = Terminal
+command-open-terminal = Qhib hauv Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+command-prompt = Lus txib AI
+command-new-tab = Tab tshiab
+command-search = Nrhiav
+command-open-value = Qhib “{ $value }”
+command-search-value = Nrhiav “{ $value }”
+
+schema-appearance = Tsos
+schema-general = Dav dav
+schema-layout = Kev teeb chaw
+schema-layout-detail = Qhov rais, pane, sidebar, thiab focus ring.
+schema-agent = Agent
+schema-agent-detail = Kev coj ntawm agent thiab kev tso cai rau cuab yeej.
+schema-shortcuts = Shortcuts
+schema-shortcuts-detail = Saib nkaus xwb. Kho settings.ron ncaj qha yog xav hloov bindings.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Hom
+schema-mode-detail = Xim rau web pages. Device raws koj lub system.
+schema-device = Device
+schema-light = Kaj
+schema-dark = Tsaus
+schema-language = Lus
+schema-language-detail = Siv system, en-US, ja, lossis txhua BCP 47 tag uas muaj catalog ~/.vmux/locales/<tag>.ftl phim.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Tshawb thiab nruab hloov tshiab thaum qhib thiab txhua teev.
+schema-startup-url = Startup URL
+schema-startup-url-detail = Yog tseg khoob yuav qhib command bar prompt.
+schema-search-engine = Search engine
+schema-search-engine-detail = Siv rau kev nrhiav web ntawm Start thiab command bar.
+schema-window = Qhov rais
+schema-pane = Pane
+schema-side-sheet = Daim ntawv sab
+schema-focus-ring = Focus ring
+schema-run-placement = Cia hloov chaw khiav
+schema-run-placement-detail = Cia agents xaiv hom pane khiav, kev taw, thiab anchor.
+schema-leader = Leader
+schema-leader-detail = Tus yuam sij ua ntej rau chord shortcuts.
+schema-chord-timeout = Chord timeout
+schema-chord-timeout-detail = Pes tsawg millisecond ua ntej chord prefix tas sij hawm.
+schema-bindings = Bindings
+schema-confirm-close = Nug ua ntej kaw
+schema-confirm-close-detail = Nug ua ntej kaw terminal uas tseem muaj process khiav.
+schema-default-theme = Default theme
+schema-default-theme-detail = Npe ntawm theme uas siv tam sim no hauv daim ntawv themes.
+
+settings-empty = (khoob)
+settings-none = (tsis muaj)
+
+schema-system = Txheej txheem
+schema-editor = Chaw kho
+schema-recording = Kev kaw
+schema-radius = Vojvoog
+schema-padding = Ntxiv ntug hauv
+schema-gap = Qhov nrug
+schema-width = Dav
+schema-color = Xim
+schema-red = Liab
+schema-green = Ntsuab
+schema-blue = Xiav
+schema-follow-files = Taug cov ntaub ntawv
+schema-tidy-files = Tu cov ntaub ntawv
+schema-tidy-files-max = Ciam tu ntaub ntawv
+schema-tidy-files-auto = Tu cov ntaub ntawv cia li
+schema-app-providers = Cov chaw muab app
+schema-provider = Chaw muab
+schema-kind = Hom
+schema-models = Cov qauv
+schema-acp = ACP agent
+schema-id = ID
+schema-name = Npe
+schema-command = Lus txib
+schema-arguments = Cov nqe lus txib
+schema-environment = Ib puag ncig
+schema-working-directory = Nplaub tshev ua haujlwm
+schema-shell = Plhaub
+schema-font-family = Tsev neeg ntawv
+schema-startup-directory = Nplaub tshev pib
+schema-themes = Cov ntsiab xim
+schema-color-scheme = Qauv xim
+schema-font-size = Loj ntawv
+schema-line-height = Siab kab
+schema-cursor-style = Hom cursor
+schema-cursor-blink = Cursor ntsais
+schema-custom-themes = Cov ntsiab xim kho tus kheej
+schema-foreground = Sab pem hauv ntej
+schema-background = Tom qab
+schema-cursor = Cursor
+schema-ansi-colors = ANSI colors
+schema-keymap = Daim ntawv yuam sij
+schema-explorer = Chaw tshawb
+schema-visible = Pom
+schema-language-servers = Cov cuab yeej pab lus
+schema-servers = Cov tshuab pab
+schema-language-id = Language ID
+schema-root-markers = Cov cim cag
+schema-output-directory = Nplaub tshev tso tawm
+
+menu-scene = Xwm
+menu-layout = Kev teeb
+menu-terminal = Chaw txib
+menu-browser = Chaw saib web
+menu-service = Kev pab
+menu-bookmark = Cim tseg
+menu-edit = Kho
+
+layout-knowledge = Kev paub
+layout-open-knowledge = Qhib Kev paub
+layout-open-welcome-knowledge = Qhib Zoo siab txais tos rau Kev paub
+layout-open-path = Qhib { $path }
+layout-fold-knowledge = Quav kev paub
+layout-unfold-knowledge = Nthuav kev paub
+layout-bookmarks = Cov cim tseg
+layout-new-folder = Nplaub tshev tshiab
+layout-add-to-bookmarks = Ntxiv rau Cov cim tseg
+layout-move-to-bookmarks = Txav mus rau Cov cim tseg
+layout-stack-number = Pawg { $number }
+layout-fold-stack = Quav pawg
+layout-unfold-stack = Nthuav pawg
+layout-close-stack = Kaw pawg
+layout-bookmark-in = Cim tseg hauv { $folder }
+
+common-cancel = Tso tseg
+common-delete = Rho tawm
+common-save = Tseg
+common-rename = Hloov npe
+common-expand = Nthuav
+common-collapse = Quav
+common-loading = Tab tom thauj…
+common-error = Yuam kev
+common-output = Tawm los
+common-pending = Tos
+common-current = tam sim no
+common-stop = Nres
+services-command = Kev pab Vmux
+services-uptime-seconds = { $seconds }v
+services-uptime-minutes = { $minutes }feeb { $seconds }v
+services-uptime-hours = { $hours }teev { $minutes }feeb
+services-uptime-days = { $days }hnub { $hours }teev
+
+error-page-failed-load = Thauj nplooj ntawv tsis tau
+error-page-not-found = Nrhiav tsis pom nplooj ntawv
+error-unknown-host = Tsis paub tus tswv app Vmux: { $host }
+
+history-title = Keeb kwm
+
+command-new-app-chat = Chat tshiab { $provider }/{ $model } (App)
+command-interactive-mode-user = Scene > Hom sib tham > Neeg siv
+command-interactive-mode-player = Scene > Hom sib tham > Player
+command-minimize-window = Layout > Qhov rais > Muab me
+command-toggle-layout = Layout > Layout > Qhib/kaw Layout
+command-close-tab = Layout > Tab > Kaw Tab
+command-new-task = Layout > Tab > Hauj lwm tshiab…
+command-next-tab = Layout > Tab > Tab tom ntej
+command-prev-tab = Layout > Tab > Tab dhau los
+command-rename-tab = Layout > Tab > Hloov npe Tab
+command-tab-select-1 = Layout > Tab > Xaiv Tab 1
+command-tab-select-2 = Layout > Tab > Xaiv Tab 2
+command-tab-select-3 = Layout > Tab > Xaiv Tab 3
+command-tab-select-4 = Layout > Tab > Xaiv Tab 4
+command-tab-select-5 = Layout > Tab > Xaiv Tab 5
+command-tab-select-6 = Layout > Tab > Xaiv Tab 6
+command-tab-select-7 = Layout > Tab > Xaiv Tab 7
+command-tab-select-8 = Layout > Tab > Xaiv Tab 8
+command-tab-select-last = Layout > Tab > Xaiv Tab kawg
+command-close-pane = Layout > Pane > Kaw Pane
+command-select-pane-left = Layout > Pane > Xaiv Pane sab laug
+command-select-pane-right = Layout > Pane > Xaiv Pane sab xis
+command-select-pane-up = Layout > Pane > Xaiv Pane sab saud
+command-select-pane-down = Layout > Pane > Xaiv Pane sab hauv qab
+command-swap-pane-prev = Layout > Pane > Pauv rau Pane dhau los
+command-swap-pane-next = Layout > Pane > Pauv rau Pane tom ntej
+command-equalize-pane-size = Layout > Pane > Ua Pane luaj ib yam
+command-resize-pane-left = Layout > Pane > Kho Pane rau sab laug
+command-resize-pane-right = Layout > Pane > Kho Pane rau sab xis
+command-resize-pane-up = Layout > Pane > Kho Pane rau sab saud
+command-resize-pane-down = Layout > Pane > Kho Pane rau sab hauv qab
+command-stack-close = Layout > Stack > Kaw Stack
+command-stack-next = Layout > Stack > Stack tom ntej
+command-stack-previous = Layout > Stack > Stack dhau los
+command-stack-reopen = Layout > Stack > Rov qhib nplooj ntawv kaw lawm
+command-stack-swap-prev = Layout > Stack > Txav Stack mus laug
+command-stack-swap-next = Layout > Stack > Txav Stack mus xis
+command-space-open = Layout > Space > Spaces
+command-terminal-close = Terminal > Kaw Terminal
+command-terminal-next = Terminal > Terminal tom ntej
+command-terminal-prev = Terminal > Terminal dhau los
+command-terminal-clear = Terminal > Tso Terminal kom dawb
+command-browser-prev-page = Browser > Kev mus saib > Rov qab
+command-browser-next-page = Browser > Kev mus saib > Mus tom ntej
+command-browser-reload = Browser > Kev mus saib > Rov thauj
+command-browser-hard-reload = Browser > Kev mus saib > Rov thauj tshiab kiag
+command-open-in-place = Browser > Qhib > Qhib ntawm no
+command-open-in-new-stack = Browser > Qhib > Qhib hauv Stack tshiab
+command-open-in-pane-top = Browser > Qhib > Qhib hauv Pane saum toj
+command-open-in-pane-right = Browser > Qhib > Qhib hauv Pane sab xis
+command-open-in-pane-bottom = Browser > Qhib > Qhib hauv Pane hauv qab
+command-open-in-pane-left = Browser > Qhib > Qhib hauv Pane sab laug
+command-open-in-new-tab = Browser > Qhib > Qhib hauv Tab tshiab
+command-open-in-new-space = Browser > Qhib > Qhib hauv Space tshiab
+command-browser-zoom-in = Browser > Saib > Ua kom loj
+command-browser-zoom-out = Browser > Saib > Ua kom me
+command-browser-zoom-reset = Browser > Saib > Luaj li qub
+command-browser-dev-tools = Browser > Saib > Cuab yeej Developer
+command-browser-open-command-bar = Browser > Bar > Command Bar
+command-browser-open-page-in-command-bar = Browser > Bar > Kho nplooj ntawv
+command-browser-open-path-bar = Browser > Bar > Tus nrhiav path
+command-browser-open-commands = Browser > Bar > Lus txib
+command-browser-open-history = Browser > Bar > Keeb kwm
+command-service-open = Service > Qhib chaw saib Service
+command-bookmark-toggle-active = Bookmark > Bookmark nplooj ntawv
+command-bookmark-pin-active = Bookmark > Pin nplooj ntawv
+
+layout-tab = Tab
+layout-no-stacks = Tsis muaj stack
+layout-loading = Tab tom thauj…
+layout-no-markdown-files = Tsis muaj ntaub ntawv Markdown
+layout-empty-folder = Nplaub tshev khoob
+layout-worktree = worktree
+layout-folder-name = Npe nplaub tshev
+layout-no-pins-bookmarks = Tsis muaj pin lossis bookmark
+layout-move-to = Txav mus rau { $folder }
+layout-bookmark-current-page = Bookmark nplooj ntawv no
+layout-rename-folder = Hloov npe nplaub tshev
+layout-remove-folder = Tshem nplaub tshev
+layout-update-downloading = Tab tom rub update
+layout-update-installing = Tab tom nruab update…
+layout-update-ready = Muaj version tshiab
+layout-restart-update = Rov qhib kom update
+
+agent-preparing = Tab tom npaj agent…
+agent-send-all-queued = Xa txhua prompt uas tos tam sim no (Esc)
+agent-send = Xa (Enter)
+agent-ready = Npaj lawm thaum koj npaj.
+agent-loading-older = Tab tom thauj lus qub dua…
+agent-load-older = Thauj lus qub dua
+agent-continued-from = Txuas los ntawm { $source }
+agent-older-context-omitted = hla context qub dua lawm
+agent-interrupted = raug cuam tshuam
+agent-allow-tool = Pub siv { $tool }?
+agent-deny = Tsis pub
+agent-allow-always = Pub txhua zaus
+agent-allow = Pub
+agent-loading-sessions = Tab tom thauj sessions…
+agent-no-resumable-sessions = Nrhiav tsis pom session rov txuas tau
+agent-no-matching-sessions = Tsis muaj session phim
+agent-no-matching-models = Tsis muaj model phim
+agent-choice-help = ↑/↓ lossis Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Xaiv repository folder
+agent-choose-repository-detail = Xaiv local Git repository uas agent yuav siv.
+agent-choosing = Tab tom xaiv…
+agent-choose-folder = Xaiv nplaub tshev
+agent-queued = tos xa
+agent-attached = Txuas nrog:
+agent-cancel-queued = Tso prompt uas tos tseg
+agent-resume-queued = Rov pib prompts uas tos
+agent-clear-queue = Tso queue kom dawb
+agent-send-all-now = xa tag nrho tam sim no
+agent-choose-option = Xaiv ib qho kev xaiv saum toj
+agent-loading-media = Tab tom thauj media…
+agent-no-matching-media = Tsis muaj media phim
+agent-prompt-context = Prompt context
+agent-details = Lus qhia ntxiv
+agent-path = Path
+agent-tool = Cuab yeej
+agent-server = Server
+agent-bytes = { $count } bytes
+agent-worked-for = Ua hauj lwm tau { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Ua hauj lwm tau { $duration } · 1 kauj ruam
+   *[other] Ua hauj lwm tau { $duration } · { $count } kauj ruam
+}
+agent-tool-guardian-review = Guardian Review
+agent-tool-read-files = Nyeem ntaub ntawv
+agent-tool-viewed-image = Saib duab
+agent-tool-used-browser = Siv browser
+agent-tool-searched-files = Tshawb ntaub ntawv
+agent-tool-ran-commands = Khiav lus txib
+agent-thinking = Tab tom xav
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Thread
+agent-parent = Niam txiv
+agent-children = Me nyuam
+agent-call = Hu
+agent-raw-event = Event nyoos
+agent-plan = Phiaj xwm
+agent-tasks = { $count ->
+    [one] 1 hauj lwm
+   *[other] { $count } hauj lwm
+}
+agent-edited = Kho lawm
+agent-reconnecting = Tab tom txuas dua { $attempt }/{ $total }
+agent-status-running = Tab tom khiav
+agent-status-done = Tiav
+agent-status-failed = Ua tsis tiav
+agent-status-pending = Tos
+agent-slash-attach-files = Txuas ntaub ntawv
+agent-slash-resume-session = Rov pib session yav dhau los
+agent-slash-select-model = Xaiv model
+agent-slash-continue-cli = Txuas session no hauv CLI
+agent-session-just-now = nyuam qhuav no
+agent-session-minutes-ago = { $count }feeb dhau los
+agent-session-hours-ago = { $count }teev dhau los
+agent-session-days-ago = { $count }hnub dhau los
+agent-working-working = Tab tom ua hauj lwm
+agent-working-thinking = Tab tom xav
+agent-working-pondering = Tab tom xav tob
+agent-working-noodling = Tab tom xav ua si
+agent-working-percolating = Tab tom lim tswv yim
+agent-working-conjuring = Tab tom tsim tswv yim
+agent-working-cooking = Tab tom ua
+agent-working-brewing = Tab tom ncu tswv yim
+agent-working-musing = Tab tom xav ntsiag to
+agent-working-ruminating = Tab tom xav rov xav dua
+agent-working-scheming = Tab tom npaj tswv yim
+agent-working-synthesizing = Tab tom sib xyaw tswv yim
+agent-working-tinkering = Tab tom kho me ntsis
+agent-working-churning = Tab tom ua tsis tu
+agent-working-vibing = Tab tom ntes vibe
+agent-working-simmering = Tab tom maj mam siav
+agent-working-crafting = Tab tom tsim
+agent-working-divining = Tab tom twv nrhiav
+agent-working-mulling = Tab tom xav xyuas
+agent-working-spelunking = Tab tom khawb nrhiav
+
+editor-toggle-explorer = Qhib/kaw Explorer (Cmd+B)
+editor-unsaved = tseem tsis tau tseg
+editor-rendered-markdown = Markdown tso tawm nrog kho tau tam sim
+editor-note = Lus cim
+editor-source-editor = Source editor
+editor-editor = Editor
+editor-git-diff = Git diff
+editor-diff = Diff
+editor-tidy = Tidy
+editor-always = Txhua zaus
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 preview tsis hloov
+   *[other] ✦ { $count } preview tsis hloov
+}
+editor-open-externally = Qhib sab nraud
+editor-changed-line = Kab hloov lawm
+editor-go-to-definition = Mus rau Definition
+editor-find-references = Nrhiav References
+editor-references = { $count ->
+    [one] 1 reference
+   *[other] { $count } references
+}
+editor-lsp-starting = { $server } tab tom pib…
+editor-lsp-not-installed = { $server } — tsis tau nruab
+editor-explorer = Explorer
+editor-open-editors = Editors qhib
+editor-outline = Outline
+editor-new-file = Ntaub ntawv tshiab
+editor-new-folder = Nplaub tshev tshiab
+editor-delete-confirm = Rho tawm “{ $name }”? Yuav rov qab tsis tau.
+editor-created-folder = Tsim nplaub tshev { $name } lawm
+editor-created-file = Tsim ntaub ntawv { $name } lawm
+editor-renamed-to = Hloov npe ua { $name } lawm
+editor-deleted = Rho tawm { $name } lawm
+editor-failed-decode-image = Decode duab tsis tau
+editor-preview-large-image = duab (loj dhau saib preview tsis tau)
+editor-preview-binary = binary
+editor-preview-file = ntaub ntawv
+
+git-status-clean = huv
+git-status-modified = hloov lawm
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = tsis tau track
+git-status-deleted = rho tawm lawm
+git-status-conflict = sib tsoo
+git-accept-all = ✓ txais tag nrho
+git-unstage = Tshem ntawm stage
+git-confirm-deny-all = Paub meej tias tsis txais tag nrho
+git-deny-all = ✗ tsis txais tag nrho
+git-commit-message = commit message
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Tab tom thauj diff…
+git-no-changes = Tsis muaj hloov los qhia
+git-accept = ✓ txais
+git-deny = ✗ tsis txais
+git-show-unchanged-lines = Qhia { $count } kab tsis hloov
+
+terminal-loading = Tab tom thauj…
+terminal-runs-when-ready = khiav thaum npaj · Ctrl+C tso kom dawb · Esc hla
+terminal-booting = tab tom pib
+terminal-type-command = ntaus lus txib · khiav thaum npaj · Esc hla
+
+setup-tagline-claude = Anthropic tus coding agent, hauv Vmux
+setup-tagline-codex = OpenAI tus coding agent, hauv Vmux
+setup-tagline-vibe = Mistral tus coding agent, hauv Vmux
+setup-install-title = Nruab { $name } CLI
+setup-homebrew-required = Yuav tsum muaj Homebrew thiaj nruab tau { $command }, thiab tseem tsis tau teeb. Vmux yuav nruab Homebrew ua ntej, ces mam nruab { $name }.
+setup-terminal-instructions = Hauv terminal, nias Return kom pib, ces sau koj tus password Mac thaum nug.
+setup-command-missing = Vmux qhib nplooj ntawv no vim local command { $command } tseem tsis tau nruab. Khiav command hauv qab no kom tau nws.
+setup-install-failed = Nruab tsis tiav. Saib terminal kom paub ntxiv, ces sim dua.
+setup-installing = Tab tom nruab…
+setup-install-homebrew = Nruab Homebrew + { $name }
+setup-run-install = Khiav install command
+setup-auto-reload = Vmux khiav nws hauv terminal thiab rov thauj thaum { $command } npaj lawm.
+
+debug-title = Debug
+debug-auto-update = Update nws tus kheej
+debug-simulate-update = Sim ua muaj update
+debug-simulate-download = Sim download
+debug-clear-update = Tshem update
+debug-trigger-restart = Ua kom rov qhib
+
+command-manage-spaces = Tswj cov chaw…
+command-pane-stack-location = pane { $pane } / stack { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Hom sib tham
+command-group-window = Qhov rai
+command-group-tab = Tab
+command-group-pane = Pane
+command-group-stack = Stack
+command-group-space = Chaw
+command-group-navigation = Kev mus los
+command-group-open = Qhib
+command-group-view = Saib
+command-group-bar = Bar
+
+menu-close-vmux = Kaw Vmux
+
+agents-terminal-coding-agent = Tus neeg sawv cev sau code hauv Terminal

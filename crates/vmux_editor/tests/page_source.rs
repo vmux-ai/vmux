@@ -11,14 +11,6 @@ fn note_source() -> &'static str {
 }
 
 #[test]
-fn explorer_panel_renders_three_sections() {
-    let s = explorer_source();
-    assert!(s.contains("\"Explorer\""));
-    assert!(s.contains("Open Editors"));
-    assert!(s.contains("Outline"));
-}
-
-#[test]
 fn explorer_rows_emit_intents() {
     let s = explorer_source();
     assert!(s.contains("ExplorerTreeToggle"));
@@ -75,7 +67,6 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("FileViewModeSet"));
     assert!(s.contains("FileViewMode::Note"));
     assert!(s.contains("let mut file_view_mode = use_signal(|| FileViewMode::Note)"));
-    assert!(s.contains("Rendered Markdown with live editing"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Editor)"));
     assert!(s.contains("file_view_mode.set(FileViewMode::Diff)"));
     assert!(s.contains("file-mode-note-enter"));

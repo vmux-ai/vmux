@@ -18,10 +18,9 @@ use crate::chat_page::event::{
     ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERBS, latest_tool_location,
+    SlashCommands, WORKING_VERB_IDS, latest_tool_location,
 };
 use dioxus::prelude::*;
-use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use vmux_command::prompt_media::{
@@ -39,9 +38,48 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
+
+fn slash_command_description(command: &SlashCommandEntry) -> String {
+    match command.name.as_str() {
+        "upload" => translate("agent-slash-attach-files"),
+        "resume" => translate("agent-slash-resume-session"),
+        "model" => translate("agent-slash-select-model"),
+        "cli" => translate("agent-slash-continue-cli"),
+        _ => command.description.clone(),
+    }
+}
+
+fn session_age_label(seconds: u64) -> String {
+    match seconds {
+        0..=59 => translate("agent-session-just-now"),
+        60..=3599 => translate_with(
+            "agent-session-minutes-ago",
+            &[("count", TranslationValue::Number((seconds / 60) as i64))],
+        ),
+        3600..=86399 => translate_with(
+            "agent-session-hours-ago",
+            &[("count", TranslationValue::Number((seconds / 3600) as i64))],
+        ),
+        _ => translate_with(
+            "agent-session-days-ago",
+            &[("count", TranslationValue::Number((seconds / 86400) as i64))],
+        ),
+    }
+}
+
+fn approval_detail_label(label: &str) -> String {
+    match label {
+        "Details" => translate("agent-details"),
+        "Path" => translate("agent-path"),
+        "Tool" => translate("agent-tool"),
+        "Server" => translate("agent-server"),
+        _ => label.to_string(),
+    }
+}
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 fn has_text_selection() -> bool {
@@ -696,7 +734,7 @@ pub fn Page(
     let install_detail = {
         let detail = error();
         if detail.is_empty() {
-            "Preparing agent…".to_string()
+            translate("agent-preparing")
         } else {
             detail
         }
@@ -792,11 +830,11 @@ pub fn Page(
         PromptComposerAction::Send
     };
     let prompt_action_title = if prompt_streaming && !queued.read().is_empty() {
-        "Send all queued prompts now (Esc)"
+        translate("agent-send-all-queued")
     } else if prompt_streaming {
-        "Stop"
+        translate("common-stop")
     } else {
-        "Send (Enter)"
+        translate("agent-send")
     };
     let choice_pending = !choice_options.read().is_empty() || approval.read().is_some();
     let prompt_action_enabled = !choice_pending
@@ -1330,7 +1368,7 @@ pub fn Page(
                             class: "mx-auto rounded-full border border-foreground/10 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-50",
                             disabled: history_loading(),
                             onclick: move |_| request_chat_history(loaded_start(), history_loading),
-                            if history_loading() { "Loading older messages…" } else { "Load older messages" }
+                            {if history_loading() { translate("agent-loading-older") } else { translate("agent-load-older") }}
                         }
                     }
                     if installing_splash {
@@ -1350,7 +1388,7 @@ pub fn Page(
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"
                             }
-                            p { class: "text-sm text-muted-foreground", "Ready when you are." }
+                            p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
                         }
                     }
                     for (i , item) in items.read().iter().enumerate() {
@@ -1370,9 +1408,14 @@ pub fn Page(
                         {
                             div { class: "flex items-center gap-2 py-1 text-xs text-muted-foreground",
                                 span { class: "h-px flex-1 bg-foreground/10" }
-                                span { "Continued from {handoff_source}" }
+                                span {
+                                    {translate_with(
+                                        "agent-continued-from",
+                                        &[("source", TranslationValue::String(&handoff_source()))],
+                                    )}
+                                }
                                 if handoff_truncated() {
-                                    span { class: "text-amber-500/80", "· older context omitted" }
+                                    span { class: "text-amber-500/80", {format!("· {}", translate("agent-older-context-omitted"))} }
                                 }
                                 span { class: "h-px flex-1 bg-foreground/10" }
                             }
@@ -1386,7 +1429,7 @@ pub fn Page(
                     if paused() {
                         div { class: "flex items-center gap-3 py-1 text-xs text-muted-foreground",
                             span { class: "h-px flex-1 bg-foreground/10" }
-                            span { class: "shrink-0", "interrupted" }
+                            span { class: "shrink-0", {translate("agent-interrupted")} }
                             span { class: "h-px flex-1 bg-foreground/10" }
                         }
                     }
@@ -1401,9 +1444,10 @@ pub fn Page(
                             div { class: "mx-auto flex max-w-3xl flex-col gap-3",
                                 div { class: "min-w-0",
                                     div { class: "text-sm text-foreground",
-                                        "Allow "
-                                        code { class: "font-mono text-amber-500", "{name}" }
-                                        "?"
+                                        {translate_with(
+                                            "agent-allow-tool",
+                                            &[("tool", TranslationValue::String(&name))],
+                                        )}
                                     }
                                     if !details.is_empty() {
                                         div { class: "mt-2 max-h-40 overflow-auto rounded-lg bg-foreground/[0.05] ring-1 ring-inset ring-foreground/10",
@@ -1411,7 +1455,7 @@ pub fn Page(
                                                 div {
                                                     key: "approval-detail-{i}",
                                                     class: "grid grid-cols-[7rem_minmax(0,1fr)] items-start gap-3 border-b border-foreground/10 px-3 py-2 last:border-b-0",
-                                                    span { class: "pt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70", "{detail.label}" }
+                                                    span { class: "pt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70", "{approval_detail_label(&detail.label)}" }
                                                     pre { class: "overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground", "{detail.value}" }
                                                 }
                                             }
@@ -1419,7 +1463,7 @@ pub fn Page(
                                     }
                                 }
                                 div { class: "flex flex-col gap-1.5",
-                                    for (index , label) in ["Allow", "Allow always", "Deny"].into_iter().enumerate() {
+                                    for (index , label) in [translate("agent-allow"), translate("agent-allow-always"), translate("agent-deny")].into_iter().enumerate() {
                                         button {
                                             key: "approval-option-{index}",
                                             class: if approval_sel() == index { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
@@ -1438,7 +1482,7 @@ pub fn Page(
                                             span { class: "min-w-0 flex-1", "{label}" }
                                         }
                                     }
-                                    div { class: "mt-1 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–3 · Enter" }
+                                    div { class: "mt-1 text-[11px] text-muted-foreground", {translate("agent-choice-help").replace("1–9", "1–3")} }
                                 }
                             }
                         }
@@ -1456,6 +1500,8 @@ pub fn Page(
                                 items: prompt_media_options,
                                 selected: menu_sel(),
                                 loading: media_loading(),
+                                loading_label: translate("agent-loading-media"),
+                                empty_label: translate("agent-no-matching-media"),
                                 on_hover: move |index| menu_sel.set(index),
                                 on_select: move |index| {
                                     if let Some(entry) = media_entries.peek().get(index).cloned() {
@@ -1477,7 +1523,7 @@ pub fn Page(
                                             class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
                                             onclick: move |_| run_slash_command(&command.name, draft, menu_sel),
                                             span { class: "font-medium text-foreground", "/{command.name}" }
-                                            span { class: "text-xs text-muted-foreground", "{command.description}" }
+                                            span { class: "text-xs text-muted-foreground", "{slash_command_description(&command)}" }
                                         }
                                     }
                                 }
@@ -1487,11 +1533,11 @@ pub fn Page(
                     if session_menu_open {
                         PromptPopup {
                             if resume_state == Some(ResumeMenuState::Loading) {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "Loading sessions…" }
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-loading-sessions")} }
                             } else if resume_state == Some(ResumeMenuState::Empty) {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No resumable sessions found" }
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-resumable-sessions")} }
                             } else if resume_state == Some(ResumeMenuState::NoMatch) {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching sessions" }
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-matching-sessions")} }
                             } else {
                                 for (i , session) in filtered_sessions.iter().enumerate() {
                                     {
@@ -1508,7 +1554,7 @@ pub fn Page(
                                                         span { class: "max-w-[40%] shrink-0 truncate text-xs text-muted-foreground", "{session.agent_name}" }
                                                     }
                                                 }
-                                                span { class: "truncate text-xs text-muted-foreground", "{session.subtitle}" }
+                                                span { class: "truncate text-xs text-muted-foreground", "{session_age_label(session.age_seconds)} · {session.subtitle}" }
                                             }
                                         }
                                     }
@@ -1519,7 +1565,7 @@ pub fn Page(
                     if model_menu_open {
                         PromptPopup {
                             if filtered_models.is_empty() {
-                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", "No matching models" }
+                                div { class: "px-3.5 py-2 text-sm text-muted-foreground", {translate("agent-no-matching-models")} }
                             } else {
                                 for (i , model) in filtered_models.iter().enumerate() {
                                     {
@@ -1534,7 +1580,7 @@ pub fn Page(
                                                 div { class: "flex min-w-0 items-baseline gap-2",
                                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }
                                                     if selected {
-                                                        span { class: "shrink-0 text-[10px] uppercase tracking-wide text-emerald-500", "current" }
+                                                        span { class: "shrink-0 text-[10px] uppercase tracking-wide text-emerald-500", {translate("common-current")} }
                                                     }
                                                 }
                                                 if !model.description.is_empty() {
@@ -1568,7 +1614,7 @@ pub fn Page(
                                     }
                                 }
                             }
-                            div { class: "mt-2.5 text-[11px] text-muted-foreground", "↑/↓ or Ctrl+N/Ctrl+P · 1–9 · Enter" }
+                            div { class: "mt-2.5 text-[11px] text-muted-foreground", {translate("agent-choice-help")} }
                         }
                     }
                     if transition_preview.read().is_empty() && !queued.read().is_empty() {
@@ -1577,14 +1623,14 @@ pub fn Page(
                                 div {
                                     key: "q{queued_prompt.id}",
                                     class: "group flex max-w-[80%] items-center gap-2 rounded-2xl border border-dashed border-foreground/20 bg-foreground/[0.03] py-2 pl-3.5 pr-2 text-sm text-muted-foreground",
-                                    span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", "queued" }
+                                    span { class: "shrink-0 text-[10px] uppercase tracking-wide text-foreground/40", {translate("agent-queued")} }
                                     span { class: "min-w-0 flex-1 whitespace-pre-wrap break-words",
                                         if !queued_prompt.text.is_empty() {
                                             "{queued_prompt.text}"
                                         }
                                         if !queued_prompt.attachment_names.is_empty() {
                                             span { class: "block text-xs text-foreground/45",
-                                                "Attached: "
+                                                {format!("{} ", translate("agent-attached"))}
                                                 for (i , name) in queued_prompt.attachment_names.iter().enumerate() {
                                                     if i > 0 { ", " }
                                                     "{name}"
@@ -1594,7 +1640,7 @@ pub fn Page(
                                     }
                                     button {
                                         class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
-                                        title: "Cancel queued prompt",
+                                        title: translate("agent-cancel-queued"),
                                         onclick: move |_| {
                                             let _ = try_cef_bin_emit_rkyv(&ChatCancelQueuedPrompt {
                                                 id: queued_prompt.id,
@@ -1616,7 +1662,7 @@ pub fn Page(
                                 div { class: "flex items-center gap-1",
                                     button {
                                         class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
-                                        title: "Resume queued prompts",
+                                        title: translate("agent-resume-queued"),
                                         onclick: move |_| {
                                             let _ = try_cef_bin_emit_rkyv(&ChatResume);
                                         },
@@ -1630,7 +1676,7 @@ pub fn Page(
                                     }
                                     button {
                                         class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
-                                        title: "Clear queue",
+                                        title: translate("agent-clear-queue"),
                                         onclick: move |_| {
                                             let _ = try_cef_bin_emit_rkyv(&ChatClearQueue);
                                         },
@@ -1648,7 +1694,7 @@ pub fn Page(
                             }
                             div { class: "flex items-center gap-2 pr-1 text-[10px] text-foreground/40",
                                 kbd { class: "inline-flex h-5 items-center rounded border border-foreground/15 bg-foreground/[0.06] px-1.5 font-mono text-[10px] font-medium text-foreground/60 shadow-sm", "Esc" }
-                                span { "send all now" }
+                                span { {translate("agent-send-all-now")} }
                             }
                         }
                     }
@@ -1657,13 +1703,13 @@ pub fn Page(
                         preview: transition_preview(),
                         attachments: prompt_attachments,
                         show_examples: show_capability_examples,
-                        placeholder: if choice_pending { "Choose an option above".to_string() } else { "Type / for commands or @ for media".to_string() },
+                        placeholder: if choice_pending { translate("agent-choose-option") } else { translate("command-composer-placeholder") },
                         accent_bg: agent_accent.accent_bg.to_string(),
                         accent_color: theme_accent.clone(),
                         accent_gradient: agent_accent.grad.to_string(),
                         footer: Some(composer_footer),
                         action: prompt_action,
-                        action_title: prompt_action_title.to_string(),
+                        action_title: prompt_action_title,
                         action_enabled: prompt_action_enabled,
                         on_input: move |value| {
                             draft.set(value);
@@ -1826,8 +1872,14 @@ fn render_item(
                                     path { d: "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z" }
                                 }
                             }
-                            span { class: "font-medium", "Prompt context" }
-                            span { class: "text-[10px] text-muted-foreground", "{context.len()} bytes" }
+                            span { class: "font-medium", {translate("agent-prompt-context")} }
+                            span {
+                                class: "text-[10px] text-muted-foreground",
+                                {translate_with(
+                                    "agent-bytes",
+                                    &[("count", TranslationValue::Number(context.len() as i64))],
+                                )}
+                            }
                             {render_disclosure_icon()}
                         }
                         pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
@@ -1906,14 +1958,28 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
         .collect::<Vec<_>>();
     let duration_label = turn.duration_secs.map(|duration| {
         if turn.step_count == 0 {
-            format!("Worked for {}", fmt_elapsed(duration))
+            let elapsed = fmt_elapsed(duration);
+            translate_with(
+                "agent-worked-for",
+                &[("duration", TranslationValue::String(&elapsed))],
+            )
         } else if turn.step_count == 1 {
-            format!("Worked for {} · 1 step", fmt_elapsed(duration))
+            let elapsed = fmt_elapsed(duration);
+            translate_with(
+                "agent-worked-for-steps",
+                &[
+                    ("duration", TranslationValue::String(&elapsed)),
+                    ("count", TranslationValue::Number(1)),
+                ],
+            )
         } else {
-            format!(
-                "Worked for {} · {} steps",
-                fmt_elapsed(duration),
-                turn.step_count
+            let elapsed = fmt_elapsed(duration);
+            translate_with(
+                "agent-worked-for-steps",
+                &[
+                    ("duration", TranslationValue::String(&elapsed)),
+                    ("count", TranslationValue::Number(turn.step_count as i64)),
+                ],
             )
         }
     });
@@ -1956,7 +2022,7 @@ fn render_disclosure_icon() -> Element {
 #[component]
 fn WorkingIndicator() -> Element {
     let mut elapsed = use_signal(|| 0u32);
-    let mut verb = use_signal(|| "Working".to_string());
+    let mut verb = use_signal(|| translate("agent-working-working"));
     use_future(move || async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(1000).await;
@@ -1966,9 +2032,9 @@ fn WorkingIndicator() -> Element {
     use_future(move || async move {
         loop {
             gloo_timers::future::TimeoutFuture::new(2500).await;
-            let count = WORKING_VERBS.len();
+            let count = WORKING_VERB_IDS.len();
             let index = ((js_sys::Math::random() * count as f64) as usize).min(count - 1);
-            verb.set(WORKING_VERBS[index].to_string());
+            verb.set(translate(WORKING_VERB_IDS[index]));
         }
     });
     let verb_text = verb();
@@ -2387,29 +2453,27 @@ fn set_page_favicon(href: &str) {
     }
 }
 
-fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, Cow<'static, str>) {
+fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, String) {
     let activity = tool_activity(name);
     let icon = tool_activity_icon_for(name, args);
     match activity {
-        ToolActivity::Guardian => (icon, Cow::Borrowed("Guardian Review")),
-        ToolActivity::ReadFile => (icon, Cow::Borrowed("Read files")),
-        ToolActivity::WriteFile => (icon, Cow::Borrowed("Editing files")),
-        ToolActivity::Layout => (icon, Cow::Borrowed("Managed layout")),
-        ToolActivity::Worktree => (icon, Cow::Borrowed("Managed workspace")),
-        ToolActivity::Image => (icon, Cow::Borrowed("Viewed image")),
-        ToolActivity::Screenshot => (icon, Cow::Borrowed("Captured screenshot")),
-        ToolActivity::OpenPage => (icon, Cow::Borrowed("Opened page")),
-        ToolActivity::Browser => (icon, Cow::Borrowed("Used browser")),
-        ToolActivity::Search => (icon, Cow::Borrowed("Searched files")),
-        ToolActivity::Command => (icon, Cow::Borrowed("Ran commands")),
+        ToolActivity::Guardian => (icon, translate("agent-tool-guardian-review")),
+        ToolActivity::ReadFile => (icon, translate("agent-tool-read-files")),
+        ToolActivity::WriteFile => (icon, translate("agent-edited")),
+        ToolActivity::Layout => (icon, translate("schema-layout")),
+        ToolActivity::Worktree => (icon, translate("layout-worktree")),
+        ToolActivity::Image => (icon, translate("agent-tool-viewed-image")),
+        ToolActivity::Screenshot => (icon, translate("agent-tool-viewed-image")),
+        ToolActivity::OpenPage => (icon, translate("agent-tool-used-browser")),
+        ToolActivity::Browser => (icon, translate("agent-tool-used-browser")),
+        ToolActivity::Search => (icon, translate("agent-tool-searched-files")),
+        ToolActivity::Command => (icon, translate("agent-tool-ran-commands")),
         ToolActivity::Other => (
             icon,
-            Cow::Owned(
-                name.rsplit(['.', ':'])
-                    .next()
-                    .unwrap_or(name)
-                    .replace('_', " "),
-            ),
+            name.rsplit(['.', ':'])
+                .next()
+                .unwrap_or(name)
+                .replace('_', " "),
         ),
     }
 }
@@ -2584,7 +2648,7 @@ fn render_block(
                 {render_activity_icon(ActivityIcon::Thinking)}
                 details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                        span { class: "font-medium", "Thinking" }
+                        span { class: "font-medium", {translate("agent-thinking")} }
                         {render_disclosure_icon()}
                     }
                     div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
@@ -2622,7 +2686,7 @@ fn render_block(
             let status_label = subagent_status_label(&subagent.status);
             let status_class = subagent_status_class(&subagent.status);
             let title = if subagent.title.is_empty() {
-                "Subagent".to_string()
+                translate("agent-subagent")
             } else {
                 subagent.title.replace('_', " ")
             };
@@ -2655,26 +2719,26 @@ fn render_block(
                             }
                             if let Some(prompt) = &subagent.prompt {
                                 div { class: "mt-2 rounded-lg bg-foreground/[0.025] p-2 text-xs leading-relaxed text-foreground/75 ring-1 ring-inset ring-foreground/10",
-                                    div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", "Prompt" }
+                                    div { class: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70", {translate("agent-prompt")} }
                                     div { class: "whitespace-pre-wrap", "{prompt}" }
                                 }
                             }
                             div { class: "mt-2 grid gap-1 text-[10px] text-muted-foreground/75",
                                 if let Some(thread_id) = &subagent.thread_id {
-                                    div { span { class: "font-semibold", "Thread " } code { class: "font-mono", "{thread_id}" } }
+                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-thread"))} } code { class: "font-mono", "{thread_id}" } }
                                 }
                                 if let Some(parent_thread_id) = &subagent.parent_thread_id {
-                                    div { span { class: "font-semibold", "Parent " } code { class: "font-mono", "{parent_thread_id}" } }
+                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-parent"))} } code { class: "font-mono", "{parent_thread_id}" } }
                                 }
                                 if !child_threads.is_empty() {
-                                    div { span { class: "font-semibold", "Children " } code { class: "break-all font-mono", "{child_threads}" } }
+                                    div { span { class: "font-semibold", {format!("{} ", translate("agent-children"))} } code { class: "break-all font-mono", "{child_threads}" } }
                                 }
-                                div { span { class: "font-semibold", "Call " } code { class: "font-mono", "{subagent.call_id}" } }
+                                div { span { class: "font-semibold", {format!("{} ", translate("agent-call"))} } code { class: "font-mono", "{subagent.call_id}" } }
                             }
                             if !subagent.raw_input.is_empty() && subagent.raw_input != "{}" {
                                 details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
                                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                                        span { class: "font-medium", "Raw event" }
+                                        span { class: "font-medium", {translate("agent-raw-event")} }
                                         {render_disclosure_icon()}
                                     }
                                     pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
@@ -2699,8 +2763,14 @@ fn render_block(
                     {render_activity_icon(ActivityIcon::Plan)}
                     details { open: true, class: "disclosure min-w-0 text-sm",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium text-foreground/80", "Plan" }
-                            span { class: "text-xs text-muted-foreground", "{n} tasks" }
+                            span { class: "font-medium text-foreground/80", {translate("agent-plan")} }
+                            span {
+                                class: "text-xs text-muted-foreground",
+                                {translate_with(
+                                    "agent-tasks",
+                                    &[("count", TranslationValue::Number(n as i64))],
+                                )}
+                            }
                             {render_disclosure_icon()}
                         }
                         ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
@@ -2743,7 +2813,7 @@ fn render_block(
                     {render_file_activity_icon(path, true)}
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
-                            span { class: "font-medium", "Edited " }
+                            span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
                             code { class: "truncate font-mono text-xs text-foreground/70", "{fname}" }
                             {render_disclosure_icon()}
                         }
@@ -2764,7 +2834,16 @@ fn render_block(
         ChatBlock::Reconnect { attempt, total } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-amber-500/[0.035]",
                 {render_activity_icon(ActivityIcon::Reconnect)}
-                span { class: "font-medium tabular-nums", "Reconnecting {attempt}/{total}" }
+                span {
+                    class: "font-medium tabular-nums",
+                    {translate_with(
+                        "agent-reconnecting",
+                        &[
+                            ("attempt", TranslationValue::Number(*attempt as i64)),
+                            ("total", TranslationValue::Number(*total as i64)),
+                        ],
+                    )}
+                }
             }
         },
     }
@@ -2816,12 +2895,12 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
     }
 }
 
-fn subagent_status_label(status: &str) -> &'static str {
+fn subagent_status_label(status: &str) -> String {
     match status {
-        "in_progress" => "Running",
-        "completed" => "Done",
-        "failed" => "Failed",
-        _ => "Pending",
+        "in_progress" => translate("agent-status-running"),
+        "completed" => translate("agent-status-done"),
+        "failed" => translate("agent-status-failed"),
+        _ => translate("agent-status-pending"),
     }
 }
 
@@ -2845,7 +2924,11 @@ fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Eleme
     } else {
         "bg-teal-500/[0.035] ring-teal-500/10"
     };
-    let label = if is_error { "Error" } else { "Output" };
+    let label = if is_error {
+        translate("common-error")
+    } else {
+        translate("common-output")
+    };
     rsx! {
         details { key: "{key}", class: "disclosure text-xs {tone}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
@@ -2873,7 +2956,11 @@ fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> E
     } else {
         "hover:bg-teal-500/[0.035]"
     };
-    let label = if is_error { "Error" } else { "Output" };
+    let label = if is_error {
+        translate("common-error")
+    } else {
+        translate("common-output")
+    };
     let icon = if is_error {
         ActivityIcon::Error
     } else {

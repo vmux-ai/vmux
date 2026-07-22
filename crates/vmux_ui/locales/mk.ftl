@@ -1,0 +1,602 @@
+locale-name = македонски
+common-open = Отвори
+common-close = Затвори
+common-install = Инсталирај
+common-uninstall = Деинсталирај
+common-update = Ажурирај
+common-retry = Обиди се повторно
+common-refresh = Освежи
+common-remove = Отстрани
+common-enable = Овозможи
+common-disable = Оневозможи
+common-new = Ново
+common-active = активно
+common-running = работи
+common-done = готово
+common-failed = Неуспешно
+common-installed = Инсталирано
+common-items = { $count ->
+    [one] { $count } ставка
+   *[other] { $count } ставки
+}
+start-title = Почеток
+start-tagline = Едно упатство. Сè е завршено.
+
+agents-title = Агенти
+agents-search = Пребарај ACP и CLI агенти…
+agents-empty = Нема соодветни агенти
+agents-empty-detail = Обиди се со име, извршна околина или ACP/CLI.
+agents-install-failed = Инсталацијата не успеа
+agents-updating = Се ажурира…
+agents-retrying = Се обидува повторно…
+agents-preparing = Се подготвува…
+
+extensions-title = Екстензии
+extensions-search = Пребарај инсталирани или во Chrome Web Store…
+extensions-relaunch = Стартувај повторно за примена
+extensions-empty = Нема инсталирани екстензии
+extensions-no-match = Нема соодветни екстензии
+extensions-empty-detail = Пребарај во Chrome Web Store погоре и притисни Enter.
+extensions-no-match-detail = Обиди се со друго име или ID на екстензија.
+extensions-on = Вклучено
+extensions-off = Исклучено
+extensions-enable-confirm = Да се овозможи { $name }?
+extensions-enable-permissions = Овозможи { $name } и дозволи:
+
+lsp-title = Јазични сервери
+lsp-search = Пребарај јазични сервери, линтери, форматери…
+lsp-loading = Се вчитува каталогот…
+lsp-empty = Нема соодветни јазични сервери
+lsp-empty-detail = Обиди се со друг јазик, линтер или форматер.
+lsp-needs = бара { $tool }
+lsp-status-available = Достапно
+lsp-status-on-path = На PATH
+lsp-status-installing = Се инсталира…
+lsp-status-installed = Инсталирано
+lsp-status-outdated = Достапно ажурирање
+lsp-status-running = Работи
+lsp-status-failed = Неуспешно
+
+spaces-title = Простори
+spaces-new-placeholder = Име на нов простор
+spaces-empty = Нема простори
+spaces-default-name = Простор { $number }
+spaces-tabs = { $count ->
+    [one] 1 јазиче
+   *[other] { $count } јазичиња
+}
+spaces-delete = Избриши простор
+
+team-title = Тим
+team-just-you = Само ти си во овој простор
+team-agents = { $count ->
+    [one] Ти и 1 агент
+   *[other] Ти и { $count } агенти
+}
+team-empty = Тука сè уште нема никој
+team-you = Ти
+team-agent = Агент
+
+services-title = Позадински услуги
+services-processes = { $count ->
+    [one] 1 процес
+   *[other] { $count } процеси
+}
+services-kill-all = Прекини ги сите
+services-not-running = Услугата не работи
+services-start-with = Стартувај со:
+services-empty = Нема активни процеси
+services-filter = Филтрирај процеси…
+services-no-match = Нема соодветни процеси
+services-connected = Поврзано
+services-disconnected = Исклучено
+services-attached = прикачено
+services-kill = Прекини
+services-memory = Меморија
+services-size = Големина
+services-shell = Школка
+
+error-title = Грешка
+
+history-search = Пребарај историја
+history-clear-all = Исчисти сè
+history-clear-confirm = Да се исчисти целата историја?
+history-clear-warning = Ова не може да се врати.
+history-cancel = Откажи
+history-today = Денес
+history-yesterday = Вчера
+history-days-ago = Пред { $count } дена
+history-day-offset = Ден -{ $count }
+
+settings-title = Поставки
+settings-loading = Се вчитуваат поставките…
+settings-stored = Зачувано во ~/.vmux/settings.ron
+settings-other = Друго
+settings-software-update = Ажурирање на софтвер
+settings-check-updates = Провери за ажурирања
+settings-check-updates-hint = Проверува автоматски при стартување и секој час кога е овозможено автоматско ажурирање.
+settings-update-unavailable = Недостапно
+settings-update-unavailable-hint = Ажурирачот не е вклучен во оваа верзија.
+settings-update-checking = Се проверува…
+settings-update-checking-hint = Се проверува за ажурирања…
+settings-update-check-again = Провери повторно
+settings-update-current = Vmux е ажуриран.
+settings-update-downloading = Се презема…
+settings-update-downloading-hint = Се презема Vmux { $version }…
+settings-update-installing = Се инсталира…
+settings-update-installing-hint = Се инсталира Vmux { $version }…
+settings-update-ready = Ажурирањето е подготвено
+settings-update-ready-hint = Vmux { $version } е подготвен. Рестартирај за примена.
+settings-update-try-again = Обиди се повторно
+settings-update-failed = Не може да се провери за ажурирања.
+settings-item = Ставка
+settings-item-number = Ставка { $number }
+settings-press-key = Притисни копче…
+settings-saved = Зачувано
+settings-record-key = Кликни за снимање нова комбинација на копчиња
+
+tray-open-window = Отвори прозорец
+tray-close-window = Затвори прозорец
+tray-pause-recording = Паузирај снимање
+tray-resume-recording = Продолжи снимање
+tray-finish-recording = Заврши снимање
+tray-quit = Излези од Vmux
+
+composer-attach-files = Прикачи датотеки (/upload)
+composer-remove-attachment = Отстрани прилог
+
+layout-back = Назад
+layout-forward = Напред
+layout-reload = Освежи
+layout-bookmark-page = Додај ја страницата во обележувачи
+layout-remove-bookmark = Отстрани обележувач
+layout-pin-page = Закачи ја страницата
+layout-unpin-page = Откачи ја страницата
+layout-manage-extensions = Управувај со екстензии
+layout-new-stack = Нов слој
+layout-close-tab = Затвори јазиче
+layout-bookmark = Обележувач
+layout-pin = Закачи
+layout-new-tab = Ново јазиче
+layout-team = Тим
+
+command-switch-space = Смени простор…
+command-search-ask = Пребарај или прашај…
+command-new-tab-placeholder = Пребарај или внеси URL, или избери Терминал…
+command-placeholder = Внеси URL, пребарај јазичиња или > за команди…
+command-composer-placeholder = Внеси / за команди или @ за медиуми
+command-send = Испрати (Enter)
+command-terminal = Терминал
+command-open-terminal = Отвори во Терминал
+command-stack = Слој
+command-tabs = { $count ->
+    [one] 1 јазиче
+   *[other] { $count } јазичиња
+}
+command-prompt = Упатство
+command-new-tab = Ново јазиче
+command-search = Пребарај
+command-open-value = Отвори „{ $value }“
+command-search-value = Пребарај „{ $value }“
+
+schema-appearance = Изглед
+schema-general = Општо
+schema-layout = Распоред
+schema-layout-detail = Прозорец, панели, странична лента и прстен за фокус.
+schema-agent = Агент
+schema-agent-detail = Однесување на агентот и дозволи за алатки.
+schema-shortcuts = Кратенки
+schema-shortcuts-detail = Само за преглед. Уреди settings.ron директно за да ги смениш врските.
+schema-terminal = Терминал
+schema-browser = Прелистувач
+schema-mode = Режим
+schema-mode-detail = Шема на бои за веб-страници. Уредот го следи системот.
+schema-device = Уред
+schema-light = Светло
+schema-dark = Темно
+schema-language = Јазик
+schema-language-detail = Користи системски, en-US, ja или која било BCP 47 ознака со соодветен ~/.vmux/locales/<tag>.ftl каталог.
+schema-auto-update = Автоматско ажурирање
+schema-auto-update-detail = Проверувај и инсталирај ажурирања при стартување и секој час.
+schema-startup-url = Почетен URL
+schema-startup-url-detail = Празно го отвора барањето во командната лента.
+schema-search-engine = Пребарувач
+schema-search-engine-detail = Се користи за веб-пребарувања од Почеток и командната лента.
+schema-window = Прозорец
+schema-pane = Панел
+schema-side-sheet = Страничен лист
+schema-focus-ring = Прстен за фокус
+schema-run-placement = Дозволи агентите да го менуваат местото за извршување
+schema-run-placement-detail = Дозволи агентите да изберат режим, насока и сидро на панелот за извршување.
+schema-leader = Водечко копче
+schema-leader-detail = Префиксно копче за chord кратенки.
+schema-chord-timeout = Истек на chord
+schema-chord-timeout-detail = Милисекунди пред да истече префиксот за chord.
+schema-bindings = Врски
+schema-confirm-close = Потврди затворање
+schema-confirm-close-detail = Прашај пред затворање терминал со активен процес.
+schema-default-theme = Стандардна тема
+schema-default-theme-detail = Име на активната тема од списокот со теми.
+
+settings-empty = (празно)
+settings-none = (нема)
+
+schema-system = Систем
+schema-editor = Уредувач
+schema-recording = Снимање
+schema-radius = Радиус
+schema-padding = Внатрешно растојание
+schema-gap = Размак
+schema-width = Ширина
+schema-color = Боја
+schema-red = Црвена
+schema-green = Зелена
+schema-blue = Сина
+schema-follow-files = Следи датотеки
+schema-tidy-files = Среди датотеки
+schema-tidy-files-max = Праг за средување датотеки
+schema-tidy-files-auto = Автоматски среди датотеки
+schema-app-providers = Даватели на апликации
+schema-provider = Давател
+schema-kind = Вид
+schema-models = Модели
+schema-acp = ACP агенти
+schema-id = ID
+schema-name = Име
+schema-command = Команда
+schema-arguments = Аргументи
+schema-environment = Околина
+schema-working-directory = Работна папка
+schema-shell = Школка
+schema-font-family = Семејство на фонт
+schema-startup-directory = Почетна папка
+schema-themes = Теми
+schema-color-scheme = Шема на бои
+schema-font-size = Големина на фонт
+schema-line-height = Висина на ред
+schema-cursor-style = Стил на курсор
+schema-cursor-blink = Трепкање на курсор
+schema-custom-themes = Прилагодени теми
+schema-foreground = Преден план
+schema-background = Заднина
+schema-cursor = Курсор
+schema-ansi-colors = ANSI бои
+schema-keymap = Мапа на копчиња
+schema-explorer = Истражувач
+schema-visible = Видливо
+schema-language-servers = Јазични сервери
+schema-servers = Сервери
+schema-language-id = ID на јазик
+schema-root-markers = Ознаки за корен
+schema-output-directory = Излезна папка
+
+menu-scene = Сцена
+menu-layout = Распоред
+menu-terminal = Терминал
+menu-browser = Прелистувач
+menu-service = Услуга
+menu-bookmark = Обележувач
+menu-edit = Уредување
+
+layout-knowledge = Знаење
+layout-open-knowledge = Отвори Знаење
+layout-open-welcome-knowledge = Отвори Добре дојдовте во Знаење
+layout-open-path = Отвори { $path }
+layout-fold-knowledge = Свиткај го знаењето
+layout-unfold-knowledge = Одвиткај го знаењето
+layout-bookmarks = Обележувачи
+layout-new-folder = Нова папка
+layout-add-to-bookmarks = Додај во обележувачи
+layout-move-to-bookmarks = Премести во обележувачи
+layout-stack-number = Склад { $number }
+layout-fold-stack = Свиткај склад
+layout-unfold-stack = Одвиткај склад
+layout-close-stack = Затвори склад
+layout-bookmark-in = Обележи во { $folder }
+
+common-cancel = Откажи
+common-delete = Избриши
+common-save = Зачувај
+common-rename = Преименувај
+common-expand = Прошири
+common-collapse = Собери
+common-loading = Се вчитува…
+common-error = Грешка
+common-output = Излез
+common-pending = На чекање
+common-current = тековно
+common-stop = Запри
+services-command = Vmux услуга
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Страницата не се вчита
+error-page-not-found = Страницата не е најдена
+error-unknown-host = Непознат домаќин на Vmux апликација: { $host }
+
+history-title = Историја
+
+command-new-app-chat = Нов разговор со { $provider }/{ $model } (апликација)
+command-interactive-mode-user = Сцена > Интерактивен режим > Корисник
+command-interactive-mode-player = Сцена > Интерактивен режим > Играч
+command-minimize-window = Распоред > Прозорец > Минимизирај
+command-toggle-layout = Распоред > Распоред > Вклучи/исклучи распоред
+command-close-tab = Распоред > Картичка > Затвори картичка
+command-new-task = Распоред > Картичка > Нова задача…
+command-next-tab = Распоред > Картичка > Следна картичка
+command-prev-tab = Распоред > Картичка > Претходна картичка
+command-rename-tab = Распоред > Картичка > Преименувај картичка
+command-tab-select-1 = Распоред > Картичка > Избери картичка 1
+command-tab-select-2 = Распоред > Картичка > Избери картичка 2
+command-tab-select-3 = Распоред > Картичка > Избери картичка 3
+command-tab-select-4 = Распоред > Картичка > Избери картичка 4
+command-tab-select-5 = Распоред > Картичка > Избери картичка 5
+command-tab-select-6 = Распоред > Картичка > Избери картичка 6
+command-tab-select-7 = Распоред > Картичка > Избери картичка 7
+command-tab-select-8 = Распоред > Картичка > Избери картичка 8
+command-tab-select-last = Распоред > Картичка > Избери последна картичка
+command-close-pane = Распоред > Панел > Затвори панел
+command-select-pane-left = Распоред > Панел > Избери лев панел
+command-select-pane-right = Распоред > Панел > Избери десен панел
+command-select-pane-up = Распоред > Панел > Избери горен панел
+command-select-pane-down = Распоред > Панел > Избери долен панел
+command-swap-pane-prev = Распоред > Панел > Замени со претходен панел
+command-swap-pane-next = Распоред > Панел > Замени со следен панел
+command-equalize-pane-size = Распоред > Панел > Изедначи големина на панели
+command-resize-pane-left = Распоред > Панел > Промени големина налево
+command-resize-pane-right = Распоред > Панел > Промени големина надесно
+command-resize-pane-up = Распоред > Панел > Промени големина нагоре
+command-resize-pane-down = Распоред > Панел > Промени големина надолу
+command-stack-close = Распоред > Стек > Затвори стек
+command-stack-next = Распоред > Стек > Следен стек
+command-stack-previous = Распоред > Стек > Претходен стек
+command-stack-reopen = Распоред > Стек > Повторно отвори затворена страница
+command-stack-swap-prev = Распоред > Стек > Премести стек налево
+command-stack-swap-next = Распоред > Стек > Премести стек надесно
+command-space-open = Распоред > Простор > Простори
+command-terminal-close = Терминал > Затвори терминал
+command-terminal-next = Терминал > Следен терминал
+command-terminal-prev = Терминал > Претходен терминал
+command-terminal-clear = Терминал > Исчисти терминал
+command-browser-prev-page = Прелистувач > Навигација > Назад
+command-browser-next-page = Прелистувач > Навигација > Напред
+command-browser-reload = Прелистувач > Навигација > Вчитај повторно
+command-browser-hard-reload = Прелистувач > Навигација > Целосно вчитај повторно
+command-open-in-place = Прелистувач > Отвори > Отвори тука
+command-open-in-new-stack = Прелистувач > Отвори > Отвори во нов стек
+command-open-in-pane-top = Прелистувач > Отвори > Отвори во панел горе
+command-open-in-pane-right = Прелистувач > Отвори > Отвори во десен панел
+command-open-in-pane-bottom = Прелистувач > Отвори > Отвори во панел долу
+command-open-in-pane-left = Прелистувач > Отвори > Отвори во лев панел
+command-open-in-new-tab = Прелистувач > Отвори > Отвори во нова картичка
+command-open-in-new-space = Прелистувач > Отвори > Отвори во нов простор
+command-browser-zoom-in = Прелистувач > Приказ > Зумирај
+command-browser-zoom-out = Прелистувач > Приказ > Одзумирај
+command-browser-zoom-reset = Прелистувач > Приказ > Вистинска големина
+command-browser-dev-tools = Прелистувач > Приказ > Алатки за програмери
+command-browser-open-command-bar = Прелистувач > Лента > Командна лента
+command-browser-open-page-in-command-bar = Прелистувач > Лента > Уреди страница
+command-browser-open-path-bar = Прелистувач > Лента > Навигатор на патека
+command-browser-open-commands = Прелистувач > Лента > Команди
+command-browser-open-history = Прелистувач > Лента > Историја
+command-service-open = Услуга > Отвори монитор на услуги
+command-bookmark-toggle-active = Обележувач > Обележи страница
+command-bookmark-pin-active = Обележувач > Закачи страница
+
+layout-tab = Картичка
+layout-no-stacks = Нема стекови
+layout-loading = Се вчитува…
+layout-no-markdown-files = Нема Markdown датотеки
+layout-empty-folder = Празна папка
+layout-worktree = работно дрво
+layout-folder-name = Име на папка
+layout-no-pins-bookmarks = Нема закачени страници или обележувачи
+layout-move-to = Премести во { $folder }
+layout-bookmark-current-page = Обележи ја тековната страница
+layout-rename-folder = Преименувај папка
+layout-remove-folder = Отстрани папка
+layout-update-downloading = Се презема ажурирање
+layout-update-installing = Се инсталира ажурирање…
+layout-update-ready = Достапна е нова верзија
+layout-restart-update = Рестартирај за ажурирање
+
+agent-preparing = Се подготвува агентот…
+agent-send-all-queued = Испрати ги сите пораки на чекање сега (Esc)
+agent-send = Испрати (Enter)
+agent-ready = Подготвен кога си и ти.
+agent-loading-older = Се вчитуваат постари пораки…
+agent-load-older = Вчитај постари пораки
+agent-continued-from = Продолжено од { $source }
+agent-older-context-omitted = постариот контекст е изоставен
+agent-interrupted = прекинато
+agent-allow-tool = Да се дозволи { $tool }?
+agent-deny = Одбиј
+agent-allow-always = Секогаш дозволувај
+agent-allow = Дозволи
+agent-loading-sessions = Се вчитуваат сесии…
+agent-no-resumable-sessions = Нема сесии за продолжување
+agent-no-matching-sessions = Нема соодветни сесии
+agent-no-matching-models = Нема соодветни модели
+agent-choice-help = ↑/↓ или Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Избери папка со репозиториум
+agent-choose-repository-detail = Избери го локалниот Git репозиториум што треба да го користи агентот.
+agent-choosing = Се избира…
+agent-choose-folder = Избери папка
+agent-queued = на чекање
+agent-attached = Прикачено:
+agent-cancel-queued = Откажи порака на чекање
+agent-resume-queued = Продолжи со пораките на чекање
+agent-clear-queue = Исчисти редица
+agent-send-all-now = испрати ги сите сега
+agent-choose-option = Избери опција погоре
+agent-loading-media = Се вчитуваат медиуми…
+agent-no-matching-media = Нема соодветни медиуми
+agent-prompt-context = Контекст на порака
+agent-details = Детали
+agent-path = Патека
+agent-tool = Алатка
+agent-server = Сервер
+agent-bytes = { $count } бајти
+agent-worked-for = Работеше { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Работеше { $duration } · 1 чекор
+   *[other] Работеше { $duration } · { $count } чекори
+}
+agent-tool-guardian-review = Guardian преглед
+agent-tool-read-files = Прочита датотеки
+agent-tool-viewed-image = Прегледа слика
+agent-tool-used-browser = Користеше прелистувач
+agent-tool-searched-files = Пребара датотеки
+agent-tool-ran-commands = Изврши команди
+agent-thinking = Размислува
+agent-subagent = Подагент
+agent-prompt = Порака
+agent-thread = Низа
+agent-parent = Родител
+agent-children = Деца
+agent-call = Повик
+agent-raw-event = Сиров настан
+agent-plan = План
+agent-tasks = { $count ->
+    [one] 1 задача
+   *[other] { $count } задачи
+}
+agent-edited = Уредено
+agent-reconnecting = Повторно поврзување { $attempt }/{ $total }
+agent-status-running = Се извршува
+agent-status-done = Готово
+agent-status-failed = Неуспешно
+agent-status-pending = На чекање
+agent-slash-attach-files = Прикачи датотеки
+agent-slash-resume-session = Продолжи претходна сесија
+agent-slash-select-model = Избери модел
+agent-slash-continue-cli = Продолжи ја оваа сесија во CLI
+agent-session-just-now = штотуку
+agent-session-minutes-ago = пред { $count }m
+agent-session-hours-ago = пред { $count }h
+agent-session-days-ago = пред { $count }d
+agent-working-working = Работи
+agent-working-thinking = Размислува
+agent-working-pondering = Размислува
+agent-working-noodling = Разработува
+agent-working-percolating = Зрее идеја
+agent-working-conjuring = Смислува
+agent-working-cooking = Готви
+agent-working-brewing = Вари идеја
+agent-working-musing = Промислува
+agent-working-ruminating = Обмислува
+agent-working-scheming = Крои план
+agent-working-synthesizing = Синтетизира
+agent-working-tinkering = Чепка
+agent-working-churning = Обработува
+agent-working-vibing = Фаќа ритам
+agent-working-simmering = Крчка
+agent-working-crafting = Составува
+agent-working-divining = Насетува
+agent-working-mulling = Премислува
+agent-working-spelunking = Копа подлабоко
+
+editor-toggle-explorer = Вклучи/исклучи истражувач (Cmd+B)
+editor-unsaved = незачувано
+editor-rendered-markdown = Прикажан Markdown со уредување во живо
+editor-note = Белешка
+editor-source-editor = Уредувач на изворен код
+editor-editor = Уредувач
+editor-git-diff = Git разлика
+editor-diff = Разлика
+editor-tidy = Среди
+editor-always = Секогаш
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 непроменет преглед
+   *[other] ✦ { $count } непроменети прегледи
+}
+editor-open-externally = Отвори надворешно
+editor-changed-line = Променета линија
+editor-go-to-definition = Оди на дефиниција
+editor-find-references = Најди референци
+editor-references = { $count ->
+    [one] 1 референца
+   *[other] { $count } референци
+}
+editor-lsp-starting = { $server } се стартува…
+editor-lsp-not-installed = { $server } — не е инсталиран
+editor-explorer = Истражувач
+editor-open-editors = Отворени уредувачи
+editor-outline = Преглед
+editor-new-file = Нова датотека
+editor-new-folder = Нова папка
+editor-delete-confirm = Да се избрише „{ $name }“? Ова не може да се врати.
+editor-created-folder = Создадена е папката { $name }
+editor-created-file = Создадена е датотеката { $name }
+editor-renamed-to = Преименувано во { $name }
+editor-deleted = Избришано { $name }
+editor-failed-decode-image = Сликата не можеше да се декодира
+editor-preview-large-image = слика (преголема за преглед)
+editor-preview-binary = бинарна датотека
+editor-preview-file = датотека
+
+git-status-clean = чисто
+git-status-modified = изменето
+git-status-staged = подготвено
+git-status-staged-modified = подготвено*
+git-status-untracked = неследено
+git-status-deleted = избришано
+git-status-conflict = конфликт
+git-accept-all = ✓ прифати сè
+git-unstage = Отстрани од подготовка
+git-confirm-deny-all = Потврди одбивање на сè
+git-deny-all = ✗ одбиј сè
+git-commit-message = порака за commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Се вчитува разлика…
+git-no-changes = Нема промени за приказ
+git-accept = ✓ прифати
+git-deny = ✗ одбиј
+git-show-unchanged-lines = Прикажи { $count } непроменети линии
+
+terminal-loading = Се вчитува…
+terminal-runs-when-ready = се извршува кога е подготвено · Ctrl+C чисти · Esc прескокнува
+terminal-booting = се подига
+terminal-type-command = внеси команда · се извршува кога е подготвено · Esc прескокнува
+
+setup-tagline-claude = Кодирачкиот агент на Anthropic, во Vmux
+setup-tagline-codex = Кодирачкиот агент на OpenAI, во Vmux
+setup-tagline-vibe = Кодирачкиот агент на Mistral, во Vmux
+setup-install-title = Инсталирај { $name } CLI
+setup-homebrew-required = Homebrew е потребен за инсталирање на { $command } и сè уште не е поставен. Vmux прво ќе го инсталира Homebrew, па потоа { $name }.
+setup-terminal-instructions = Во терминалот, притисни Return за старт, па внеси ја лозинката за Mac кога ќе биде побарана.
+setup-command-missing = Vmux ја отвори оваа страница бидејќи локалната команда { $command } сè уште не е инсталирана. Изврши ја командата подолу за да ја добиеш.
+setup-install-failed = Инсталацијата не заврши. Провери го терминалот за детали, па обиди се повторно.
+setup-installing = Се инсталира…
+setup-install-homebrew = Инсталирај Homebrew + { $name }
+setup-run-install = Изврши команда за инсталација
+setup-auto-reload = Vmux ја извршува во терминал и повторно вчитува кога { $command } ќе биде подготвена.
+
+debug-title = Дебагирање
+debug-auto-update = Автоматско ажурирање
+debug-simulate-update = Симулирај достапно ажурирање
+debug-simulate-download = Симулирај преземање
+debug-clear-update = Исчисти ажурирање
+debug-trigger-restart = Активирај рестартирање
+
+command-manage-spaces = Управувај со простори…
+command-pane-stack-location = панел { $pane } / стек { $stack }
+command-space-pane-stack-location = { $space } / панел { $pane } / стек { $stack }
+command-terminal-path = Терминал ({ $path })
+command-group-interactive-mode = Интерактивен режим
+command-group-window = Прозорец
+command-group-tab = Картичка
+command-group-pane = Панел
+command-group-stack = Стек
+command-group-space = Простор
+command-group-navigation = Навигација
+command-group-open = Отвори
+command-group-view = Приказ
+command-group-bar = Лента
+
+menu-close-vmux = Затвори Vmux
+
+agents-terminal-coding-agent = Агент за кодирање преку терминал

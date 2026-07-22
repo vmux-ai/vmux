@@ -9,6 +9,9 @@ use vmux_layout::{
     stack::FocusedStack,
     warm_page::WarmPage,
 };
+use vmux_ui::i18n::{
+    available_locales, locale_name, register_catalog, requested_locale, translate_for,
+};
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
@@ -102,6 +105,19 @@ pub(crate) struct SettingsSchemaSent;
 #[derive(Component)]
 pub(crate) struct UpdateCheckStatusSent;
 
+pub(crate) fn localize_settings_metadata(
+    settings: Res<AppSettings>,
+    mut views: Query<&mut PageMetadata, With<Settings>>,
+) {
+    let locale = requested_locale(Some(&settings.appearance.locale));
+    let title = translate_for(&locale, "settings-title");
+    for mut metadata in &mut views {
+        if metadata.title != title {
+            metadata.title.clone_from(&title);
+        }
+    }
+}
+
 pub(crate) fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsListSent>)>,
@@ -138,15 +154,18 @@ pub(crate) fn broadcast_settings_to_views(
 }
 
 pub(crate) fn broadcast_schema_to_views(
+    settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsSchemaSent>)>,
+    sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsSchemaSent>)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    if pending.is_empty() {
+    if pending.is_empty() && (!settings.is_changed() || sent.is_empty()) {
         return;
     }
+    let locale = requested_locale(Some(&settings.appearance.locale));
     let payload = SettingsSchemaEvent {
-        json: serde_json::to_string(&build_settings_schema()).unwrap_or_default(),
+        json: serde_json::to_string(&build_settings_schema_for(&locale)).unwrap_or_default(),
     };
     for entity in &pending {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
@@ -158,6 +177,18 @@ pub(crate) fn broadcast_schema_to_views(
             &payload,
         ));
         commands.entity(entity).insert(SettingsSchemaSent);
+    }
+    if settings.is_changed() {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                SETTINGS_SCHEMA_EVENT,
+                &payload,
+            ));
+        }
     }
 }
 
@@ -258,90 +289,148 @@ pub(crate) fn handle_open_settings_command(
     }
 }
 
+#[cfg(test)]
 fn build_settings_schema() -> SettingsSchema {
+    build_settings_schema_for("en-US")
+}
+
+fn build_settings_schema_for(locale: &str) -> SettingsSchema {
+    let directory = vmux_core::profile::config_dir().join("locales");
+    if let Some(source) = [locale, locale.split('-').next().unwrap_or(locale)]
+        .into_iter()
+        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+    {
+        let _ = register_catalog(locale, &source);
+    }
+    let t = |id| translate_for(locale, id);
+    let locale_options = std::iter::once(SelectOption {
+        value: "system".to_string(),
+        label: t("schema-system"),
+    })
+    .chain(available_locales().iter().map(|locale| SelectOption {
+        value: (*locale).to_string(),
+        label: locale_name(locale).to_string(),
+    }))
+    .collect::<Vec<_>>();
     SettingsSchema {
         sections: vec![
             SectionSpec {
-                id: "appearance".to_string(),
-                title: "Appearance".to_string(),
-                description: None,
-                synthetic_keys: vec!["mode".to_string()],
-                root_path: "appearance".to_string(),
-            },
-            SectionSpec {
                 id: "general".to_string(),
-                title: "General".to_string(),
+                title: t("schema-general"),
                 description: None,
                 synthetic_keys: vec!["auto_update".to_string()],
                 root_path: String::new(),
             },
             SectionSpec {
+                id: "appearance".to_string(),
+                title: t("schema-appearance"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "appearance".to_string(),
+            },
+            SectionSpec {
                 id: "layout".to_string(),
-                title: "Layout".to_string(),
-                description: Some("Window CEF shell, panes, sidebar, and focus ring.".to_string()),
+                title: t("schema-layout"),
+                description: Some(t("schema-layout-detail")),
                 synthetic_keys: vec![],
                 root_path: "layout".to_string(),
             },
             SectionSpec {
                 id: "agent".to_string(),
-                title: "Agent".to_string(),
-                description: Some("Agent behavior and tool permissions.".to_string()),
+                title: t("schema-agent"),
+                description: Some(t("schema-agent-detail")),
                 synthetic_keys: vec![],
                 root_path: "agent".to_string(),
             },
             SectionSpec {
                 id: "shortcuts".to_string(),
-                title: "Shortcuts".to_string(),
-                description: Some(
-                    "Read-only view. Edit settings.ron directly to change bindings.".to_string(),
-                ),
+                title: t("schema-shortcuts"),
+                description: Some(t("schema-shortcuts-detail")),
                 synthetic_keys: vec![],
                 root_path: "shortcuts".to_string(),
             },
             SectionSpec {
                 id: "terminal".to_string(),
-                title: "Terminal".to_string(),
+                title: t("schema-terminal"),
                 description: None,
                 synthetic_keys: vec![],
                 root_path: "terminal".to_string(),
             },
             SectionSpec {
                 id: "browser".to_string(),
-                title: "Browser".to_string(),
+                title: t("schema-browser"),
                 description: None,
                 synthetic_keys: vec![],
                 root_path: "browser".to_string(),
             },
+            SectionSpec {
+                id: "editor".to_string(),
+                title: t("schema-editor"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "editor".to_string(),
+            },
+            SectionSpec {
+                id: "recording".to_string(),
+                title: t("schema-recording"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "recording".to_string(),
+            },
+            SectionSpec {
+                id: "spaces".to_string(),
+                title: t("spaces-title"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "spaces".to_string(),
+            },
         ],
         fields: vec![
             field(
+                "appearance",
+                FieldSpec {
+                    order: vec!["mode".into(), "locale".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
                 "appearance.mode",
                 FieldSpec {
-                    label: Some("Mode".into()),
-                    hint: Some("Color scheme for web pages. Device follows your system.".into()),
+                    label: Some(t("schema-mode")),
+                    hint: Some(t("schema-mode-detail")),
                     widget: Some(WidgetKind::Select),
                     options: vec![
                         SelectOption {
                             value: "device".into(),
-                            label: "Device".into(),
+                            label: t("schema-device"),
                         },
                         SelectOption {
                             value: "light".into(),
-                            label: "Light".into(),
+                            label: t("schema-light"),
                         },
                         SelectOption {
                             value: "dark".into(),
-                            label: "Dark".into(),
+                            label: t("schema-dark"),
                         },
                     ],
                     ..Default::default()
                 },
             ),
             field(
+                "appearance.locale",
+                FieldSpec {
+                    label: Some(t("schema-language")),
+                    hint: Some(t("schema-language-detail")),
+                    widget: Some(WidgetKind::Select),
+                    options: locale_options,
+                    ..Default::default()
+                },
+            ),
+            field(
                 "auto_update",
                 FieldSpec {
-                    label: Some("Auto-update".into()),
-                    hint: Some("Check for and install updates on launch and every hour.".into()),
+                    label: Some(t("schema-auto-update")),
+                    hint: Some(t("schema-auto-update-detail")),
                     ..Default::default()
                 },
             ),
@@ -355,8 +444,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "browser.startup_url",
                 FieldSpec {
-                    label: Some("Startup URL".into()),
-                    hint: Some("Empty opens the command bar prompt.".into()),
+                    label: Some(t("schema-startup-url")),
+                    hint: Some(t("schema-startup-url-detail")),
                     placeholder: Some("https://example.com".into()),
                     ..Default::default()
                 },
@@ -364,8 +453,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "browser.search_engine",
                 FieldSpec {
-                    label: Some("Search engine".into()),
-                    hint: Some("Used for web searches from Start and the command bar.".into()),
+                    label: Some(t("schema-search-engine")),
+                    hint: Some(t("schema-search-engine-detail")),
                     widget: Some(WidgetKind::Select),
                     options: vec![
                         SelectOption {
@@ -396,6 +485,7 @@ fn build_settings_schema() -> SettingsSchema {
                 "layout",
                 FieldSpec {
                     order: vec![
+                        "radius".into(),
                         "window".into(),
                         "pane".into(),
                         "side_sheet".into(),
@@ -404,37 +494,54 @@ fn build_settings_schema() -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.radius", t("schema-radius")),
             field(
                 "layout.window",
                 FieldSpec {
-                    label: Some("Window".into()),
+                    label: Some(t("schema-window")),
                     order: vec!["padding".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.window.padding", t("schema-padding")),
             field(
                 "layout.pane",
                 FieldSpec {
-                    label: Some("Pane".into()),
-                    order: vec!["gap".into(), "radius".into()],
+                    label: Some(t("schema-pane")),
+                    order: vec!["gap".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.pane.gap", t("schema-gap")),
             field(
                 "layout.side_sheet",
                 FieldSpec {
-                    label: Some("Side sheet".into()),
+                    label: Some(t("schema-side-sheet")),
+                    order: vec!["width".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.side_sheet.width", t("schema-width")),
             field(
                 "layout.focus_ring",
                 FieldSpec {
-                    label: Some("Focus ring".into()),
+                    label: Some(t("schema-focus-ring")),
                     order: vec!["width".into(), "color".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.focus_ring.width", t("schema-width")),
+            field(
+                "layout.focus_ring.color",
+                FieldSpec {
+                    label: Some(t("schema-color")),
+                    order: vec!["r".into(), "g".into(), "b".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("layout.focus_ring.color.r", t("schema-red")),
+            labeled_field("layout.focus_ring.color.g", t("schema-green")),
+            labeled_field("layout.focus_ring.color.b", t("schema-blue")),
             field(
                 "agent",
                 FieldSpec {
@@ -453,11 +560,26 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "agent.allow_run_placement_override",
                 FieldSpec {
-                    label: Some("Allow run placement override".into()),
-                    hint: Some("Let agents choose run pane mode, direction, and anchor.".into()),
+                    label: Some(t("schema-run-placement")),
+                    hint: Some(t("schema-run-placement-detail")),
                     ..Default::default()
                 },
             ),
+            labeled_field("agent.follow_files", t("schema-follow-files")),
+            labeled_field("agent.tidy_files", t("schema-tidy-files")),
+            labeled_field("agent.tidy_files_max", t("schema-tidy-files-max")),
+            labeled_field("agent.tidy_files_auto", t("schema-tidy-files-auto")),
+            labeled_field("agent.app_providers", t("schema-app-providers")),
+            labeled_field("agent.app_providers[].provider", t("schema-provider")),
+            labeled_field("agent.app_providers[].kind", t("schema-kind")),
+            labeled_field("agent.app_providers[].models", t("schema-models")),
+            labeled_field("agent.acp", t("schema-acp")),
+            labeled_field("agent.acp[].id", t("schema-id")),
+            labeled_field("agent.acp[].name", t("schema-name")),
+            labeled_field("agent.acp[].command", t("schema-command")),
+            labeled_field("agent.acp[].args", t("schema-arguments")),
+            labeled_field("agent.acp[].env", t("schema-environment")),
+            labeled_field("agent.acp[].cwd", t("schema-working-directory")),
             field(
                 "shortcuts",
                 FieldSpec {
@@ -472,8 +594,8 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "shortcuts.leader",
                 FieldSpec {
-                    label: Some("Leader".into()),
-                    hint: Some("Prefix key for chord shortcuts.".into()),
+                    label: Some(t("schema-leader")),
+                    hint: Some(t("schema-leader-detail")),
                     widget: Some(WidgetKind::LeaderKbd),
                     ..Default::default()
                 },
@@ -481,15 +603,15 @@ fn build_settings_schema() -> SettingsSchema {
             field(
                 "shortcuts.chord_timeout_ms",
                 FieldSpec {
-                    label: Some("Chord timeout".into()),
-                    hint: Some("Milliseconds before a chord prefix expires.".into()),
+                    label: Some(t("schema-chord-timeout")),
+                    hint: Some(t("schema-chord-timeout-detail")),
                     ..Default::default()
                 },
             ),
             field(
                 "shortcuts.bindings",
                 FieldSpec {
-                    label: Some("Bindings".into()),
+                    label: Some(t("schema-bindings")),
                     widget: Some(WidgetKind::BindingsList),
                     ..Default::default()
                 },
@@ -498,6 +620,9 @@ fn build_settings_schema() -> SettingsSchema {
                 "terminal",
                 FieldSpec {
                     order: vec![
+                        "shell".into(),
+                        "font_family".into(),
+                        "startup_dir".into(),
                         "confirm_close".into(),
                         "default_theme".into(),
                         "themes".into(),
@@ -506,29 +631,125 @@ fn build_settings_schema() -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("terminal.shell", t("schema-shell")),
+            labeled_field("terminal.font_family", t("schema-font-family")),
+            labeled_field("terminal.startup_dir", t("schema-startup-directory")),
             field(
                 "terminal.confirm_close",
                 FieldSpec {
-                    label: Some("Confirm close".into()),
-                    hint: Some("Prompt before closing a terminal with a running process.".into()),
+                    label: Some(t("schema-confirm-close")),
+                    hint: Some(t("schema-confirm-close-detail")),
                     ..Default::default()
                 },
             ),
             field(
                 "terminal.default_theme",
                 FieldSpec {
-                    label: Some("Default theme".into()),
-                    hint: Some("Name of the active theme from the themes list.".into()),
+                    label: Some(t("schema-default-theme")),
+                    hint: Some(t("schema-default-theme-detail")),
                     placeholder: Some("default".into()),
                     ..Default::default()
                 },
             ),
+            labeled_field("terminal.themes", t("schema-themes")),
+            labeled_field("terminal.themes[].name", t("schema-name")),
+            labeled_field("terminal.themes[].color_scheme", t("schema-color-scheme")),
+            labeled_field("terminal.themes[].font_family", t("schema-font-family")),
+            labeled_field("terminal.themes[].font_size", t("schema-font-size")),
+            labeled_field("terminal.themes[].line_height", t("schema-line-height")),
+            labeled_field("terminal.themes[].padding", t("schema-padding")),
+            labeled_field("terminal.themes[].cursor_style", t("schema-cursor-style")),
+            labeled_field("terminal.themes[].cursor_blink", t("schema-cursor-blink")),
+            labeled_field("terminal.themes[].shell", t("schema-shell")),
+            labeled_field("terminal.custom_themes", t("schema-custom-themes")),
+            labeled_field("terminal.custom_themes[].name", t("schema-name")),
+            labeled_field(
+                "terminal.custom_themes[].foreground",
+                t("schema-foreground"),
+            ),
+            labeled_field(
+                "terminal.custom_themes[].background",
+                t("schema-background"),
+            ),
+            labeled_field("terminal.custom_themes[].cursor", t("schema-cursor")),
+            labeled_field("terminal.custom_themes[].ansi", t("schema-ansi-colors")),
+            field(
+                "editor",
+                FieldSpec {
+                    order: vec!["keymap".into(), "explorer".into(), "lsp".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "editor.keymap",
+                FieldSpec {
+                    label: Some(t("schema-keymap")),
+                    widget: Some(WidgetKind::Select),
+                    options: vec![
+                        SelectOption {
+                            value: "vscode".into(),
+                            label: "VS Code".into(),
+                        },
+                        SelectOption {
+                            value: "vim".into(),
+                            label: "Vim".into(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "editor.explorer",
+                FieldSpec {
+                    label: Some(t("schema-explorer")),
+                    order: vec!["visible".into(), "width".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("editor.explorer.visible", t("schema-visible")),
+            labeled_field("editor.explorer.width", t("schema-width")),
+            field(
+                "editor.lsp",
+                FieldSpec {
+                    label: Some(t("schema-language-servers")),
+                    order: vec!["servers".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("editor.lsp.servers", t("schema-servers")),
+            labeled_field("editor.lsp.servers.*.command", t("schema-command")),
+            labeled_field("editor.lsp.servers.*.args", t("schema-arguments")),
+            labeled_field("editor.lsp.servers.*.language_id", t("schema-language-id")),
+            labeled_field(
+                "editor.lsp.servers.*.root_markers",
+                t("schema-root-markers"),
+            ),
+            field(
+                "recording",
+                FieldSpec {
+                    order: vec!["output_dir".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("recording.output_dir", t("schema-output-directory")),
+            labeled_field("spaces.*.startup_url", t("schema-startup-url")),
+            labeled_field("spaces.*.startup_dir", t("schema-startup-directory")),
         ],
     }
 }
 
 fn field(path: &str, spec: FieldSpec) -> (String, FieldSpec) {
     (path.to_string(), spec)
+}
+
+fn labeled_field(path: &str, label: String) -> (String, FieldSpec) {
+    field(
+        path,
+        FieldSpec {
+            label: Some(label),
+            ..Default::default()
+        },
+    )
 }
 
 #[cfg(test)]
@@ -543,6 +764,69 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+
+    #[test]
+    fn schema_exposes_every_bundled_language() {
+        let schema = build_settings_schema();
+        let language = schema.field("appearance.locale").expect("language field");
+        assert_eq!(language.widget, Some(WidgetKind::Select));
+        let values = language
+            .options
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(values.first(), Some(&"system"));
+        assert_eq!(&values[1..], available_locales());
+        assert_eq!(
+            language
+                .options
+                .iter()
+                .find(|option| option.value == "ja")
+                .map(|option| option.label.as_str()),
+            Some("日本語")
+        );
+    }
+
+    #[test]
+    fn schema_uses_requested_locale() {
+        let schema = build_settings_schema_for("ja");
+        let appearance = schema
+            .sections
+            .iter()
+            .find(|section| section.id == "appearance")
+            .unwrap();
+        assert_eq!(appearance.title, "外観");
+        assert_eq!(
+            schema.field("appearance.locale").unwrap().label.as_deref(),
+            Some("言語")
+        );
+        assert_eq!(appearance.root_path, "appearance");
+        assert!(appearance.synthetic_keys.is_empty());
+        assert_eq!(
+            schema
+                .field("agent.app_providers[0].provider")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("プロバイダー")
+        );
+        assert_eq!(
+            schema
+                .field("agent.acp[0].command")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("コマンド")
+        );
+        assert_eq!(
+            schema
+                .field("spaces.personal.startup_dir")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("起動ディレクトリ")
+        );
     }
 }
 

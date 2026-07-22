@@ -7,6 +7,8 @@ use tray_icon::{TrayIcon, TrayIconBuilder};
 use crate::background_lifecycle::LifecycleEvent;
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
+use vmux_setting::AppSettings;
+use vmux_ui::i18n::{register_catalog, requested_locale, translate_for};
 
 pub(crate) static PENDING_TRAY_EVENTS: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -16,6 +18,7 @@ pub(crate) struct TrayPlugin;
 struct TrayHandle {
     _tray: TrayIcon,
     toggle: MenuItem,
+    quit: MenuItem,
     toggle_id: String,
     quit_id: String,
     #[cfg(feature = "recording")]
@@ -31,29 +34,32 @@ struct TrayHandle {
     #[cfg(feature = "recording")]
     done_id: String,
     last_any_visible: Option<bool>,
+    last_locale: String,
     #[cfg(feature = "recording")]
     last_status: Option<RecordingStatus>,
 }
 
 impl Plugin for TrayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray).add_systems(
-            Update,
-            (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
-        );
+        app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
+            .add_systems(
+                Update,
+                (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
+            );
     }
 }
 
 fn setup_tray(world: &mut World) {
+    let locale = tray_locale(world.resource::<AppSettings>());
     let menu = Menu::new();
-    let toggle = MenuItem::new(toggle_label(true), true, None);
+    let toggle = MenuItem::new(toggle_label(true, &locale), true, None);
     #[cfg(feature = "recording")]
-    let pause = MenuItem::new("Pause Recording", false, None);
+    let pause = MenuItem::new(translate_for(&locale, "tray-pause-recording"), false, None);
     #[cfg(feature = "recording")]
-    let resume = MenuItem::new("Resume Recording", false, None);
+    let resume = MenuItem::new(translate_for(&locale, "tray-resume-recording"), false, None);
     #[cfg(feature = "recording")]
-    let done = MenuItem::new("Finish Recording", false, None);
-    let quit = MenuItem::new("Quit Vmux", true, None);
+    let done = MenuItem::new(translate_for(&locale, "tray-finish-recording"), false, None);
+    let quit = MenuItem::new(translate_for(&locale, "tray-quit"), true, None);
     let toggle_id = toggle.id().0.clone();
     let quit_id = quit.id().0.clone();
     #[cfg(feature = "recording")]
@@ -98,6 +104,7 @@ fn setup_tray(world: &mut World) {
     world.insert_non_send(TrayHandle {
         _tray: tray,
         toggle,
+        quit,
         toggle_id,
         quit_id,
         #[cfg(feature = "recording")]
@@ -113,6 +120,7 @@ fn setup_tray(world: &mut World) {
         #[cfg(feature = "recording")]
         done_id,
         last_any_visible: None,
+        last_locale: locale,
         #[cfg(feature = "recording")]
         last_status: None,
     });
@@ -149,14 +157,33 @@ fn drain_tray_events(
     }
 }
 
-fn sync_tray_menu_state(handle: Option<NonSendMut<TrayHandle>>, windows: Query<&Window>) {
+fn sync_tray_menu_state(
+    handle: Option<NonSendMut<TrayHandle>>,
+    windows: Query<&Window>,
+    settings: Res<AppSettings>,
+) {
     let Some(mut handle) = handle else { return };
     let any_visible = windows.iter().any(|w| w.visible);
-    if handle.last_any_visible == Some(any_visible) {
+    let locale = tray_locale(&settings);
+    if handle.last_any_visible == Some(any_visible) && handle.last_locale == locale {
         return;
     }
     handle.last_any_visible = Some(any_visible);
-    handle.toggle.set_text(toggle_label(any_visible));
+    handle.last_locale.clone_from(&locale);
+    handle.toggle.set_text(toggle_label(any_visible, &locale));
+    handle.quit.set_text(translate_for(&locale, "tray-quit"));
+    #[cfg(feature = "recording")]
+    {
+        handle
+            .pause
+            .set_text(translate_for(&locale, "tray-pause-recording"));
+        handle
+            .resume
+            .set_text(translate_for(&locale, "tray-resume-recording"));
+        handle
+            .done
+            .set_text(translate_for(&locale, "tray-finish-recording"));
+    }
 }
 
 #[cfg(feature = "recording")]
@@ -189,12 +216,24 @@ fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<T
 #[cfg(not(feature = "recording"))]
 fn sync_tray_recording() {}
 
-fn toggle_label(any_visible: bool) -> &'static str {
+fn toggle_label(any_visible: bool, locale: &str) -> String {
     if any_visible {
-        "Close Window"
+        translate_for(locale, "tray-close-window")
     } else {
-        "Open Window"
+        translate_for(locale, "tray-open-window")
     }
+}
+
+fn tray_locale(settings: &AppSettings) -> String {
+    let locale = requested_locale(Some(&settings.appearance.locale));
+    let directory = vmux_core::profile::config_dir().join("locales");
+    if let Some(source) = [locale.as_str(), locale.split('-').next().unwrap_or(&locale)]
+        .into_iter()
+        .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
+    {
+        let _ = register_catalog(&locale, &source);
+    }
+    locale
 }
 
 fn toggle_lifecycle_event(any_visible: bool) -> LifecycleEvent {
@@ -264,27 +303,13 @@ mod tests {
             source.contains(&tray_builder) || source.contains(&tray_type),
             "tray.rs must wire tray-icon, not be a stub"
         );
-        let open_needle = ["\"Open ", "Window\""].concat();
-        assert!(
-            source.contains(&open_needle),
-            "tray toggle must expose an 'Open Window' label"
-        );
-        let close_needle = ["\"Close ", "Window\""].concat();
-        assert!(
-            source.contains(&close_needle),
-            "tray toggle must expose a 'Close Window' label"
-        );
-        let quit_needle = ["\"Quit ", "Vmux\""].concat();
-        assert!(
-            source.contains(&quit_needle),
-            "tray must expose a 'Quit Vmux' menu item"
-        );
     }
 
     #[test]
     fn toggle_label_reflects_visibility() {
-        assert_eq!(super::toggle_label(true), "Close Window");
-        assert_eq!(super::toggle_label(false), "Open Window");
+        assert_eq!(super::toggle_label(true, "en-US"), "Close Window");
+        assert_eq!(super::toggle_label(false, "en-US"), "Open Window");
+        assert_eq!(super::toggle_label(false, "ja"), "ウインドウを開く");
     }
 
     #[test]

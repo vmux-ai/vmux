@@ -1,0 +1,602 @@
+locale-name = Èdè Yorùbá
+common-open = Ṣí
+common-close = Tì
+common-install = Fi sílẹ̀
+common-uninstall = Yọ kúrò
+common-update = Ṣàfikún tuntun
+common-retry = Gbìyànjú lẹ́ẹ̀kansi
+common-refresh = Tún sọ di tuntun
+common-remove = Yọ kúrò
+common-enable = Mú ṣiṣẹ́
+common-disable = Pa
+common-new = Tuntun
+common-active = ń ṣiṣẹ́
+common-running = ń lọ
+common-done = ti parí
+common-failed = Kùnà
+common-installed = Ti fi sílẹ̀
+common-items = { $count ->
+    [one] ohun kan { $count }
+   *[other] ohun { $count }
+}
+start-title = Bẹ̀rẹ̀
+start-tagline = Prompt kan. Ohunkóhun, ti ṣe.
+
+agents-title = Àwọn agent
+agents-search = Wá àwọn agent ACP àti CLI…
+agents-empty = Kò sí agent tó bá a mu
+agents-empty-detail = Gbìyànjú orúkọ, runtime, tàbí ACP/CLI.
+agents-install-failed = Fífì sílẹ̀ kùnà
+agents-updating = Ń ṣe àfikún tuntun…
+agents-retrying = Ń gbìyànjú lẹ́ẹ̀kansi…
+agents-preparing = Ń pèsè…
+
+extensions-title = Àwọn extension
+extensions-search = Wá èyí tó ti fi sílẹ̀ tàbí Chrome Web Store…
+extensions-relaunch = Tún bẹ̀rẹ̀ láti fi ṣiṣẹ́
+extensions-empty = Kò sí extension tí a fi sílẹ̀
+extensions-no-match = Kò sí extension tó bá a mu
+extensions-empty-detail = Wá nínú Chrome Web Store lókè, kí o tẹ Return.
+extensions-no-match-detail = Gbìyànjú orúkọ míì tàbí ID extension.
+extensions-on = Tan
+extensions-off = Pa
+extensions-enable-confirm = Mú { $name } ṣiṣẹ́?
+extensions-enable-permissions = Mú { $name } ṣiṣẹ́, kí o sì gba láyè:
+
+lsp-title = Àwọn Language Server
+lsp-search = Wá language server, linter, formatter…
+lsp-loading = Ń kó katalọ́ọ̀gù wọlé…
+lsp-empty = Kò sí language server tó bá a mu
+lsp-empty-detail = Gbìyànjú èdè míì, linter, tàbí formatter.
+lsp-needs = nílò { $tool }
+lsp-status-available = Wà
+lsp-status-on-path = Wà lórí PATH
+lsp-status-installing = Ń fi sílẹ̀…
+lsp-status-installed = Ti fi sílẹ̀
+lsp-status-outdated = Àfikún tuntun wà
+lsp-status-running = Ń ṣiṣẹ́
+lsp-status-failed = Kùnà
+
+spaces-title = Àwọn ààyè
+spaces-new-placeholder = Orúkọ ààyè tuntun
+spaces-empty = Kò sí ààyè
+spaces-default-name = Ààyè { $number }
+spaces-tabs = { $count ->
+    [one] tab 1
+   *[other] tab { $count }
+}
+spaces-delete = Pa ààyè rẹ́
+
+team-title = Ẹgbẹ́
+team-just-you = Ìwọ nìkan ni nínú ààyè yìí
+team-agents = { $count ->
+    [one] Ìwọ àti agent 1
+   *[other] Ìwọ àti agent { $count }
+}
+team-empty = Kò tíì sí ẹnikẹ́ni níbí
+team-you = Ìwọ
+team-agent = Agent
+
+services-title = Àwọn iṣẹ́ abẹ́lẹ̀
+services-processes = { $count ->
+    [one] process 1
+   *[other] process { $count }
+}
+services-kill-all = Pa Gbogbo Rẹ́
+services-not-running = Iṣẹ́ náà kò ṣiṣẹ́
+services-start-with = Bẹ̀rẹ̀ pẹ̀lú:
+services-empty = Kò sí process tó ń ṣiṣẹ́
+services-filter = Sẹ́ process…
+services-no-match = Kò sí process tó bá a mu
+services-connected = Ti sopọ̀
+services-disconnected = Ti ge
+services-attached = ti so mọ́
+services-kill = Pa
+services-memory = Mẹ́mórì
+services-size = Ìwọ̀n
+services-shell = Shell
+
+error-title = Àṣìṣe
+
+history-search = Wá nínú ìtàn
+history-clear-all = Pa gbogbo rẹ́ rẹ́
+history-clear-confirm = Pa gbogbo ìtàn rẹ́?
+history-clear-warning = A kò lè dá èyí padà.
+history-cancel = Fagilé
+history-today = Lónìí
+history-yesterday = Àná
+history-days-ago = ọjọ́ { $count } sẹ́yìn
+history-day-offset = Ọjọ́ -{ $count }
+
+settings-title = Ètò
+settings-loading = Ń kó ètò wọlé…
+settings-stored = Wà nínú ~/.vmux/settings.ron
+settings-other = Míì
+settings-software-update = Àfikún tuntun sọ́fitiwia
+settings-check-updates = Ṣàyẹ̀wò àfikún tuntun
+settings-check-updates-hint = Ó máa ṣàyẹ̀wò fúnra rẹ̀ nígbà ìbẹ̀rẹ̀ àti ní gbogbo wákàtí tí Auto-update bá ṣiṣẹ́.
+settings-update-unavailable = Kò sí
+settings-update-unavailable-hint = Updater kò sí nínú build yìí.
+settings-update-checking = Ń ṣàyẹ̀wò…
+settings-update-checking-hint = Ń ṣàyẹ̀wò àfikún tuntun…
+settings-update-check-again = Tún ṣàyẹ̀wò
+settings-update-current = Vmux ti wà lórí tuntun.
+settings-update-downloading = Ń gba wọlé…
+settings-update-downloading-hint = Ń gba Vmux { $version } wọlé…
+settings-update-installing = Ń fi sílẹ̀…
+settings-update-installing-hint = Ń fi Vmux { $version } sílẹ̀…
+settings-update-ready = Àfikún tuntun ti ṣetán
+settings-update-ready-hint = Vmux { $version } ti ṣetán. Tún bẹ̀rẹ̀ láti fi ṣiṣẹ́.
+settings-update-try-again = Gbìyànjú lẹ́ẹ̀kansi
+settings-update-failed = Kò lè ṣàyẹ̀wò àfikún tuntun.
+settings-item = Ohun kan
+settings-item-number = Ohun { $number }
+settings-press-key = Tẹ kọ́kọ́rọ́ kan…
+settings-saved = Ti fipamọ́
+settings-record-key = Tẹ láti gba key combo tuntun sílẹ̀
+
+tray-open-window = Ṣí fèrèsé
+tray-close-window = Tì fèrèsé
+tray-pause-recording = Dá gbigbasilẹ dúró díẹ̀
+tray-resume-recording = Tẹ̀síwájú gbigbasilẹ
+tray-finish-recording = Parí gbigbasilẹ
+tray-quit = Jáde kúrò ní Vmux
+
+composer-attach-files = So fáìlì pọ̀ (/upload)
+composer-remove-attachment = Yọ àfikún kúrò
+
+layout-back = Padà
+layout-forward = Lọ síwájú
+layout-reload = Tún kó wọlé
+layout-bookmark-page = Fi ojúewé yìí sí bookmark
+layout-remove-bookmark = Yọ bookmark kúrò
+layout-pin-page = Pin ojúewé yìí
+layout-unpin-page = Yọ pin ojúewé yìí
+layout-manage-extensions = Ṣàkóso extension
+layout-new-stack = Stack tuntun
+layout-close-tab = Tì tab
+layout-bookmark = Bookmark
+layout-pin = Pin
+layout-new-tab = Tab tuntun
+layout-team = Ẹgbẹ́
+
+command-switch-space = Yí ààyè padà…
+command-search-ask = Wá tàbí béèrè…
+command-new-tab-placeholder = Wá tàbí tẹ URL, tàbí yan Terminal…
+command-placeholder = Tẹ URL, wá àwọn tab, tàbí > fún àṣẹ…
+command-composer-placeholder = Tẹ / fún àṣẹ tàbí @ fún media
+command-send = Ránṣẹ́ (Enter)
+command-terminal = Terminal
+command-open-terminal = Ṣí nínú Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] tab 1
+   *[other] tab { $count }
+}
+command-prompt = Prompt
+command-new-tab = Tab tuntun
+command-search = Wá
+command-open-value = Ṣí “{ $value }”
+command-search-value = Wá “{ $value }”
+
+schema-appearance = Ìrísí
+schema-general = Gbogbogbò
+schema-layout = Ìtòlẹ́sẹẹsẹ
+schema-layout-detail = Fèrèsé, pane, sidebar, àti focus ring.
+schema-agent = Agent
+schema-agent-detail = Ìhùwàsí agent àti àṣẹ ìwọlé irinṣẹ́.
+schema-shortcuts = Àwọn ọna kúrú
+schema-shortcuts-detail = Wiwo nìkan. Ṣàtúnṣe settings.ron taara láti yí binding padà.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Móòdù
+schema-mode-detail = Ètò àwọ̀ fún ojúewé wẹ́ẹ̀bù. Device máa tẹ̀lé ètò rẹ.
+schema-device = Device
+schema-light = Ìmọ́lẹ̀
+schema-dark = Òkùnkùn
+schema-language = Èdè
+schema-language-detail = Lo ti ẹ̀rọ, en-US, ja, tàbí tag BCP 47 èyíkéyìí tó ní katalọ́ọ̀gù ~/.vmux/locales/<tag>.ftl tó bá a mu.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Ṣàyẹ̀wò kí o sì fi àfikún tuntun sílẹ̀ ní ìbẹ̀rẹ̀ àti ní gbogbo wákàtí.
+schema-startup-url = URL ìbẹ̀rẹ̀
+schema-startup-url-detail = Tó bá ṣófo, yóò ṣí prompt pẹpẹ àṣẹ.
+schema-search-engine = Ẹ̀rọ ìwádìí
+schema-search-engine-detail = A máa lò ó fún ìwádìí wẹ́ẹ̀bù láti Start àti pẹpẹ àṣẹ.
+schema-window = Fèrèsé
+schema-pane = Pane
+schema-side-sheet = Ìwé ẹgbẹ́
+schema-focus-ring = Focus ring
+schema-run-placement = Gba agent láyè láti yí ibi run padà
+schema-run-placement-detail = Jẹ́ kí àwọn agent yan móòdù pane run, ìtọ́sọ́nà, àti anchor.
+schema-leader = Leader
+schema-leader-detail = Kọ́kọ́rọ́ àkọ́kọ́ fún shortcut chord.
+schema-chord-timeout = Àkókò chord
+schema-chord-timeout-detail = Millisecond kí prefix chord tó parí.
+schema-bindings = Àwọn binding
+schema-confirm-close = Jẹ́rìí kí o tó tì
+schema-confirm-close-detail = Béèrè kí o tó tì terminal tó ní process tó ń ṣiṣẹ́.
+schema-default-theme = Theme àiyédèrùn
+schema-default-theme-detail = Orúkọ theme tó ń ṣiṣẹ́ nínú àtòkọ theme.
+
+settings-empty = (ṣófo)
+settings-none = (kò sí)
+
+schema-system = Ẹ̀rọ
+schema-editor = Olóòtú
+schema-recording = Ìgbasilẹ
+schema-radius = Ìwọ̀n yípo
+schema-padding = Àlàfo inú
+schema-gap = Àlàfo
+schema-width = Ìbú
+schema-color = Àwọ̀
+schema-red = Pupa
+schema-green = Àwọ̀ ewé
+schema-blue = Búlúù
+schema-follow-files = Tẹ̀lé àwọn fáìlì
+schema-tidy-files = Mú àwọn fáìlì létò
+schema-tidy-files-max = Ìdíwọ̀n ìmúlétò fáìlì
+schema-tidy-files-auto = Mú àwọn fáìlì létò fúnra rẹ̀
+schema-app-providers = Àwọn olùpèsè ápù
+schema-provider = Olùpèsè
+schema-kind = Irú
+schema-models = Àwọn módẹ́ẹ̀lì
+schema-acp = Àwọn aṣojú ACP
+schema-id = ID
+schema-name = Orúkọ
+schema-command = Àṣẹ
+schema-arguments = Àwọn àrgumẹ́ńtì
+schema-environment = Àyíká
+schema-working-directory = Àpò iṣẹ́
+schema-shell = Ṣẹ́ẹ̀lì
+schema-font-family = Ẹbí fọ́ńtì
+schema-startup-directory = Àpò ìbẹ̀rẹ̀
+schema-themes = Àwọn àkòrí
+schema-color-scheme = Ètò àwọ̀
+schema-font-size = Ìtóbi fọ́ńtì
+schema-line-height = Gíga ìlà
+schema-cursor-style = Ìrísí kọ́sọ̀
+schema-cursor-blink = Ìpẹ́jú kọ́sọ̀
+schema-custom-themes = Àwọn àkòrí àdáṣe
+schema-foreground = Iwájú
+schema-background = Ẹ̀yìn
+schema-cursor = Kọ́sọ̀
+schema-ansi-colors = Àwọn àwọ̀ ANSI
+schema-keymap = Mápù kọ́kọ́rọ́
+schema-explorer = Olùṣàwárí
+schema-visible = Hàn
+schema-language-servers = Àwọn olupèsè èdè
+schema-servers = Àwọn olupèsè
+schema-language-id = ID èdè
+schema-root-markers = Àwọn àmì gbòngbo
+schema-output-directory = Àpò àbájáde
+
+menu-scene = Ìran
+menu-layout = Ìṣètò
+menu-terminal = Tẹ́míńà
+menu-browser = Aṣàwákiri
+menu-service = Ìṣẹ́
+menu-bookmark = Àmì ìwé
+menu-edit = Ṣàtúnṣe
+
+layout-knowledge = Ìmọ̀
+layout-open-knowledge = Ṣí Ìmọ̀
+layout-open-welcome-knowledge = Ṣí Káàbọ̀ sí Ìmọ̀
+layout-open-path = Ṣí { $path }
+layout-fold-knowledge = Pa ìmọ̀ pọ̀
+layout-unfold-knowledge = Sí ìmọ̀
+layout-bookmarks = Àwọn àmì ìwé
+layout-new-folder = Fódà tuntun
+layout-add-to-bookmarks = Fi kún Àwọn àmì ìwé
+layout-move-to-bookmarks = Gbé sí Àwọn àmì ìwé
+layout-stack-number = Ìpele { $number }
+layout-fold-stack = Pa ìpele pọ̀
+layout-unfold-stack = Sí ìpele
+layout-close-stack = Pa ìpele
+layout-bookmark-in = Ṣe àmì ìwé nínú { $folder }
+
+common-cancel = Fagilé
+common-delete = Paarẹ
+common-save = Fipamọ́
+common-rename = Tún lorúkọ
+common-expand = Fẹ̀
+common-collapse = Kó pọ̀
+common-loading = Ń ṣàkójọpọ̀…
+common-error = Àṣìṣe
+common-output = Àbájáde
+common-pending = Ó ń dúró
+common-current = ti báyìí
+common-stop = Dáwọ́ dúró
+services-command = Iṣẹ́ Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Ojúewé kò ṣí
+error-page-not-found = A kò rí ojúewé
+error-unknown-host = Olùgbàlejò app Vmux tí a kò mọ̀: { $host }
+
+history-title = Ìtàn
+
+command-new-app-chat = Ìfọ̀rọ̀wérọ̀ { $provider }/{ $model } tuntun (App)
+command-interactive-mode-user = Ìran > Móòdù ìbáṣepọ̀ > Olùmúlò
+command-interactive-mode-player = Ìran > Móòdù ìbáṣepọ̀ > Ẹlẹ́rọ
+command-minimize-window = Ìtòlẹ́sẹẹsẹ > Fèrèsé > Kó kéré
+command-toggle-layout = Ìtòlẹ́sẹẹsẹ > Ìtòlẹ́sẹẹsẹ > Yí ìtòlẹ́sẹẹsẹ padà
+command-close-tab = Ìtòlẹ́sẹẹsẹ > Taabu > Pa taabu
+command-new-task = Ìtòlẹ́sẹẹsẹ > Taabu > Iṣẹ́ tuntun…
+command-next-tab = Ìtòlẹ́sẹẹsẹ > Taabu > Taabu tó tẹ̀lé
+command-prev-tab = Ìtòlẹ́sẹẹsẹ > Taabu > Taabu tó ṣáájú
+command-rename-tab = Ìtòlẹ́sẹẹsẹ > Taabu > Tún taabu lorúkọ
+command-tab-select-1 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 1
+command-tab-select-2 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 2
+command-tab-select-3 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 3
+command-tab-select-4 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 4
+command-tab-select-5 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 5
+command-tab-select-6 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 6
+command-tab-select-7 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 7
+command-tab-select-8 = Ìtòlẹ́sẹẹsẹ > Taabu > Yan Taabu 8
+command-tab-select-last = Ìtòlẹ́sẹẹsẹ > Taabu > Yan taabu tó kẹ́yìn
+command-close-pane = Ìtòlẹ́sẹẹsẹ > Pání > Pa pání
+command-select-pane-left = Ìtòlẹ́sẹẹsẹ > Pání > Yan pání òsì
+command-select-pane-right = Ìtòlẹ́sẹẹsẹ > Pání > Yan pání ọ̀tún
+command-select-pane-up = Ìtòlẹ́sẹẹsẹ > Pání > Yan pání òkè
+command-select-pane-down = Ìtòlẹ́sẹẹsẹ > Pání > Yan pání ìsàlẹ̀
+command-swap-pane-prev = Ìtòlẹ́sẹẹsẹ > Pání > Paarọ̀ pání pẹ̀lú ti ṣáájú
+command-swap-pane-next = Ìtòlẹ́sẹẹsẹ > Pání > Paarọ̀ pání pẹ̀lú ti tẹ̀lé
+command-equalize-pane-size = Ìtòlẹ́sẹẹsẹ > Pání > Ṣe ìwọ̀n pání dọ́gba
+command-resize-pane-left = Ìtòlẹ́sẹẹsẹ > Pání > Tún ìwọ̀n pání sí òsì
+command-resize-pane-right = Ìtòlẹ́sẹẹsẹ > Pání > Tún ìwọ̀n pání sí ọ̀tún
+command-resize-pane-up = Ìtòlẹ́sẹẹsẹ > Pání > Tún ìwọ̀n pání sí òkè
+command-resize-pane-down = Ìtòlẹ́sẹẹsẹ > Pání > Tún ìwọ̀n pání sí ìsàlẹ̀
+command-stack-close = Ìtòlẹ́sẹẹsẹ > Staki > Pa staki
+command-stack-next = Ìtòlẹ́sẹẹsẹ > Staki > Staki tó tẹ̀lé
+command-stack-previous = Ìtòlẹ́sẹẹsẹ > Staki > Staki tó ṣáájú
+command-stack-reopen = Ìtòlẹ́sẹẹsẹ > Staki > Tún ojúewé tí a ti pa ṣí
+command-stack-swap-prev = Ìtòlẹ́sẹẹsẹ > Staki > Gbé staki sí òsì
+command-stack-swap-next = Ìtòlẹ́sẹẹsẹ > Staki > Gbé staki sí ọ̀tún
+command-space-open = Ìtòlẹ́sẹẹsẹ > Àyè > Àwọn àyè
+command-terminal-close = Tẹ́míńà > Pa tẹ́míńà
+command-terminal-next = Tẹ́míńà > Tẹ́míńà tó tẹ̀lé
+command-terminal-prev = Tẹ́míńà > Tẹ́míńà tó ṣáájú
+command-terminal-clear = Tẹ́míńà > Nu tẹ́míńà
+command-browser-prev-page = Ẹrọ aṣàwákiri > Ìrìnàjò > Padà
+command-browser-next-page = Ẹrọ aṣàwákiri > Ìrìnàjò > Lọ síwájú
+command-browser-reload = Ẹrọ aṣàwákiri > Ìrìnàjò > Tún ṣí
+command-browser-hard-reload = Ẹrọ aṣàwákiri > Ìrìnàjò > Tún ṣí pátápátá
+command-open-in-place = Ẹrọ aṣàwákiri > Ṣí > Ṣí níbí
+command-open-in-new-stack = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú staki tuntun
+command-open-in-pane-top = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú pání lókè
+command-open-in-pane-right = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú pání ọ̀tún
+command-open-in-pane-bottom = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú pání nísàlẹ̀
+command-open-in-pane-left = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú pání òsì
+command-open-in-new-tab = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú taabu tuntun
+command-open-in-new-space = Ẹrọ aṣàwákiri > Ṣí > Ṣí nínú àyè tuntun
+command-browser-zoom-in = Ẹrọ aṣàwákiri > Ìfihàn > Sún mọ́
+command-browser-zoom-out = Ẹrọ aṣàwákiri > Ìfihàn > Sún kúrò
+command-browser-zoom-reset = Ẹrọ aṣàwákiri > Ìfihàn > Ìwọ̀n gidi
+command-browser-dev-tools = Ẹrọ aṣàwákiri > Ìfihàn > Irinṣẹ́ olùgbéejáde
+command-browser-open-command-bar = Ẹrọ aṣàwákiri > Bàárà > Bàárà àṣẹ
+command-browser-open-page-in-command-bar = Ẹrọ aṣàwákiri > Bàárà > Ṣàtúnṣe ojúewé
+command-browser-open-path-bar = Ẹrọ aṣàwákiri > Bàárà > Atọ́nà ipa
+command-browser-open-commands = Ẹrọ aṣàwákiri > Bàárà > Àwọn àṣẹ
+command-browser-open-history = Ẹrọ aṣàwákiri > Bàárà > Ìtàn
+command-service-open = Iṣẹ́ > Ṣí olùbojútó iṣẹ́
+command-bookmark-toggle-active = Ìfihànamọ́ > Fi ojúewé pamọ́
+command-bookmark-pin-active = Ìfihànamọ́ > Pin ojúewé mọ́lẹ̀
+
+layout-tab = Taabu
+layout-no-stacks = Kò sí staki
+layout-loading = Ń ṣàkójọpọ̀…
+layout-no-markdown-files = Kò sí fáìlì Markdown
+layout-empty-folder = Fódà òfo
+layout-worktree = igi iṣẹ́
+layout-folder-name = Orúkọ fódà
+layout-no-pins-bookmarks = Kò sí pin tàbí ìfihànamọ́
+layout-move-to = Gbé lọ sí { $folder }
+layout-bookmark-current-page = Fi ojúewé báyìí pamọ́
+layout-rename-folder = Tún fódà lorúkọ
+layout-remove-folder = Yọ fódà kúrò
+layout-update-downloading = Ń gba ìmúdójúìwọ̀n sílẹ̀
+layout-update-installing = Ń fi ìmúdójúìwọ̀n sori ẹrọ…
+layout-update-ready = Ẹ̀yà tuntun wà
+layout-restart-update = Tún bẹ̀rẹ̀ láti ṣe ìmúdójúìwọ̀n
+
+agent-preparing = Ń pèsè agent…
+agent-send-all-queued = Fi gbogbo ìbéèrè tó wà lórí ìlà ránṣẹ́ báyìí (Esc)
+agent-send = Ránṣẹ́ (Enter)
+agent-ready = Mo ṣetán nígbà tí o bá ṣetán.
+agent-loading-older = Ń ṣàkójọpọ̀ àwọn ìfiránṣẹ́ àtijọ́…
+agent-load-older = Ṣàkójọpọ̀ àwọn ìfiránṣẹ́ àtijọ́
+agent-continued-from = Tẹ̀síwájú láti { $source }
+agent-older-context-omitted = a yọ ọ̀rọ̀ àyíká àtijọ́ kúrò
+agent-interrupted = a dá a dúró
+agent-allow-tool = Gba { $tool } láyè?
+agent-deny = Kọ̀
+agent-allow-always = Gba láyè nígbà gbogbo
+agent-allow = Gba láyè
+agent-loading-sessions = Ń ṣàkójọpọ̀ àwọn sẹ́ṣọ́n…
+agent-no-resumable-sessions = Kò rí sẹ́ṣọ́n tí a lè tẹ̀síwájú
+agent-no-matching-sessions = Kò sí sẹ́ṣọ́n tó bá mu
+agent-no-matching-models = Kò sí model tó bá mu
+agent-choice-help = ↑/↓ tàbí Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Yan fódà repository
+agent-choose-repository-detail = Yan repository Git agbègbè tí agent yóò lò.
+agent-choosing = Ń yan…
+agent-choose-folder = Yan fódà
+agent-queued = wà lórí ìlà
+agent-attached = Tí a so mọ́:
+agent-cancel-queued = Fagilé ìbéèrè tó wà lórí ìlà
+agent-resume-queued = Tẹ̀síwájú àwọn ìbéèrè tó wà lórí ìlà
+agent-clear-queue = Nu ìlà
+agent-send-all-now = rán gbogbo rẹ̀ báyìí
+agent-choose-option = Yan àṣàyàn kan lókè
+agent-loading-media = Ń ṣàkójọpọ̀ mídíà…
+agent-no-matching-media = Kò sí mídíà tó bá mu
+agent-prompt-context = Àyíká prompt
+agent-details = Àlàyé
+agent-path = Ipa
+agent-tool = Irinṣẹ́
+agent-server = Sàbà
+agent-bytes = { $count } bytes
+agent-worked-for = Ṣiṣẹ́ fún { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Ṣiṣẹ́ fún { $duration } · ìgbésẹ̀ 1
+   *[other] Ṣiṣẹ́ fún { $duration } · ìgbésẹ̀ { $count }
+}
+agent-tool-guardian-review = Àyẹ̀wò Guardian
+agent-tool-read-files = Ka àwọn fáìlì
+agent-tool-viewed-image = Wo àwòrán
+agent-tool-used-browser = Lo ẹrọ aṣàwákiri
+agent-tool-searched-files = Wá nínú àwọn fáìlì
+agent-tool-ran-commands = Ṣiṣe àwọn àṣẹ
+agent-thinking = Ń ronú
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Ìlànà ọ̀rọ̀
+agent-parent = Òbí
+agent-children = Àwọn ọmọ
+agent-call = Ìpè
+agent-raw-event = Ìṣẹ̀lẹ̀ aise
+agent-plan = Ètò
+agent-tasks = { $count ->
+    [one] iṣẹ́ 1
+   *[other] iṣẹ́ { $count }
+}
+agent-edited = Tí a ṣàtúnṣe
+agent-reconnecting = Ń tún sopọ̀ { $attempt }/{ $total }
+agent-status-running = Ń ṣiṣẹ́
+agent-status-done = Ti parí
+agent-status-failed = Kùnà
+agent-status-pending = Ó ń dúró
+agent-slash-attach-files = So àwọn fáìlì mọ́
+agent-slash-resume-session = Tẹ̀síwájú sẹ́ṣọ́n iṣáájú
+agent-slash-select-model = Yan model
+agent-slash-continue-cli = Tẹ̀síwájú sẹ́ṣọ́n yìí nínú CLI
+agent-session-just-now = ní báyìí
+agent-session-minutes-ago = ní { $count }m sẹ́yìn
+agent-session-hours-ago = ní { $count }h sẹ́yìn
+agent-session-days-ago = ní { $count }d sẹ́yìn
+agent-working-working = Ń ṣiṣẹ́
+agent-working-thinking = Ń ronú
+agent-working-pondering = Ń ronú jinlẹ̀
+agent-working-noodling = Ń yí ọ̀rọ̀ ká
+agent-working-percolating = Ń pọn
+agent-working-conjuring = Ń dá nkan jáde
+agent-working-cooking = Ń se é
+agent-working-brewing = Ń pò ó pọ̀
+agent-working-musing = Ń ṣàṣàrò
+agent-working-ruminating = Ń ronú pẹ̀lú
+agent-working-scheming = Ń ṣe ètò
+agent-working-synthesizing = Ń ṣàkópọ̀
+agent-working-tinkering = Ń tún un ṣe díẹ̀díẹ̀
+agent-working-churning = Ń ṣiṣẹ́ kíkankíkan
+agent-working-vibing = Ń gba ìṣàn rẹ̀
+agent-working-simmering = Ń jẹ́ kó jinna díẹ̀díẹ̀
+agent-working-crafting = Ń kọ́ ọ
+agent-working-divining = Ń wá ìtọ́sọ́nà
+agent-working-mulling = Ń gbé e yọ̀
+agent-working-spelunking = Ń walẹ̀ wò ó
+
+editor-toggle-explorer = Tan/pa Explorer (Cmd+B)
+editor-unsaved = kò tíì fipamọ́
+editor-rendered-markdown = Markdown tí a ṣe àfihàn pẹ̀lú àtúnṣe láàyè
+editor-note = Àkíyèsí
+editor-source-editor = Olootu source
+editor-editor = Olootu
+editor-git-diff = Ìyàtọ̀ Git
+editor-diff = Ìyàtọ̀
+editor-tidy = Tọ́tún
+editor-always = Nígbà gbogbo
+editor-unchanged-previews = { $count ->
+    [one] ✦ àkọ́wò 1 tí kò yí padà
+   *[other] ✦ àkọ́wò { $count } tí kò yí padà
+}
+editor-open-externally = Ṣí níta
+editor-changed-line = Laini tí ó yí padà
+editor-go-to-definition = Lọ sí ìtumọ̀
+editor-find-references = Wá àwọn ìtọ́kasí
+editor-references = { $count ->
+    [one] ìtọ́kasí 1
+   *[other] ìtọ́kasí { $count }
+}
+editor-lsp-starting = { $server } ń bẹ̀rẹ̀…
+editor-lsp-not-installed = { $server } — kò sí lórí ẹrọ
+editor-explorer = Explorer
+editor-open-editors = Àwọn olootu tó ṣí
+editor-outline = Ìlapa
+editor-new-file = Fáìlì tuntun
+editor-new-folder = Fódà tuntun
+editor-delete-confirm = Pa “{ $name }” rẹ́? A kò lè dá a padà.
+editor-created-folder = A ṣẹ̀dá fódà { $name }
+editor-created-file = A ṣẹ̀dá fáìlì { $name }
+editor-renamed-to = A tún un lorúkọ sí { $name }
+editor-deleted = A pa { $name } rẹ́
+editor-failed-decode-image = Kò lè tú kóòdù àwòrán
+editor-preview-large-image = àwòrán (ó tóbi jù fún àkọ́wò)
+editor-preview-binary = binary
+editor-preview-file = fáìlì
+
+git-status-clean = mọ́
+git-status-modified = tí a yí padà
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = a kò tọ́pa rẹ̀
+git-status-deleted = tí a paarẹ
+git-status-conflict = ìjà
+git-accept-all = ✓ gba gbogbo rẹ̀
+git-unstage = Yọ kúrò ní stage
+git-confirm-deny-all = Jẹ́rìí kọ gbogbo rẹ̀
+git-deny-all = ✗ kọ gbogbo rẹ̀
+git-commit-message = ìfiránṣẹ́ commit
+git-commit = Commit ({ $count })
+git-push = ↑ Titari
+git-loading-diff = Ń ṣàkójọpọ̀ ìyàtọ̀…
+git-no-changes = Kò sí ìyípadà láti fihàn
+git-accept = ✓ gba
+git-deny = ✗ kọ
+git-show-unchanged-lines = Fi laini { $count } tí kò yí padà hàn
+
+terminal-loading = Ń ṣàkójọpọ̀…
+terminal-runs-when-ready = yóò ṣiṣẹ́ nígbà tó bá ṣetán · Ctrl+C ń nu · Esc ń fo kọjá
+terminal-booting = ń bẹ̀rẹ̀
+terminal-type-command = tẹ àṣẹ kan · yóò ṣiṣẹ́ nígbà tó bá ṣetán · Esc ń fo kọjá
+
+setup-tagline-claude = Agent kóòdù Anthropic, nínú Vmux
+setup-tagline-codex = Agent kóòdù OpenAI, nínú Vmux
+setup-tagline-vibe = Agent kóòdù Mistral, nínú Vmux
+setup-install-title = Fi CLI { $name } sori ẹrọ
+setup-homebrew-required = Homebrew jẹ́ dandan láti fi { $command } sori ẹrọ, kò sì tíì ṣètò. Vmux yóò kọ́kọ́ fi Homebrew sori ẹrọ, lẹ́yìn náà { $name }.
+setup-terminal-instructions = Nínú tẹ́míńà, tẹ Return láti bẹ̀rẹ̀, lẹ́yìn náà tẹ ọ̀rọ̀ aṣínà Mac rẹ nígbà tí a bá béèrè.
+setup-command-missing = Vmux ṣí ojúewé yìí nítorí pé àṣẹ agbègbè { $command } kò tíì sí lórí ẹrọ. Ṣiṣe àṣẹ tó wà nísàlẹ̀ láti gbà á.
+setup-install-failed = Fífi sori ẹrọ kò parí. Ṣàyẹ̀wò tẹ́míńà fún àlàyé, lẹ́yìn náà gbìyànjú lẹ́ẹ̀kansi.
+setup-installing = Ń fi sori ẹrọ…
+setup-install-homebrew = Fi Homebrew + { $name } sori ẹrọ
+setup-run-install = Ṣiṣe àṣẹ fífi sori ẹrọ
+setup-auto-reload = Vmux ń ṣiṣẹ́ rẹ̀ nínú tẹ́míńà, ó sì tún ṣí nígbà tí { $command } bá ṣetán.
+
+debug-title = Ṣàtúnṣe aṣìṣe
+debug-auto-update = Ìmúdójúìwọ̀n aládàáṣiṣẹ́
+debug-simulate-update = Ṣe àfihàn pé ìmúdójúìwọ̀n wà
+debug-simulate-download = Ṣe àfihàn gbígbà sílẹ̀
+debug-clear-update = Nu ìmúdójúìwọ̀n
+debug-trigger-restart = Fa ìtúnbẹ̀rẹ̀ ṣẹ́
+
+command-manage-spaces = Ṣàkóso àwọn ààyè…
+command-pane-stack-location = pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }
+command-space-pane-stack-location = { $space } / pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }
+command-terminal-path = Tẹ́mìnà ({ $path })
+command-group-interactive-mode = Móòdù ìbáṣepọ̀
+command-group-window = Fèrèsé
+command-group-tab = Táàbù
+command-group-pane = Pẹ́ẹ̀nù
+command-group-stack = Àkójọpọ̀
+command-group-space = Ààyè
+command-group-navigation = Ìrìnàjò
+command-group-open = Ṣí
+command-group-view = Ìwò
+command-group-bar = Pẹpẹ
+
+menu-close-vmux = Pa Vmux
+
+agents-terminal-coding-agent = Ajẹ́ńtì kóòdù tó dá lórí tẹ́mìnà

@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
+use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -19,7 +20,7 @@ const START_TRANSITIONED: &str = "_startTransitioned";
 pub fn Page(
     #[props(default)] on_agent_transition: Option<EventHandler<StartAgentTransition>>,
 ) -> Element {
-    use_theme();
+    let locale = use_theme();
     let state =
         use_event::<CommandBarOpenEvent>(COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent::default);
     let mut mounted = use_signal(|| false);
@@ -30,8 +31,9 @@ pub fn Page(
         });
 
     use_effect(move || {
+        locale();
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            doc.set_title("Start");
+            doc.set_title(&translate("start-title"));
         }
         let _ = try_cef_bin_emit_rkyv(&StartDataRequest);
         set_start_transitioned(false);
@@ -64,7 +66,7 @@ pub fn Page(
                     h1 { class: "bg-gradient-to-b from-foreground to-foreground/55 bg-clip-text text-6xl font-semibold leading-none tracking-tight text-transparent",
                         "vmux"
                     }
-                    p { class: "text-base text-muted-foreground", "One prompt. Anything, done." }
+                    p { class: "text-base text-muted-foreground", {translate("start-tagline")} }
                 }
                 div { class: "relative w-full",
                     CommandPalette {

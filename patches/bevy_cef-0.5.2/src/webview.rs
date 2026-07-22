@@ -265,7 +265,7 @@ fn shared_texture_enabled(windowed: bool) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn create_webview(
     mut browsers: NonSendMut<Browsers>,
-    disk_profile: Res<CefDiskProfileRoot>,
+    cef_settings: (Res<CefDiskProfileRoot>, Res<CefAcceptLanguageList>),
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
     bin_ipc_event_sender: Res<BinIpcEventRawSender>,
@@ -391,7 +391,8 @@ fn create_webview(
                     .flatten(),
                 &initialize_scripts,
                 host_window,
-                disk_profile.0.as_deref(),
+                cef_settings.0.0.as_deref(),
+                &cef_settings.1.0,
                 if windowed && opaque_windowed_background {
                     Some(0xFF212124)
                 } else if transparent {

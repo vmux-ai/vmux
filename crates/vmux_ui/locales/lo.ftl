@@ -1,0 +1,602 @@
+locale-name = ລາວ
+common-open = ເປີດ
+common-close = ປິດ
+common-install = ຕິດຕັ້ງ
+common-uninstall = ຖອນການຕິດຕັ້ງ
+common-update = ອັບເດດ
+common-retry = ລອງໃໝ່
+common-refresh = ໂຫຼດໃໝ່
+common-remove = ເອົາອອກ
+common-enable = ເປີດໃຊ້
+common-disable = ປິດໃຊ້
+common-new = ສ້າງໃໝ່
+common-active = ກຳລັງໃຊ້
+common-running = ກຳລັງເຮັດວຽກ
+common-done = ສຳເລັດ
+common-failed = ລົ້ມເຫຼວ
+common-installed = ຕິດຕັ້ງແລ້ວ
+common-items = { $count ->
+    [one] { $count } ລາຍການ
+   *[other] { $count } ລາຍການ
+}
+start-title = ເລີ່ມຕົ້ນ
+start-tagline = ສັ່ງຄັ້ງດຽວ. ເຮັດຫຍັງກໍໄດ້ໃຫ້ສຳເລັດ.
+
+agents-title = ເອເຈນຕ໌
+agents-search = ຄົ້ນຫາເອເຈນຕ໌ ACP ແລະ CLI…
+agents-empty = ບໍ່ມີເອເຈນຕ໌ທີ່ກົງກັນ
+agents-empty-detail = ລອງຄົ້ນດ້ວຍຊື່, runtime ຫຼື ACP/CLI.
+agents-install-failed = ຕິດຕັ້ງບໍ່ສຳເລັດ
+agents-updating = ກຳລັງອັບເດດ…
+agents-retrying = ກຳລັງລອງໃໝ່…
+agents-preparing = ກຳລັງກຽມ…
+
+extensions-title = ສ່ວນຂະຫຍາຍ
+extensions-search = ຄົ້ນຫາທີ່ຕິດຕັ້ງແລ້ວ ຫຼື Chrome Web Store…
+extensions-relaunch = ເປີດໃໝ່ເພື່ອນຳໃຊ້
+extensions-empty = ຍັງບໍ່ມີສ່ວນຂະຫຍາຍທີ່ຕິດຕັ້ງ
+extensions-no-match = ບໍ່ມີສ່ວນຂະຫຍາຍທີ່ກົງກັນ
+extensions-empty-detail = ຄົ້ນຫາໃນ Chrome Web Store ຂ້າງເທິງ ແລ້ວກົດ Return.
+extensions-no-match-detail = ລອງຊື່ອື່ນ ຫຼື ID ສ່ວນຂະຫຍາຍ.
+extensions-on = ເປີດ
+extensions-off = ປິດ
+extensions-enable-confirm = ເປີດໃຊ້ { $name } ບໍ?
+extensions-enable-permissions = ເປີດໃຊ້ { $name } ແລະອະນຸຍາດ:
+
+lsp-title = ເຊີບເວີພາສາ
+lsp-search = ຄົ້ນຫາເຊີບເວີພາສາ, linter, formatter…
+lsp-loading = ກຳລັງໂຫຼດຄາຕາລັອກ…
+lsp-empty = ບໍ່ມີເຊີບເວີພາສາທີ່ກົງກັນ
+lsp-empty-detail = ລອງພາສາ, linter ຫຼື formatter ອື່ນ.
+lsp-needs = ຕ້ອງມີ { $tool }
+lsp-status-available = ພ້ອມໃຊ້
+lsp-status-on-path = ຢູ່ໃນ PATH
+lsp-status-installing = ກຳລັງຕິດຕັ້ງ…
+lsp-status-installed = ຕິດຕັ້ງແລ້ວ
+lsp-status-outdated = ມີອັບເດດ
+lsp-status-running = ກຳລັງເຮັດວຽກ
+lsp-status-failed = ລົ້ມເຫຼວ
+
+spaces-title = ພື້ນທີ່ວຽກ
+spaces-new-placeholder = ຊື່ພື້ນທີ່ວຽກໃໝ່
+spaces-empty = ຍັງບໍ່ມີພື້ນທີ່ວຽກ
+spaces-default-name = ພື້ນທີ່ວຽກ { $number }
+spaces-tabs = { $count ->
+    [one] 1 ແທັບ
+   *[other] { $count } ແທັບ
+}
+spaces-delete = ລຶບພື້ນທີ່ວຽກ
+
+team-title = ທີມ
+team-just-you = ມີພຽງແຕ່ທ່ານໃນພື້ນທີ່ວຽກນີ້
+team-agents = { $count ->
+    [one] ທ່ານ ແລະເອເຈນຕ໌ 1 ຕົວ
+   *[other] ທ່ານ ແລະເອເຈນຕ໌ { $count } ຕົວ
+}
+team-empty = ຍັງບໍ່ມີໃຜຢູ່ນີ້
+team-you = ທ່ານ
+team-agent = ເອເຈນຕ໌
+
+services-title = ບໍລິການພື້ນຫຼັງ
+services-processes = { $count ->
+    [one] 1 ໂປຣເຊສ
+   *[other] { $count } ໂປຣເຊສ
+}
+services-kill-all = ຢຸດທັງໝົດ
+services-not-running = ບໍລິການບໍ່ໄດ້ເຮັດວຽກ
+services-start-with = ເລີ່ມດ້ວຍ:
+services-empty = ບໍ່ມີໂປຣເຊສທີ່ກຳລັງເຮັດວຽກ
+services-filter = ກັ່ນຕອງໂປຣເຊສ…
+services-no-match = ບໍ່ມີໂປຣເຊສທີ່ກົງກັນ
+services-connected = ເຊື່ອມຕໍ່ແລ້ວ
+services-disconnected = ຕັດການເຊື່ອມຕໍ່
+services-attached = ແນບຢູ່
+services-kill = ບັງຄັບຢຸດ
+services-memory = ໜ່ວຍຄວາມຈຳ
+services-size = ຂະໜາດ
+services-shell = Shell
+
+error-title = ຂໍ້ຜິດພາດ
+
+history-search = ຄົ້ນຫາປະຫວັດ
+history-clear-all = ລຶບທັງໝົດ
+history-clear-confirm = ລຶບປະຫວັດທັງໝົດບໍ?
+history-clear-warning = ບໍ່ສາມາດຍ້ອນກັບໄດ້.
+history-cancel = ຍົກເລີກ
+history-today = ມື້ນີ້
+history-yesterday = ມື້ວານ
+history-days-ago = { $count } ມື້ກ່ອນ
+history-day-offset = ມື້ -{ $count }
+
+settings-title = ການຕັ້ງຄ່າ
+settings-loading = ກຳລັງໂຫຼດການຕັ້ງຄ່າ…
+settings-stored = ເກັບໄວ້ທີ່ ~/.vmux/settings.ron
+settings-other = ອື່ນໆ
+settings-software-update = ອັບເດດຊອບແວ
+settings-check-updates = ກວດຫາອັບເດດ
+settings-check-updates-hint = ກວດອັດຕະໂນມັດເມື່ອເປີດແອັບ ແລະທຸກຊົ່ວໂມງເມື່ອເປີດ Auto-update.
+settings-update-unavailable = ໃຊ້ບໍ່ໄດ້
+settings-update-unavailable-hint = ບິວນີ້ບໍ່ມີຕົວອັບເດດ.
+settings-update-checking = ກຳລັງກວດ…
+settings-update-checking-hint = ກຳລັງກວດຫາອັບເດດ…
+settings-update-check-again = ກວດອີກຄັ້ງ
+settings-update-current = Vmux ເປັນເວີຊັນຫຼ້າສຸດແລ້ວ.
+settings-update-downloading = ກຳລັງດາວໂຫຼດ…
+settings-update-downloading-hint = ກຳລັງດາວໂຫຼດ Vmux { $version }…
+settings-update-installing = ກຳລັງຕິດຕັ້ງ…
+settings-update-installing-hint = ກຳລັງຕິດຕັ້ງ Vmux { $version }…
+settings-update-ready = ອັບເດດພ້ອມແລ້ວ
+settings-update-ready-hint = Vmux { $version } ພ້ອມແລ້ວ. ຣີສະຕາດເພື່ອນຳໃຊ້.
+settings-update-try-again = ລອງອີກຄັ້ງ
+settings-update-failed = ບໍ່ສາມາດກວດຫາອັບເດດໄດ້.
+settings-item = ລາຍການ
+settings-item-number = ລາຍການ { $number }
+settings-press-key = ກົດປຸ່ມ…
+settings-saved = ບັນທຶກແລ້ວ
+settings-record-key = ຄລິກເພື່ອບັນທຶກຊຸດປຸ່ມໃໝ່
+
+tray-open-window = ເປີດໜ້າຕ່າງ
+tray-close-window = ປິດໜ້າຕ່າງ
+tray-pause-recording = ຢຸດບັນທຶກຊົ່ວຄາວ
+tray-resume-recording = ບັນທຶກຕໍ່
+tray-finish-recording = ສິ້ນສຸດການບັນທຶກ
+tray-quit = ອອກຈາກ Vmux
+
+composer-attach-files = ແນບໄຟລ໌ (/upload)
+composer-remove-attachment = ເອົາໄຟລ໌ແນບອອກ
+
+layout-back = ກັບຄືນ
+layout-forward = ໄປໜ້າ
+layout-reload = ໂຫຼດໃໝ່
+layout-bookmark-page = ບຸກມາກໜ້ານີ້
+layout-remove-bookmark = ເອົາບຸກມາກອອກ
+layout-pin-page = ປັກໝຸດໜ້ານີ້
+layout-unpin-page = ຖອນປັກໝຸດໜ້ານີ້
+layout-manage-extensions = ຈັດການສ່ວນຂະຫຍາຍ
+layout-new-stack = ສະແຕັກໃໝ່
+layout-close-tab = ປິດແທັບ
+layout-bookmark = ບຸກມາກ
+layout-pin = ປັກໝຸດ
+layout-new-tab = ແທັບໃໝ່
+layout-team = ທີມ
+
+command-switch-space = ສະຫຼັບພື້ນທີ່ວຽກ…
+command-search-ask = ຄົ້ນຫາ ຫຼືຖາມ…
+command-new-tab-placeholder = ຄົ້ນຫາ ຫຼືພິມ URL, ຫຼືເລືອກ Terminal…
+command-placeholder = ພິມ URL, ຄົ້ນຫາແທັບ ຫຼືພິມ > ເພື່ອໃຊ້ຄຳສັ່ງ…
+command-composer-placeholder = ພິມ / ເພື່ອໃຊ້ຄຳສັ່ງ ຫຼື @ ເພື່ອແນບມີເດຍ
+command-send = ສົ່ງ (Enter)
+command-terminal = Terminal
+command-open-terminal = ເປີດໃນ Terminal
+command-stack = ສະແຕັກ
+command-tabs = { $count ->
+    [one] 1 ແທັບ
+   *[other] { $count } ແທັບ
+}
+command-prompt = ພຣອມປ໌
+command-new-tab = ແທັບໃໝ່
+command-search = ຄົ້ນຫາ
+command-open-value = ເປີດ “{ $value }”
+command-search-value = ຄົ້ນຫາ “{ $value }”
+
+schema-appearance = ຮູບລັກສະນະ
+schema-general = ທົ່ວໄປ
+schema-layout = ເຄົ້າໂຄງ
+schema-layout-detail = ໜ້າຕ່າງ, ແພນ, ແຖບຂ້າງ ແລະວົງເນັ້ນໂຟກັສ.
+schema-agent = ເອເຈນຕ໌
+schema-agent-detail = ພຶດຕິກຳເອເຈນຕ໌ ແລະສິດໃຊ້ເຄື່ອງມື.
+schema-shortcuts = ທາງລັດ
+schema-shortcuts-detail = ເບິ່ງໄດ້ຢ່າງດຽວ. ແກ້ໄຂ bindings ໂດຍກົງໃນ settings.ron.
+schema-terminal = Terminal
+schema-browser = ເບຣາວເຊີ
+schema-mode = ໂໝດ
+schema-mode-detail = ຊຸດສີສຳລັບໜ້າເວັບ. Device ຈະຕາມລະບົບຂອງທ່ານ.
+schema-device = Device
+schema-light = ສະຫວ່າງ
+schema-dark = ມືດ
+schema-language = ພາສາ
+schema-language-detail = ໃຊ້ພາສາລະບົບ, en-US, ja ຫຼືແທັກ BCP 47 ໃດກໍໄດ້ທີ່ມີຄາຕາລັອກ ~/.vmux/locales/<tag>.ftl ທີ່ກົງກັນ.
+schema-auto-update = Auto-update
+schema-auto-update-detail = ກວດຫາ ແລະຕິດຕັ້ງອັບເດດເມື່ອເປີດແອັບ ແລະທຸກຊົ່ວໂມງ.
+schema-startup-url = URL ເມື່ອເປີດແອັບ
+schema-startup-url-detail = ປ່ອຍວ່າງໄວ້ຈະເປີດພຣອມປ໌ໃນແຖບຄຳສັ່ງ.
+schema-search-engine = ເຄື່ອງມືຄົ້ນຫາ
+schema-search-engine-detail = ໃຊ້ສຳລັບຄົ້ນຫາເວັບຈາກ Start ແລະແຖບຄຳສັ່ງ.
+schema-window = ໜ້າຕ່າງ
+schema-pane = ແພນ
+schema-side-sheet = ແຜ່ນດ້ານຂ້າງ
+schema-focus-ring = ວົງເນັ້ນໂຟກັສ
+schema-run-placement = ອະນຸຍາດໃຫ້ override ຕຳແໜ່ງການຣັນ
+schema-run-placement-detail = ໃຫ້ເອເຈນຕ໌ເລືອກໂໝດແພນສຳລັບຣັນ, ທິດທາງ ແລະຈຸດຍຶດ.
+schema-leader = Leader
+schema-leader-detail = ປຸ່ມນຳໜ້າສຳລັບທາງລັດແບບ chord.
+schema-chord-timeout = ໝົດເວລາ chord
+schema-chord-timeout-detail = ຈຳນວນມິນລິວິນາທີກ່ອນຄຳນຳໜ້າ chord ຈະໝົດອາຍຸ.
+schema-bindings = Bindings
+schema-confirm-close = ຢືນຢັນກ່ອນປິດ
+schema-confirm-close-detail = ຖາມກ່ອນປິດ Terminal ທີ່ມີໂປຣເຊສກຳລັງເຮັດວຽກ.
+schema-default-theme = ທີມເລີ່ມຕົ້ນ
+schema-default-theme-detail = ຊື່ຂອງທີມທີ່ໃຊ້ຢູ່ຈາກລາຍການທີມ.
+
+settings-empty = (ວ່າງ)
+settings-none = (ບໍ່ມີ)
+
+schema-system = ລະບົບ
+schema-editor = ຕົວແກ້ໄຂ
+schema-recording = ການບັນທຶກ
+schema-radius = ລັດສະໝີ
+schema-padding = ຂອບໃນ
+schema-gap = ໄລຍະຫ່າງ
+schema-width = ຄວາມກວ້າງ
+schema-color = ສີ
+schema-red = ສີແດງ
+schema-green = ສີຂຽວ
+schema-blue = ສີຟ້າ
+schema-follow-files = ຕິດຕາມໄຟລ໌
+schema-tidy-files = ເກັບກວາດໄຟລ໌
+schema-tidy-files-max = ເກນເກັບກວາດໄຟລ໌
+schema-tidy-files-auto = ເກັບກວາດໄຟລ໌ອັດຕະໂນມັດ
+schema-app-providers = ຜູ້ໃຫ້ບໍລິການແອັບ
+schema-provider = ຜູ້ໃຫ້ບໍລິການ
+schema-kind = ປະເພດ
+schema-models = ໂມເດວ
+schema-acp = ເອເຈນ ACP
+schema-id = ID
+schema-name = ຊື່
+schema-command = ຄຳສັ່ງ
+schema-arguments = ອາກິວເມັນ
+schema-environment = ຕົວແປສະພາບແວດລ້ອມ
+schema-working-directory = ໄດເຣັກທໍຣີເຮັດວຽກ
+schema-shell = ເຊວ
+schema-font-family = ຕະກູນຟອນ
+schema-startup-directory = ໄດເຣັກທໍຣີເລີ່ມຕົ້ນ
+schema-themes = ທີມ
+schema-color-scheme = ຊຸດສີ
+schema-font-size = ຂະໜາດຟອນ
+schema-line-height = ຄວາມສູງແຖວ
+schema-cursor-style = ຮູບແບບເຄີເຊີ
+schema-cursor-blink = ເຄີເຊີກະພິບ
+schema-custom-themes = ທີມກຳນົດເອງ
+schema-foreground = ສີດ້ານໜ້າ
+schema-background = ພື້ນຫຼັງ
+schema-cursor = ເຄີເຊີ
+schema-ansi-colors = ສີ ANSI
+schema-keymap = ແຜນຜັງປຸ່ມ
+schema-explorer = ຕົວສຳຫຼວດ
+schema-visible = ສະແດງ
+schema-language-servers = ເຊີບເວີພາສາ
+schema-servers = ເຊີບເວີ
+schema-language-id = ID ພາສາ
+schema-root-markers = ຕົວໝາຍຮາກ
+schema-output-directory = ໄດເຣັກທໍຣີຜົນລັບ
+
+menu-scene = ສາກ
+menu-layout = ເຄົ້າໂຄງ
+menu-terminal = ເທີມິນັນ
+menu-browser = ເບຣົາເຊີ
+menu-service = ບໍລິການ
+menu-bookmark = ບຸກມາກ
+menu-edit = ແກ້ໄຂ
+
+layout-knowledge = ຄວາມຮູ້
+layout-open-knowledge = ເປີດຄວາມຮູ້
+layout-open-welcome-knowledge = ເປີດຍິນດີຕ້ອນຮັບສູ່ຄວາມຮູ້
+layout-open-path = ເປີດ { $path }
+layout-fold-knowledge = ພັບຄວາມຮູ້
+layout-unfold-knowledge = ກາງຄວາມຮູ້
+layout-bookmarks = ບຸກມາກ
+layout-new-folder = ໂຟນເດີໃໝ່
+layout-add-to-bookmarks = ເພີ່ມໃສ່ບຸກມາກ
+layout-move-to-bookmarks = ຍ້າຍໄປບຸກມາກ
+layout-stack-number = ສະແຕັກ { $number }
+layout-fold-stack = ພັບສະແຕັກ
+layout-unfold-stack = ກາງສະແຕັກ
+layout-close-stack = ປິດສະແຕັກ
+layout-bookmark-in = ບຸກມາກໃນ { $folder }
+
+common-cancel = ຍົກເລີກ
+common-delete = ລຶບ
+common-save = ບັນທຶກ
+common-rename = ປ່ຽນຊື່
+common-expand = ຂະຫຍາຍ
+common-collapse = ຫຍໍ້
+common-loading = ກຳລັງໂຫຼດ…
+common-error = ຂໍ້ຜິດພາດ
+common-output = ຜົນລັບ
+common-pending = ລໍຖ້າຢູ່
+common-current = ປັດຈຸບັນ
+common-stop = ຢຸດ
+services-command = ບໍລິການ Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = ໂຫຼດໜ້າບໍ່ສຳເລັດ
+error-page-not-found = ບໍ່ພົບໜ້າ
+error-unknown-host = ໂຮສແອັບ Vmux ທີ່ບໍ່ຮູ້ຈັກ: { $host }
+
+history-title = ປະຫວັດ
+
+command-new-app-chat = ແຊັດ { $provider }/{ $model } ໃໝ່ (ແອັບ)
+command-interactive-mode-user = ຊີນ > ໂໝດໂຕ້ຕອບ > ຜູ້ໃຊ້
+command-interactive-mode-player = ຊີນ > ໂໝດໂຕ້ຕອບ > ຜູ້ຫຼິ້ນ
+command-minimize-window = ເລຍເອົາຕ໌ > ໜ້າຕ່າງ > ຫຍໍ້ລົງ
+command-toggle-layout = ເລຍເອົາຕ໌ > ເລຍເອົາຕ໌ > ສະຫຼັບເລຍເອົາຕ໌
+command-close-tab = ເລຍເອົາຕ໌ > ແທັບ > ປິດແທັບ
+command-new-task = ເລຍເອົາຕ໌ > ແທັບ > ວຽກໃໝ່…
+command-next-tab = ເລຍເອົາຕ໌ > ແທັບ > ແທັບຖັດໄປ
+command-prev-tab = ເລຍເອົາຕ໌ > ແທັບ > ແທັບກ່ອນໜ້າ
+command-rename-tab = ເລຍເອົາຕ໌ > ແທັບ > ປ່ຽນຊື່ແທັບ
+command-tab-select-1 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 1
+command-tab-select-2 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 2
+command-tab-select-3 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 3
+command-tab-select-4 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 4
+command-tab-select-5 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 5
+command-tab-select-6 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 6
+command-tab-select-7 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 7
+command-tab-select-8 = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບ 8
+command-tab-select-last = ເລຍເອົາຕ໌ > ແທັບ > ເລືອກແທັບສຸດທ້າຍ
+command-close-pane = ເລຍເອົາຕ໌ > ພານ > ປິດພານ
+command-select-pane-left = ເລຍເອົາຕ໌ > ພານ > ເລືອກພານຊ້າຍ
+command-select-pane-right = ເລຍເອົາຕ໌ > ພານ > ເລືອກພານຂວາ
+command-select-pane-up = ເລຍເອົາຕ໌ > ພານ > ເລືອກພານເທິງ
+command-select-pane-down = ເລຍເອົາຕ໌ > ພານ > ເລືອກພານລຸ່ມ
+command-swap-pane-prev = ເລຍເອົາຕ໌ > ພານ > ສະຫຼັບກັບພານກ່ອນໜ້າ
+command-swap-pane-next = ເລຍເອົາຕ໌ > ພານ > ສະຫຼັບກັບພານຖັດໄປ
+command-equalize-pane-size = ເລຍເອົາຕ໌ > ພານ > ປັບຂະໜາດພານໃຫ້ເທົ່າກັນ
+command-resize-pane-left = ເລຍເອົາຕ໌ > ພານ > ປັບຂະໜາດພານໄປຊ້າຍ
+command-resize-pane-right = ເລຍເອົາຕ໌ > ພານ > ປັບຂະໜາດພານໄປຂວາ
+command-resize-pane-up = ເລຍເອົາຕ໌ > ພານ > ປັບຂະໜາດພານຂຶ້ນ
+command-resize-pane-down = ເລຍເອົາຕ໌ > ພານ > ປັບຂະໜາດພານລົງ
+command-stack-close = ເລຍເອົາຕ໌ > ສະແຕັກ > ປິດສະແຕັກ
+command-stack-next = ເລຍເອົາຕ໌ > ສະແຕັກ > ສະແຕັກຖັດໄປ
+command-stack-previous = ເລຍເອົາຕ໌ > ສະແຕັກ > ສະແຕັກກ່ອນໜ້າ
+command-stack-reopen = ເລຍເອົາຕ໌ > ສະແຕັກ > ເປີດໜ້າທີ່ປິດໄປຄືນ
+command-stack-swap-prev = ເລຍເອົາຕ໌ > ສະແຕັກ > ຍ້າຍສະແຕັກໄປຊ້າຍ
+command-stack-swap-next = ເລຍເອົາຕ໌ > ສະແຕັກ > ຍ້າຍສະແຕັກໄປຂວາ
+command-space-open = ເລຍເອົາຕ໌ > ສະເປດ > ສະເປດ
+command-terminal-close = ເທີມິນັນ > ປິດເທີມິນັນ
+command-terminal-next = ເທີມິນັນ > ເທີມິນັນຖັດໄປ
+command-terminal-prev = ເທີມິນັນ > ເທີມິນັນກ່ອນໜ້າ
+command-terminal-clear = ເທີມິນັນ > ລ້າງເທີມິນັນ
+command-browser-prev-page = ເບຣາວເຊີ > ນຳທາງ > ກັບຄືນ
+command-browser-next-page = ເບຣາວເຊີ > ນຳທາງ > ໄປໜ້າ
+command-browser-reload = ເບຣາວເຊີ > ນຳທາງ > ໂຫຼດໃໝ່
+command-browser-hard-reload = ເບຣາວເຊີ > ນຳທາງ > ໂຫຼດໃໝ່ແບບບັງຄັບ
+command-open-in-place = ເບຣາວເຊີ > ເປີດ > ເປີດທີ່ນີ້
+command-open-in-new-stack = ເບຣາວເຊີ > ເປີດ > ເປີດໃນສະແຕັກໃໝ່
+command-open-in-pane-top = ເບຣາວເຊີ > ເປີດ > ເປີດໃນພານດ້ານເທິງ
+command-open-in-pane-right = ເບຣາວເຊີ > ເປີດ > ເປີດໃນພານຂວາ
+command-open-in-pane-bottom = ເບຣາວເຊີ > ເປີດ > ເປີດໃນພານດ້ານລຸ່ມ
+command-open-in-pane-left = ເບຣາວເຊີ > ເປີດ > ເປີດໃນພານຊ້າຍ
+command-open-in-new-tab = ເບຣາວເຊີ > ເປີດ > ເປີດໃນແທັບໃໝ່
+command-open-in-new-space = ເບຣາວເຊີ > ເປີດ > ເປີດໃນສະເປດໃໝ່
+command-browser-zoom-in = ເບຣາວເຊີ > ເບິ່ງ > ຂະຫຍາຍ
+command-browser-zoom-out = ເບຣາວເຊີ > ເບິ່ງ > ຫຍໍ້
+command-browser-zoom-reset = ເບຣາວເຊີ > ເບິ່ງ > ຂະໜາດຈິງ
+command-browser-dev-tools = ເບຣາວເຊີ > ເບິ່ງ > ເຄື່ອງມືນັກພັດທະນາ
+command-browser-open-command-bar = ເບຣາວເຊີ > ແຖບ > ແຖບຄຳສັ່ງ
+command-browser-open-page-in-command-bar = ເບຣາວເຊີ > ແຖບ > ແກ້ໄຂໜ້າ
+command-browser-open-path-bar = ເບຣາວເຊີ > ແຖບ > ຕົວນຳທາງພາທ
+command-browser-open-commands = ເບຣາວເຊີ > ແຖບ > ຄຳສັ່ງ
+command-browser-open-history = ເບຣາວເຊີ > ແຖບ > ປະຫວັດ
+command-service-open = ບໍລິການ > ເປີດຕົວຕິດຕາມບໍລິການ
+command-bookmark-toggle-active = ບຸກມາກ > ບຸກມາກໜ້ານີ້
+command-bookmark-pin-active = ບຸກມາກ > ປັກໝຸດໜ້ານີ້
+
+layout-tab = ແທັບ
+layout-no-stacks = ບໍ່ມີສະແຕັກ
+layout-loading = ກຳລັງໂຫຼດ…
+layout-no-markdown-files = ບໍ່ມີໄຟລ໌ Markdown
+layout-empty-folder = ໂຟນເດີຫວ່າງ
+layout-worktree = worktree
+layout-folder-name = ຊື່ໂຟນເດີ
+layout-no-pins-bookmarks = ບໍ່ມີປັກໝຸດຫຼືບຸກມາກ
+layout-move-to = ຍ້າຍໄປ { $folder }
+layout-bookmark-current-page = ບຸກມາກໜ້າປັດຈຸບັນ
+layout-rename-folder = ປ່ຽນຊື່ໂຟນເດີ
+layout-remove-folder = ເອົາໂຟນເດີອອກ
+layout-update-downloading = ກຳລັງດາວໂຫຼດອັບເດດ
+layout-update-installing = ກຳລັງຕິດຕັ້ງອັບເດດ…
+layout-update-ready = ມີເວີຊັນໃໝ່
+layout-restart-update = ຣີສະຕາດເພື່ອອັບເດດ
+
+agent-preparing = ກຳລັງກຽມເອເຈັນ…
+agent-send-all-queued = ສົ່ງພຣອມທີ່ຄິວໄວ້ທັງໝົດຕອນນີ້ (Esc)
+agent-send = ສົ່ງ (Enter)
+agent-ready = ພ້ອມເມື່ອທ່ານພ້ອມ.
+agent-loading-older = ກຳລັງໂຫຼດຂໍ້ຄວາມເກົ່າກວ່າ…
+agent-load-older = ໂຫຼດຂໍ້ຄວາມເກົ່າກວ່າ
+agent-continued-from = ຕໍ່ຈາກ { $source }
+agent-older-context-omitted = ຂ້າມບໍລິບົດເກົ່າກວ່າ
+agent-interrupted = ຖືກຂັດຈັງຫວະ
+agent-allow-tool = ອະນຸຍາດ { $tool } ບໍ?
+agent-deny = ປະຕິເສດ
+agent-allow-always = ອະນຸຍາດສະເໝີ
+agent-allow = ອະນຸຍາດ
+agent-loading-sessions = ກຳລັງໂຫຼດເຊສຊັນ…
+agent-no-resumable-sessions = ບໍ່ພົບເຊສຊັນທີ່ຕໍ່ຄືນໄດ້
+agent-no-matching-sessions = ບໍ່ມີເຊສຊັນທີ່ກົງກັນ
+agent-no-matching-models = ບໍ່ມີໂມເດວທີ່ກົງກັນ
+agent-choice-help = ↑/↓ ຫຼື Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = ເລືອກໂຟນເດີຣີໂພຊິທໍຣີ
+agent-choose-repository-detail = ເລືອກຣີໂພຊິທໍຣີ Git ໃນເຄື່ອງທີ່ເອເຈັນຄວນໃຊ້.
+agent-choosing = ກຳລັງເລືອກ…
+agent-choose-folder = ເລືອກໂຟນເດີ
+agent-queued = ຢູ່ໃນຄິວ
+agent-attached = ແນບແລ້ວ:
+agent-cancel-queued = ຍົກເລີກພຣອມທີ່ຄິວໄວ້
+agent-resume-queued = ດຳເນີນພຣອມທີ່ຄິວໄວ້ຕໍ່
+agent-clear-queue = ລ້າງຄິວ
+agent-send-all-now = ສົ່ງທັງໝົດຕອນນີ້
+agent-choose-option = ເລືອກຕົວເລືອກດ້ານເທິງ
+agent-loading-media = ກຳລັງໂຫຼດມີເດຍ…
+agent-no-matching-media = ບໍ່ມີມີເດຍທີ່ກົງກັນ
+agent-prompt-context = ບໍລິບົດພຣອມ
+agent-details = ລາຍລະອຽດ
+agent-path = ພາທ
+agent-tool = ເຄື່ອງມື
+agent-server = ເຊີບເວີ
+agent-bytes = { $count } ໄບຕ໌
+agent-worked-for = ເຮັດວຽກເປັນເວລາ { $duration }
+agent-worked-for-steps = { $count ->
+    [one] ເຮັດວຽກເປັນເວລາ { $duration } · 1 ຂັ້ນຕອນ
+   *[other] ເຮັດວຽກເປັນເວລາ { $duration } · { $count } ຂັ້ນຕອນ
+}
+agent-tool-guardian-review = ການກວດທານຂອງ Guardian
+agent-tool-read-files = ອ່ານໄຟລ໌
+agent-tool-viewed-image = ເບິ່ງຮູບພາບ
+agent-tool-used-browser = ໃຊ້ເບຣາວເຊີ
+agent-tool-searched-files = ຄົ້ນຫາໄຟລ໌
+agent-tool-ran-commands = ແລ່ນຄຳສັ່ງ
+agent-thinking = ກຳລັງຄິດ
+agent-subagent = ເອເຈັນຍ່ອຍ
+agent-prompt = ພຣອມ
+agent-thread = ເທຣດ
+agent-parent = ແມ່
+agent-children = ລູກ
+agent-call = ການເອີ້ນ
+agent-raw-event = ເຫດການດິບ
+agent-plan = ແຜນ
+agent-tasks = { $count ->
+    [one] 1 ວຽກ
+   *[other] { $count } ວຽກ
+}
+agent-edited = ແກ້ໄຂແລ້ວ
+agent-reconnecting = ກຳລັງເຊື່ອມຕໍ່ໃໝ່ { $attempt }/{ $total }
+agent-status-running = ກຳລັງແລ່ນ
+agent-status-done = ສຳເລັດ
+agent-status-failed = ລົ້ມເຫຼວ
+agent-status-pending = ລໍຖ້າຢູ່
+agent-slash-attach-files = ແນບໄຟລ໌
+agent-slash-resume-session = ດຳເນີນເຊສຊັນກ່ອນໜ້າຕໍ່
+agent-slash-select-model = ເລືອກໂມເດວ
+agent-slash-continue-cli = ດຳເນີນເຊສຊັນນີ້ຕໍ່ໃນ CLI
+agent-session-just-now = ເມື່ອກີ້ນີ້
+agent-session-minutes-ago = { $count }m ກ່ອນ
+agent-session-hours-ago = { $count }h ກ່ອນ
+agent-session-days-ago = { $count }d ກ່ອນ
+agent-working-working = ກຳລັງເຮັດວຽກ
+agent-working-thinking = ກຳລັງຄິດ
+agent-working-pondering = ກຳລັງພິຈາລະນາ
+agent-working-noodling = ກຳລັງລອງຄິດ
+agent-working-percolating = ກຳລັງກັ່ນຄວາມຄິດ
+agent-working-conjuring = ກຳລັງເສກສ້າງ
+agent-working-cooking = ກຳລັງປຸງແຕ່ງ
+agent-working-brewing = ກຳລັງບ່ມ
+agent-working-musing = ກຳລັງຄິດພິນິດ
+agent-working-ruminating = ກຳລັງຄິດທົບທວນ
+agent-working-scheming = ກຳລັງວາງກົນລະຍຸດ
+agent-working-synthesizing = ກຳລັງສັງເຄາະ
+agent-working-tinkering = ກຳລັງປັບແຕ່ງ
+agent-working-churning = ກຳລັງປັ່ນຄວາມຄິດ
+agent-working-vibing = ກຳລັງຈັບຟີລ
+agent-working-simmering = ກຳລັງຄ່ອຍໆຕົ້ມ
+agent-working-crafting = ກຳລັງປະດິດ
+agent-working-divining = ກຳລັງຄາດຄະເນ
+agent-working-mulling = ກຳລັງຄິດໄຕ່ຕອງ
+agent-working-spelunking = ກຳລັງຂຸດຄົ້ນ
+
+editor-toggle-explorer = ສະຫຼັບ Explorer (Cmd+B)
+editor-unsaved = ຍັງບໍ່ໄດ້ບັນທຶກ
+editor-rendered-markdown = Markdown ທີ່ແສດງຜົນພ້ອມການແກ້ໄຂສົດ
+editor-note = ໝາຍເຫດ
+editor-source-editor = ຕົວແກ້ໄຂຊອຣສ
+editor-editor = ຕົວແກ້ໄຂ
+editor-git-diff = Git diff
+editor-diff = Diff
+editor-tidy = ຈັດລະບຽບ
+editor-always = ສະເໝີ
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 ພຣີວິວທີ່ບໍ່ປ່ຽນແປງ
+   *[other] ✦ { $count } ພຣີວິວທີ່ບໍ່ປ່ຽນແປງ
+}
+editor-open-externally = ເປີດພາຍນອກ
+editor-changed-line = ແຖວທີ່ປ່ຽນແປງ
+editor-go-to-definition = ໄປຫານິຍາມ
+editor-find-references = ຊອກຫາການອ້າງອີງ
+editor-references = { $count ->
+    [one] 1 ການອ້າງອີງ
+   *[other] { $count } ການອ້າງອີງ
+}
+editor-lsp-starting = { $server } ກຳລັງເລີ່ມ…
+editor-lsp-not-installed = { $server } — ຍັງບໍ່ໄດ້ຕິດຕັ້ງ
+editor-explorer = Explorer
+editor-open-editors = ຕົວແກ້ໄຂທີ່ເປີດຢູ່
+editor-outline = ໂຄງຮ່າງ
+editor-new-file = ໄຟລ໌ໃໝ່
+editor-new-folder = ໂຟນເດີໃໝ່
+editor-delete-confirm = ລຶບ “{ $name }”? ກູ້ຄືນບໍ່ໄດ້.
+editor-created-folder = ສ້າງໂຟນເດີ { $name } ແລ້ວ
+editor-created-file = ສ້າງໄຟລ໌ { $name } ແລ້ວ
+editor-renamed-to = ປ່ຽນຊື່ເປັນ { $name } ແລ້ວ
+editor-deleted = ລຶບ { $name } ແລ້ວ
+editor-failed-decode-image = ຖອດລະຫັດຮູບພາບບໍ່ສຳເລັດ
+editor-preview-large-image = ຮູບພາບ (ໃຫຍ່ເກີນຈະພຣີວິວ)
+editor-preview-binary = ໄບນາຣີ
+editor-preview-file = ໄຟລ໌
+
+git-status-clean = ສະອາດ
+git-status-modified = ແກ້ໄຂແລ້ວ
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = ບໍ່ໄດ້ຕິດຕາມ
+git-status-deleted = ລຶບແລ້ວ
+git-status-conflict = ຂັດແຍ້ງ
+git-accept-all = ✓ ຍອມຮັບທັງໝົດ
+git-unstage = ເອົາອອກຈາກ stage
+git-confirm-deny-all = ຢືນຢັນປະຕິເສດທັງໝົດ
+git-deny-all = ✗ ປະຕິເສດທັງໝົດ
+git-commit-message = ຂໍ້ຄວາມ commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = ກຳລັງໂຫຼດ diff…
+git-no-changes = ບໍ່ມີການປ່ຽນແປງໃຫ້ສະແດງ
+git-accept = ✓ ຍອມຮັບ
+git-deny = ✗ ປະຕິເສດ
+git-show-unchanged-lines = ສະແດງ { $count } ແຖວທີ່ບໍ່ປ່ຽນແປງ
+
+terminal-loading = ກຳລັງໂຫຼດ…
+terminal-runs-when-ready = ແລ່ນເມື່ອພ້ອມ · Ctrl+C ລ້າງ · Esc ຂ້າມ
+terminal-booting = ກຳລັງບູດ
+terminal-type-command = ພິມຄຳສັ່ງ · ແລ່ນເມື່ອພ້ອມ · Esc ຂ້າມ
+
+setup-tagline-claude = ເອເຈັນຂຽນໂຄດຂອງ Anthropic ໃນ Vmux
+setup-tagline-codex = ເອເຈັນຂຽນໂຄດຂອງ OpenAI ໃນ Vmux
+setup-tagline-vibe = ເອເຈັນຂຽນໂຄດຂອງ Mistral ໃນ Vmux
+setup-install-title = ຕິດຕັ້ງ { $name } CLI
+setup-homebrew-required = ຕ້ອງມີ Homebrew ເພື່ອຕິດຕັ້ງ { $command } ແລະຍັງບໍ່ໄດ້ຕັ້ງຄ່າ. Vmux ຈະຕິດຕັ້ງ Homebrew ກ່ອນ ແລ້ວຈຶ່ງຕິດຕັ້ງ { $name }.
+setup-terminal-instructions = ໃນເທີມິນັນ, ກົດ Return ເພື່ອເລີ່ມ, ແລ້ວໃສ່ລະຫັດຜ່ານ Mac ເມື່ອຖືກຖາມ.
+setup-command-missing = Vmux ເປີດໜ້ານີ້ເພາະຄຳສັ່ງ { $command } ໃນເຄື່ອງຍັງບໍ່ໄດ້ຕິດຕັ້ງ. ແລ່ນຄຳສັ່ງດ້ານລຸ່ມເພື່ອເອົາມັນ.
+setup-install-failed = ການຕິດຕັ້ງບໍ່ສຳເລັດ. ກວດເບິ່ງເທີມິນັນສຳລັບລາຍລະອຽດ ແລ້ວລອງໃໝ່.
+setup-installing = ກຳລັງຕິດຕັ້ງ…
+setup-install-homebrew = ຕິດຕັ້ງ Homebrew + { $name }
+setup-run-install = ແລ່ນຄຳສັ່ງຕິດຕັ້ງ
+setup-auto-reload = Vmux ແລ່ນມັນໃນເທີມິນັນ ແລະໂຫຼດໃໝ່ເມື່ອ { $command } ພ້ອມ.
+
+debug-title = ດີບັກ
+debug-auto-update = ອັບເດດອັດຕະໂນມັດ
+debug-simulate-update = ຈຳລອງວ່າມີອັບເດດ
+debug-simulate-download = ຈຳລອງການດາວໂຫຼດ
+debug-clear-update = ລ້າງອັບເດດ
+debug-trigger-restart = ກະຕຸ້ນການຣີສະຕາດ
+
+command-manage-spaces = ຈັດການສະເປດ…
+command-pane-stack-location = ພານ { $pane } / ສະແຕັກ { $stack }
+command-space-pane-stack-location = { $space } / ພານ { $pane } / ສະແຕັກ { $stack }
+command-terminal-path = ເທີມິນັນ ({ $path })
+command-group-interactive-mode = ໂໝດໂຕ້ຕອບ
+command-group-window = ໜ້າຕ່າງ
+command-group-tab = ແທັບ
+command-group-pane = ພານ
+command-group-stack = ສະແຕັກ
+command-group-space = ສະເປດ
+command-group-navigation = ການນຳທາງ
+command-group-open = ເປີດ
+command-group-view = ມຸມມອງ
+command-group-bar = ແຖບ
+
+menu-close-vmux = ປິດ Vmux
+
+agents-terminal-coding-agent = ເອເຈນຂຽນໂຄດຜ່ານເທີມິນັນ

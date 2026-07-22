@@ -1,0 +1,602 @@
+locale-name = Ikinyarwanda
+common-open = Fungura
+common-close = Funga
+common-install = Shyiramo
+common-uninstall = Kuramo
+common-update = Vugurura
+common-retry = Ongera ugerageze
+common-refresh = Ongera uvugurure
+common-remove = Vanaho
+common-enable = Koresha
+common-disable = Hagarika
+common-new = Gishya
+common-active = irakora
+common-running = irimo gukora
+common-done = birangiye
+common-failed = Byanze
+common-installed = Byashyizwemo
+common-items = { $count ->
+    [one] ikintu { $count }
+   *[other] ibintu { $count }
+}
+start-title = Tangira
+start-tagline = Prompt imwe. Ibyo ushaka, birakorwa.
+
+agents-title = Abajenti
+agents-search = Shakisha abajenti ba ACP na CLI…
+agents-empty = Nta bajenti bihuye
+agents-empty-detail = Gerageza izina, runtime, cyangwa ACP/CLI.
+agents-install-failed = Gushyiramo byanze
+agents-updating = Biravugururwa…
+agents-retrying = Birongera kugeragezwa…
+agents-preparing = Birategurwa…
+
+extensions-title = Imigereka
+extensions-search = Shakisha iyashyizwemo cyangwa Chrome Web Store…
+extensions-relaunch = Ongera utangize ngo bikurikizwe
+extensions-empty = Nta migereka yashyizwemo
+extensions-no-match = Nta migereka ihuye
+extensions-empty-detail = Shakisha muri Chrome Web Store hejuru, hanyuma ukande Enter.
+extensions-no-match-detail = Gerageza irindi zina cyangwa ID y’umugereka.
+extensions-on = Ifunguye
+extensions-off = Ifunze
+extensions-enable-confirm = Gukoresha { $name }?
+extensions-enable-permissions = Koresha { $name } kandi wemere:
+
+lsp-title = Seriveri z’indimi
+lsp-search = Shakisha seriveri z’indimi, linters, formatters…
+lsp-loading = Katalo irimo gufungurwa…
+lsp-empty = Nta seriveri z’indimi zihuye
+lsp-empty-detail = Gerageza urundi rurimi, linter, cyangwa formatter.
+lsp-needs = ikeneye { $tool }
+lsp-status-available = Iraboneka
+lsp-status-on-path = Iri kuri PATH
+lsp-status-installing = Irimo gushyirwamo…
+lsp-status-installed = Yashyizwemo
+lsp-status-outdated = Ivugurura riraboneka
+lsp-status-running = Irimo gukora
+lsp-status-failed = Byanze
+
+spaces-title = Imyanya
+spaces-new-placeholder = Izina ry’umwanya mushya
+spaces-empty = Nta myanya
+spaces-default-name = Umwanya { $number }
+spaces-tabs = { $count ->
+    [one] tabu 1
+   *[other] tabu { $count }
+}
+spaces-delete = Siba umwanya
+
+team-title = Ikipe
+team-just-you = Ni wowe wenyine muri uyu mwanya
+team-agents = { $count ->
+    [one] Wowe n’ajenti 1
+   *[other] Wowe n’abajenti { $count }
+}
+team-empty = Nta wundi urahagera
+team-you = Wowe
+team-agent = Ajenti
+
+services-title = Serivisi z’inyuma
+services-processes = { $count ->
+    [one] porosesi 1
+   *[other] porosesi { $count }
+}
+services-kill-all = Hagarika zose ku ngufu
+services-not-running = Serivisi ntiri gukora
+services-start-with = Tangiza ukoresheje:
+services-empty = Nta porosesi zikora
+services-filter = Shungura porosesi…
+services-no-match = Nta porosesi zihuye
+services-connected = Byahujwe
+services-disconnected = Byatandukanye
+services-attached = yometse
+services-kill = Hagarika ku ngufu
+services-memory = Ububiko
+services-size = Ingano
+services-shell = Shell
+
+error-title = Ikosa
+
+history-search = Shakisha mu mateka
+history-clear-all = Siba byose
+history-clear-confirm = Gusiba amateka yose?
+history-clear-warning = Ntibishobora gusubizwa inyuma.
+history-cancel = Hagarika
+history-today = Uyu munsi
+history-yesterday = Ejo hashize
+history-days-ago = hashize iminsi { $count }
+history-day-offset = Umunsi -{ $count }
+
+settings-title = Igenamiterere
+settings-loading = Igenamiterere ririmo gufungurwa…
+settings-stored = Bibitswe muri ~/.vmux/settings.ron
+settings-other = Ibindi
+settings-software-update = Ivugurura rya porogaramu
+settings-check-updates = Reba ivugurura
+settings-check-updates-hint = Igenzura mu kwitangiza no buri saha iyo Auto-update ikora.
+settings-update-unavailable = Ntibiboneka
+settings-update-unavailable-hint = Uvugurura ntarimo muri iyi build.
+settings-update-checking = Biragenzurwa…
+settings-update-checking-hint = Harimo kugenzurwa ivugurura…
+settings-update-check-again = Ongera ugenzure
+settings-update-current = Vmux iri ku gihe.
+settings-update-downloading = Birakururwa…
+settings-update-downloading-hint = Harakururwa Vmux { $version }…
+settings-update-installing = Birashyirwamo…
+settings-update-installing-hint = Harashyirwamo Vmux { $version }…
+settings-update-ready = Ivugurura ryiteguye
+settings-update-ready-hint = Vmux { $version } yiteguye. Ongera utangize ngo rikurikizwe.
+settings-update-try-again = Ongera ugerageze
+settings-update-failed = Ntibyashobotse kugenzura ivugurura.
+settings-item = Ikintu
+settings-item-number = Ikintu { $number }
+settings-press-key = Kanda urufunguzo…
+settings-saved = Byabitswe
+settings-record-key = Kanda hano wandike ikomatanya rishya ry’imfunguzo
+
+tray-open-window = Fungura idirishya
+tray-close-window = Funga idirishya
+tray-pause-recording = Hagarika gufata by’agateganyo
+tray-resume-recording = Komeza gufata
+tray-finish-recording = Rangiza gufata
+tray-quit = Sohoka muri Vmux
+
+composer-attach-files = Ongeraho dosiye (/upload)
+composer-remove-attachment = Vanaho umugereka
+
+layout-back = Subira inyuma
+layout-forward = Jya imbere
+layout-reload = Ongera ufungure
+layout-bookmark-page = Bika uru rupapuro
+layout-remove-bookmark = Vanaho ikimenyetso
+layout-pin-page = Pinning’a uru rupapuro
+layout-unpin-page = Kuraho pin y’uru rupapuro
+layout-manage-extensions = Gucunga imigereka
+layout-new-stack = Stack nshya
+layout-close-tab = Funga tabu
+layout-bookmark = Ikimenyetso
+layout-pin = Pinning’a
+layout-new-tab = Tabu nshya
+layout-team = Ikipe
+
+command-switch-space = Hindura umwanya…
+command-search-ask = Shakisha cyangwa ubaze…
+command-new-tab-placeholder = Shakisha cyangwa wandike URL, cyangwa uhitemo Terminal…
+command-placeholder = Andika URL, shakisha tabu, cyangwa > ku mategeko…
+command-composer-placeholder = Andika / ku mategeko cyangwa @ ku bitangazamakuru
+command-send = Ohereza (Enter)
+command-terminal = Terminal
+command-open-terminal = Fungurira muri Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] tabu 1
+   *[other] tabu { $count }
+}
+command-prompt = Prompt
+command-new-tab = Tabu nshya
+command-search = Shakisha
+command-open-value = Fungura “{ $value }”
+command-search-value = Shakisha “{ $value }”
+
+schema-appearance = Imigaragarire
+schema-general = Rusange
+schema-layout = Imiterere
+schema-layout-detail = Idirishya, ibice, akabari ko ku ruhande, n’uruziga rwo kwibanda.
+schema-agent = Ajenti
+schema-agent-detail = Imyitwarire y’ajenti n’impushya z’ibikoresho.
+schema-shortcuts = Amagufi
+schema-shortcuts-detail = Kureba gusa. Hindura settings.ron ako kanya kugira ngo uhindure bindings.
+schema-terminal = Terminal
+schema-browser = Mucukumbuzi
+schema-mode = Uburyo
+schema-mode-detail = Ibara ry’amapaji y’urubuga. Device ikurikiza sisitemu yawe.
+schema-device = Device
+schema-light = Urumuri
+schema-dark = Umwijima
+schema-language = Ururimi
+schema-language-detail = Koresha sisitemu, en-US, ja, cyangwa tag iyo ari yo yose ya BCP 47 ifite katalo ya ~/.vmux/locales/<tag>.ftl bihuye.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Genzura kandi ushyiremo ivugurura mu kwitangiza no buri saha.
+schema-startup-url = URL yo gutangira
+schema-startup-url-detail = Iyo irimo ubusa, ifungura prompt y’akabari k’amategeko.
+schema-search-engine = Moteri y’ishakisha
+schema-search-engine-detail = Ikoreshwa mu gushakisha ku rubuga uhereye kuri Tangira no ku kabari k’amategeko.
+schema-window = Idirishya
+schema-pane = Igice
+schema-side-sheet = Urupapuro rwo ku ruhande
+schema-focus-ring = Uruziga rwo kwibanda
+schema-run-placement = Emera guhindura aho run ishyirwa
+schema-run-placement-detail = Reka abajenti bahitemo uburyo bw’igice cya run, icyerekezo, n’aho bishingira.
+schema-leader = Leader
+schema-leader-detail = Urufunguzo rubanziriza amagufi ya chord.
+schema-chord-timeout = Igihe chord imara
+schema-chord-timeout-detail = Milisekonda mbere y’uko prefix ya chord irangira.
+schema-bindings = Bindings
+schema-confirm-close = Emeza gufunga
+schema-confirm-close-detail = Baza mbere yo gufunga terminal ifite porosesi ikiri gukora.
+schema-default-theme = Insanganyamatsiko isanzwe
+schema-default-theme-detail = Izina ry’insanganyamatsiko ikora iri ku rutonde rw’insanganyamatsiko.
+
+settings-empty = (nta kirimo)
+settings-none = (nta na kimwe)
+
+schema-system = Sisitemu
+schema-editor = Muhinduzi
+schema-recording = Gufata amajwi n’amashusho
+schema-radius = Uruziga rw’inguni
+schema-padding = Umwanya w’imbere
+schema-gap = Intera
+schema-width = Ubugari
+schema-color = Ibara
+schema-red = Umutuku
+schema-green = Icyatsi
+schema-blue = Ubururu
+schema-follow-files = Gukurikira dosiye
+schema-tidy-files = Gusukura dosiye
+schema-tidy-files-max = Urugero rwo gusukura dosiye
+schema-tidy-files-auto = Gusukura dosiye mu buryo bwikora
+schema-app-providers = Abatanga porogaramu
+schema-provider = Utanga serivisi
+schema-kind = Ubwoko
+schema-models = Moderi
+schema-acp = Abakozi ba ACP
+schema-id = ID
+schema-name = Izina
+schema-command = Itegeko
+schema-arguments = Ingingo
+schema-environment = Ibigenga imikorere
+schema-working-directory = Ububiko bukorerwamo
+schema-shell = Shell
+schema-font-family = Umuryango w’imyandikire
+schema-startup-directory = Ububiko butangirirwamo
+schema-themes = Insanganyamatsiko
+schema-color-scheme = Imiterere y’amabara
+schema-font-size = Ingano y’imyandikire
+schema-line-height = Ubuhagarike bw’umurongo
+schema-cursor-style = Imiterere y’akaranga
+schema-cursor-blink = Kumyasa kw’akaranga
+schema-custom-themes = Insanganyamatsiko zihariye
+schema-foreground = Imbere
+schema-background = Inyuma
+schema-cursor = Akaranga
+schema-ansi-colors = Amabara ya ANSI
+schema-keymap = Ikarita ya buto
+schema-explorer = Mucukumbuzi
+schema-visible = Bigaragara
+schema-language-servers = Seriveri z’indimi
+schema-servers = Seriveri
+schema-language-id = ID y’ururimi
+schema-root-markers = Ibimenyetso by’umuzi
+schema-output-directory = Ububiko bw’ibisohoka
+
+menu-scene = Igice
+menu-layout = Imiterere
+menu-terminal = Teriminali
+menu-browser = Mucukumbuzi
+menu-service = Serivisi
+menu-bookmark = Akamenyetso
+menu-edit = Guhindura
+
+layout-knowledge = Ubumenyi
+layout-open-knowledge = Fungura Ubumenyi
+layout-open-welcome-knowledge = Fungura Ikaze mu Bumenyi
+layout-open-path = Fungura { $path }
+layout-fold-knowledge = Hina ubumenyi
+layout-unfold-knowledge = Rambura ubumenyi
+layout-bookmarks = Utumenyetso
+layout-new-folder = Ububiko bushya
+layout-add-to-bookmarks = Ongera mu Utumenyetso
+layout-move-to-bookmarks = Himurira mu Utumenyetso
+layout-stack-number = Ikirundo { $number }
+layout-fold-stack = Hina ikirundo
+layout-unfold-stack = Rambura ikirundo
+layout-close-stack = Funga ikirundo
+layout-bookmark-in = Akamenyetso muri { $folder }
+
+common-cancel = Kureka
+common-delete = Gusiba
+common-save = Kubika
+common-rename = Guhindura izina
+common-expand = Kwagura
+common-collapse = Kuzinga
+common-loading = Birimo gutangizwa…
+common-error = Ikosa
+common-output = Ibyasohotse
+common-pending = Bitegereje
+common-current = iriho
+common-stop = Guhagarika
+services-command = Serivisi ya Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Urupapuro ntirwashoboye gutangizwa
+error-page-not-found = Urupapuro ntirwabonetse
+error-unknown-host = Uwakiriye porogaramu ya Vmux ntazwi: { $host }
+
+history-title = Amateka
+
+command-new-app-chat = Ikiganiro gishya cya { $provider }/{ $model } (Porogaramu)
+command-interactive-mode-user = Igice > Uburyo bw’imikoranire > Umukoresha
+command-interactive-mode-player = Igice > Uburyo bw’imikoranire > Umukinnyi
+command-minimize-window = Imiterere > Idirishya > Kugabanya
+command-toggle-layout = Imiterere > Imiterere > Guhindura imiterere
+command-close-tab = Imiterere > Tab > Gufunga tab
+command-new-task = Imiterere > Tab > Igikorwa gishya…
+command-next-tab = Imiterere > Tab > Tab ikurikira
+command-prev-tab = Imiterere > Tab > Tab ibanza
+command-rename-tab = Imiterere > Tab > Guhindura izina rya tab
+command-tab-select-1 = Imiterere > Tab > Guhitamo tab 1
+command-tab-select-2 = Imiterere > Tab > Guhitamo tab 2
+command-tab-select-3 = Imiterere > Tab > Guhitamo tab 3
+command-tab-select-4 = Imiterere > Tab > Guhitamo tab 4
+command-tab-select-5 = Imiterere > Tab > Guhitamo tab 5
+command-tab-select-6 = Imiterere > Tab > Guhitamo tab 6
+command-tab-select-7 = Imiterere > Tab > Guhitamo tab 7
+command-tab-select-8 = Imiterere > Tab > Guhitamo tab 8
+command-tab-select-last = Imiterere > Tab > Guhitamo tab ya nyuma
+command-close-pane = Imiterere > Pane > Gufunga pane
+command-select-pane-left = Imiterere > Pane > Guhitamo pane y’ibumoso
+command-select-pane-right = Imiterere > Pane > Guhitamo pane y’iburyo
+command-select-pane-up = Imiterere > Pane > Guhitamo pane yo hejuru
+command-select-pane-down = Imiterere > Pane > Guhitamo pane yo hasi
+command-swap-pane-prev = Imiterere > Pane > Gusimbuza pane n’iyabanjirije
+command-swap-pane-next = Imiterere > Pane > Gusimbuza pane n’ikurikira
+command-equalize-pane-size = Imiterere > Pane > Kuringaniza ingano za pane
+command-resize-pane-left = Imiterere > Pane > Guhindura ingano ya pane ibumoso
+command-resize-pane-right = Imiterere > Pane > Guhindura ingano ya pane iburyo
+command-resize-pane-up = Imiterere > Pane > Guhindura ingano ya pane hejuru
+command-resize-pane-down = Imiterere > Pane > Guhindura ingano ya pane hasi
+command-stack-close = Imiterere > Stack > Gufunga stack
+command-stack-next = Imiterere > Stack > Stack ikurikira
+command-stack-previous = Imiterere > Stack > Stack ibanza
+command-stack-reopen = Imiterere > Stack > Kongera gufungura urupapuro rwafunzwe
+command-stack-swap-prev = Imiterere > Stack > Kwimurira stack ibumoso
+command-stack-swap-next = Imiterere > Stack > Kwimurira stack iburyo
+command-space-open = Imiterere > Space > Spaces
+command-terminal-close = Teminali > Gufunga teminali
+command-terminal-next = Teminali > Teminali ikurikira
+command-terminal-prev = Teminali > Teminali ibanza
+command-terminal-clear = Teminali > Gusukura teminali
+command-browser-prev-page = Mucukumbuzi > Kugenda > Gusubira inyuma
+command-browser-next-page = Mucukumbuzi > Kugenda > Kujya imbere
+command-browser-reload = Mucukumbuzi > Kugenda > Kongera gutangiza
+command-browser-hard-reload = Mucukumbuzi > Kugenda > Kongera gutangiza bisesuye
+command-open-in-place = Mucukumbuzi > Gufungura > Gufungura hano
+command-open-in-new-stack = Mucukumbuzi > Gufungura > Gufungura muri stack nshya
+command-open-in-pane-top = Mucukumbuzi > Gufungura > Gufungura muri pane yo hejuru
+command-open-in-pane-right = Mucukumbuzi > Gufungura > Gufungura muri pane y’iburyo
+command-open-in-pane-bottom = Mucukumbuzi > Gufungura > Gufungura muri pane yo hasi
+command-open-in-pane-left = Mucukumbuzi > Gufungura > Gufungura muri pane y’ibumoso
+command-open-in-new-tab = Mucukumbuzi > Gufungura > Gufungura muri tab nshya
+command-open-in-new-space = Mucukumbuzi > Gufungura > Gufungura muri Space nshya
+command-browser-zoom-in = Mucukumbuzi > Kureba > Kongera ubunini
+command-browser-zoom-out = Mucukumbuzi > Kureba > Kugabanya ubunini
+command-browser-zoom-reset = Mucukumbuzi > Kureba > Ingano nyayo
+command-browser-dev-tools = Mucukumbuzi > Kureba > Ibikoresho by’abatekinisiye
+command-browser-open-command-bar = Mucukumbuzi > Umurongo > Umurongo w’amabwiriza
+command-browser-open-page-in-command-bar = Mucukumbuzi > Umurongo > Guhindura urupapuro
+command-browser-open-path-bar = Mucukumbuzi > Umurongo > Navigator y’inzira
+command-browser-open-commands = Mucukumbuzi > Umurongo > Amabwiriza
+command-browser-open-history = Mucukumbuzi > Umurongo > Amateka
+command-service-open = Serivisi > Gufungura igenzura rya serivisi
+command-bookmark-toggle-active = Akamenyetso > Kubika urupapuro
+command-bookmark-pin-active = Akamenyetso > Gushinga urupapuro
+
+layout-tab = Tab
+layout-no-stacks = Nta stack zihari
+layout-loading = Birimo gutangizwa…
+layout-no-markdown-files = Nta dosiye za Markdown zihari
+layout-empty-folder = Ububiko burimo ubusa
+layout-worktree = worktree
+layout-folder-name = Izina ry’ububiko
+layout-no-pins-bookmarks = Nta byashinzwe cyangwa ibimenyetso bihari
+layout-move-to = Kwimurira muri { $folder }
+layout-bookmark-current-page = Kubika urupapuro ruriho
+layout-rename-folder = Guhindura izina ry’ububiko
+layout-remove-folder = Gukuraho ububiko
+layout-update-downloading = Kuvanaho ivugurura
+layout-update-installing = Gushyiramo ivugurura…
+layout-update-ready = Verisiyo nshya irahari
+layout-restart-update = Ongera utangize kugira ngo uvugurure
+
+agent-preparing = Gutegura agent…
+agent-send-all-queued = Ohereza prompts zose ziri ku murongo ubu (Esc)
+agent-send = Kohereza (Enter)
+agent-ready = Niteguye igihe witeguye.
+agent-loading-older = Kuzana ubutumwa bwa kera…
+agent-load-older = Kuzana ubutumwa bwa kera
+agent-continued-from = Byakomereje kuri { $source }
+agent-older-context-omitted = context ya kera yasimbutswe
+agent-interrupted = byahagaritswe
+agent-allow-tool = Emerera { $tool }?
+agent-deny = Kwanga
+agent-allow-always = Kujya wemera
+agent-allow = Kwemera
+agent-loading-sessions = Kuzana sessions…
+agent-no-resumable-sessions = Nta sessions zakomeza zabonetse
+agent-no-matching-sessions = Nta sessions bihuye
+agent-no-matching-models = Nta models zihuye
+agent-choice-help = ↑/↓ cyangwa Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Hitamo ububiko bwa repository
+agent-choose-repository-detail = Hitamo repository ya Git yo kuri mudasobwa agent izakoresha.
+agent-choosing = Guhitamo…
+agent-choose-folder = Hitamo ububiko
+agent-queued = biri ku murongo
+agent-attached = Byometse:
+agent-cancel-queued = Guhagarika prompt iri ku murongo
+agent-resume-queued = Gukomeza prompts ziri ku murongo
+agent-clear-queue = Gusiba umurongo
+agent-send-all-now = ohereza byose ubu
+agent-choose-option = Hitamo uburyo hejuru
+agent-loading-media = Kuzana media…
+agent-no-matching-media = Nta media ihuye
+agent-prompt-context = Context ya prompt
+agent-details = Ibisobanuro
+agent-path = Inzira
+agent-tool = Igikoresho
+agent-server = Serveri
+agent-bytes = bytes { $count }
+agent-worked-for = Yakoze { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Yakoze { $duration } · intambwe 1
+   *[other] Yakoze { $duration } · intambwe { $count }
+}
+agent-tool-guardian-review = Isuzuma rya Guardian
+agent-tool-read-files = Yasomye dosiye
+agent-tool-viewed-image = Yarebye ishusho
+agent-tool-used-browser = Yakoresheje mucukumbuzi
+agent-tool-searched-files = Yashatse muri dosiye
+agent-tool-ran-commands = Yakoresheje amabwiriza
+agent-thinking = Gutekereza
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Ikiganiro
+agent-parent = Umubyeyi
+agent-children = Abana
+agent-call = Ihamagara
+agent-raw-event = Icyabaye kidatunganyijwe
+agent-plan = Gahunda
+agent-tasks = { $count ->
+    [one] Igikorwa 1
+   *[other] Ibikorwa { $count }
+}
+agent-edited = Byahinduwe
+agent-reconnecting = Kongera kwihuza { $attempt }/{ $total }
+agent-status-running = Birimo gukora
+agent-status-done = Byarangiye
+agent-status-failed = Byanze
+agent-status-pending = Bitegereje
+agent-slash-attach-files = Komeka dosiye
+agent-slash-resume-session = Gukomeza session ya kera
+agent-slash-select-model = Guhitamo model
+agent-slash-continue-cli = Komereza iyi session muri CLI
+agent-session-just-now = ubu nyine
+agent-session-minutes-ago = hashize { $count }m
+agent-session-hours-ago = hashize { $count }h
+agent-session-days-ago = hashize { $count }d
+agent-working-working = Gukora
+agent-working-thinking = Gutekereza
+agent-working-pondering = Kuzirikana
+agent-working-noodling = Gucukumbura
+agent-working-percolating = Gushungura ibitekerezo
+agent-working-conjuring = Guhimba
+agent-working-cooking = Gutegura
+agent-working-brewing = Gutunganya
+agent-working-musing = Gutekereza byimbitse
+agent-working-ruminating = Kuzirikana
+agent-working-scheming = Gucura umugambi
+agent-working-synthesizing = Guhuza
+agent-working-tinkering = Kugoragoza
+agent-working-churning = Gucugusa
+agent-working-vibing = Kwiyumva
+agent-working-simmering = Gucanira buhoro
+agent-working-crafting = Gukora neza
+agent-working-divining = Guhishurirwa
+agent-working-mulling = Gusesengura
+agent-working-spelunking = Gucukumbura
+
+editor-toggle-explorer = Guhindura Explorer (Cmd+B)
+editor-unsaved = ntibyabitswe
+editor-rendered-markdown = Markdown yerekanwe kandi ihindurirwa ako kanya
+editor-note = Icyitonderwa
+editor-source-editor = Muhinduzi wa source
+editor-editor = Muhinduzi
+editor-git-diff = Git diff
+editor-diff = Diff
+editor-tidy = Gutunganya
+editor-always = Buri gihe
+editor-unchanged-previews = { $count ->
+    [one] ✦ preview 1 idahindutse
+   *[other] ✦ previews { $count } zidahindutse
+}
+editor-open-externally = Gufungura hanze
+editor-changed-line = Umurongo wahindutse
+editor-go-to-definition = Kujya ku gisobanuro
+editor-find-references = Gushaka aho bikoreshwa
+editor-references = { $count ->
+    [one] aho bikoreshwa 1
+   *[other] aho bikoreshwa { $count }
+}
+editor-lsp-starting = { $server } iratangira…
+editor-lsp-not-installed = { $server } — ntiyashyizwemo
+editor-explorer = Explorer
+editor-open-editors = Abahinduzi bafunguye
+editor-outline = Incamake
+editor-new-file = Dosiye nshya
+editor-new-folder = Ububiko bushya
+editor-delete-confirm = Gusiba “{ $name }”? Ntibishobora gusubizwa inyuma.
+editor-created-folder = Ububiko { $name } bwakozwe
+editor-created-file = Dosiye { $name } yakozwe
+editor-renamed-to = Izina ryahinduwe riba { $name }
+editor-deleted = { $name } yasibwe
+editor-failed-decode-image = Kunanirwa gusoma ishusho
+editor-preview-large-image = ishusho (ni nini cyane ku buryo yerekanwa)
+editor-preview-binary = binary
+editor-preview-file = dosiye
+
+git-status-clean = bisukuye
+git-status-modified = byahinduwe
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = ntibikurikiranwa
+git-status-deleted = byasibwe
+git-status-conflict = conflict
+git-accept-all = ✓ kwemera byose
+git-unstage = Gukuraho staging
+git-confirm-deny-all = Emeza kwanga byose
+git-deny-all = ✗ kwanga byose
+git-commit-message = ubutumwa bwa commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Kuzana diff…
+git-no-changes = Nta mpinduka zo kwerekana
+git-accept = ✓ kwemera
+git-deny = ✗ kwanga
+git-show-unchanged-lines = Erekana imirongo { $count } idahindutse
+
+terminal-loading = Birimo gutangizwa…
+terminal-runs-when-ready = bikora iyo byiteguye · Ctrl+C isukura · Esc isimbuka
+terminal-booting = gutangira
+terminal-type-command = andika ibwiriza · rikora iyo ryiteguye · Esc isimbuka
+
+setup-tagline-claude = Agent yo gukoda ya Anthropic, muri Vmux
+setup-tagline-codex = Agent yo gukoda ya OpenAI, muri Vmux
+setup-tagline-vibe = Agent yo gukoda ya Mistral, muri Vmux
+setup-install-title = Shyiramo CLI ya { $name }
+setup-homebrew-required = Homebrew irakenewe kugira ngo ushyiremo { $command } kandi ntirashyirwamo. Vmux izabanza gushyiramo Homebrew, hanyuma { $name }.
+setup-terminal-instructions = Muri teminali, kanda Return kugira ngo utangire, hanyuma wandike ijambo ry’ibanga rya Mac yawe nibisabwa.
+setup-command-missing = Vmux yafunguye uru rupapuro kuko ibwiriza { $command } ryo kuri mudasobwa ritarashyirwamo. Koresha ibwiriza riri hasi kugira ngo uribone.
+setup-install-failed = Gushyiramo ntibyarangiye. Reba ibisobanuro muri teminali, hanyuma wongere ugerageze.
+setup-installing = Gushyiramo…
+setup-install-homebrew = Shyiramo Homebrew + { $name }
+setup-run-install = Koresha ibwiriza ryo gushyiramo
+setup-auto-reload = Vmux irarikoresha muri teminali maze ikongera gutangiza iyo { $command } yiteguye.
+
+debug-title = Gukosora
+debug-auto-update = Kwivugurura
+debug-simulate-update = Kwigana ko ivugurura rihari
+debug-simulate-download = Kwigana ivanaho
+debug-clear-update = Gukuraho ivugurura
+debug-trigger-restart = Gutangiza kongera gutangira
+
+command-manage-spaces = Gucunga imyanya…
+command-pane-stack-location = igice { $pane } / urwego { $stack }
+command-space-pane-stack-location = { $space } / igice { $pane } / urwego { $stack }
+command-terminal-path = Terminali ({ $path })
+command-group-interactive-mode = Uburyo bw’imikoranire
+command-group-window = Idirishya
+command-group-tab = Agafishi
+command-group-pane = Igice
+command-group-stack = Urwego
+command-group-space = Umwanya
+command-group-navigation = Kugendagenda
+command-group-open = Fungura
+command-group-view = Reba
+command-group-bar = Umurongo
+
+menu-close-vmux = Funga Vmux
+
+agents-terminal-coding-agent = Agenti yo kwandika kode ikorera muri terminali

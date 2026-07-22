@@ -1,0 +1,602 @@
+locale-name = română
+common-open = Deschide
+common-close = Închide
+common-install = Instalează
+common-uninstall = Dezinstalează
+common-update = Actualizează
+common-retry = Reîncearcă
+common-refresh = Reîmprospătează
+common-remove = Elimină
+common-enable = Activează
+common-disable = Dezactivează
+common-new = Nou
+common-active = activ
+common-running = rulează
+common-done = gata
+common-failed = Eșuat
+common-installed = Instalat
+common-items = { $count ->
+    [one] { $count } element
+   *[other] { $count } elemente
+}
+start-title = Start
+start-tagline = Un singur prompt. Orice, rezolvat.
+
+agents-title = Agenți
+agents-search = Caută agenți ACP și CLI…
+agents-empty = Nu există agenți potriviți
+agents-empty-detail = Încearcă un nume, un runtime sau ACP/CLI.
+agents-install-failed = Instalarea a eșuat
+agents-updating = Se actualizează…
+agents-retrying = Se reîncearcă…
+agents-preparing = Se pregătește…
+
+extensions-title = Extensii
+extensions-search = Caută extensii instalate sau în Chrome Web Store…
+extensions-relaunch = Repornește pentru aplicare
+extensions-empty = Nu există extensii instalate
+extensions-no-match = Nu există extensii potrivite
+extensions-empty-detail = Caută mai sus în Chrome Web Store și apasă Enter.
+extensions-no-match-detail = Încearcă alt nume sau alt ID de extensie.
+extensions-on = Activat
+extensions-off = Dezactivat
+extensions-enable-confirm = Activezi { $name }?
+extensions-enable-permissions = Activează { $name } și permite:
+
+lsp-title = Servere de limbaj
+lsp-search = Caută servere de limbaj, linters, formatatoare…
+lsp-loading = Se încarcă catalogul…
+lsp-empty = Nu există servere de limbaj potrivite
+lsp-empty-detail = Încearcă alt limbaj, linter sau formator.
+lsp-needs = necesită { $tool }
+lsp-status-available = Disponibil
+lsp-status-on-path = În PATH
+lsp-status-installing = Se instalează…
+lsp-status-installed = Instalat
+lsp-status-outdated = Actualizare disponibilă
+lsp-status-running = Rulează
+lsp-status-failed = Eșuat
+
+spaces-title = Spații
+spaces-new-placeholder = Numele noului spațiu
+spaces-empty = Nu există spații
+spaces-default-name = Spațiu { $number }
+spaces-tabs = { $count ->
+    [one] 1 filă
+   *[other] { $count } file
+}
+spaces-delete = Șterge spațiul
+
+team-title = Echipă
+team-just-you = Doar tu în acest spațiu
+team-agents = { $count ->
+    [one] Tu și 1 agent
+   *[other] Tu și { $count } agenți
+}
+team-empty = Nu este nimeni aici încă
+team-you = Tu
+team-agent = Agent
+
+services-title = Servicii în fundal
+services-processes = { $count ->
+    [one] 1 proces
+   *[other] { $count } procese
+}
+services-kill-all = Oprește forțat tot
+services-not-running = Serviciul nu rulează
+services-start-with = Pornește cu:
+services-empty = Nu există procese active
+services-filter = Filtrează procese…
+services-no-match = Nu există procese potrivite
+services-connected = Conectat
+services-disconnected = Deconectat
+services-attached = atașat
+services-kill = Oprește forțat
+services-memory = Memorie
+services-size = Dimensiune
+services-shell = Shell
+
+error-title = Eroare
+
+history-search = Caută în istoric
+history-clear-all = Șterge tot
+history-clear-confirm = Ștergi tot istoricul?
+history-clear-warning = Această acțiune nu poate fi anulată.
+history-cancel = Anulează
+history-today = Astăzi
+history-yesterday = Ieri
+history-days-ago = acum { $count } zile
+history-day-offset = Ziua -{ $count }
+
+settings-title = Setări
+settings-loading = Se încarcă setările…
+settings-stored = Stocat în ~/.vmux/settings.ron
+settings-other = Altele
+settings-software-update = Actualizare software
+settings-check-updates = Caută actualizări
+settings-check-updates-hint = Verifică automat la pornire și la fiecare oră când actualizarea automată este activată.
+settings-update-unavailable = Indisponibil
+settings-update-unavailable-hint = Modulul de actualizare nu este inclus în acest build.
+settings-update-checking = Se verifică…
+settings-update-checking-hint = Se caută actualizări…
+settings-update-check-again = Verifică din nou
+settings-update-current = Vmux este la zi.
+settings-update-downloading = Se descarcă…
+settings-update-downloading-hint = Se descarcă Vmux { $version }…
+settings-update-installing = Se instalează…
+settings-update-installing-hint = Se instalează Vmux { $version }…
+settings-update-ready = Actualizare pregătită
+settings-update-ready-hint = Vmux { $version } este gata. Repornește pentru aplicare.
+settings-update-try-again = Încearcă din nou
+settings-update-failed = Nu s-au putut verifica actualizările.
+settings-item = Element
+settings-item-number = Element { $number }
+settings-press-key = Apasă o tastă…
+settings-saved = Salvat
+settings-record-key = Click pentru a înregistra o nouă combinație de taste
+
+tray-open-window = Deschide fereastra
+tray-close-window = Închide fereastra
+tray-pause-recording = Pune înregistrarea pe pauză
+tray-resume-recording = Reia înregistrarea
+tray-finish-recording = Finalizează înregistrarea
+tray-quit = Închide Vmux
+
+composer-attach-files = Atașează fișiere (/upload)
+composer-remove-attachment = Elimină atașamentul
+
+layout-back = Înapoi
+layout-forward = Înainte
+layout-reload = Reîncarcă
+layout-bookmark-page = Adaugă pagina la favorite
+layout-remove-bookmark = Elimină favoritul
+layout-pin-page = Fixează pagina
+layout-unpin-page = Anulează fixarea paginii
+layout-manage-extensions = Gestionează extensiile
+layout-new-stack = Stivă nouă
+layout-close-tab = Închide fila
+layout-bookmark = Favorit
+layout-pin = Fixează
+layout-new-tab = Filă nouă
+layout-team = Echipă
+
+command-switch-space = Schimbă spațiul…
+command-search-ask = Caută sau întreabă…
+command-new-tab-placeholder = Caută, introdu un URL sau selectează Terminal…
+command-placeholder = Introdu un URL, caută file sau folosește > pentru comenzi…
+command-composer-placeholder = Tastează / pentru comenzi sau @ pentru media
+command-send = Trimite (Enter)
+command-terminal = Terminal
+command-open-terminal = Deschide în Terminal
+command-stack = Stivă
+command-tabs = { $count ->
+    [one] 1 filă
+   *[other] { $count } file
+}
+command-prompt = Prompt
+command-new-tab = Filă nouă
+command-search = Caută
+command-open-value = Deschide „{ $value }”
+command-search-value = Caută „{ $value }”
+
+schema-appearance = Aspect
+schema-general = General
+schema-layout = Aranjare
+schema-layout-detail = Fereastră, panouri, bară laterală și contur de focalizare.
+schema-agent = Agent
+schema-agent-detail = Comportamentul agentului și permisiunile pentru unelte.
+schema-shortcuts = Scurtături
+schema-shortcuts-detail = Vizualizare doar în citire. Editează direct settings.ron pentru a schimba asocierile.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Mod
+schema-mode-detail = Schema de culori pentru pagini web. Dispozitiv folosește setarea sistemului.
+schema-device = Dispozitiv
+schema-light = Luminos
+schema-dark = Întunecat
+schema-language = Limbă
+schema-language-detail = Folosește sistemul, en-US, ja sau orice etichetă BCP 47 cu un catalog ~/.vmux/locales/<tag>.ftl corespunzător.
+schema-auto-update = Actualizare automată
+schema-auto-update-detail = Caută și instalează actualizări la pornire și la fiecare oră.
+schema-startup-url = URL la pornire
+schema-startup-url-detail = Dacă este gol, se deschide promptul barei de comenzi.
+schema-search-engine = Motor de căutare
+schema-search-engine-detail = Folosit pentru căutări web din Start și din bara de comenzi.
+schema-window = Fereastră
+schema-pane = Panou
+schema-side-sheet = Panou lateral
+schema-focus-ring = Contur de focalizare
+schema-run-placement = Permite suprascrierea plasării rulării
+schema-run-placement-detail = Permite agenților să aleagă modul panoului de rulare, direcția și ancora.
+schema-leader = Leader
+schema-leader-detail = Tastă prefix pentru scurtături chord.
+schema-chord-timeout = Timeout chord
+schema-chord-timeout-detail = Milisecunde înainte ca un prefix chord să expire.
+schema-bindings = Asocieri
+schema-confirm-close = Confirmă închiderea
+schema-confirm-close-detail = Cere confirmare înainte de a închide un terminal cu un proces în rulare.
+schema-default-theme = Temă implicită
+schema-default-theme-detail = Numele temei active din lista de teme.
+
+settings-empty = (gol)
+settings-none = (niciunul)
+
+schema-system = Sistem
+schema-editor = Editor
+schema-recording = Înregistrare
+schema-radius = Rază
+schema-padding = Spațiere interioară
+schema-gap = Spațiu
+schema-width = Lățime
+schema-color = Culoare
+schema-red = Roșu
+schema-green = Verde
+schema-blue = Albastru
+schema-follow-files = Urmărește fișiere
+schema-tidy-files = Curăță fișiere
+schema-tidy-files-max = Prag de curățare a fișierelor
+schema-tidy-files-auto = Curăță fișiere automat
+schema-app-providers = Furnizori de aplicații
+schema-provider = Furnizor
+schema-kind = Tip
+schema-models = Modele
+schema-acp = Agenți ACP
+schema-id = ID
+schema-name = Nume
+schema-command = Comandă
+schema-arguments = Argumente
+schema-environment = Variabile de mediu
+schema-working-directory = Director de lucru
+schema-shell = Shell
+schema-font-family = Familie de fonturi
+schema-startup-directory = Director de pornire
+schema-themes = Teme
+schema-color-scheme = Schemă de culori
+schema-font-size = Dimensiune font
+schema-line-height = Înălțime rând
+schema-cursor-style = Stil cursor
+schema-cursor-blink = Clipire cursor
+schema-custom-themes = Teme personalizate
+schema-foreground = Prim-plan
+schema-background = Fundal
+schema-cursor = Cursor
+schema-ansi-colors = Culori ANSI
+schema-keymap = Hartă de taste
+schema-explorer = Explorator
+schema-visible = Vizibil
+schema-language-servers = Servere de limbaj
+schema-servers = Servere
+schema-language-id = ID limbaj
+schema-root-markers = Marcatori rădăcină
+schema-output-directory = Director de ieșire
+
+menu-scene = Scenă
+menu-layout = Aranjament
+menu-terminal = Terminal
+menu-browser = Browser
+menu-service = Serviciu
+menu-bookmark = Semn de carte
+menu-edit = Editare
+
+layout-knowledge = Cunoștințe
+layout-open-knowledge = Deschide Cunoștințe
+layout-open-welcome-knowledge = Deschide Bun venit în Cunoștințe
+layout-open-path = Deschide { $path }
+layout-fold-knowledge = Pliază cunoștințele
+layout-unfold-knowledge = Depliază cunoștințele
+layout-bookmarks = Semne de carte
+layout-new-folder = Folder nou
+layout-add-to-bookmarks = Adaugă la semne de carte
+layout-move-to-bookmarks = Mută la semne de carte
+layout-stack-number = Stivă { $number }
+layout-fold-stack = Pliază stiva
+layout-unfold-stack = Depliază stiva
+layout-close-stack = Închide stiva
+layout-bookmark-in = Pune semn de carte în { $folder }
+
+common-cancel = Anulează
+common-delete = Șterge
+common-save = Salvează
+common-rename = Redenumește
+common-expand = Extinde
+common-collapse = Restrânge
+common-loading = Se încarcă…
+common-error = Eroare
+common-output = Ieșire
+common-pending = În așteptare
+common-current = curent
+common-stop = Oprește
+services-command = serviciu Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }z { $hours }h
+
+error-page-failed-load = Pagina nu s-a putut încărca
+error-page-not-found = Pagina nu a fost găsită
+error-unknown-host = Gazdă necunoscută pentru aplicația Vmux: { $host }
+
+history-title = Istoric
+
+command-new-app-chat = Chat nou { $provider }/{ $model } (Aplicație)
+command-interactive-mode-user = Scenă > Mod interactiv > Utilizator
+command-interactive-mode-player = Scenă > Mod interactiv > Player
+command-minimize-window = Aranjare > Fereastră > Minimizează
+command-toggle-layout = Aranjare > Aranjare > Comută aranjarea
+command-close-tab = Aranjare > Filă > Închide fila
+command-new-task = Aranjare > Filă > Activitate nouă…
+command-next-tab = Aranjare > Filă > Fila următoare
+command-prev-tab = Aranjare > Filă > Fila anterioară
+command-rename-tab = Aranjare > Filă > Redenumește fila
+command-tab-select-1 = Aranjare > Filă > Selectează fila 1
+command-tab-select-2 = Aranjare > Filă > Selectează fila 2
+command-tab-select-3 = Aranjare > Filă > Selectează fila 3
+command-tab-select-4 = Aranjare > Filă > Selectează fila 4
+command-tab-select-5 = Aranjare > Filă > Selectează fila 5
+command-tab-select-6 = Aranjare > Filă > Selectează fila 6
+command-tab-select-7 = Aranjare > Filă > Selectează fila 7
+command-tab-select-8 = Aranjare > Filă > Selectează fila 8
+command-tab-select-last = Aranjare > Filă > Selectează ultima filă
+command-close-pane = Aranjare > Panou > Închide panoul
+command-select-pane-left = Aranjare > Panou > Selectează panoul din stânga
+command-select-pane-right = Aranjare > Panou > Selectează panoul din dreapta
+command-select-pane-up = Aranjare > Panou > Selectează panoul de sus
+command-select-pane-down = Aranjare > Panou > Selectează panoul de jos
+command-swap-pane-prev = Aranjare > Panou > Schimbă cu panoul anterior
+command-swap-pane-next = Aranjare > Panou > Schimbă cu panoul următor
+command-equalize-pane-size = Aranjare > Panou > Egalizează dimensiunea panourilor
+command-resize-pane-left = Aranjare > Panou > Redimensionează panoul spre stânga
+command-resize-pane-right = Aranjare > Panou > Redimensionează panoul spre dreapta
+command-resize-pane-up = Aranjare > Panou > Redimensionează panoul în sus
+command-resize-pane-down = Aranjare > Panou > Redimensionează panoul în jos
+command-stack-close = Aranjare > Stivă > Închide stiva
+command-stack-next = Aranjare > Stivă > Stiva următoare
+command-stack-previous = Aranjare > Stivă > Stiva anterioară
+command-stack-reopen = Aranjare > Stivă > Redeschide pagina închisă
+command-stack-swap-prev = Aranjare > Stivă > Mută stiva la stânga
+command-stack-swap-next = Aranjare > Stivă > Mută stiva la dreapta
+command-space-open = Aranjare > Spațiu > Spații
+command-terminal-close = Terminal > Închide terminalul
+command-terminal-next = Terminal > Terminalul următor
+command-terminal-prev = Terminal > Terminalul anterior
+command-terminal-clear = Terminal > Golește terminalul
+command-browser-prev-page = Browser > Navigare > Înapoi
+command-browser-next-page = Browser > Navigare > Înainte
+command-browser-reload = Browser > Navigare > Reîncarcă
+command-browser-hard-reload = Browser > Navigare > Reîncărcare completă
+command-open-in-place = Browser > Deschidere > Deschide aici
+command-open-in-new-stack = Browser > Deschidere > Deschide într-o stivă nouă
+command-open-in-pane-top = Browser > Deschidere > Deschide în panoul de sus
+command-open-in-pane-right = Browser > Deschidere > Deschide în panoul din dreapta
+command-open-in-pane-bottom = Browser > Deschidere > Deschide în panoul de jos
+command-open-in-pane-left = Browser > Deschidere > Deschide în panoul din stânga
+command-open-in-new-tab = Browser > Deschidere > Deschide într-o filă nouă
+command-open-in-new-space = Browser > Deschidere > Deschide într-un spațiu nou
+command-browser-zoom-in = Browser > Vizualizare > Mărește
+command-browser-zoom-out = Browser > Vizualizare > Micșorează
+command-browser-zoom-reset = Browser > Vizualizare > Dimensiune reală
+command-browser-dev-tools = Browser > Vizualizare > Instrumente pentru dezvoltatori
+command-browser-open-command-bar = Browser > Bară > Bara de comenzi
+command-browser-open-page-in-command-bar = Browser > Bară > Editează pagina
+command-browser-open-path-bar = Browser > Bară > Navigator cale
+command-browser-open-commands = Browser > Bară > Comenzi
+command-browser-open-history = Browser > Bară > Istoric
+command-service-open = Serviciu > Deschide monitorul serviciilor
+command-bookmark-toggle-active = Semn de carte > Adaugă pagina la semne de carte
+command-bookmark-pin-active = Semn de carte > Fixează pagina
+
+layout-tab = Filă
+layout-no-stacks = Nicio stivă
+layout-loading = Se încarcă…
+layout-no-markdown-files = Niciun fișier Markdown
+layout-empty-folder = Dosar gol
+layout-worktree = worktree
+layout-folder-name = Numele dosarului
+layout-no-pins-bookmarks = Nicio fixare sau semn de carte
+layout-move-to = Mută în { $folder }
+layout-bookmark-current-page = Adaugă pagina curentă la semne de carte
+layout-rename-folder = Redenumește dosarul
+layout-remove-folder = Elimină dosarul
+layout-update-downloading = Se descarcă actualizarea
+layout-update-installing = Se instalează actualizarea…
+layout-update-ready = Este disponibilă o versiune nouă
+layout-restart-update = Repornește pentru actualizare
+
+agent-preparing = Se pregătește agentul…
+agent-send-all-queued = Trimite acum toate prompturile din coadă (Esc)
+agent-send = Trimite (Enter)
+agent-ready = Gata când ești.
+agent-loading-older = Se încarcă mesajele mai vechi…
+agent-load-older = Încarcă mesaje mai vechi
+agent-continued-from = Continuat din { $source }
+agent-older-context-omitted = context mai vechi omis
+agent-interrupted = întrerupt
+agent-allow-tool = Permiți { $tool }?
+agent-deny = Refuză
+agent-allow-always = Permite întotdeauna
+agent-allow = Permite
+agent-loading-sessions = Se încarcă sesiunile…
+agent-no-resumable-sessions = Nu s-au găsit sesiuni de reluat
+agent-no-matching-sessions = Nicio sesiune potrivită
+agent-no-matching-models = Niciun model potrivit
+agent-choice-help = ↑/↓ sau Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Alege dosarul depozitului
+agent-choose-repository-detail = Selectează depozitul Git local pe care să-l folosească agentul.
+agent-choosing = Se alege…
+agent-choose-folder = Alege dosarul
+agent-queued = în coadă
+agent-attached = Atașat:
+agent-cancel-queued = Anulează promptul din coadă
+agent-resume-queued = Reia prompturile din coadă
+agent-clear-queue = Golește coada
+agent-send-all-now = trimite tot acum
+agent-choose-option = Alege o opțiune de mai sus
+agent-loading-media = Se încarcă media…
+agent-no-matching-media = Niciun media potrivit
+agent-prompt-context = Contextul promptului
+agent-details = Detalii
+agent-path = Cale
+agent-tool = Instrument
+agent-server = Server
+agent-bytes = { $count } octeți
+agent-worked-for = A lucrat { $duration }
+agent-worked-for-steps = { $count ->
+    [one] A lucrat { $duration } · 1 pas
+   *[other] A lucrat { $duration } · { $count } pași
+}
+agent-tool-guardian-review = Revizuire Guardian
+agent-tool-read-files = A citit fișiere
+agent-tool-viewed-image = A vizualizat imaginea
+agent-tool-used-browser = A folosit browserul
+agent-tool-searched-files = A căutat în fișiere
+agent-tool-ran-commands = A rulat comenzi
+agent-thinking = Se gândește
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Fir
+agent-parent = Părinte
+agent-children = Copii
+agent-call = Apel
+agent-raw-event = Eveniment brut
+agent-plan = Plan
+agent-tasks = { $count ->
+    [one] 1 activitate
+   *[other] { $count } activități
+}
+agent-edited = Editat
+agent-reconnecting = Se reconectează { $attempt }/{ $total }
+agent-status-running = Rulează
+agent-status-done = Terminat
+agent-status-failed = Eșuat
+agent-status-pending = În așteptare
+agent-slash-attach-files = Atașează fișiere
+agent-slash-resume-session = Reia o sesiune anterioară
+agent-slash-select-model = Selectează modelul
+agent-slash-continue-cli = Continuă această sesiune în CLI
+agent-session-just-now = chiar acum
+agent-session-minutes-ago = acum { $count }m
+agent-session-hours-ago = acum { $count }h
+agent-session-days-ago = acum { $count }z
+agent-working-working = Lucrează
+agent-working-thinking = Se gândește
+agent-working-pondering = Cântărește
+agent-working-noodling = Explorează idei
+agent-working-percolating = Se cristalizează
+agent-working-conjuring = Conjurează
+agent-working-cooking = Gătește
+agent-working-brewing = Prepară
+agent-working-musing = Meditează
+agent-working-ruminating = Rumegă
+agent-working-scheming = Plănuiește
+agent-working-synthesizing = Sintetizează
+agent-working-tinkering = Meșterește
+agent-working-churning = Procesează
+agent-working-vibing = Prinde ritmul
+agent-working-simmering = Fierbe la foc mic
+agent-working-crafting = Creează
+agent-working-divining = Intuiește
+agent-working-mulling = Reflectă
+agent-working-spelunking = Sapă în adâncime
+
+editor-toggle-explorer = Comută Explorer (Cmd+B)
+editor-unsaved = nesalvat
+editor-rendered-markdown = Markdown randat cu editare live
+editor-note = Notă
+editor-source-editor = Editor sursă
+editor-editor = Editor
+editor-git-diff = Dif Git
+editor-diff = Dif
+editor-tidy = Curățare
+editor-always = Întotdeauna
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 previzualizare neschimbată
+   *[other] ✦ { $count } previzualizări neschimbate
+}
+editor-open-externally = Deschide extern
+editor-changed-line = Linie modificată
+editor-go-to-definition = Mergi la definiție
+editor-find-references = Găsește referințe
+editor-references = { $count ->
+    [one] 1 referință
+   *[other] { $count } referințe
+}
+editor-lsp-starting = { $server } pornește…
+editor-lsp-not-installed = { $server } — nu este instalat
+editor-explorer = Explorer
+editor-open-editors = Editoare deschise
+editor-outline = Schiță
+editor-new-file = Fișier nou
+editor-new-folder = Dosar nou
+editor-delete-confirm = Ștergi „{ $name }”? Acțiunea nu poate fi anulată.
+editor-created-folder = Dosarul { $name } a fost creat
+editor-created-file = Fișierul { $name } a fost creat
+editor-renamed-to = Redenumit în { $name }
+editor-deleted = { $name } a fost șters
+editor-failed-decode-image = Imaginea nu a putut fi decodată
+editor-preview-large-image = imagine (prea mare pentru previzualizare)
+editor-preview-binary = binar
+editor-preview-file = fișier
+
+git-status-clean = curat
+git-status-modified = modificat
+git-status-staged = indexat
+git-status-staged-modified = indexat*
+git-status-untracked = neurmărit
+git-status-deleted = șters
+git-status-conflict = conflict
+git-accept-all = ✓ acceptă tot
+git-unstage = Scoate din index
+git-confirm-deny-all = Confirmă refuzul tuturor
+git-deny-all = ✗ refuză tot
+git-commit-message = mesaj de commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Se încarcă diful…
+git-no-changes = Nu există modificări de afișat
+git-accept = ✓ acceptă
+git-deny = ✗ refuză
+git-show-unchanged-lines = Afișează { $count } linii neschimbate
+
+terminal-loading = Se încarcă…
+terminal-runs-when-ready = rulează când e gata · Ctrl+C golește · Esc omite
+terminal-booting = pornește
+terminal-type-command = tastează o comandă · rulează când e gata · Esc omite
+
+setup-tagline-claude = Agentul de codare Anthropic, în Vmux
+setup-tagline-codex = Agentul de codare OpenAI, în Vmux
+setup-tagline-vibe = Agentul de codare Mistral, în Vmux
+setup-install-title = Instalează CLI-ul { $name }
+setup-homebrew-required = Homebrew este necesar pentru a instala { $command } și nu este configurat încă. Vmux va instala mai întâi Homebrew, apoi { $name }.
+setup-terminal-instructions = În terminal, apasă Return pentru a porni, apoi introdu parola Mac când ți se cere.
+setup-command-missing = Vmux a deschis această pagină deoarece comanda locală { $command } nu este instalată încă. Rulează comanda de mai jos ca să o instalezi.
+setup-install-failed = Instalarea nu s-a finalizat. Verifică terminalul pentru detalii, apoi reîncearcă.
+setup-installing = Se instalează…
+setup-install-homebrew = Instalează Homebrew + { $name }
+setup-run-install = Rulează comanda de instalare
+setup-auto-reload = Vmux o rulează într-un terminal și reîncarcă atunci când { $command } este gata.
+
+debug-title = Depanare
+debug-auto-update = Actualizare automată
+debug-simulate-update = Simulează actualizare disponibilă
+debug-simulate-download = Simulează descărcarea
+debug-clear-update = Șterge actualizarea
+debug-trigger-restart = Declanșează repornirea
+
+command-manage-spaces = Gestionează spațiile…
+command-pane-stack-location = panou { $pane } / stivă { $stack }
+command-space-pane-stack-location = { $space } / panou { $pane } / stivă { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Mod interactiv
+command-group-window = Fereastră
+command-group-tab = Filă
+command-group-pane = Panou
+command-group-stack = Stivă
+command-group-space = Spațiu
+command-group-navigation = Navigare
+command-group-open = Deschidere
+command-group-view = Vizualizare
+command-group-bar = Bară
+
+menu-close-vmux = Închide Vmux
+
+agents-terminal-coding-agent = Agent de programare în terminal

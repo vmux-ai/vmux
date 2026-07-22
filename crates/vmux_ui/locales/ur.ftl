@@ -1,0 +1,602 @@
+locale-name = اردو
+common-open = کھولیں
+common-close = بند کریں
+common-install = انسٹال کریں
+common-uninstall = اَن انسٹال کریں
+common-update = اپ ڈیٹ کریں
+common-retry = دوبارہ کوشش کریں
+common-refresh = ریفریش کریں
+common-remove = ہٹائیں
+common-enable = فعال کریں
+common-disable = غیر فعال کریں
+common-new = نیا
+common-active = فعال
+common-running = چل رہا ہے
+common-done = مکمل
+common-failed = ناکام
+common-installed = انسٹال شدہ
+common-items = { $count ->
+    [one] { $count } آئٹم
+   *[other] { $count } آئٹمز
+}
+start-title = شروع کریں
+start-tagline = ایک پرامپٹ۔ ہر کام مکمل۔
+
+agents-title = ایجنٹس
+agents-search = ACP اور CLI ایجنٹس تلاش کریں…
+agents-empty = کوئی مماثل ایجنٹ نہیں
+agents-empty-detail = نام، رن ٹائم، یا ACP/CLI آزمائیں۔
+agents-install-failed = انسٹالیشن ناکام رہی
+agents-updating = اپ ڈیٹ ہو رہا ہے…
+agents-retrying = دوبارہ کوشش ہو رہی ہے…
+agents-preparing = تیاری ہو رہی ہے…
+
+extensions-title = ایکسٹینشنز
+extensions-search = انسٹال شدہ یا Chrome Web Store میں تلاش کریں…
+extensions-relaunch = لاگو کرنے کے لیے دوبارہ چلائیں
+extensions-empty = کوئی ایکسٹینشن انسٹال نہیں
+extensions-no-match = کوئی مماثل ایکسٹینشن نہیں
+extensions-empty-detail = اوپر Chrome Web Store میں تلاش کریں اور Return دبائیں۔
+extensions-no-match-detail = کوئی اور نام یا ایکسٹینشن ID آزمائیں۔
+extensions-on = آن
+extensions-off = آف
+extensions-enable-confirm = { $name } فعال کریں؟
+extensions-enable-permissions = { $name } فعال کریں اور اجازت دیں:
+
+lsp-title = لینگویج سرورز
+lsp-search = لینگویج سرورز، لنٹرز، فارمیٹرز تلاش کریں…
+lsp-loading = کیٹلاگ لوڈ ہو رہا ہے…
+lsp-empty = کوئی مماثل لینگویج سرور نہیں
+lsp-empty-detail = کوئی اور زبان، لنٹر، یا فارمیٹر آزمائیں۔
+lsp-needs = { $tool } درکار ہے
+lsp-status-available = دستیاب
+lsp-status-on-path = PATH پر موجود
+lsp-status-installing = انسٹال ہو رہا ہے…
+lsp-status-installed = انسٹال شدہ
+lsp-status-outdated = اپ ڈیٹ دستیاب ہے
+lsp-status-running = چل رہا ہے
+lsp-status-failed = ناکام
+
+spaces-title = اسپیسز
+spaces-new-placeholder = نئی اسپیس کا نام
+spaces-empty = کوئی اسپیس نہیں
+spaces-default-name = اسپیس { $number }
+spaces-tabs = { $count ->
+    [one] 1 ٹیب
+   *[other] { $count } ٹیبز
+}
+spaces-delete = اسپیس حذف کریں
+
+team-title = ٹیم
+team-just-you = اس اسپیس میں صرف آپ ہیں
+team-agents = { $count ->
+    [one] آپ اور 1 ایجنٹ
+   *[other] آپ اور { $count } ایجنٹس
+}
+team-empty = یہاں ابھی کوئی نہیں
+team-you = آپ
+team-agent = ایجنٹ
+
+services-title = پس منظر کی سروسز
+services-processes = { $count ->
+    [one] 1 پروسیس
+   *[other] { $count } پروسیسز
+}
+services-kill-all = سب ختم کریں
+services-not-running = سروس نہیں چل رہی
+services-start-with = اس کے ساتھ شروع کریں:
+services-empty = کوئی فعال پروسیس نہیں
+services-filter = پروسیسز فلٹر کریں…
+services-no-match = کوئی مماثل پروسیس نہیں
+services-connected = منسلک
+services-disconnected = منقطع
+services-attached = اٹیچڈ
+services-kill = ختم کریں
+services-memory = میموری
+services-size = سائز
+services-shell = شیل
+
+error-title = خرابی
+
+history-search = ہسٹری تلاش کریں
+history-clear-all = سب صاف کریں
+history-clear-confirm = پوری ہسٹری صاف کریں؟
+history-clear-warning = یہ عمل واپس نہیں ہو سکے گا۔
+history-cancel = منسوخ کریں
+history-today = آج
+history-yesterday = کل
+history-days-ago = { $count } دن پہلے
+history-day-offset = دن -{ $count }
+
+settings-title = سیٹنگز
+settings-loading = سیٹنگز لوڈ ہو رہی ہیں…
+settings-stored = ~/.vmux/settings.ron میں محفوظ
+settings-other = دیگر
+settings-software-update = سافٹ ویئر اپ ڈیٹ
+settings-check-updates = اپ ڈیٹس چیک کریں
+settings-check-updates-hint = Auto-update فعال ہو تو لانچ پر اور ہر گھنٹے خودکار چیک ہوتا ہے۔
+settings-update-unavailable = دستیاب نہیں
+settings-update-unavailable-hint = اس بلڈ میں اپ ڈیٹر شامل نہیں ہے۔
+settings-update-checking = چیک ہو رہا ہے…
+settings-update-checking-hint = اپ ڈیٹس چیک ہو رہی ہیں…
+settings-update-check-again = دوبارہ چیک کریں
+settings-update-current = Vmux اپ ٹو ڈیٹ ہے۔
+settings-update-downloading = ڈاؤن لوڈ ہو رہا ہے…
+settings-update-downloading-hint = Vmux { $version } ڈاؤن لوڈ ہو رہا ہے…
+settings-update-installing = انسٹال ہو رہا ہے…
+settings-update-installing-hint = Vmux { $version } انسٹال ہو رہا ہے…
+settings-update-ready = اپ ڈیٹ تیار ہے
+settings-update-ready-hint = Vmux { $version } تیار ہے۔ لاگو کرنے کے لیے ری اسٹارٹ کریں۔
+settings-update-try-again = دوبارہ کوشش کریں
+settings-update-failed = اپ ڈیٹس چیک نہیں ہو سکیں۔
+settings-item = آئٹم
+settings-item-number = آئٹم { $number }
+settings-press-key = کوئی کلید دبائیں…
+settings-saved = محفوظ ہو گیا
+settings-record-key = نیا کلید کمبو ریکارڈ کرنے کے لیے کلک کریں
+
+tray-open-window = ونڈو کھولیں
+tray-close-window = ونڈو بند کریں
+tray-pause-recording = ریکارڈنگ روکیں
+tray-resume-recording = ریکارڈنگ دوبارہ شروع کریں
+tray-finish-recording = ریکارڈنگ مکمل کریں
+tray-quit = Vmux بند کریں
+
+composer-attach-files = فائلیں منسلک کریں (/upload)
+composer-remove-attachment = منسلکہ ہٹائیں
+
+layout-back = واپس
+layout-forward = آگے
+layout-reload = دوبارہ لوڈ کریں
+layout-bookmark-page = یہ صفحہ بک مارک کریں
+layout-remove-bookmark = بک مارک ہٹائیں
+layout-pin-page = یہ صفحہ پن کریں
+layout-unpin-page = اس صفحے کی پن ہٹائیں
+layout-manage-extensions = ایکسٹینشنز کا نظم کریں
+layout-new-stack = نیا اسٹیک
+layout-close-tab = ٹیب بند کریں
+layout-bookmark = بک مارک
+layout-pin = پن کریں
+layout-new-tab = نیا ٹیب
+layout-team = ٹیم
+
+command-switch-space = اسپیس بدلیں…
+command-search-ask = تلاش کریں یا پوچھیں…
+command-new-tab-placeholder = تلاش کریں، URL لکھیں، یا Terminal منتخب کریں…
+command-placeholder = URL لکھیں، ٹیبز تلاش کریں، یا کمانڈز کے لیے > لکھیں…
+command-composer-placeholder = کمانڈز کے لیے / یا میڈیا کے لیے @ لکھیں
+command-send = بھیجیں (Enter)
+command-terminal = ٹرمینل
+command-open-terminal = ٹرمینل میں کھولیں
+command-stack = اسٹیک
+command-tabs = { $count ->
+    [one] 1 ٹیب
+   *[other] { $count } ٹیبز
+}
+command-prompt = پرامپٹ
+command-new-tab = نیا ٹیب
+command-search = تلاش کریں
+command-open-value = “{ $value }” کھولیں
+command-search-value = “{ $value }” تلاش کریں
+
+schema-appearance = ظاہری شکل
+schema-general = عمومی
+schema-layout = لے آؤٹ
+schema-layout-detail = ونڈو، پینز، سائیڈبار، اور فوکس رنگ۔
+schema-agent = ایجنٹ
+schema-agent-detail = ایجنٹ کا برتاؤ اور ٹول اجازتیں۔
+schema-shortcuts = شارٹ کٹس
+schema-shortcuts-detail = صرف پڑھنے کے لیے منظر۔ بائنڈنگز بدلنے کے لیے settings.ron براہِ راست ایڈٹ کریں۔
+schema-terminal = ٹرمینل
+schema-browser = براؤزر
+schema-mode = موڈ
+schema-mode-detail = ویب صفحات کے لیے رنگوں کی اسکیم۔ Device آپ کے سسٹم کی پیروی کرتا ہے۔
+schema-device = ڈیوائس
+schema-light = لائٹ
+schema-dark = ڈارک
+schema-language = زبان
+schema-language-detail = سسٹم، en-US، ja، یا کوئی بھی BCP 47 ٹیگ استعمال کریں جس کے لیے ~/.vmux/locales/<tag>.ftl کیٹلاگ موجود ہو۔
+schema-auto-update = Auto-update
+schema-auto-update-detail = لانچ پر اور ہر گھنٹے اپ ڈیٹس چیک اور انسٹال کریں۔
+schema-startup-url = اسٹارٹ اپ URL
+schema-startup-url-detail = خالی ہو تو کمانڈ بار پرامپٹ کھلتا ہے۔
+schema-search-engine = سرچ انجن
+schema-search-engine-detail = Start اور کمانڈ بار سے ویب تلاش کے لیے استعمال ہوتا ہے۔
+schema-window = ونڈو
+schema-pane = پین
+schema-side-sheet = سائیڈ شیٹ
+schema-focus-ring = فوکس رنگ
+schema-run-placement = رن پلیسمنٹ اوور رائیڈ کی اجازت دیں
+schema-run-placement-detail = ایجنٹس کو رن پین موڈ، سمت، اور اینکر منتخب کرنے دیں۔
+schema-leader = لیڈر
+schema-leader-detail = کورڈ شارٹ کٹس کے لیے سابقہ کلید۔
+schema-chord-timeout = کورڈ ٹائم آؤٹ
+schema-chord-timeout-detail = کورڈ سابقہ ختم ہونے سے پہلے ملی سیکنڈز۔
+schema-bindings = بائنڈنگز
+schema-confirm-close = بند کرنے کی تصدیق
+schema-confirm-close-detail = چلتے ہوئے پروسیس والے ٹرمینل کو بند کرنے سے پہلے پوچھیں۔
+schema-default-theme = ڈیفالٹ تھیم
+schema-default-theme-detail = تھیمز کی فہرست میں فعال تھیم کا نام۔
+
+settings-empty = (خالی)
+settings-none = (کوئی نہیں)
+
+schema-system = نظام
+schema-editor = ایڈیٹر
+schema-recording = ریکارڈنگ
+schema-radius = رداس
+schema-padding = پیڈنگ
+schema-gap = وقفہ
+schema-width = چوڑائی
+schema-color = رنگ
+schema-red = سرخ
+schema-green = سبز
+schema-blue = نیلا
+schema-follow-files = فائلوں کی پیروی کریں
+schema-tidy-files = فائلیں سمیٹیں
+schema-tidy-files-max = فائل سمیٹنے کی حد
+schema-tidy-files-auto = فائلیں خودکار سمیٹیں
+schema-app-providers = ایپ فراہم کنندگان
+schema-provider = فراہم کنندہ
+schema-kind = قسم
+schema-models = ماڈلز
+schema-acp = ACP ایجنٹس
+schema-id = ID
+schema-name = نام
+schema-command = کمانڈ
+schema-arguments = آرگیومنٹس
+schema-environment = ماحول
+schema-working-directory = ورکنگ ڈائریکٹری
+schema-shell = شیل
+schema-font-family = فونٹ خاندان
+schema-startup-directory = آغاز ڈائریکٹری
+schema-themes = تھیمز
+schema-color-scheme = رنگ اسکیم
+schema-font-size = فونٹ سائز
+schema-line-height = لائن اونچائی
+schema-cursor-style = کرسر انداز
+schema-cursor-blink = کرسر جھپکنا
+schema-custom-themes = حسبِ ضرورت تھیمز
+schema-foreground = پیش منظر
+schema-background = پس منظر
+schema-cursor = کرسر
+schema-ansi-colors = ANSI رنگ
+schema-keymap = کلیدی نقشہ
+schema-explorer = ایکسپلورر
+schema-visible = مرئی
+schema-language-servers = زبان سرورز
+schema-servers = سرورز
+schema-language-id = زبان ID
+schema-root-markers = روٹ نشانیاں
+schema-output-directory = آؤٹ پٹ ڈائریکٹری
+
+menu-scene = منظر
+menu-layout = لے آؤٹ
+menu-terminal = ٹرمینل
+menu-browser = براؤزر
+menu-service = خدمت
+menu-bookmark = بک مارک
+menu-edit = تدوین
+
+layout-knowledge = علم
+layout-open-knowledge = علم کھولیں
+layout-open-welcome-knowledge = علم میں خوش آمدید کھولیں
+layout-open-path = { $path } کھولیں
+layout-fold-knowledge = علم تہہ کریں
+layout-unfold-knowledge = علم کھولیں
+layout-bookmarks = بک مارکس
+layout-new-folder = نیا فولڈر
+layout-add-to-bookmarks = بک مارکس میں شامل کریں
+layout-move-to-bookmarks = بک مارکس میں منتقل کریں
+layout-stack-number = اسٹیک { $number }
+layout-fold-stack = اسٹیک تہہ کریں
+layout-unfold-stack = اسٹیک کھولیں
+layout-close-stack = اسٹیک بند کریں
+layout-bookmark-in = { $folder } میں بک مارک کریں
+
+common-cancel = منسوخ کریں
+common-delete = حذف کریں
+common-save = محفوظ کریں
+common-rename = نام بدلیں
+common-expand = پھیلائیں
+common-collapse = سمیٹیں
+common-loading = لوڈ ہو رہا ہے…
+common-error = خرابی
+common-output = آؤٹ پٹ
+common-pending = زیرِ التوا
+common-current = موجودہ
+common-stop = روکیں
+services-command = Vmux سروس
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = صفحہ لوڈ نہیں ہو سکا
+error-page-not-found = صفحہ نہیں ملا
+error-unknown-host = نامعلوم Vmux ایپ ہوسٹ: { $host }
+
+history-title = سرگزشت
+
+command-new-app-chat = نئی { $provider }/{ $model } چیٹ (ایپ)
+command-interactive-mode-user = منظر > تعاملی موڈ > صارف
+command-interactive-mode-player = منظر > تعاملی موڈ > پلیئر
+command-minimize-window = لے آؤٹ > ونڈو > چھوٹی کریں
+command-toggle-layout = لے آؤٹ > لے آؤٹ > لے آؤٹ بدلیں
+command-close-tab = لے آؤٹ > ٹیب > ٹیب بند کریں
+command-new-task = لے آؤٹ > ٹیب > نیا کام…
+command-next-tab = لے آؤٹ > ٹیب > اگلا ٹیب
+command-prev-tab = لے آؤٹ > ٹیب > پچھلا ٹیب
+command-rename-tab = لے آؤٹ > ٹیب > ٹیب کا نام بدلیں
+command-tab-select-1 = لے آؤٹ > ٹیب > ٹیب 1 منتخب کریں
+command-tab-select-2 = لے آؤٹ > ٹیب > ٹیب 2 منتخب کریں
+command-tab-select-3 = لے آؤٹ > ٹیب > ٹیب 3 منتخب کریں
+command-tab-select-4 = لے آؤٹ > ٹیب > ٹیب 4 منتخب کریں
+command-tab-select-5 = لے آؤٹ > ٹیب > ٹیب 5 منتخب کریں
+command-tab-select-6 = لے آؤٹ > ٹیب > ٹیب 6 منتخب کریں
+command-tab-select-7 = لے آؤٹ > ٹیب > ٹیب 7 منتخب کریں
+command-tab-select-8 = لے آؤٹ > ٹیب > ٹیب 8 منتخب کریں
+command-tab-select-last = لے آؤٹ > ٹیب > آخری ٹیب منتخب کریں
+command-close-pane = لے آؤٹ > پین > پین بند کریں
+command-select-pane-left = لے آؤٹ > پین > بایاں پین منتخب کریں
+command-select-pane-right = لے آؤٹ > پین > دایاں پین منتخب کریں
+command-select-pane-up = لے آؤٹ > پین > اوپر والا پین منتخب کریں
+command-select-pane-down = لے آؤٹ > پین > نیچے والا پین منتخب کریں
+command-swap-pane-prev = لے آؤٹ > پین > پین کو پچھلے سے بدلیں
+command-swap-pane-next = لے آؤٹ > پین > پین کو اگلے سے بدلیں
+command-equalize-pane-size = لے آؤٹ > پین > پین کا سائز برابر کریں
+command-resize-pane-left = لے آؤٹ > پین > پین بائیں طرف ری سائز کریں
+command-resize-pane-right = لے آؤٹ > پین > پین دائیں طرف ری سائز کریں
+command-resize-pane-up = لے آؤٹ > پین > پین اوپر کی طرف ری سائز کریں
+command-resize-pane-down = لے آؤٹ > پین > پین نیچے کی طرف ری سائز کریں
+command-stack-close = لے آؤٹ > اسٹیک > اسٹیک بند کریں
+command-stack-next = لے آؤٹ > اسٹیک > اگلا اسٹیک
+command-stack-previous = لے آؤٹ > اسٹیک > پچھلا اسٹیک
+command-stack-reopen = لے آؤٹ > اسٹیک > بند صفحہ دوبارہ کھولیں
+command-stack-swap-prev = لے آؤٹ > اسٹیک > اسٹیک بائیں منتقل کریں
+command-stack-swap-next = لے آؤٹ > اسٹیک > اسٹیک دائیں منتقل کریں
+command-space-open = لے آؤٹ > اسپیس > اسپیسز
+command-terminal-close = ٹرمینل > ٹرمینل بند کریں
+command-terminal-next = ٹرمینل > اگلا ٹرمینل
+command-terminal-prev = ٹرمینل > پچھلا ٹرمینل
+command-terminal-clear = ٹرمینل > ٹرمینل صاف کریں
+command-browser-prev-page = براؤزر > نیویگیشن > واپس
+command-browser-next-page = براؤزر > نیویگیشن > آگے
+command-browser-reload = براؤزر > نیویگیشن > دوبارہ لوڈ کریں
+command-browser-hard-reload = براؤزر > نیویگیشن > ہارڈ ری لوڈ
+command-open-in-place = براؤزر > کھولیں > یہیں کھولیں
+command-open-in-new-stack = براؤزر > کھولیں > نئے اسٹیک میں کھولیں
+command-open-in-pane-top = براؤزر > کھولیں > اوپر والے پین میں کھولیں
+command-open-in-pane-right = براؤزر > کھولیں > دائیں پین میں کھولیں
+command-open-in-pane-bottom = براؤزر > کھولیں > نیچے والے پین میں کھولیں
+command-open-in-pane-left = براؤزر > کھولیں > بائیں پین میں کھولیں
+command-open-in-new-tab = براؤزر > کھولیں > نئے ٹیب میں کھولیں
+command-open-in-new-space = براؤزر > کھولیں > نئی اسپیس میں کھولیں
+command-browser-zoom-in = براؤزر > منظر > زوم اِن
+command-browser-zoom-out = براؤزر > منظر > زوم آؤٹ
+command-browser-zoom-reset = براؤزر > منظر > اصل سائز
+command-browser-dev-tools = براؤزر > منظر > ڈویلپر ٹولز
+command-browser-open-command-bar = براؤزر > بار > کمانڈ بار
+command-browser-open-page-in-command-bar = براؤزر > بار > صفحہ میں ترمیم
+command-browser-open-path-bar = براؤزر > بار > پاتھ نیویگیٹر
+command-browser-open-commands = براؤزر > بار > کمانڈز
+command-browser-open-history = براؤزر > بار > سرگزشت
+command-service-open = سروس > سروس مانیٹر کھولیں
+command-bookmark-toggle-active = بک مارک > صفحہ بک مارک کریں
+command-bookmark-pin-active = بک مارک > صفحہ پن کریں
+
+layout-tab = ٹیب
+layout-no-stacks = کوئی اسٹیک نہیں
+layout-loading = لوڈ ہو رہا ہے…
+layout-no-markdown-files = کوئی Markdown فائل نہیں
+layout-empty-folder = خالی فولڈر
+layout-worktree = ورک ٹری
+layout-folder-name = فولڈر کا نام
+layout-no-pins-bookmarks = کوئی پن یا بک مارک نہیں
+layout-move-to = { $folder } میں منتقل کریں
+layout-bookmark-current-page = موجودہ صفحہ بک مارک کریں
+layout-rename-folder = فولڈر کا نام بدلیں
+layout-remove-folder = فولڈر ہٹائیں
+layout-update-downloading = اپ ڈیٹ ڈاؤن لوڈ ہو رہی ہے
+layout-update-installing = اپ ڈیٹ انسٹال ہو رہی ہے…
+layout-update-ready = نیا ورژن دستیاب ہے
+layout-restart-update = اپ ڈیٹ کے لیے دوبارہ شروع کریں
+
+agent-preparing = ایجنٹ تیار ہو رہا ہے…
+agent-send-all-queued = قطار میں موجود سب پرامپٹس ابھی بھیجیں (Esc)
+agent-send = بھیجیں (Enter)
+agent-ready = جب آپ تیار ہوں۔
+agent-loading-older = پرانے پیغامات لوڈ ہو رہے ہیں…
+agent-load-older = پرانے پیغامات لوڈ کریں
+agent-continued-from = { $source } سے جاری
+agent-older-context-omitted = پرانا سیاق چھوڑ دیا گیا
+agent-interrupted = مداخلت ہوئی
+agent-allow-tool = { $tool } کی اجازت دیں؟
+agent-deny = انکار کریں
+agent-allow-always = ہمیشہ اجازت دیں
+agent-allow = اجازت دیں
+agent-loading-sessions = سیشنز لوڈ ہو رہے ہیں…
+agent-no-resumable-sessions = دوبارہ شروع کیے جا سکنے والے سیشن نہیں ملے
+agent-no-matching-sessions = کوئی مماثل سیشن نہیں
+agent-no-matching-models = کوئی مماثل ماڈل نہیں
+agent-choice-help = ↑/↓ یا Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = ریپوزٹری فولڈر منتخب کریں
+agent-choose-repository-detail = مقامی Git ریپوزٹری منتخب کریں جسے ایجنٹ استعمال کرے۔
+agent-choosing = منتخب ہو رہا ہے…
+agent-choose-folder = فولڈر منتخب کریں
+agent-queued = قطار میں
+agent-attached = منسلک:
+agent-cancel-queued = قطار والا پرامپٹ منسوخ کریں
+agent-resume-queued = قطار والے پرامپٹس دوبارہ شروع کریں
+agent-clear-queue = قطار صاف کریں
+agent-send-all-now = سب ابھی بھیجیں
+agent-choose-option = اوپر سے ایک اختیار منتخب کریں
+agent-loading-media = میڈیا لوڈ ہو رہا ہے…
+agent-no-matching-media = کوئی مماثل میڈیا نہیں
+agent-prompt-context = پرامپٹ سیاق
+agent-details = تفصیلات
+agent-path = پاتھ
+agent-tool = ٹول
+agent-server = سرور
+agent-bytes = { $count } بائٹس
+agent-worked-for = { $duration } تک کام کیا
+agent-worked-for-steps = { $count ->
+    [one] { $duration } تک کام کیا · 1 قدم
+   *[other] { $duration } تک کام کیا · { $count } قدم
+}
+agent-tool-guardian-review = گارڈین ریویو
+agent-tool-read-files = فائلیں پڑھیں
+agent-tool-viewed-image = تصویر دیکھی
+agent-tool-used-browser = براؤزر استعمال کیا
+agent-tool-searched-files = فائلیں تلاش کیں
+agent-tool-ran-commands = کمانڈز چلائیں
+agent-thinking = سوچ رہا ہے
+agent-subagent = ذیلی ایجنٹ
+agent-prompt = پرامپٹ
+agent-thread = تھریڈ
+agent-parent = والد
+agent-children = ذیلی
+agent-call = کال
+agent-raw-event = خام ایونٹ
+agent-plan = منصوبہ
+agent-tasks = { $count ->
+    [one] 1 کام
+   *[other] { $count } کام
+}
+agent-edited = ترمیم شدہ
+agent-reconnecting = دوبارہ جڑ رہا ہے { $attempt }/{ $total }
+agent-status-running = چل رہا ہے
+agent-status-done = مکمل
+agent-status-failed = ناکام
+agent-status-pending = زیرِ التوا
+agent-slash-attach-files = فائلیں منسلک کریں
+agent-slash-resume-session = پچھلا سیشن دوبارہ شروع کریں
+agent-slash-select-model = ماڈل منتخب کریں
+agent-slash-continue-cli = یہ سیشن CLI میں جاری رکھیں
+agent-session-just-now = ابھی ابھی
+agent-session-minutes-ago = { $count }m پہلے
+agent-session-hours-ago = { $count }h پہلے
+agent-session-days-ago = { $count }d پہلے
+agent-working-working = کام کر رہا ہے
+agent-working-thinking = سوچ رہا ہے
+agent-working-pondering = غور کر رہا ہے
+agent-working-noodling = سوچ بچار کر رہا ہے
+agent-working-percolating = خیال پک رہا ہے
+agent-working-conjuring = تراش رہا ہے
+agent-working-cooking = پکا رہا ہے
+agent-working-brewing = تیار کر رہا ہے
+agent-working-musing = سوچ میں ہے
+agent-working-ruminating = غور و فکر کر رہا ہے
+agent-working-scheming = حکمتِ عملی بنا رہا ہے
+agent-working-synthesizing = یکجا کر رہا ہے
+agent-working-tinkering = چھیڑ چھاڑ کر رہا ہے
+agent-working-churning = کھنگال رہا ہے
+agent-working-vibing = موڈ میں ہے
+agent-working-simmering = آہستہ پک رہا ہے
+agent-working-crafting = تشکیل دے رہا ہے
+agent-working-divining = سراغ لگا رہا ہے
+agent-working-mulling = سوچ رہا ہے
+agent-working-spelunking = گہرائی میں جا رہا ہے
+
+editor-toggle-explorer = ایکسپلورر ٹوگل کریں (Cmd+B)
+editor-unsaved = غیر محفوظ
+editor-rendered-markdown = براہِ راست ترمیم کے ساتھ رینڈر شدہ Markdown
+editor-note = نوٹ
+editor-source-editor = سورس ایڈیٹر
+editor-editor = ایڈیٹر
+editor-git-diff = Git ڈِف
+editor-diff = ڈِف
+editor-tidy = صاف کریں
+editor-always = ہمیشہ
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 غیر تبدیل شدہ پیش منظر
+   *[other] ✦ { $count } غیر تبدیل شدہ پیش منظر
+}
+editor-open-externally = باہر کھولیں
+editor-changed-line = تبدیل شدہ سطر
+editor-go-to-definition = تعریف پر جائیں
+editor-find-references = حوالہ جات تلاش کریں
+editor-references = { $count ->
+    [one] 1 حوالہ
+   *[other] { $count } حوالہ جات
+}
+editor-lsp-starting = { $server } شروع ہو رہا ہے…
+editor-lsp-not-installed = { $server } — انسٹال نہیں
+editor-explorer = ایکسپلورر
+editor-open-editors = کھلے ایڈیٹرز
+editor-outline = خاکہ
+editor-new-file = نئی فائل
+editor-new-folder = نیا فولڈر
+editor-delete-confirm = “{ $name }” حذف کریں؟ یہ عمل واپس نہیں ہو سکتا۔
+editor-created-folder = فولڈر { $name } بنایا گیا
+editor-created-file = فائل { $name } بنائی گئی
+editor-renamed-to = نام بدل کر { $name } کر دیا گیا
+editor-deleted = { $name } حذف کر دیا گیا
+editor-failed-decode-image = تصویر ڈی کوڈ نہیں ہو سکی
+editor-preview-large-image = تصویر (پیش منظر کے لیے بہت بڑی)
+editor-preview-binary = بائنری
+editor-preview-file = فائل
+
+git-status-clean = صاف
+git-status-modified = ترمیم شدہ
+git-status-staged = اسٹیجڈ
+git-status-staged-modified = اسٹیجڈ*
+git-status-untracked = غیر ٹریک شدہ
+git-status-deleted = حذف شدہ
+git-status-conflict = تضاد
+git-accept-all = ✓ سب قبول کریں
+git-unstage = اسٹیج سے ہٹائیں
+git-confirm-deny-all = سب رد کرنے کی تصدیق کریں
+git-deny-all = ✗ سب رد کریں
+git-commit-message = کمٹ پیغام
+git-commit = کمٹ ({ $count })
+git-push = ↑ پُش
+git-loading-diff = ڈِف لوڈ ہو رہا ہے…
+git-no-changes = دکھانے کے لیے کوئی تبدیلی نہیں
+git-accept = ✓ قبول کریں
+git-deny = ✗ رد کریں
+git-show-unchanged-lines = { $count } غیر تبدیل شدہ سطریں دکھائیں
+
+terminal-loading = لوڈ ہو رہا ہے…
+terminal-runs-when-ready = تیار ہونے پر چلے گا · Ctrl+C صاف کرتا ہے · Esc چھوڑتا ہے
+terminal-booting = بوٹ ہو رہا ہے
+terminal-type-command = کمانڈ ٹائپ کریں · تیار ہونے پر چلے گا · Esc چھوڑتا ہے
+
+setup-tagline-claude = Anthropic کا کوڈنگ ایجنٹ، Vmux میں
+setup-tagline-codex = OpenAI کا کوڈنگ ایجنٹ، Vmux میں
+setup-tagline-vibe = Mistral کا کوڈنگ ایجنٹ، Vmux میں
+setup-install-title = { $name } CLI انسٹال کریں
+setup-homebrew-required = { $command } انسٹال کرنے کے لیے Homebrew درکار ہے اور ابھی سیٹ اپ نہیں ہے۔ Vmux پہلے Homebrew انسٹال کرے گا، پھر { $name }۔
+setup-terminal-instructions = ٹرمینل میں شروع کرنے کے لیے Return دبائیں، پھر اشارہ ملنے پر اپنا Mac پاس ورڈ درج کریں۔
+setup-command-missing = Vmux نے یہ صفحہ اس لیے کھولا ہے کہ مقامی { $command } کمانڈ ابھی انسٹال نہیں۔ اسے حاصل کرنے کے لیے نیچے والی کمانڈ چلائیں۔
+setup-install-failed = انسٹال مکمل نہیں ہوا۔ تفصیلات کے لیے ٹرمینل دیکھیں، پھر دوبارہ کوشش کریں۔
+setup-installing = انسٹال ہو رہا ہے…
+setup-install-homebrew = Homebrew + { $name } انسٹال کریں
+setup-run-install = انسٹال کمانڈ چلائیں
+setup-auto-reload = Vmux اسے ٹرمینل میں چلاتا ہے اور { $command } تیار ہونے پر دوبارہ لوڈ کرتا ہے۔
+
+debug-title = ڈیبگ
+debug-auto-update = خودکار اپ ڈیٹ
+debug-simulate-update = اپ ڈیٹ دستیاب ہونے کی نقل بنائیں
+debug-simulate-download = ڈاؤن لوڈ کی نقل بنائیں
+debug-clear-update = اپ ڈیٹ صاف کریں
+debug-trigger-restart = دوبارہ شروع کرائیں
+
+command-manage-spaces = اسپیسز کا نظم کریں…
+command-pane-stack-location = پین { $pane } / اسٹیک { $stack }
+command-space-pane-stack-location = { $space } / پین { $pane } / اسٹیک { $stack }
+command-terminal-path = ٹرمینل ({ $path })
+command-group-interactive-mode = انٹرایکٹو موڈ
+command-group-window = ونڈو
+command-group-tab = ٹیب
+command-group-pane = پین
+command-group-stack = اسٹیک
+command-group-space = اسپیس
+command-group-navigation = نیویگیشن
+command-group-open = کھولیں
+command-group-view = منظر
+command-group-bar = بار
+
+menu-close-vmux = Vmux بند کریں
+
+agents-terminal-coding-agent = ٹرمینل پر مبنی کوڈنگ ایجنٹ

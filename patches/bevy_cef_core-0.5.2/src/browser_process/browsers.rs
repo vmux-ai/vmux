@@ -16,10 +16,10 @@ use cef::Rect;
 use cef::{
     Browser, BrowserHost, BrowserSettings, CefString, Client, CompositionUnderline,
     DictionaryValue, ImplBrowser, ImplBrowserHost, ImplDictionaryValue, ImplFrame, ImplListValue,
-    ImplProcessMessage, ImplRequestContext, MouseButtonType, ProcessId, Range, RequestContext,
-    RequestContextSettings, WindowInfo, binary_value_create, browser_host_create_browser_sync,
-    dictionary_value_create, list_value_create, process_message_create,
-    register_scheme_handler_factory,
+    ImplPreferenceManager, ImplProcessMessage, ImplRequestContext, ImplValue, MouseButtonType,
+    ProcessId, Range, RequestContext, RequestContextSettings, WindowInfo, binary_value_create,
+    browser_host_create_browser_sync, dictionary_value_create, list_value_create,
+    process_message_create, register_scheme_handler_factory, value_create,
 };
 use cef_dll_sys::{cef_event_flags_t, cef_mouse_button_type_t};
 #[allow(deprecated)]
@@ -132,6 +132,9 @@ fn requires_extension_free_context(uri: &str) -> bool {
 /// Inserted by that plugin; when `bevy_cef_core` is used without it, initialize via `init_resource` (default `None`).
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CefDiskProfileRoot(pub Option<String>);
+
+#[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
+pub struct CefAcceptLanguageList(pub String);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CefColorMode {
@@ -255,6 +258,7 @@ impl Browsers {
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
+        accept_language_list: &str,
         background_color: Option<u32>,
         windowless_frame_rate: i32,
         windowed: bool,
@@ -365,14 +369,14 @@ impl Browsers {
         {
             Some(root) => {
                 if self.shared_disk_context.is_none() {
-                    self.ensure_shared_disk_context(requester, root);
+                    self.ensure_shared_disk_context(requester, root, accept_language_list);
                 } else {
                     let _ = requester;
                 }
                 self.shared_disk_context.as_mut()
             }
             None => {
-                ephemeral_local = Self::ephemeral_request_context(requester);
+                ephemeral_local = Self::ephemeral_request_context(requester, accept_language_list);
                 ephemeral_local.as_mut()
             }
         };
@@ -1975,19 +1979,31 @@ impl Browsers {
             .ime_commit_text(Some(&text.into()), Some(&replacement_range), 0);
     }
 
-    fn persistent_request_context_settings(cache_path: &str) -> RequestContextSettings {
+    fn persistent_request_context_settings(
+        cache_path: &str,
+        accept_language_list: &str,
+    ) -> RequestContextSettings {
         let mut settings = RequestContextSettings::default();
         settings.cache_path = cache_path.into();
         settings.persist_session_cookies = 1;
+        settings.accept_language_list = accept_language_list.into();
         settings
     }
 
-    fn ensure_shared_disk_context(&mut self, requester: Requester, root: &str) {
+    fn ensure_shared_disk_context(
+        &mut self,
+        requester: Requester,
+        root: &str,
+        accept_language_list: &str,
+    ) {
         if self.shared_disk_context.is_some() {
             return;
         }
         let mut context = cef::request_context_create_context(
-            Some(&Self::persistent_request_context_settings(root)),
+            Some(&Self::persistent_request_context_settings(
+                root,
+                accept_language_list,
+            )),
             Some(&mut RequestContextHandlerBuilder::build()),
         );
         if let Some(context) = context.as_mut() {
@@ -2011,9 +2027,16 @@ impl Browsers {
         self.shared_disk_context = context;
     }
 
-    fn ephemeral_request_context(requester: Requester) -> Option<RequestContext> {
+    fn ephemeral_request_context(
+        requester: Requester,
+        accept_language_list: &str,
+    ) -> Option<RequestContext> {
+        let settings = RequestContextSettings {
+            accept_language_list: accept_language_list.into(),
+            ..Default::default()
+        };
         let mut context = cef::request_context_create_context(
-            Some(&RequestContextSettings::default()),
+            Some(&settings),
             Some(&mut RequestContextHandlerBuilder::build()),
         );
         if let Some(context) = context.as_mut() {
@@ -2035,6 +2058,37 @@ impl Browsers {
             );
         }
         context
+    }
+
+    pub fn set_accept_language_list(&mut self, accept_language_list: &str) {
+        if accept_language_list.trim().is_empty() {
+            return;
+        }
+        if let Some(context) = self.shared_disk_context.as_ref() {
+            Self::set_accept_language_preference(context, accept_language_list);
+        }
+        for browser in self.browsers.values() {
+            if let Some(context) = browser.host.request_context() {
+                Self::set_accept_language_preference(&context, accept_language_list);
+            }
+        }
+    }
+
+    fn set_accept_language_preference(context: &RequestContext, accept_language_list: &str) {
+        let name: CefString = "intl.accept_languages".into();
+        if context.can_set_preference(Some(&name)) == 0 {
+            return;
+        }
+        let Some(mut value) = value_create() else {
+            return;
+        };
+        if value.set_string(Some(&accept_language_list.into())) == 0 {
+            return;
+        }
+        let mut error = CefString::default();
+        if context.set_preference(Some(&name), Some(&mut value), Some(&mut error)) == 0 {
+            warn!("failed to set CEF accept-language preference");
+        }
     }
 
     pub fn set_color_scheme(&mut self, mode: CefColorMode) {

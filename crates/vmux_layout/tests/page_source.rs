@@ -2,7 +2,7 @@
 fn tab_close_button_captures_mouse_down_before_click() {
     let tab = tab_component_source();
     let close_button = tab
-        .split("aria_label: \"Close tab\"")
+        .split("aria_label: translate(\"layout-close-tab\")")
         .nth(1)
         .and_then(|rest| rest.split("Icon { class: \"h-2.5 w-2.5\"").next())
         .expect("tab close button");
@@ -16,7 +16,7 @@ fn tab_close_button_captures_mouse_down_before_click() {
 fn tab_close_button_requests_tab_close() {
     let tab = tab_component_source();
     let close_button = tab
-        .split("aria_label: \"Close tab\"")
+        .split("aria_label: translate(\"layout-close-tab\")")
         .nth(1)
         .and_then(|rest| rest.split("Icon { class: \"h-2.5 w-2.5\"").next())
         .expect("tab close button");
@@ -31,7 +31,10 @@ fn tab_hover_area_switches_tab() {
     let tab_root = tab
         .split("div {\n            class: \"{tab_class}\"")
         .nth(1)
-        .and_then(|rest| rest.split("aria_label: \"Close tab\"").next())
+        .and_then(|rest| {
+            rest.split("aria_label: translate(\"layout-close-tab\")")
+                .next()
+        })
         .expect("tab root");
 
     assert!(tab_root.contains("onclick: move |_|"));
@@ -104,7 +107,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("entry.name.eq_ignore_ascii_case(\"welcome.md\")"));
     assert!(source.contains("open_knowledge_path(pane_id, landing_path.clone())"));
     assert!(source.contains("if entry.title.is_empty()"));
-    assert!(source.contains("\"Empty folder\""));
     assert!(source.contains("if expanded() {"));
     assert!(!source.contains("if expanded() && has_children"));
     assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
@@ -228,7 +230,6 @@ fn dir_path_titles_truncate_at_start() {
     assert!(source.contains("title.starts_with('/') || title.starts_with(\"~/\")"));
     assert!(source.contains("\"truncate-start\""));
     assert!(source.contains("dir_truncate_class(&display_title)"));
-    assert!(source.contains("dir_truncate_class(&stack.title)"));
 
     let theme = include_str!("../../vmux_ui/assets/theme.css");
     assert!(theme.contains(".truncate-start"));

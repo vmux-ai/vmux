@@ -10,6 +10,7 @@ use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
 
 const TREE_MOTION_MS: i32 = 170;
@@ -303,18 +304,32 @@ fn section_header(title: String, open: Signal<bool>, on_toggle: EventHandler<()>
     }
 }
 
-fn prompt_title(kind: PromptKind) -> &'static str {
+fn prompt_title(kind: PromptKind) -> String {
     match kind {
-        PromptKind::CreateFile => "New File",
-        PromptKind::CreateDir => "New Folder",
-        PromptKind::Rename => "Rename",
-        PromptKind::Delete => "Delete",
+        PromptKind::CreateFile => translate("editor-new-file"),
+        PromptKind::CreateDir => translate("editor-new-folder"),
+        PromptKind::Rename => translate("common-rename"),
+        PromptKind::Delete => translate("common-delete"),
     }
+}
+
+fn localize_notice(message: &str) -> String {
+    for (prefix, id) in [
+        ("Created folder ", "editor-created-folder"),
+        ("Created file ", "editor-created-file"),
+        ("Renamed to ", "editor-renamed-to"),
+        ("Deleted ", "editor-deleted"),
+    ] {
+        if let Some(name) = message.strip_prefix(prefix) {
+            return translate_with(id, &[("name", TranslationValue::String(name))]);
+        }
+    }
+    message.to_string()
 }
 
 #[component]
 pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
-    let mut root_name = use_signal(|| "Explorer".to_string());
+    let mut root_name = use_signal(|| translate("editor-explorer"));
     let mut root_path = use_signal(String::new);
     let mut current_path = use_signal(String::new);
     let mut root_loading = use_signal(|| false);
@@ -380,7 +395,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 notice_generation,
                 ExplorerNotice {
                     ok: e.ok,
-                    message: e.message,
+                    message: if e.ok {
+                        localize_notice(&e.message)
+                    } else {
+                        e.message
+                    },
                 },
             );
         });
@@ -409,10 +428,10 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     rsx! {
         div { class: "relative flex h-full w-full flex-col overflow-hidden bg-foreground/[0.04] font-sans text-xs text-foreground select-none",
             div { class: "flex h-9 shrink-0 items-center px-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                "Explorer"
+                {translate("editor-explorer")}
             }
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
-                {section_header("Open Editors".to_string(), show_open, EventHandler::new(move |_| show_open.set(!show_open())))}
+                {section_header(translate("editor-open-editors"), show_open, EventHandler::new(move |_| show_open.set(!show_open())))}
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
@@ -517,7 +536,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                         if root_loading() && rows.read().is_empty() {
                             div { class: "flex h-6 items-center gap-2 px-3 text-foreground/45",
                                 span { class: "h-3 w-3 animate-spin rounded-full border border-foreground/20 border-t-foreground/60" }
-                                "Loading"
+                                {translate("common-loading")}
                             }
                         }
                         for motion in rows() {
@@ -590,7 +609,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     }
                 }
 
-                {section_header("Outline".to_string(), show_outline, EventHandler::new(move |_| show_outline.set(!show_outline())))}
+                {section_header(translate("editor-outline"), show_outline, EventHandler::new(move |_| show_outline.set(!show_outline())))}
                 div { class: "{outline_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for s in outline() {
@@ -637,7 +656,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     menu.set(None);
                                 }
                             },
-                            "New File"
+                            {translate("editor-new-file")}
                         }
                         button {
                             class: "flex w-full items-center rounded-md px-3 py-2 text-left transition-colors hover:bg-foreground/[0.08]",
@@ -649,7 +668,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     menu.set(None);
                                 }
                             },
-                            "New Folder"
+                            {translate("editor-new-folder")}
                         }
                         div { class: "mx-2 my-1 h-px bg-border" }
                         button {
@@ -661,7 +680,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     menu.set(None);
                                 }
                             },
-                            "Refresh"
+                            {translate("common-refresh")}
                         }
                     }
                     if !current.is_root {
@@ -679,7 +698,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     menu.set(None);
                                 }
                             },
-                            "Rename"
+                            {translate("common-rename")}
                         }
                         button {
                             class: "flex w-full items-center rounded-md px-3 py-2 text-left text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-300",
@@ -691,7 +710,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     menu.set(None);
                                 }
                             },
-                            "Delete"
+                            {translate("common-delete")}
                         }
                     }
                 }
@@ -707,7 +726,10 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                         div { class: "text-sm font-semibold text-foreground", "{prompt_title(current.kind)}" }
                         if current.kind == PromptKind::Delete {
                             div { class: "mt-2 text-xs leading-relaxed text-muted-foreground",
-                                "Delete “{current.name}”? This cannot be undone."
+                                {translate_with(
+                                    "editor-delete-confirm",
+                                    &[("name", TranslationValue::String(&current.name))],
+                                )}
                             }
                         } else {
                             input {
@@ -730,7 +752,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                             button {
                                 class: "rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground",
                                 onclick: move |_| prompt.set(None),
-                                "Cancel"
+                                {translate("common-cancel")}
                             }
                             button {
                                 class: if current.kind == PromptKind::Delete {
@@ -739,7 +761,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                     "rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-medium text-slate-950 transition-colors hover:bg-cyan-400"
                                 },
                                 onclick: move |_| submit_prompt(prompt, draft),
-                                {if current.kind == PromptKind::Delete { "Delete" } else { "Save" }}
+                                {if current.kind == PromptKind::Delete {
+                                    translate("common-delete")
+                                } else {
+                                    translate("common-save")
+                                }}
                             }
                         }
                     }

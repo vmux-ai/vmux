@@ -20,6 +20,7 @@ web = [
     "dep:vmux_space",
     "dep:vmux_team",
     "dep:vmux_terminal",
+    "dep:vmux_ui",
     "dep:web-sys",
 ]
 
@@ -48,4 +49,5 @@ vmux_setting = { path = "../vmux_setting", optional = true }
 vmux_space = { path = "../vmux_space", optional = true }
 vmux_team = { path = "../vmux_team", optional = true }
 vmux_terminal = { path = "../vmux_terminal", optional = true }
+vmux_ui = { path = "../vmux_ui", optional = true }
 web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

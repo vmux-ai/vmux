@@ -14,6 +14,7 @@ use vmux_ui::components::manager::{
 };
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::translate;
 
 fn request_catalog() {
     let _ = try_cef_bin_emit_rkyv(&AgentsCatalogRequest {});
@@ -49,7 +50,7 @@ fn matches_search(agent: &AgentEntry, query: &str) -> bool {
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut agents = use_signal(Vec::<AgentEntry>::new);
     let mut query = use_signal(String::new);
     let mut loaded = use_signal(|| false);
@@ -66,13 +67,14 @@ pub fn Page() -> Element {
                 set_status(agents, &id, "installed", "");
                 request_catalog();
             } else {
-                set_status(agents, &id, "error", "Install failed");
+                set_status(agents, &id, "error", &translate("agents-install-failed"));
             }
         });
 
     use_effect(move || {
+        locale();
         if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title("Agents");
+            doc.set_title(&translate("agents-title"));
         }
         request_catalog();
     });
@@ -87,10 +89,10 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             ManagerHeader {
-                title: "Agents",
+                title: translate("agents-title"),
                 count: all_agents.len(),
                 search_value: query(),
-                search_placeholder: "Search ACP and CLI agents…",
+                search_placeholder: translate("agents-search"),
                 onsearch: move |event: FormEvent| query.set(event.value()),
                 onkeydown: None,
                 actions: rsx! {},
@@ -100,8 +102,8 @@ pub fn Page() -> Element {
                     ManagerSkeleton {}
                 } else if filtered.is_empty() {
                     ManagerEmpty {
-                        title: "No matching agents",
-                        detail: "Try a name, runtime, or ACP/CLI.",
+                        title: translate("agents-empty"),
+                        detail: translate("agents-empty-detail"),
                     }
                 }
                 for agent in filtered.iter() {
@@ -115,6 +117,11 @@ pub fn Page() -> Element {
 fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
     let icon_url = agent.icon.clone();
     let launch_url = agent.launch_url.clone();
+    let description = if agent.source == "cli" {
+        translate("agents-terminal-coding-agent")
+    } else {
+        agent.description.clone()
+    };
     rsx! {
         ManagerRow {
             icon: rsx! {
@@ -126,7 +133,7 @@ fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element 
                 }
             },
             title: agent.name.clone(),
-            subtitle: agent.description.clone(),
+            subtitle: description,
             meta: rsx! {
                 ManagerBadge { tone: ManagerTone::Neutral, "{agent.source}" }
                 if agent.runtime != agent.source {
@@ -147,13 +154,13 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
     match agent.status.as_str() {
         "installing" => rsx! { ManagerSpinner { detail: agent.detail.clone() } },
         "installed" => rsx! {
-            span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", "Installed" }
+            span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
                     let _ = try_cef_bin_emit_rkyv(&AgentsOpen { url: launch_url.clone() });
                 },
-                "Open"
+                {translate("common-open")}
             }
             if agent.uninstallable {
                 ManagerButton {
@@ -162,7 +169,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         set_status(agents, &uninstall_id, "available", "");
                         let _ = try_cef_bin_emit_rkyv(&AgentsUninstall { id: uninstall_id.clone() });
                     },
-                    "Uninstall"
+                    {translate("common-uninstall")}
                 }
             }
         },
@@ -170,18 +177,18 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    set_status(agents, &id, "installing", "Updating…");
+                    set_status(agents, &id, "installing", &translate("agents-updating"));
                     let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone() });
                 },
-                "Update"
+                {translate("common-update")}
             }
         },
         "error" => rsx! {
-            span { class: "max-w-36 truncate text-xs text-red-500", title: "{agent.detail}", "Failed" }
+            span { class: "max-w-36 truncate text-xs text-red-500", title: "{agent.detail}", {translate("common-failed")} }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
-                    set_status(agents, &install_id, "installing", "Retrying…");
+                    set_status(agents, &install_id, "installing", &translate("agents-retrying"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
@@ -189,14 +196,14 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
                     }
                 },
-                "Retry"
+                {translate("common-retry")}
             }
         },
         _ => rsx! {
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    set_status(agents, &install_id, "installing", "Preparing…");
+                    set_status(agents, &install_id, "installing", &translate("agents-preparing"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
@@ -204,7 +211,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
                     }
                 },
-                "Install"
+                {translate("common-install")}
             }
         },
     }

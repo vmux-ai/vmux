@@ -88,6 +88,7 @@ chrono = { workspace = true }
 vmux_agent = { path = "../vmux_agent" }
 vmux_browser = { path = "../vmux_browser" }
 vmux_core = { path = "../vmux_core" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_editor = { path = "../vmux_editor" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }

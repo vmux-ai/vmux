@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::i18n::translate;
 use dioxus::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -153,7 +154,7 @@ pub fn PromptComposer(
                             if let Some(remove_index) = attachment.remove_index {
                                 button {
                                     class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition hover:bg-foreground/10 hover:text-foreground",
-                                    title: "Remove attachment",
+                                    title: translate("composer-remove-attachment"),
                                     onmousedown: move |event| event.prevent_default(),
                                     onclick: move |_| {
                                         on_remove_attachment.call(remove_index);
@@ -236,7 +237,7 @@ pub fn PromptComposer(
                 div { class: "relative z-10 mt-0.5 flex min-w-0 items-center gap-1 px-1",
                     button {
                         class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-foreground/50 transition hover:bg-foreground/[0.08] hover:text-foreground active:scale-95",
-                        title: "Attach files (/upload)",
+                        title: translate("composer-attach-files"),
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| on_attach.call(()),
                         svg {
@@ -253,7 +254,7 @@ pub fn PromptComposer(
                         div { class: "min-w-0 flex-1 overflow-hidden", {footer} }
                     } else {
                         div { class: "min-w-0 flex-1 truncate px-1 text-[10px] text-muted-foreground/55",
-                            "Enter to send · Shift+Enter for new line"
+                            {translate("command-send")}
                         }
                     }
                     button {

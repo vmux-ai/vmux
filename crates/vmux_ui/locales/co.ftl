@@ -1,0 +1,602 @@
+locale-name = corsu
+common-open = Apre
+common-close = Chjode
+common-install = Stallà
+common-uninstall = Disinstallà
+common-update = Mette à ghjornu
+common-retry = Ripruvà
+common-refresh = Attualizà
+common-remove = Caccià
+common-enable = Attivà
+common-disable = Disattivà
+common-new = Novu
+common-active = attivu
+common-running = in corsu
+common-done = compiu
+common-failed = Fiascatu
+common-installed = Stallatu
+common-items = { $count ->
+    [one] { $count } elementu
+   *[other] { $count } elementi
+}
+start-title = Principiu
+start-tagline = Un prompt. Tuttu fattu.
+
+agents-title = Agenti
+agents-search = Circà agenti ACP è CLI…
+agents-empty = Nisun agente currispundente
+agents-empty-detail = Pruvate un nome, un runtime, o ACP/CLI.
+agents-install-failed = Stallazione fiascata
+agents-updating = Messa à ghjornu…
+agents-retrying = Novu tentativu…
+agents-preparing = Preparazione…
+
+extensions-title = Estensioni
+extensions-search = Circà trà quelle stallate o in Chrome Web Store…
+extensions-relaunch = Rilancià per applicà
+extensions-empty = Nisuna estensione stallata
+extensions-no-match = Nisuna estensione currispundente
+extensions-empty-detail = Circate in Chrome Web Store quì sopra è appughjate nant’à Ritornu.
+extensions-no-match-detail = Pruvate un altru nome o ID d’estensione.
+extensions-on = Attiva
+extensions-off = Disattiva
+extensions-enable-confirm = Attivà { $name }?
+extensions-enable-permissions = Attivà { $name } è permette:
+
+lsp-title = Servitori di lingua
+lsp-search = Circà servitori di lingua, linters, furmattatori…
+lsp-loading = Caricamentu di u catalogu…
+lsp-empty = Nisun servitore di lingua currispundente
+lsp-empty-detail = Pruvate un’altra lingua, linter, o furmattatore.
+lsp-needs = richiede { $tool }
+lsp-status-available = Dispunibule
+lsp-status-on-path = In PATH
+lsp-status-installing = Stallazione…
+lsp-status-installed = Stallatu
+lsp-status-outdated = Messa à ghjornu dispunibule
+lsp-status-running = In corsu
+lsp-status-failed = Fiascatu
+
+spaces-title = Spazii
+spaces-new-placeholder = Nome di u novu spaziu
+spaces-empty = Nisun spaziu
+spaces-default-name = Spaziu { $number }
+spaces-tabs = { $count ->
+    [one] 1 scheda
+   *[other] { $count } schede
+}
+spaces-delete = Sguassà u spaziu
+
+team-title = Squadra
+team-just-you = Site solu in questu spaziu
+team-agents = { $count ->
+    [one] Voi è 1 agente
+   *[other] Voi è { $count } agenti
+}
+team-empty = Ùn ci hè ancu nimu quì
+team-you = Voi
+team-agent = Agente
+
+services-title = Servizii in fondu
+services-processes = { $count ->
+    [one] 1 prucessu
+   *[other] { $count } prucessi
+}
+services-kill-all = Tumbà tuttu
+services-not-running = U serviziu ùn hè micca in corsu
+services-start-with = Principià cù:
+services-empty = Nisun prucessu attivu
+services-filter = Filtrà i prucessi…
+services-no-match = Nisun prucessu currispundente
+services-connected = Cunnessu
+services-disconnected = Scunnessu
+services-attached = attaccatu
+services-kill = Tumbà
+services-memory = Memoria
+services-size = Dimensione
+services-shell = Shell
+
+error-title = Errore
+
+history-search = Circà in a cronulugia
+history-clear-all = Sguassà tuttu
+history-clear-confirm = Sguassà tutta a cronulugia?
+history-clear-warning = Ùn si puderà vultà in daretu.
+history-cancel = Annullà
+history-today = Oghje
+history-yesterday = Eri
+history-days-ago = { $count } ghjorni fà
+history-day-offset = Ghjornu -{ $count }
+
+settings-title = Preferenze
+settings-loading = Caricamentu di e preferenze…
+settings-stored = Salvatu in ~/.vmux/settings.ron
+settings-other = Altru
+settings-software-update = Messa à ghjornu di u prugramma
+settings-check-updates = Circà e messe à ghjornu
+settings-check-updates-hint = Verifica in autumàticu à u lanciu è ogni ora quandu a messa à ghjornu autumàtica hè attiva.
+settings-update-unavailable = Micca dispunibule
+settings-update-unavailable-hint = L’aghjurnadore ùn hè micca inclusu in sta custruzzione.
+settings-update-checking = Verificazione…
+settings-update-checking-hint = Ricerca di messe à ghjornu…
+settings-update-check-again = Verificà torna
+settings-update-current = Vmux hè à ghjornu.
+settings-update-downloading = Scaricamentu…
+settings-update-downloading-hint = Scaricamentu di Vmux { $version }…
+settings-update-installing = Stallazione…
+settings-update-installing-hint = Stallazione di Vmux { $version }…
+settings-update-ready = Messa à ghjornu pronta
+settings-update-ready-hint = Vmux { $version } hè prontu. Riavviate per applicà.
+settings-update-try-again = Pruvà torna
+settings-update-failed = Impussibule di circà e messe à ghjornu.
+settings-item = Elementu
+settings-item-number = Elementu { $number }
+settings-press-key = Appughjate una chjave…
+settings-saved = Salvatu
+settings-record-key = Cliccate per arregistrà una nova cumbinazione di chjave
+
+tray-open-window = Apre a finestra
+tray-close-window = Chjode a finestra
+tray-pause-recording = Mette l’arregistramentu in pausa
+tray-resume-recording = Ripiglià l’arregistramentu
+tray-finish-recording = Finisce l’arregistramentu
+tray-quit = Esce da Vmux
+
+composer-attach-files = Aghjunghje fugliali (/upload)
+composer-remove-attachment = Caccià l’allegatu
+
+layout-back = In daretu
+layout-forward = In avanti
+layout-reload = Ricaricà
+layout-bookmark-page = Aghjunghje sta pagina à i preferiti
+layout-remove-bookmark = Caccià u preferitu
+layout-pin-page = Fissà sta pagina
+layout-unpin-page = Sbluccà sta pagina
+layout-manage-extensions = Gestisce l’estensioni
+layout-new-stack = Nova pila
+layout-close-tab = Chjode a scheda
+layout-bookmark = Preferitu
+layout-pin = Fissà
+layout-new-tab = Nova scheda
+layout-team = Squadra
+
+command-switch-space = Cambià spaziu…
+command-search-ask = Circà o dumandà…
+command-new-tab-placeholder = Circate o scrivite un URL, o sceglite Terminal…
+command-placeholder = Scrivite un URL, circate schede, o > per i cumandi…
+command-composer-placeholder = Scrivite / per i cumandi o @ per i media
+command-send = Mandà (Entrata)
+command-terminal = Terminale
+command-open-terminal = Apre in Terminale
+command-stack = Pila
+command-tabs = { $count ->
+    [one] 1 scheda
+   *[other] { $count } schede
+}
+command-prompt = Prompt
+command-new-tab = Nova scheda
+command-search = Circà
+command-open-value = Apre “{ $value }”
+command-search-value = Circà “{ $value }”
+
+schema-appearance = Aspettu
+schema-general = Generale
+schema-layout = Dispusera
+schema-layout-detail = Finestra, pannelli, barra laterale, è anellu di focus.
+schema-agent = Agente
+schema-agent-detail = Cumportamentu di l’agente è permessi d’arnesi.
+schema-shortcuts = Accurtatoghji
+schema-shortcuts-detail = Vista in sola lettura. Mudificate settings.ron direttamente per cambià l’assuciamenti.
+schema-terminal = Terminale
+schema-browser = Navigatore
+schema-mode = Modu
+schema-mode-detail = Schema di culori per e pagine web. Dispositivu seguita u sistema.
+schema-device = Dispositivu
+schema-light = Chjaru
+schema-dark = Scuru
+schema-language = Lingua
+schema-language-detail = Aduprate u sistema, en-US, ja, o qualunque tag BCP 47 cù un catalogu currispundente ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Messa à ghjornu autumàtica
+schema-auto-update-detail = Circà è stallà e messe à ghjornu à u lanciu è ogni ora.
+schema-startup-url = URL d’avviu
+schema-startup-url-detail = Viotu apre u prompt di a barra di cumandi.
+schema-search-engine = Mutore di ricerca
+schema-search-engine-detail = Adupratu per e ricerche web da Principiu è da a barra di cumandi.
+schema-window = Finestra
+schema-pane = Pannellu
+schema-side-sheet = Fogliu laterale
+schema-focus-ring = Anellu di focus
+schema-run-placement = Permette di rimpiazzà u piazzamentu d’esecuzione
+schema-run-placement-detail = Lascià l’agenti sceglie u modu, a direzzione è l’ancura di u pannellu d’esecuzione.
+schema-leader = Leader
+schema-leader-detail = Chjave prefissu per l’accurtatoghji à chord.
+schema-chord-timeout = Scadenza di chord
+schema-chord-timeout-detail = Millisecondi nanzu chì un prefissu di chord scadi.
+schema-bindings = Assuciamenti
+schema-confirm-close = Cunfirmà a chjusura
+schema-confirm-close-detail = Dumandà prima di chjode un terminale cù un prucessu in corsu.
+schema-default-theme = Tema predefinitu
+schema-default-theme-detail = Nome di u tema attivu da a lista di temi.
+
+settings-empty = (viotu)
+settings-none = (nimu)
+
+schema-system = Sistema
+schema-editor = Editore
+schema-recording = Arregistramentu
+schema-radius = Raghju
+schema-padding = Spaziatura interna
+schema-gap = Spaziu
+schema-width = Larghezza
+schema-color = Culore
+schema-red = Rossu
+schema-green = Verde
+schema-blue = Turchinu
+schema-follow-files = Seguità i schedarii
+schema-tidy-files = Riurdinà i schedarii
+schema-tidy-files-max = Soglia di riordiniu di i schedarii
+schema-tidy-files-auto = Riurdinà i schedarii autumaticamente
+schema-app-providers = Furnidori d'app
+schema-provider = Furnidore
+schema-kind = Genere
+schema-models = Mudelli
+schema-acp = Agenti ACP
+schema-id = ID
+schema-name = Nome
+schema-command = Cumanda
+schema-arguments = Argumenti
+schema-environment = Ambiente
+schema-working-directory = Cartulare di travagliu
+schema-shell = Shell
+schema-font-family = Famiglia di caratteri
+schema-startup-directory = Cartulare d'avviu
+schema-themes = Temi
+schema-color-scheme = Schema di culori
+schema-font-size = Dimensione di caratteri
+schema-line-height = Altezza di linea
+schema-cursor-style = Stile di cursore
+schema-cursor-blink = Intermittenza di cursore
+schema-custom-themes = Temi persunalizati
+schema-foreground = Primu pianu
+schema-background = Sfondu
+schema-cursor = Cursore
+schema-ansi-colors = Culori ANSI
+schema-keymap = Mappa di tasti
+schema-explorer = Esploratore
+schema-visible = Visibile
+schema-language-servers = Servori di lingua
+schema-servers = Servori
+schema-language-id = ID di lingua
+schema-root-markers = Marcatori di radica
+schema-output-directory = Cartulare d'esciuta
+
+menu-scene = Scena
+menu-layout = Dispusizione
+menu-terminal = Tirminale
+menu-browser = Navigatore
+menu-service = Serviziu
+menu-bookmark = Segnalibru
+menu-edit = Mudificà
+
+layout-knowledge = Cunniscenza
+layout-open-knowledge = Apre Cunniscenza
+layout-open-welcome-knowledge = Apre Benvenutu in Cunniscenza
+layout-open-path = Apre { $path }
+layout-fold-knowledge = Piegà Cunniscenza
+layout-unfold-knowledge = Spiegà Cunniscenza
+layout-bookmarks = Segnalibri
+layout-new-folder = Cartulare novu
+layout-add-to-bookmarks = Aghjunghje à i Segnalibri
+layout-move-to-bookmarks = Spustà in i Segnalibri
+layout-stack-number = Pila { $number }
+layout-fold-stack = Piegà a pila
+layout-unfold-stack = Spiegà a pila
+layout-close-stack = Chjode a pila
+layout-bookmark-in = Mette un segnalibru in { $folder }
+
+common-cancel = Annullà
+common-delete = Sguassà
+common-save = Salvà
+common-rename = Rinuminà
+common-expand = Allargà
+common-collapse = Riduce
+common-loading = Caricamentu…
+common-error = Errore
+common-output = Esciuta
+common-pending = In attesa
+common-current = attuale
+common-stop = Firmà
+services-command = Serviziu Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }min { $seconds }s
+services-uptime-hours = { $hours }ore { $minutes }min
+services-uptime-days = { $days }ghj { $hours }ore
+
+error-page-failed-load = A pagina ùn s’hè micca caricata
+error-page-not-found = Pagina micca trovu
+error-unknown-host = Host d’app Vmux scunnisciutu: { $host }
+
+history-title = Cronulugia
+
+command-new-app-chat = Nova chjachjarata { $provider }/{ $model } (App)
+command-interactive-mode-user = Scena > Modu interattivu > Utente
+command-interactive-mode-player = Scena > Modu interattivu > Lettore
+command-minimize-window = Dispusizione > Finestra > Minimizà
+command-toggle-layout = Dispusizione > Dispusizione > Cambià dispusizione
+command-close-tab = Dispusizione > Scheda > Chjode a scheda
+command-new-task = Dispusizione > Scheda > Novu compitu…
+command-next-tab = Dispusizione > Scheda > Scheda dopu
+command-prev-tab = Dispusizione > Scheda > Scheda nanzu
+command-rename-tab = Dispusizione > Scheda > Rinuminà a scheda
+command-tab-select-1 = Dispusizione > Scheda > Selezziunà a scheda 1
+command-tab-select-2 = Dispusizione > Scheda > Selezziunà a scheda 2
+command-tab-select-3 = Dispusizione > Scheda > Selezziunà a scheda 3
+command-tab-select-4 = Dispusizione > Scheda > Selezziunà a scheda 4
+command-tab-select-5 = Dispusizione > Scheda > Selezziunà a scheda 5
+command-tab-select-6 = Dispusizione > Scheda > Selezziunà a scheda 6
+command-tab-select-7 = Dispusizione > Scheda > Selezziunà a scheda 7
+command-tab-select-8 = Dispusizione > Scheda > Selezziunà a scheda 8
+command-tab-select-last = Dispusizione > Scheda > Selezziunà l’ultima scheda
+command-close-pane = Dispusizione > Pannellu > Chjode u pannellu
+command-select-pane-left = Dispusizione > Pannellu > Selezziunà u pannellu à manca
+command-select-pane-right = Dispusizione > Pannellu > Selezziunà u pannellu à diritta
+command-select-pane-up = Dispusizione > Pannellu > Selezziunà u pannellu sopra
+command-select-pane-down = Dispusizione > Pannellu > Selezziunà u pannellu sottu
+command-swap-pane-prev = Dispusizione > Pannellu > Scambià cù u pannellu precedente
+command-swap-pane-next = Dispusizione > Pannellu > Scambià cù u pannellu seguente
+command-equalize-pane-size = Dispusizione > Pannellu > Appianà a dimensione di i pannelli
+command-resize-pane-left = Dispusizione > Pannellu > Ridimensionà u pannellu à manca
+command-resize-pane-right = Dispusizione > Pannellu > Ridimensionà u pannellu à diritta
+command-resize-pane-up = Dispusizione > Pannellu > Ridimensionà u pannellu in sù
+command-resize-pane-down = Dispusizione > Pannellu > Ridimensionà u pannellu in ghjò
+command-stack-close = Dispusizione > Pila > Chjode a pila
+command-stack-next = Dispusizione > Pila > Pila dopu
+command-stack-previous = Dispusizione > Pila > Pila nanzu
+command-stack-reopen = Dispusizione > Pila > Riapre a pagina chjosa
+command-stack-swap-prev = Dispusizione > Pila > Spustà a pila à manca
+command-stack-swap-next = Dispusizione > Pila > Spustà a pila à diritta
+command-space-open = Dispusizione > Spaziu > Spazii
+command-terminal-close = Terminal > Chjode u terminale
+command-terminal-next = Terminal > Terminale dopu
+command-terminal-prev = Terminal > Terminale nanzu
+command-terminal-clear = Terminal > Pulisce u terminale
+command-browser-prev-page = Navigatore > Navigazione > Indietro
+command-browser-next-page = Navigatore > Navigazione > Avanti
+command-browser-reload = Navigatore > Navigazione > Ricaricà
+command-browser-hard-reload = Navigatore > Navigazione > Ricaricamentu cumpletu
+command-open-in-place = Navigatore > Apre > Apre quì
+command-open-in-new-stack = Navigatore > Apre > Apre in nova pila
+command-open-in-pane-top = Navigatore > Apre > Apre in u pannellu sopra
+command-open-in-pane-right = Navigatore > Apre > Apre in u pannellu à diritta
+command-open-in-pane-bottom = Navigatore > Apre > Apre in u pannellu sottu
+command-open-in-pane-left = Navigatore > Apre > Apre in u pannellu à manca
+command-open-in-new-tab = Navigatore > Apre > Apre in nova scheda
+command-open-in-new-space = Navigatore > Apre > Apre in novu spaziu
+command-browser-zoom-in = Navigatore > Vista > Ingrandisce
+command-browser-zoom-out = Navigatore > Vista > Riduce
+command-browser-zoom-reset = Navigatore > Vista > Dimensione reale
+command-browser-dev-tools = Navigatore > Vista > Strumenti di sviluppu
+command-browser-open-command-bar = Navigatore > Barra > Barra di cumandi
+command-browser-open-page-in-command-bar = Navigatore > Barra > Mudificà a pagina
+command-browser-open-path-bar = Navigatore > Barra > Navigatore di percorsu
+command-browser-open-commands = Navigatore > Barra > Cumandi
+command-browser-open-history = Navigatore > Barra > Cronulugia
+command-service-open = Serviziu > Apre u monitoru di servizii
+command-bookmark-toggle-active = Segnalibru > Aghjunghje a pagina à i segnalibri
+command-bookmark-pin-active = Segnalibru > Fissà a pagina
+
+layout-tab = Scheda
+layout-no-stacks = Nisuna pila
+layout-loading = Caricamentu…
+layout-no-markdown-files = Nisun schedariu Markdown
+layout-empty-folder = Cartulare viotu
+layout-worktree = worktree
+layout-folder-name = Nome di cartulare
+layout-no-pins-bookmarks = Nisuna pagina fissata o segnalibru
+layout-move-to = Spustà in { $folder }
+layout-bookmark-current-page = Aghjunghje a pagina attuale à i segnalibri
+layout-rename-folder = Rinuminà u cartulare
+layout-remove-folder = Caccià u cartulare
+layout-update-downloading = Scaricamentu di l’aghjurnamentu
+layout-update-installing = Installazione di l’aghjurnamentu…
+layout-update-ready = Nova versione dispunibule
+layout-restart-update = Riavvià per aghjurnà
+
+agent-preparing = Preparazione di l’agente…
+agent-send-all-queued = Mandà subitu tutte e richieste in coda (Esc)
+agent-send = Mandà (Enter)
+agent-ready = Prontu quandu vulete.
+agent-loading-older = Caricamentu di i messaghji più vechji…
+agent-load-older = Caricà messaghji più vechji
+agent-continued-from = Cuntinuatu da { $source }
+agent-older-context-omitted = cuntestu più vechju omessu
+agent-interrupted = interrottu
+agent-allow-tool = Permette { $tool }?
+agent-deny = Ricusà
+agent-allow-always = Permette sempre
+agent-allow = Permette
+agent-loading-sessions = Caricamentu di e sessioni…
+agent-no-resumable-sessions = Nisuna sessione ripigliabile trovu
+agent-no-matching-sessions = Nisuna sessione currispundente
+agent-no-matching-models = Nisun mudellu currispundente
+agent-choice-help = ↑/↓ o Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Sceglie u cartulare di u repositoriu
+agent-choose-repository-detail = Selezziunate u repositoriu Git lucale chì l’agente deve aduprà.
+agent-choosing = Scelta…
+agent-choose-folder = Sceglie cartulare
+agent-queued = in coda
+agent-attached = Attaccatu:
+agent-cancel-queued = Annullà a richiesta in coda
+agent-resume-queued = Ripiglià e richieste in coda
+agent-clear-queue = Sviutà a coda
+agent-send-all-now = mandà tuttu avà
+agent-choose-option = Sceglite un’opzione quì sopra
+agent-loading-media = Caricamentu di i media…
+agent-no-matching-media = Nisun media currispundente
+agent-prompt-context = Cuntestu di a richiesta
+agent-details = Detagli
+agent-path = Percorsu
+agent-tool = Strumentu
+agent-server = Servitore
+agent-bytes = { $count } byte
+agent-worked-for = Hà travagliatu per { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Hà travagliatu per { $duration } · 1 passu
+   *[other] Hà travagliatu per { $duration } · { $count } passi
+}
+agent-tool-guardian-review = Rivista Guardian
+agent-tool-read-files = Hà lettu schedarii
+agent-tool-viewed-image = Hà vistu un’imagine
+agent-tool-used-browser = Hà adupratu u navigatore
+agent-tool-searched-files = Hà circatu schedarii
+agent-tool-ran-commands = Hà eseguitu cumandi
+agent-thinking = Riflette
+agent-subagent = Sottuagente
+agent-prompt = Richiesta
+agent-thread = Filu
+agent-parent = Genitore
+agent-children = Figlioli
+agent-call = Chjama
+agent-raw-event = Avvenimentu brutu
+agent-plan = Pianu
+agent-tasks = { $count ->
+    [one] 1 compitu
+   *[other] { $count } compiti
+}
+agent-edited = Mudificatu
+agent-reconnecting = Ricunnessione { $attempt }/{ $total }
+agent-status-running = In corsu
+agent-status-done = Fattu
+agent-status-failed = Fallitu
+agent-status-pending = In attesa
+agent-slash-attach-files = Attaccà schedarii
+agent-slash-resume-session = Ripiglià una sessione passata
+agent-slash-select-model = Selezziunà mudellu
+agent-slash-continue-cli = Cuntinuà sta sessione in CLI
+agent-session-just-now = avà avà
+agent-session-minutes-ago = { $count }min fà
+agent-session-hours-ago = { $count }ore fà
+agent-session-days-ago = { $count }ghj fà
+agent-working-working = Travaglia
+agent-working-thinking = Riflette
+agent-working-pondering = Pensa
+agent-working-noodling = Sperimenta
+agent-working-percolating = Matura l’idea
+agent-working-conjuring = Evoca
+agent-working-cooking = Cucina
+agent-working-brewing = Infonde
+agent-working-musing = Medita
+agent-working-ruminating = Rumina
+agent-working-scheming = Cuncepisce
+agent-working-synthesizing = Sintetizeghja
+agent-working-tinkering = Aghjusta
+agent-working-churning = Elabureghja
+agent-working-vibing = Segue u filu
+agent-working-simmering = Lascia bullicà
+agent-working-crafting = Custruisce
+agent-working-divining = Intuisce
+agent-working-mulling = Pesa
+agent-working-spelunking = Scava
+
+editor-toggle-explorer = Attivà/disattivà Esploratore (Cmd+B)
+editor-unsaved = micca salvatu
+editor-rendered-markdown = Markdown resu cù mudificazione in diretta
+editor-note = Nota
+editor-source-editor = Editore di codice surghjente
+editor-editor = Editore
+editor-git-diff = Diff Git
+editor-diff = Diff
+editor-tidy = Pulì
+editor-always = Sempre
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 anteprima senza cambiamenti
+   *[other] ✦ { $count } anteprime senza cambiamenti
+}
+editor-open-externally = Apre fora
+editor-changed-line = Linea cambiata
+editor-go-to-definition = Andà à a definizione
+editor-find-references = Truvà riferimenti
+editor-references = { $count ->
+    [one] 1 riferimentu
+   *[other] { $count } riferimenti
+}
+editor-lsp-starting = { $server } in avviu…
+editor-lsp-not-installed = { $server } — micca installatu
+editor-explorer = Esploratore
+editor-open-editors = Editori aperti
+editor-outline = Struttura
+editor-new-file = Novu schedariu
+editor-new-folder = Novu cartulare
+editor-delete-confirm = Sguassà “{ $name }”? Ùn si pò annullà.
+editor-created-folder = Cartulare creatu { $name }
+editor-created-file = Schedariu creatu { $name }
+editor-renamed-to = Rinuminatu in { $name }
+editor-deleted = Sguassatu { $name }
+editor-failed-decode-image = Impussibule di decudificà l’imagine
+editor-preview-large-image = imagine (troppu grande per l’anteprima)
+editor-preview-binary = binariu
+editor-preview-file = schedariu
+
+git-status-clean = pulitu
+git-status-modified = mudificatu
+git-status-staged = in stage
+git-status-staged-modified = in stage*
+git-status-untracked = micca tracciatu
+git-status-deleted = sguassatu
+git-status-conflict = cunflittu
+git-accept-all = ✓ accittà tuttu
+git-unstage = Caccià da stage
+git-confirm-deny-all = Cunfirmà u rifiutu tutale
+git-deny-all = ✗ ricusà tuttu
+git-commit-message = missaghju di commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Caricamentu di u diff…
+git-no-changes = Nisun cambiamentu da mustrà
+git-accept = ✓ accittà
+git-deny = ✗ ricusà
+git-show-unchanged-lines = Mustrà { $count } linee senza cambiamenti
+
+terminal-loading = Caricamentu…
+terminal-runs-when-ready = si lancia quand’ellu hè prontu · Ctrl+C pulisce · Esc salta
+terminal-booting = avviu
+terminal-type-command = scrivite un cumandu · si lancia quand’ellu hè prontu · Esc salta
+
+setup-tagline-claude = L’agente di codificazione d’Anthropic, in Vmux
+setup-tagline-codex = L’agente di codificazione d’OpenAI, in Vmux
+setup-tagline-vibe = L’agente di codificazione di Mistral, in Vmux
+setup-install-title = Installà CLI { $name }
+setup-homebrew-required = Homebrew hè necessariu per installà { $command } è ùn hè ancu cunfiguratu. Vmux installerà prima Homebrew, dopu { $name }.
+setup-terminal-instructions = In u terminale, appughjate Return per principià, po inserite a vostra password di Mac quandu hè dumandata.
+setup-command-missing = Vmux hà apertu sta pagina perchè u cumandu lucale { $command } ùn hè ancu installatu. Lanciate u cumandu quì sottu per ottene lu.
+setup-install-failed = L’installazione ùn hè micca finita. Verificate u terminale per i detagli, poi pruvate torna.
+setup-installing = Installazione…
+setup-install-homebrew = Installà Homebrew + { $name }
+setup-run-install = Lancià u cumandu d’installazione
+setup-auto-reload = Vmux u lancia in un terminale è ricarica quandu { $command } hè prontu.
+
+debug-title = Debug
+debug-auto-update = Aghjurnamentu automaticu
+debug-simulate-update = Simulà aghjurnamentu dispunibule
+debug-simulate-download = Simulà scaricamentu
+debug-clear-update = Sguassà aghjurnamentu
+debug-trigger-restart = Innescà riavviu
+
+command-manage-spaces = Gestisce i spazii…
+command-pane-stack-location = riquadru { $pane } / pila { $stack }
+command-space-pane-stack-location = { $space } / riquadru { $pane } / pila { $stack }
+command-terminal-path = Terminale ({ $path })
+command-group-interactive-mode = Modu interattivu
+command-group-window = Finestra
+command-group-tab = Scheda
+command-group-pane = Riquadru
+command-group-stack = Pila
+command-group-space = Spaziu
+command-group-navigation = Navigazione
+command-group-open = Apre
+command-group-view = Vista
+command-group-bar = Barra
+
+menu-close-vmux = Chjode Vmux
+
+agents-terminal-coding-agent = Agente di codice in terminale

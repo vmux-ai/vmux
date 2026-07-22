@@ -1,0 +1,602 @@
+locale-name = עברית
+common-open = פתח
+common-close = סגור
+common-install = התקן
+common-uninstall = הסר התקנה
+common-update = עדכן
+common-retry = נסה שוב
+common-refresh = רענן
+common-remove = הסר
+common-enable = הפעל
+common-disable = השבת
+common-new = חדש
+common-active = פעיל
+common-running = פועל
+common-done = הסתיים
+common-failed = נכשל
+common-installed = מותקן
+common-items = { $count ->
+    [one] פריט אחד
+   *[other] { $count } פריטים
+}
+start-title = התחלה
+start-tagline = הנחיה אחת. כל משימה, סגורה.
+
+agents-title = סוכני AI
+agents-search = חיפוש סוכני ACP ו-CLI…
+agents-empty = לא נמצאו סוכנים תואמים
+agents-empty-detail = נסו שם, סביבת הרצה או ACP/CLI.
+agents-install-failed = ההתקנה נכשלה
+agents-updating = מתעדכן…
+agents-retrying = מנסה שוב…
+agents-preparing = מתכונן…
+
+extensions-title = הרחבות
+extensions-search = חיפוש בהרחבות המותקנות או ב-Chrome Web Store…
+extensions-relaunch = הפעל מחדש כדי להחיל
+extensions-empty = לא מותקנות הרחבות
+extensions-no-match = לא נמצאו הרחבות תואמות
+extensions-empty-detail = חפשו למעלה ב-Chrome Web Store והקישו Enter.
+extensions-no-match-detail = נסו שם אחר או מזהה הרחבה.
+extensions-on = מופעל
+extensions-off = כבוי
+extensions-enable-confirm = להפעיל את { $name }?
+extensions-enable-permissions = להפעיל את { $name } ולאפשר:
+
+lsp-title = שרתי שפה
+lsp-search = חיפוש שרתי שפה, לינטרים, מפרמטים…
+lsp-loading = הקטלוג נטען…
+lsp-empty = לא נמצאו שרתי שפה תואמים
+lsp-empty-detail = נסו שפה, לינטר או מפרמט אחר.
+lsp-needs = דורש את { $tool }
+lsp-status-available = זמין
+lsp-status-on-path = ב-PATH
+lsp-status-installing = מתקין…
+lsp-status-installed = מותקן
+lsp-status-outdated = עדכון זמין
+lsp-status-running = פועל
+lsp-status-failed = נכשל
+
+spaces-title = מרחבים
+spaces-new-placeholder = שם למרחב חדש
+spaces-empty = אין מרחבים
+spaces-default-name = מרחב { $number }
+spaces-tabs = { $count ->
+    [one] כרטיסייה אחת
+   *[other] { $count } כרטיסיות
+}
+spaces-delete = מחק מרחב
+
+team-title = צוות
+team-just-you = רק אתה במרחב הזה
+team-agents = { $count ->
+    [one] אתה וסוכן אחד
+   *[other] אתה ו-{ $count } סוכנים
+}
+team-empty = עדיין אין כאן אף אחד
+team-you = אתה
+team-agent = סוכן
+
+services-title = שירותי רקע
+services-processes = { $count ->
+    [one] תהליך אחד
+   *[other] { $count } תהליכים
+}
+services-kill-all = עצור הכול בכוח
+services-not-running = השירות אינו פועל
+services-start-with = התחל עם:
+services-empty = אין תהליכים פעילים
+services-filter = סינון תהליכים…
+services-no-match = לא נמצאו תהליכים תואמים
+services-connected = מחובר
+services-disconnected = מנותק
+services-attached = מצורף
+services-kill = עצור בכוח
+services-memory = זיכרון
+services-size = גודל
+services-shell = מעטפת
+
+error-title = שגיאה
+
+history-search = חיפוש בהיסטוריה
+history-clear-all = נקה הכול
+history-clear-confirm = לנקות את כל ההיסטוריה?
+history-clear-warning = אי אפשר לבטל את הפעולה הזו.
+history-cancel = ביטול
+history-today = היום
+history-yesterday = אתמול
+history-days-ago = לפני { $count } ימים
+history-day-offset = יום -{ $count }
+
+settings-title = הגדרות
+settings-loading = ההגדרות נטענות…
+settings-stored = נשמר ב-~/.vmux/settings.ron
+settings-other = אחר
+settings-software-update = עדכון תוכנה
+settings-check-updates = בדוק עדכונים
+settings-check-updates-hint = נבדק אוטומטית בהפעלה וכל שעה כשעדכון אוטומטי מופעל.
+settings-update-unavailable = לא זמין
+settings-update-unavailable-hint = מנגנון העדכון לא נכלל בבנייה הזו.
+settings-update-checking = בודק…
+settings-update-checking-hint = בודק עדכונים…
+settings-update-check-again = בדוק שוב
+settings-update-current = Vmux מעודכן.
+settings-update-downloading = מוריד…
+settings-update-downloading-hint = מוריד את Vmux { $version }…
+settings-update-installing = מתקין…
+settings-update-installing-hint = מתקין את Vmux { $version }…
+settings-update-ready = העדכון מוכן
+settings-update-ready-hint = Vmux { $version } מוכן. יש להפעיל מחדש כדי להחיל אותו.
+settings-update-try-again = נסה שוב
+settings-update-failed = לא ניתן לבדוק עדכונים.
+settings-item = פריט
+settings-item-number = פריט { $number }
+settings-press-key = הקש מקש…
+settings-saved = נשמר
+settings-record-key = לחץ כדי להקליט צירוף מקשים חדש
+
+tray-open-window = פתח חלון
+tray-close-window = סגור חלון
+tray-pause-recording = השהה הקלטה
+tray-resume-recording = המשך הקלטה
+tray-finish-recording = סיים הקלטה
+tray-quit = צא מ-Vmux
+
+composer-attach-files = צרף קבצים (/upload)
+composer-remove-attachment = הסר קובץ מצורף
+
+layout-back = חזור
+layout-forward = קדימה
+layout-reload = טען מחדש
+layout-bookmark-page = הוסף דף זה לסימניות
+layout-remove-bookmark = הסר סימנייה
+layout-pin-page = נעץ דף זה
+layout-unpin-page = בטל נעיצה של דף זה
+layout-manage-extensions = נהל הרחבות
+layout-new-stack = שכבה חדשה
+layout-close-tab = סגור כרטיסייה
+layout-bookmark = סימנייה
+layout-pin = נעץ
+layout-new-tab = כרטיסייה חדשה
+layout-team = צוות
+
+command-switch-space = מעבר מרחב…
+command-search-ask = חפש או שאל…
+command-new-tab-placeholder = חפש או הקלד URL, או בחר Terminal…
+command-placeholder = הקלד URL, חפש כרטיסיות, או > לפקודות…
+command-composer-placeholder = הקלד / לפקודות או @ למדיה
+command-send = שלח (Enter)
+command-terminal = Terminal
+command-open-terminal = פתח ב-Terminal
+command-stack = שכבה
+command-tabs = { $count ->
+    [one] כרטיסייה אחת
+   *[other] { $count } כרטיסיות
+}
+command-prompt = הנחיה
+command-new-tab = כרטיסייה חדשה
+command-search = חיפוש
+command-open-value = פתח את “{ $value }”
+command-search-value = חפש את “{ $value }”
+
+schema-appearance = מראה
+schema-general = כללי
+schema-layout = פריסה
+schema-layout-detail = חלון, חלוניות, סרגל צד וטבעת מיקוד.
+schema-agent = סוכן AI
+schema-agent-detail = התנהגות הסוכן והרשאות לכלים.
+schema-shortcuts = קיצורי מקשים
+schema-shortcuts-detail = תצוגה לקריאה בלבד. לשינוי קיצורים יש לערוך ישירות את settings.ron.
+schema-terminal = מסוף
+schema-browser = דפדפן
+schema-mode = מצב
+schema-mode-detail = ערכת צבעים לדפי אינטרנט. ״מכשיר״ פועל לפי הגדרות המערכת.
+schema-device = מכשיר
+schema-light = בהיר
+schema-dark = כהה
+schema-language = שפה
+schema-language-detail = השתמשו במערכת, en-US, ja או בכל תג BCP 47 עם קטלוג ~/.vmux/locales/<tag>.ftl תואם.
+schema-auto-update = עדכון אוטומטי
+schema-auto-update-detail = בדיקה והתקנה של עדכונים בהפעלה וכל שעה.
+schema-startup-url = URL בהפעלה
+schema-startup-url-detail = אם ריק, תיפתח הנחיית שורת הפקודות.
+schema-search-engine = מנוע חיפוש
+schema-search-engine-detail = משמש לחיפושי אינטרנט מהמסך התחלה ומשורת הפקודות.
+schema-window = חלון
+schema-pane = חלונית
+schema-side-sheet = גיליון צד
+schema-focus-ring = טבעת מיקוד
+schema-run-placement = אפשר עקיפת מיקום הרצה
+schema-run-placement-detail = אפשר לסוכנים לבחור מצב חלונית הרצה, כיוון ועוגן.
+schema-leader = מקש מוביל
+schema-leader-detail = מקש קידומת לקיצורי אקורד.
+schema-chord-timeout = זמן קצוב לאקורד
+schema-chord-timeout-detail = מספר מילישניות עד שתוקף קידומת אקורד פג.
+schema-bindings = קישורי מקשים
+schema-confirm-close = אישור לפני סגירה
+schema-confirm-close-detail = הצג בקשה לפני סגירת מסוף עם תהליך פעיל.
+schema-default-theme = ערכת ברירת מחדל
+schema-default-theme-detail = שם הערכה הפעילה מרשימת הערכות.
+
+settings-empty = (ריק)
+settings-none = (ללא)
+
+schema-system = מערכת
+schema-editor = עורך
+schema-recording = הקלטה
+schema-radius = רדיוס
+schema-padding = ריווח פנימי
+schema-gap = מרווח
+schema-width = רוחב
+schema-color = צבע
+schema-red = אדום
+schema-green = ירוק
+schema-blue = כחול
+schema-follow-files = מעקב אחר קבצים
+schema-tidy-files = סידור קבצים
+schema-tidy-files-max = סף סידור קבצים
+schema-tidy-files-auto = סידור קבצים אוטומטי
+schema-app-providers = ספקי יישומים
+schema-provider = ספק
+schema-kind = סוג
+schema-models = מודלים
+schema-acp = סוכני ACP
+schema-id = ID
+schema-name = שם
+schema-command = פקודה
+schema-arguments = ארגומנטים
+schema-environment = משתני סביבה
+schema-working-directory = תיקיית עבודה
+schema-shell = מעטפת
+schema-font-family = משפחת גופנים
+schema-startup-directory = תיקיית הפעלה
+schema-themes = ערכות נושא
+schema-color-scheme = סכמת צבעים
+schema-font-size = גודל גופן
+schema-line-height = גובה שורה
+schema-cursor-style = סגנון סמן
+schema-cursor-blink = הבהוב סמן
+schema-custom-themes = ערכות נושא מותאמות אישית
+schema-foreground = קדמה
+schema-background = רקע
+schema-cursor = סמן
+schema-ansi-colors = צבעי ANSI
+schema-keymap = מיפוי מקשים
+schema-explorer = סייר
+schema-visible = גלוי
+schema-language-servers = שרתי שפה
+schema-servers = שרתים
+schema-language-id = Language ID
+schema-root-markers = סמני שורש
+schema-output-directory = תיקיית פלט
+
+menu-scene = סצנה
+menu-layout = פריסה
+menu-terminal = מסוף
+menu-browser = דפדפן
+menu-service = שירות
+menu-bookmark = סימנייה
+menu-edit = עריכה
+
+layout-knowledge = ידע
+layout-open-knowledge = פתיחת ידע
+layout-open-welcome-knowledge = פתיחת ״ברוכים הבאים לידע״
+layout-open-path = פתיחת { $path }
+layout-fold-knowledge = קיפול ידע
+layout-unfold-knowledge = פריסת ידע
+layout-bookmarks = סימניות
+layout-new-folder = תיקייה חדשה
+layout-add-to-bookmarks = הוספה לסימניות
+layout-move-to-bookmarks = העברה לסימניות
+layout-stack-number = ערימה { $number }
+layout-fold-stack = קיפול ערימה
+layout-unfold-stack = פריסת ערימה
+layout-close-stack = סגירת ערימה
+layout-bookmark-in = סימנייה ב{ $folder }
+
+common-cancel = ביטול
+common-delete = מחיקה
+common-save = שמירה
+common-rename = שינוי שם
+common-expand = הרחבה
+common-collapse = כיווץ
+common-loading = בטעינה…
+common-error = שגיאה
+common-output = פלט
+common-pending = בהמתנה
+common-current = נוכחי
+common-stop = עצירה
+services-command = שירות Vmux
+services-uptime-seconds = { $seconds }ש׳
+services-uptime-minutes = { $minutes }דק׳ { $seconds }ש׳
+services-uptime-hours = { $hours }שע׳ { $minutes }דק׳
+services-uptime-days = { $days }י׳ { $hours }שע׳
+
+error-page-failed-load = טעינת הדף נכשלה
+error-page-not-found = הדף לא נמצא
+error-unknown-host = מארח אפליקציית Vmux לא מוכר: { $host }
+
+history-title = היסטוריה
+
+command-new-app-chat = צ׳אט חדש עם { $provider }/{ $model } (אפליקציה)
+command-interactive-mode-user = סצנה > מצב אינטראקטיבי > משתמש
+command-interactive-mode-player = סצנה > מצב אינטראקטיבי > נגן
+command-minimize-window = פריסה > חלון > מזעור
+command-toggle-layout = פריסה > פריסה > החלפת פריסה
+command-close-tab = פריסה > לשונית > סגירת לשונית
+command-new-task = פריסה > לשונית > משימה חדשה…
+command-next-tab = פריסה > לשונית > הלשונית הבאה
+command-prev-tab = פריסה > לשונית > הלשונית הקודמת
+command-rename-tab = פריסה > לשונית > שינוי שם לשונית
+command-tab-select-1 = פריסה > לשונית > בחירת לשונית 1
+command-tab-select-2 = פריסה > לשונית > בחירת לשונית 2
+command-tab-select-3 = פריסה > לשונית > בחירת לשונית 3
+command-tab-select-4 = פריסה > לשונית > בחירת לשונית 4
+command-tab-select-5 = פריסה > לשונית > בחירת לשונית 5
+command-tab-select-6 = פריסה > לשונית > בחירת לשונית 6
+command-tab-select-7 = פריסה > לשונית > בחירת לשונית 7
+command-tab-select-8 = פריסה > לשונית > בחירת לשונית 8
+command-tab-select-last = פריסה > לשונית > בחירת הלשונית האחרונה
+command-close-pane = פריסה > חלונית > סגירת חלונית
+command-select-pane-left = פריסה > חלונית > בחירת החלונית משמאל
+command-select-pane-right = פריסה > חלונית > בחירת החלונית מימין
+command-select-pane-up = פריסה > חלונית > בחירת החלונית למעלה
+command-select-pane-down = פריסה > חלונית > בחירת החלונית למטה
+command-swap-pane-prev = פריסה > חלונית > החלפה עם החלונית הקודמת
+command-swap-pane-next = פריסה > חלונית > החלפה עם החלונית הבאה
+command-equalize-pane-size = פריסה > חלונית > השוואת גודל חלוניות
+command-resize-pane-left = פריסה > חלונית > שינוי גודל החלונית שמאלה
+command-resize-pane-right = פריסה > חלונית > שינוי גודל החלונית ימינה
+command-resize-pane-up = פריסה > חלונית > שינוי גודל החלונית למעלה
+command-resize-pane-down = פריסה > חלונית > שינוי גודל החלונית למטה
+command-stack-close = פריסה > ערימה > סגירת ערימה
+command-stack-next = פריסה > ערימה > הערימה הבאה
+command-stack-previous = פריסה > ערימה > הערימה הקודמת
+command-stack-reopen = פריסה > ערימה > פתיחה מחדש של דף שנסגר
+command-stack-swap-prev = פריסה > ערימה > העברת ערימה שמאלה
+command-stack-swap-next = פריסה > ערימה > העברת ערימה ימינה
+command-space-open = פריסה > מרחב > מרחבים
+command-terminal-close = מסוף > סגירת מסוף
+command-terminal-next = מסוף > המסוף הבא
+command-terminal-prev = מסוף > המסוף הקודם
+command-terminal-clear = מסוף > ניקוי מסוף
+command-browser-prev-page = דפדפן > ניווט > אחורה
+command-browser-next-page = דפדפן > ניווט > קדימה
+command-browser-reload = דפדפן > ניווט > טעינה מחדש
+command-browser-hard-reload = דפדפן > ניווט > טעינה מחדש מלאה
+command-open-in-place = דפדפן > פתיחה > פתיחה כאן
+command-open-in-new-stack = דפדפן > פתיחה > פתיחה בערימה חדשה
+command-open-in-pane-top = דפדפן > פתיחה > פתיחה בחלונית מעל
+command-open-in-pane-right = דפדפן > פתיחה > פתיחה בחלונית מימין
+command-open-in-pane-bottom = דפדפן > פתיחה > פתיחה בחלונית מתחת
+command-open-in-pane-left = דפדפן > פתיחה > פתיחה בחלונית משמאל
+command-open-in-new-tab = דפדפן > פתיחה > פתיחה בלשונית חדשה
+command-open-in-new-space = דפדפן > פתיחה > פתיחה במרחב חדש
+command-browser-zoom-in = דפדפן > תצוגה > התקרבות
+command-browser-zoom-out = דפדפן > תצוגה > התרחקות
+command-browser-zoom-reset = דפדפן > תצוגה > גודל ממשי
+command-browser-dev-tools = דפדפן > תצוגה > כלי פיתוח
+command-browser-open-command-bar = דפדפן > סרגל > סרגל הפקודות
+command-browser-open-page-in-command-bar = דפדפן > סרגל > עריכת דף
+command-browser-open-path-bar = דפדפן > סרגל > נווט נתיבים
+command-browser-open-commands = דפדפן > סרגל > פקודות
+command-browser-open-history = דפדפן > סרגל > היסטוריה
+command-service-open = שירות > פתיחת צג השירותים
+command-bookmark-toggle-active = סימנייה > שמירת הדף כסימנייה
+command-bookmark-pin-active = סימנייה > נעיצת הדף
+
+layout-tab = לשונית
+layout-no-stacks = אין ערימות
+layout-loading = בטעינה…
+layout-no-markdown-files = אין קובצי Markdown
+layout-empty-folder = תיקייה ריקה
+layout-worktree = עץ עבודה
+layout-folder-name = שם התיקייה
+layout-no-pins-bookmarks = אין נעיצות או סימניות
+layout-move-to = העברה אל { $folder }
+layout-bookmark-current-page = שמירת הדף הנוכחי כסימנייה
+layout-rename-folder = שינוי שם תיקייה
+layout-remove-folder = הסרת תיקייה
+layout-update-downloading = העדכון בהורדה
+layout-update-installing = העדכון מותקן…
+layout-update-ready = גרסה חדשה זמינה
+layout-restart-update = הפעלה מחדש לעדכון
+
+agent-preparing = הסוכן בהכנה…
+agent-send-all-queued = שליחת כל ההנחיות שבתור עכשיו (Esc)
+agent-send = שליחה (Enter)
+agent-ready = מוכן כשתהיו.
+agent-loading-older = הודעות ישנות יותר נטענות…
+agent-load-older = טעינת הודעות ישנות יותר
+agent-continued-from = המשך מתוך { $source }
+agent-older-context-omitted = הקשר ישן יותר הושמט
+agent-interrupted = הופסק
+agent-allow-tool = לאפשר את { $tool }?
+agent-deny = דחייה
+agent-allow-always = לאפשר תמיד
+agent-allow = לאפשר
+agent-loading-sessions = סשנים נטענים…
+agent-no-resumable-sessions = לא נמצאו סשנים שניתן להמשיך
+agent-no-matching-sessions = אין סשנים תואמים
+agent-no-matching-models = אין מודלים תואמים
+agent-choice-help = ↑/↓ או Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = בחירת תיקיית מאגר
+agent-choose-repository-detail = בחרו את מאגר ה־Git המקומי שבו הסוכן ישתמש.
+agent-choosing = בבחירה…
+agent-choose-folder = בחירת תיקייה
+agent-queued = בתור
+agent-attached = מצורף:
+agent-cancel-queued = ביטול הנחיה בתור
+agent-resume-queued = המשך הנחיות בתור
+agent-clear-queue = ניקוי התור
+agent-send-all-now = לשלוח הכול עכשיו
+agent-choose-option = בחרו אפשרות למעלה
+agent-loading-media = מדיה נטענת…
+agent-no-matching-media = אין מדיה תואמת
+agent-prompt-context = הקשר ההנחיה
+agent-details = פרטים
+agent-path = נתיב
+agent-tool = כלי
+agent-server = שרת
+agent-bytes = { $count } בתים
+agent-worked-for = עבד במשך { $duration }
+agent-worked-for-steps = { $count ->
+    [one] עבד במשך { $duration } · שלב אחד
+   *[other] עבד במשך { $duration } · { $count } שלבים
+}
+agent-tool-guardian-review = סקירת Guardian
+agent-tool-read-files = קרא קבצים
+agent-tool-viewed-image = צפה בתמונה
+agent-tool-used-browser = השתמש בדפדפן
+agent-tool-searched-files = חיפש בקבצים
+agent-tool-ran-commands = הריץ פקודות
+agent-thinking = חושב
+agent-subagent = סוכן משנה
+agent-prompt = הנחיה
+agent-thread = שרשור
+agent-parent = אב
+agent-children = צאצאים
+agent-call = קריאה
+agent-raw-event = אירוע גולמי
+agent-plan = תוכנית
+agent-tasks = { $count ->
+    [one] משימה אחת
+   *[other] { $count } משימות
+}
+agent-edited = נערך
+agent-reconnecting = מתחבר מחדש { $attempt }/{ $total }
+agent-status-running = פועל
+agent-status-done = הושלם
+agent-status-failed = נכשל
+agent-status-pending = בהמתנה
+agent-slash-attach-files = צירוף קבצים
+agent-slash-resume-session = המשך סשן קודם
+agent-slash-select-model = בחירת מודל
+agent-slash-continue-cli = המשך הסשן הזה ב־CLI
+agent-session-just-now = ממש עכשיו
+agent-session-minutes-ago = לפני { $count } דק׳
+agent-session-hours-ago = לפני { $count } שע׳
+agent-session-days-ago = לפני { $count } י׳
+agent-working-working = עובד
+agent-working-thinking = חושב
+agent-working-pondering = מהרהר
+agent-working-noodling = מתלבט
+agent-working-percolating = מתבשל
+agent-working-conjuring = שולף רעיונות
+agent-working-cooking = מבשל
+agent-working-brewing = רוקח
+agent-working-musing = מהרהר
+agent-working-ruminating = שוקל לעומק
+agent-working-scheming = מתכנן
+agent-working-synthesizing = מסנתז
+agent-working-tinkering = משייף
+agent-working-churning = מעבד
+agent-working-vibing = זורם
+agent-working-simmering = מתבשל על אש קטנה
+agent-working-crafting = יוצר
+agent-working-divining = מנחש בחוכמה
+agent-working-mulling = חושב לעומק
+agent-working-spelunking = חופר לעומק
+
+editor-toggle-explorer = הצגה/הסתרה של הסייר (Cmd+B)
+editor-unsaved = לא נשמר
+editor-rendered-markdown = Markdown מרונדר עם עריכה חיה
+editor-note = הערה
+editor-source-editor = עורך קוד מקור
+editor-editor = עורך
+editor-git-diff = השוואת Git
+editor-diff = השוואה
+editor-tidy = סידור
+editor-always = תמיד
+editor-unchanged-previews = { $count ->
+    [one] ✦ תצוגה מקדימה אחת ללא שינוי
+   *[other] ✦ { $count } תצוגות מקדימות ללא שינוי
+}
+editor-open-externally = פתיחה חיצונית
+editor-changed-line = שורה שהשתנתה
+editor-go-to-definition = מעבר להגדרה
+editor-find-references = מציאת הפניות
+editor-references = { $count ->
+    [one] הפניה אחת
+   *[other] { $count } הפניות
+}
+editor-lsp-starting = { $server } מופעל…
+editor-lsp-not-installed = { $server } — לא מותקן
+editor-explorer = סייר
+editor-open-editors = עורכים פתוחים
+editor-outline = מתאר
+editor-new-file = קובץ חדש
+editor-new-folder = תיקייה חדשה
+editor-delete-confirm = למחוק את “{ $name }”? אי אפשר לבטל את הפעולה הזו.
+editor-created-folder = התיקייה { $name } נוצרה
+editor-created-file = הקובץ { $name } נוצר
+editor-renamed-to = השם שונה ל־{ $name }
+editor-deleted = { $name } נמחק
+editor-failed-decode-image = פענוח התמונה נכשל
+editor-preview-large-image = תמונה (גדולה מדי לתצוגה מקדימה)
+editor-preview-binary = בינארי
+editor-preview-file = קובץ
+
+git-status-clean = נקי
+git-status-modified = שונה
+git-status-staged = מוכן לקומיט
+git-status-staged-modified = מוכן לקומיט*
+git-status-untracked = לא במעקב
+git-status-deleted = נמחק
+git-status-conflict = התנגשות
+git-accept-all = ✓ אישור הכול
+git-unstage = הסרה מהכנה לקומיט
+git-confirm-deny-all = אישור דחיית הכול
+git-deny-all = ✗ דחיית הכול
+git-commit-message = הודעת קומיט
+git-commit = קומיט ({ $count })
+git-push = ↑ דחיפה
+git-loading-diff = ההשוואה נטענת…
+git-no-changes = אין שינויים להצגה
+git-accept = ✓ אישור
+git-deny = ✗ דחייה
+git-show-unchanged-lines = הצגת { $count } שורות ללא שינוי
+
+terminal-loading = בטעינה…
+terminal-runs-when-ready = ירוץ כשיהיה מוכן · Ctrl+C מנקה · Esc מדלג
+terminal-booting = באתחול
+terminal-type-command = הקלדת פקודה · תרוץ כשיהיה מוכן · Esc מדלג
+
+setup-tagline-claude = סוכן הקידוד של Anthropic, בתוך Vmux
+setup-tagline-codex = סוכן הקידוד של OpenAI, בתוך Vmux
+setup-tagline-vibe = סוכן הקידוד של Mistral, בתוך Vmux
+setup-install-title = התקנת CLI של { $name }
+setup-homebrew-required = נדרש Homebrew כדי להתקין את { $command }, והוא עדיין לא מוגדר. Vmux יתקין קודם את Homebrew, ואז את { $name }.
+setup-terminal-instructions = במסוף, לחצו על Return כדי להתחיל, ואז הזינו את סיסמת ה־Mac כשתתבקשו.
+setup-command-missing = Vmux פתח את הדף הזה כי הפקודה המקומית { $command } עדיין לא מותקנת. הריצו את הפקודה למטה כדי לקבל אותה.
+setup-install-failed = ההתקנה לא הסתיימה. בדקו את המסוף לפרטים ונסו שוב.
+setup-installing = מתקין…
+setup-install-homebrew = התקנת Homebrew + { $name }
+setup-run-install = הרצת פקודת התקנה
+setup-auto-reload = Vmux מריץ אותה במסוף וטוען מחדש כש־{ $command } מוכן.
+
+debug-title = ניפוי שגיאות
+debug-auto-update = עדכון אוטומטי
+debug-simulate-update = הדמיית עדכון זמין
+debug-simulate-download = הדמיית הורדה
+debug-clear-update = ניקוי עדכון
+debug-trigger-restart = הפעלת הפעלה מחדש
+
+command-manage-spaces = ניהול מרחבים…
+command-pane-stack-location = חלונית { $pane } / ערימה { $stack }
+command-space-pane-stack-location = { $space } / חלונית { $pane } / ערימה { $stack }
+command-terminal-path = מסוף ({ $path })
+command-group-interactive-mode = מצב אינטראקטיבי
+command-group-window = חלון
+command-group-tab = כרטיסייה
+command-group-pane = חלונית
+command-group-stack = ערימה
+command-group-space = מרחב
+command-group-navigation = ניווט
+command-group-open = פתיחה
+command-group-view = תצוגה
+command-group-bar = סרגל
+
+menu-close-vmux = סגור את Vmux
+
+agents-terminal-coding-agent = סוכן קוד מבוסס מסוף

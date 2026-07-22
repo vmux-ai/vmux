@@ -1,0 +1,602 @@
+locale-name = кыргызча
+common-open = Ачуу
+common-close = Жабуу
+common-install = Орнотуу
+common-uninstall = Өчүрүү
+common-update = Жаңыртуу
+common-retry = Кайра аракет кылуу
+common-refresh = Жаңылоо
+common-remove = Алып салуу
+common-enable = Иштетүү
+common-disable = Өчүрүү
+common-new = Жаңы
+common-active = активдүү
+common-running = иштеп жатат
+common-done = бүттү
+common-failed = Ишке ашкан жок
+common-installed = Орнотулду
+common-items = { $count ->
+    [one] { $count } нерсе
+   *[other] { $count } нерсе
+}
+start-title = Баштоо
+start-tagline = Бир промпт. Баары даяр.
+
+agents-title = Агенттер
+agents-search = ACP жана CLI агенттерин издөө…
+agents-empty = Дал келген агент жок
+agents-empty-detail = Атын, аткаруу чөйрөсүн же ACP/CLI киргизип көрүңүз.
+agents-install-failed = Орнотулбай калды
+agents-updating = Жаңыртылууда…
+agents-retrying = Кайра аракет кылынууда…
+agents-preparing = Даярдалууда…
+
+extensions-title = Кеңейтүүлөр
+extensions-search = Орнотулгандардан же Chrome Web Store'дон издөө…
+extensions-relaunch = Колдонуу үчүн кайра иштетиңиз
+extensions-empty = Орнотулган кеңейтүү жок
+extensions-no-match = Дал келген кеңейтүү жок
+extensions-empty-detail = Жогорудан Chrome Web Store'дон издеп, Return басыңыз.
+extensions-no-match-detail = Башка ат же кеңейтүү ID киргизип көрүңүз.
+extensions-on = Күйүк
+extensions-off = Өчүк
+extensions-enable-confirm = { $name } иштетилсинби?
+extensions-enable-permissions = { $name } иштетилип, төмөнкүлөргө уруксат берилсин:
+
+lsp-title = Тил серверлери
+lsp-search = Тил серверлерин, линтерлерди, форматтоочуларды издөө…
+lsp-loading = Каталог жүктөлүүдө…
+lsp-empty = Дал келген тил сервери жок
+lsp-empty-detail = Башка тил, линтер же форматтоочу киргизип көрүңүз.
+lsp-needs = { $tool } керек
+lsp-status-available = Жеткиликтүү
+lsp-status-on-path = PATH ичинде
+lsp-status-installing = Орнотулууда…
+lsp-status-installed = Орнотулду
+lsp-status-outdated = Жаңыртуу бар
+lsp-status-running = Иштеп жатат
+lsp-status-failed = Ишке ашкан жок
+
+spaces-title = Мейкиндиктер
+spaces-new-placeholder = Жаңы мейкиндиктин аты
+spaces-empty = Мейкиндик жок
+spaces-default-name = Мейкиндик { $number }
+spaces-tabs = { $count ->
+    [one] 1 өтмөк
+   *[other] { $count } өтмөк
+}
+spaces-delete = Мейкиндикти өчүрүү
+
+team-title = Команда
+team-just-you = Бул мейкиндикте сиз гана барсыз
+team-agents = { $count ->
+    [one] Сиз жана 1 агент
+   *[other] Сиз жана { $count } агент
+}
+team-empty = Бул жерде азырынча эч ким жок
+team-you = Сиз
+team-agent = Агент
+
+services-title = Фондук кызматтар
+services-processes = { $count ->
+    [one] 1 процесс
+   *[other] { $count } процесс
+}
+services-kill-all = Баарын мажбурлап токтотуу
+services-not-running = Кызмат иштеп жаткан жок
+services-start-with = Муну менен баштоо:
+services-empty = Активдүү процесс жок
+services-filter = Процесстерди чыпкалоо…
+services-no-match = Дал келген процесс жок
+services-connected = Туташты
+services-disconnected = Ажыратылды
+services-attached = тиркелген
+services-kill = Мажбурлап токтотуу
+services-memory = Эс тутум
+services-size = Өлчөм
+services-shell = Shell
+
+error-title = Ката
+
+history-search = Тарыхтан издөө
+history-clear-all = Баарын тазалоо
+history-clear-confirm = Тарыхтын баары тазалансынбы?
+history-clear-warning = Муну артка кайтаруу мүмкүн эмес.
+history-cancel = Жокко чыгаруу
+history-today = Бүгүн
+history-yesterday = Кечээ
+history-days-ago = { $count } күн мурун
+history-day-offset = Күн -{ $count }
+
+settings-title = Жөндөөлөр
+settings-loading = Жөндөөлөр жүктөлүүдө…
+settings-stored = ~/.vmux/settings.ron ичинде сакталат
+settings-other = Башка
+settings-software-update = Программаны жаңыртуу
+settings-check-updates = Жаңыртууларды текшерүү
+settings-check-updates-hint = Автожаңыртуу иштетилсе, ишке киргенде жана ар бир саат сайын автоматтык текшерет.
+settings-update-unavailable = Жеткиликсиз
+settings-update-unavailable-hint = Бул түзүлүшкө жаңырткыч киргизилген эмес.
+settings-update-checking = Текшерилүүдө…
+settings-update-checking-hint = Жаңыртуулар текшерилүүдө…
+settings-update-check-again = Кайра текшерүү
+settings-update-current = Vmux эң акыркы версияда.
+settings-update-downloading = Жүктөлүүдө…
+settings-update-downloading-hint = Vmux { $version } жүктөлүүдө…
+settings-update-installing = Орнотулууда…
+settings-update-installing-hint = Vmux { $version } орнотулууда…
+settings-update-ready = Жаңыртуу даяр
+settings-update-ready-hint = Vmux { $version } даяр. Колдонуу үчүн кайра иштетиңиз.
+settings-update-try-again = Кайра аракет кылуу
+settings-update-failed = Жаңыртууларды текшерүү мүмкүн болбоду.
+settings-item = Нерсе
+settings-item-number = Нерсе { $number }
+settings-press-key = Баскычты басыңыз…
+settings-saved = Сакталды
+settings-record-key = Жаңы баскыч айкалышын жаздыруу үчүн басыңыз
+
+tray-open-window = Терезени ачуу
+tray-close-window = Терезени жабуу
+tray-pause-recording = Жаздырууну тындыруу
+tray-resume-recording = Жаздырууну улантуу
+tray-finish-recording = Жаздырууну бүтүрүү
+tray-quit = Vmux'тан чыгуу
+
+composer-attach-files = Файлдарды тиркөө (/upload)
+composer-remove-attachment = Тиркемени алып салуу
+
+layout-back = Артка
+layout-forward = Алга
+layout-reload = Кайра жүктөө
+layout-bookmark-page = Бул баракты кыстармага кошуу
+layout-remove-bookmark = Кыстарманы алып салуу
+layout-pin-page = Бул баракты кадап коюу
+layout-unpin-page = Бул баракты кадоодон чыгаруу
+layout-manage-extensions = Кеңейтүүлөрдү башкаруу
+layout-new-stack = Жаңы катмар
+layout-close-tab = Өтмөктү жабуу
+layout-bookmark = Кыстарма
+layout-pin = Кадоо
+layout-new-tab = Жаңы өтмөк
+layout-team = Команда
+
+command-switch-space = Мейкиндикти алмаштыруу…
+command-search-ask = Издөө же суроо берүү…
+command-new-tab-placeholder = Издеңиз же URL териңиз, же Терминалды тандаңыз…
+command-placeholder = URL териңиз, өтмөктөрдөн издеңиз же буйруктар үчүн > киргизиңиз…
+command-composer-placeholder = Буйруктар үчүн / же медиа үчүн @ териңиз
+command-send = Жөнөтүү (Enter)
+command-terminal = Терминал
+command-open-terminal = Терминалда ачуу
+command-stack = Катмар
+command-tabs = { $count ->
+    [one] 1 өтмөк
+   *[other] { $count } өтмөк
+}
+command-prompt = Промпт
+command-new-tab = Жаңы өтмөк
+command-search = Издөө
+command-open-value = “{ $value }” ачуу
+command-search-value = “{ $value }” издөө
+
+schema-appearance = Көрүнүш
+schema-general = Жалпы
+schema-layout = Жайгашуу
+schema-layout-detail = Терезе, панелдер, каптал тилке жана фокус алкагы.
+schema-agent = Агент
+schema-agent-detail = Агенттин жүрүм-туруму жана курал уруксаттары.
+schema-shortcuts = Кыска жолдор
+schema-shortcuts-detail = Окуу үчүн гана көрүнүш. Байламдарды өзгөртүү үчүн settings.ron файлын түз түзөтүңүз.
+schema-terminal = Терминал
+schema-browser = Браузер
+schema-mode = Режим
+schema-mode-detail = Веб-барактар үчүн түс схемасы. Түзмөк тутумуңузду ээрчийт.
+schema-device = Түзмөк
+schema-light = Ачык
+schema-dark = Караңгы
+schema-language = Тил
+schema-language-detail = Тутумду, en-US, ja же дал келген ~/.vmux/locales/<tag>.ftl каталогу бар каалаган BCP 47 тегин колдонуңуз.
+schema-auto-update = Автожаңыртуу
+schema-auto-update-detail = Ишке киргенде жана ар бир саат сайын жаңыртууларды текшерип, орнотот.
+schema-startup-url = Баштапкы URL
+schema-startup-url-detail = Бош болсо, буйрук тилкесиндеги промпт ачылат.
+schema-search-engine = Издөө кыймылдаткычы
+schema-search-engine-detail = Баштоодон жана буйрук тилкесинен веб-издөөлөр үчүн колдонулат.
+schema-window = Терезе
+schema-pane = Панель
+schema-side-sheet = Каптал барак
+schema-focus-ring = Фокус алкагы
+schema-run-placement = Иштетүү жайгашуусун өзгөртүүгө уруксат берүү
+schema-run-placement-detail = Агенттерге иштетүү панелинин режимин, багытын жана анкерин тандоого уруксат бериңиз.
+schema-leader = Лидер
+schema-leader-detail = Аккорд кыска жолдору үчүн префикс баскыч.
+schema-chord-timeout = Аккорд күтүү мөөнөтү
+schema-chord-timeout-detail = Аккорд префикси жараксыз болгонго чейинки миллисекунддар.
+schema-bindings = Байламдар
+schema-confirm-close = Жабууну ырастоо
+schema-confirm-close-detail = Иштеп жаткан процесси бар терминалды жабуудан мурун сурайт.
+schema-default-theme = Баштапкы тема
+schema-default-theme-detail = Темалар тизмесиндеги активдүү теманын аты.
+
+settings-empty = (бош)
+settings-none = (жок)
+
+schema-system = Система
+schema-editor = Редактор
+schema-recording = Жаздыруу
+schema-radius = Радиус
+schema-padding = Ички аралык
+schema-gap = Аралык
+schema-width = Туурасы
+schema-color = Түс
+schema-red = Кызыл
+schema-green = Жашыл
+schema-blue = Көк
+schema-follow-files = Файлдарды ээрчүү
+schema-tidy-files = Файлдарды ирээттөө
+schema-tidy-files-max = Файл ирээттөө чеги
+schema-tidy-files-auto = Файлдарды автоматтык ирээттөө
+schema-app-providers = Колдонмо провайдерлери
+schema-provider = Провайдер
+schema-kind = Түрү
+schema-models = Моделдер
+schema-acp = ACP агенттери
+schema-id = ID
+schema-name = Аты
+schema-command = Буйрук
+schema-arguments = Аргументтер
+schema-environment = Чөйрө
+schema-working-directory = Иш каталогу
+schema-shell = Кабык
+schema-font-family = Арип үй-бүлөсү
+schema-startup-directory = Баштоо каталогу
+schema-themes = Темалар
+schema-color-scheme = Түс схемасы
+schema-font-size = Арип өлчөмү
+schema-line-height = Сап бийиктиги
+schema-cursor-style = Курсор стили
+schema-cursor-blink = Курсордун өчүп-жанышы
+schema-custom-themes = Ыңгайлаштырылган темалар
+schema-foreground = Алдыңкы план
+schema-background = Фон
+schema-cursor = Курсор
+schema-ansi-colors = ANSI түстөрү
+schema-keymap = Баскыч картасы
+schema-explorer = Изилдегич
+schema-visible = Көрүнөт
+schema-language-servers = Тил серверлери
+schema-servers = Серверлер
+schema-language-id = Тил ID
+schema-root-markers = Тамыр маркерлери
+schema-output-directory = Чыгаруу каталогу
+
+menu-scene = Сцена
+menu-layout = Макет
+menu-terminal = Терминал
+menu-browser = Браузер
+menu-service = Кызмат
+menu-bookmark = Кыстарма
+menu-edit = Түзөтүү
+
+layout-knowledge = Билим
+layout-open-knowledge = Билимди ачуу
+layout-open-welcome-knowledge = «Билимге кош келиңиз» барагын ачуу
+layout-open-path = { $path } ачуу
+layout-fold-knowledge = Билимди бүктөө
+layout-unfold-knowledge = Билимди жайып көрсөтүү
+layout-bookmarks = Кыстармалар
+layout-new-folder = Жаңы папка
+layout-add-to-bookmarks = Кыстармаларга кошуу
+layout-move-to-bookmarks = Кыстармаларга жылдыруу
+layout-stack-number = Стек { $number }
+layout-fold-stack = Стекти бүктөө
+layout-unfold-stack = Стекти жайып көрсөтүү
+layout-close-stack = Стекти жабуу
+layout-bookmark-in = { $folder } ичинде кыстарма коюу
+
+common-cancel = Жокко чыгаруу
+common-delete = Өчүрүү
+common-save = Сактоо
+common-rename = Аталышын өзгөртүү
+common-expand = Жайып көрсөтүү
+common-collapse = Жыйноо
+common-loading = Жүктөлүүдө…
+common-error = Ката
+common-output = Чыгыш
+common-pending = Күтүүдө
+common-current = учурдагы
+common-stop = Токтотуу
+services-command = Vmux кызматы
+services-uptime-seconds = { $seconds }с
+services-uptime-minutes = { $minutes }м { $seconds }с
+services-uptime-hours = { $hours }саат { $minutes }м
+services-uptime-days = { $days }күн { $hours }саат
+
+error-page-failed-load = Барак жүктөлгөн жок
+error-page-not-found = Барак табылган жок
+error-unknown-host = Белгисиз Vmux колдонмо хосту: { $host }
+
+history-title = Таржымал
+
+command-new-app-chat = Жаңы { $provider }/{ $model } чаты (Колдонмо)
+command-interactive-mode-user = Сцена > Интерактивдүү режим > Колдонуучу
+command-interactive-mode-player = Сцена > Интерактивдүү режим > Ойноткуч
+command-minimize-window = Макет > Терезе > Кичирейтүү
+command-toggle-layout = Макет > Макет > Макетти которуу
+command-close-tab = Макет > Өтмөк > Өтмөктү жабуу
+command-new-task = Макет > Өтмөк > Жаңы тапшырма…
+command-next-tab = Макет > Өтмөк > Кийинки өтмөк
+command-prev-tab = Макет > Өтмөк > Мурунку өтмөк
+command-rename-tab = Макет > Өтмөк > Өтмөктүн атын өзгөртүү
+command-tab-select-1 = Макет > Өтмөк > 1-өтмөктү тандоо
+command-tab-select-2 = Макет > Өтмөк > 2-өтмөктү тандоо
+command-tab-select-3 = Макет > Өтмөк > 3-өтмөктү тандоо
+command-tab-select-4 = Макет > Өтмөк > 4-өтмөктү тандоо
+command-tab-select-5 = Макет > Өтмөк > 5-өтмөктү тандоо
+command-tab-select-6 = Макет > Өтмөк > 6-өтмөктү тандоо
+command-tab-select-7 = Макет > Өтмөк > 7-өтмөктү тандоо
+command-tab-select-8 = Макет > Өтмөк > 8-өтмөктү тандоо
+command-tab-select-last = Макет > Өтмөк > Акыркы өтмөктү тандоо
+command-close-pane = Макет > Панель > Панелди жабуу
+command-select-pane-left = Макет > Панель > Сол панелди тандоо
+command-select-pane-right = Макет > Панель > Оң панелди тандоо
+command-select-pane-up = Макет > Панель > Жогору панелди тандоо
+command-select-pane-down = Макет > Панель > Төмөнкү панелди тандоо
+command-swap-pane-prev = Макет > Панель > Панелди мурункусу менен алмаштыруу
+command-swap-pane-next = Макет > Панель > Панелди кийинкиси менен алмаштыруу
+command-equalize-pane-size = Макет > Панель > Панелдердин өлчөмүн теңөө
+command-resize-pane-left = Макет > Панель > Панелди солго өлчөмдөө
+command-resize-pane-right = Макет > Панель > Панелди оңго өлчөмдөө
+command-resize-pane-up = Макет > Панель > Панелди жогору өлчөмдөө
+command-resize-pane-down = Макет > Панель > Панелди төмөн өлчөмдөө
+command-stack-close = Макет > Стек > Стекти жабуу
+command-stack-next = Макет > Стек > Кийинки стек
+command-stack-previous = Макет > Стек > Мурунку стек
+command-stack-reopen = Макет > Стек > Жабылган баракты кайра ачуу
+command-stack-swap-prev = Макет > Стек > Стекти солго жылдыруу
+command-stack-swap-next = Макет > Стек > Стекти оңго жылдыруу
+command-space-open = Макет > Мейкиндик > Мейкиндиктер
+command-terminal-close = Терминал > Терминалды жабуу
+command-terminal-next = Терминал > Кийинки терминал
+command-terminal-prev = Терминал > Мурунку терминал
+command-terminal-clear = Терминал > Терминалды тазалоо
+command-browser-prev-page = Браузер > Навигация > Артка
+command-browser-next-page = Браузер > Навигация > Алга
+command-browser-reload = Браузер > Навигация > Кайра жүктөө
+command-browser-hard-reload = Браузер > Навигация > Толук кайра жүктөө
+command-open-in-place = Браузер > Ачуу > Ушул жерде ачуу
+command-open-in-new-stack = Браузер > Ачуу > Жаңы стекте ачуу
+command-open-in-pane-top = Браузер > Ачуу > Жогорудагы панелде ачуу
+command-open-in-pane-right = Браузер > Ачуу > Оң панелде ачуу
+command-open-in-pane-bottom = Браузер > Ачуу > Төмөнкү панелде ачуу
+command-open-in-pane-left = Браузер > Ачуу > Сол панелде ачуу
+command-open-in-new-tab = Браузер > Ачуу > Жаңы өтмөктө ачуу
+command-open-in-new-space = Браузер > Ачуу > Жаңы мейкиндикте ачуу
+command-browser-zoom-in = Браузер > Көрүнүш > Чоңойтуу
+command-browser-zoom-out = Браузер > Көрүнүш > Кичирейтүү
+command-browser-zoom-reset = Браузер > Көрүнүш > Чыныгы өлчөм
+command-browser-dev-tools = Браузер > Көрүнүш > Иштеп чыгуучу куралдары
+command-browser-open-command-bar = Браузер > Тилке > Буйрук тилкеси
+command-browser-open-page-in-command-bar = Браузер > Тилке > Баракты түзөтүү
+command-browser-open-path-bar = Браузер > Тилке > Жол навигатору
+command-browser-open-commands = Браузер > Тилке > Буйруктар
+command-browser-open-history = Браузер > Тилке > Таржымал
+command-service-open = Кызмат > Кызмат мониторун ачуу
+command-bookmark-toggle-active = Кыстарма > Баракты кыстаруу
+command-bookmark-pin-active = Кыстарма > Баракты бекитүү
+
+layout-tab = Өтмөк
+layout-no-stacks = Стектер жок
+layout-loading = Жүктөлүүдө…
+layout-no-markdown-files = Markdown файлдары жок
+layout-empty-folder = Бош папка
+layout-worktree = иш дарагы
+layout-folder-name = Папканын аты
+layout-no-pins-bookmarks = Бекитилгендер же кыстармалар жок
+layout-move-to = { $folder } папкасына жылдыруу
+layout-bookmark-current-page = Учурдагы баракты кыстаруу
+layout-rename-folder = Папканын атын өзгөртүү
+layout-remove-folder = Папканы алып салуу
+layout-update-downloading = Жаңыртуу жүктөлүүдө
+layout-update-installing = Жаңыртуу орнотулууда…
+layout-update-ready = Жаңы версия бар
+layout-restart-update = Жаңыртуу үчүн кайра иштетүү
+
+agent-preparing = Агент даярдалууда…
+agent-send-all-queued = Кезектеги бардык сурамдарды азыр жөнөтүү (Esc)
+agent-send = Жөнөтүү (Enter)
+agent-ready = Даяр болгонуңузда даярмын.
+agent-loading-older = Эски билдирүүлөр жүктөлүүдө…
+agent-load-older = Эски билдирүүлөрдү жүктөө
+agent-continued-from = { $source } булагынан уланды
+agent-older-context-omitted = эски контекст калтырылды
+agent-interrupted = үзгүлтүккө учурады
+agent-allow-tool = { $tool } куралына уруксат бересизби?
+agent-deny = Баш тартуу
+agent-allow-always = Ар дайым уруксат берүү
+agent-allow = Уруксат берүү
+agent-loading-sessions = Сессиялар жүктөлүүдө…
+agent-no-resumable-sessions = Улантууга боло турган сессия табылган жок
+agent-no-matching-sessions = Дал келген сессия жок
+agent-no-matching-models = Дал келген моделдер жок
+agent-choice-help = ↑/↓ же Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Репозиторий папкасын тандаңыз
+agent-choose-repository-detail = Агент колдоно турган жергиликтүү Git репозиторийин тандаңыз.
+agent-choosing = Тандалууда…
+agent-choose-folder = Папканы тандоо
+agent-queued = кезекте
+agent-attached = Тиркелди:
+agent-cancel-queued = Кезектеги сурамды жокко чыгаруу
+agent-resume-queued = Кезектеги сурамдарды улантуу
+agent-clear-queue = Кезекти тазалоо
+agent-send-all-now = баарын азыр жөнөтүү
+agent-choose-option = Жогорудан параметр тандаңыз
+agent-loading-media = Медиа жүктөлүүдө…
+agent-no-matching-media = Дал келген медиа жок
+agent-prompt-context = Сурам контексти
+agent-details = Чоо-жайы
+agent-path = Жол
+agent-tool = Курал
+agent-server = Сервер
+agent-bytes = { $count } байт
+agent-worked-for = { $duration } иштеди
+agent-worked-for-steps = { $count ->
+    [one] { $duration } иштеди · 1 кадам
+   *[other] { $duration } иштеди · { $count } кадам
+}
+agent-tool-guardian-review = Коргоочу кароо
+agent-tool-read-files = Файлдарды окуду
+agent-tool-viewed-image = Сүрөттү көрдү
+agent-tool-used-browser = Браузерди колдонду
+agent-tool-searched-files = Файлдарды издеди
+agent-tool-ran-commands = Буйруктарды иштетти
+agent-thinking = Ойлонууда
+agent-subagent = Кошумча агент
+agent-prompt = Сурам
+agent-thread = Тема
+agent-parent = Ата-эне
+agent-children = Балдар
+agent-call = Чакыруу
+agent-raw-event = Чийки окуя
+agent-plan = План
+agent-tasks = { $count ->
+    [one] 1 тапшырма
+   *[other] { $count } тапшырма
+}
+agent-edited = Түзөтүлдү
+agent-reconnecting = Кайра туташууда { $attempt }/{ $total }
+agent-status-running = Иштеп жатат
+agent-status-done = Бүттү
+agent-status-failed = Ишке ашкан жок
+agent-status-pending = Күтүүдө
+agent-slash-attach-files = Файлдарды тиркөө
+agent-slash-resume-session = Мурунку сессияны улантуу
+agent-slash-select-model = Моделди тандоо
+agent-slash-continue-cli = Бул сессияны CLI ичинде улантуу
+agent-session-just-now = жаңы эле
+agent-session-minutes-ago = { $count }м мурун
+agent-session-hours-ago = { $count }саат мурун
+agent-session-days-ago = { $count }күн мурун
+agent-working-working = Иштеп жатат
+agent-working-thinking = Ойлонууда
+agent-working-pondering = Терең ойлонууда
+agent-working-noodling = Ойлонуп көрүүдө
+agent-working-percolating = Жетилип жатат
+agent-working-conjuring = Ойлоп табууда
+agent-working-cooking = Даярдап жатат
+agent-working-brewing = Кайнатып жатат
+agent-working-musing = Ой жүгүртүүдө
+agent-working-ruminating = Кайра-кайра ойлонууда
+agent-working-scheming = План түзүүдө
+agent-working-synthesizing = Бириктирүүдө
+agent-working-tinkering = Чукулап жатат
+agent-working-churning = Иштеп чыгууда
+agent-working-vibing = Ыңгайын кармоодо
+agent-working-simmering = Жай бышырууда
+agent-working-crafting = Жасап жатат
+agent-working-divining = Баамдоодо
+agent-working-mulling = Ойлонуп талдоодо
+agent-working-spelunking = Терең казып жатат
+
+editor-toggle-explorer = Explorer'ди которуу (Cmd+B)
+editor-unsaved = сакталган эмес
+editor-rendered-markdown = Түз түзөтүү менен көрсөтүлгөн Markdown
+editor-note = Эскертме
+editor-source-editor = Баштапкы код редактору
+editor-editor = Редактор
+editor-git-diff = Git айырмасы
+editor-diff = Айырма
+editor-tidy = Иреттөө
+editor-always = Ар дайым
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 өзгөрбөгөн алдын ала көрүнүш
+   *[other] ✦ { $count } өзгөрбөгөн алдын ала көрүнүш
+}
+editor-open-externally = Сырттан ачуу
+editor-changed-line = Өзгөргөн сап
+editor-go-to-definition = Аныктамасына өтүү
+editor-find-references = Шилтемелерди табуу
+editor-references = { $count ->
+    [one] 1 шилтеме
+   *[other] { $count } шилтеме
+}
+editor-lsp-starting = { $server } ишке кирүүдө…
+editor-lsp-not-installed = { $server } — орнотулган эмес
+editor-explorer = Explorer
+editor-open-editors = Ачык редакторлор
+editor-outline = Түзүм
+editor-new-file = Жаңы файл
+editor-new-folder = Жаңы папка
+editor-delete-confirm = “{ $name }” өчүрүлсүнбү? Муну артка кайтарууга болбойт.
+editor-created-folder = { $name } папкасы түзүлдү
+editor-created-file = { $name } файлы түзүлдү
+editor-renamed-to = Аты { $name } болуп өзгөртүлдү
+editor-deleted = { $name } өчүрүлдү
+editor-failed-decode-image = Сүрөттү чечмелөө ишке ашкан жок
+editor-preview-large-image = сүрөт (алдын ала көрүү үчүн өтө чоң)
+editor-preview-binary = бинардык
+editor-preview-file = файл
+
+git-status-clean = таза
+git-status-modified = өзгөртүлгөн
+git-status-staged = сахналанган
+git-status-staged-modified = сахналанган*
+git-status-untracked = көзөмөлдөнбөгөн
+git-status-deleted = өчүрүлгөн
+git-status-conflict = конфликт
+git-accept-all = ✓ баарын кабыл алуу
+git-unstage = Сахнадан алып салуу
+git-confirm-deny-all = Баарын четке кагууну ырастоо
+git-deny-all = ✗ баарын четке кагуу
+git-commit-message = коммит билдирүүсү
+git-commit = Коммит ({ $count })
+git-push = ↑ Push
+git-loading-diff = Айырма жүктөлүүдө…
+git-no-changes = Көрсөтө турган өзгөрүү жок
+git-accept = ✓ кабыл алуу
+git-deny = ✗ четке кагуу
+git-show-unchanged-lines = { $count } өзгөрбөгөн сапты көрсөтүү
+
+terminal-loading = Жүктөлүүдө…
+terminal-runs-when-ready = даяр болгондо иштейт · Ctrl+C тазалайт · Esc өткөрүп жиберет
+terminal-booting = жүктөлүүдө
+terminal-type-command = буйрук териңиз · даяр болгондо иштейт · Esc өткөрүп жиберет
+
+setup-tagline-claude = Anthropic'тин код жазуу агенти, Vmux ичинде
+setup-tagline-codex = OpenAI'дын код жазуу агенти, Vmux ичинде
+setup-tagline-vibe = Mistral'дын код жазуу агенти, Vmux ичинде
+setup-install-title = { $name } CLI орнотуу
+setup-homebrew-required = { $command } орнотуу үчүн Homebrew керек, бирок ал азырынча жөндөлө элек. Vmux адегенде Homebrew'ду, андан кийин { $name } орнотот.
+setup-terminal-instructions = Терминалда баштоо үчүн Return басыңыз, андан соң суралганда Mac сырсөзүңүздү киргизиңиз.
+setup-command-missing = Жергиликтүү { $command } буйругу азырынча орнотулбагандыктан, Vmux бул баракты ачты. Аны алуу үчүн төмөнкү буйрукту иштетиңиз.
+setup-install-failed = Орнотуу аягына чыккан жок. Чоо-жайын терминалдан текшерип, кайра аракет кылыңыз.
+setup-installing = Орнотулууда…
+setup-install-homebrew = Homebrew + { $name } орнотуу
+setup-run-install = Орнотуу буйругун иштетүү
+setup-auto-reload = Vmux аны терминалда иштетет жана { $command } даяр болгондо кайра жүктөйт.
+
+debug-title = Мүчүлүштүктөрдү оңдоо
+debug-auto-update = Автожаңыртуу
+debug-simulate-update = Жаңыртуу бар экенин симуляциялоо
+debug-simulate-download = Жүктөөнү симуляциялоо
+debug-clear-update = Жаңыртууну тазалоо
+debug-trigger-restart = Кайра иштетүүнү баштоо
+
+command-manage-spaces = Мейкиндиктерди башкаруу…
+command-pane-stack-location = панель { $pane } / стек { $stack }
+command-space-pane-stack-location = { $space } / панель { $pane } / стек { $stack }
+command-terminal-path = Терминал ({ $path })
+command-group-interactive-mode = Интерактивдүү режим
+command-group-window = Терезе
+command-group-tab = Өтмөк
+command-group-pane = Панель
+command-group-stack = Стек
+command-group-space = Мейкиндик
+command-group-navigation = Багыттоо
+command-group-open = Ачуу
+command-group-view = Көрүнүш
+command-group-bar = Тилке
+
+menu-close-vmux = Vmux'ту жабуу
+
+agents-terminal-coding-agent = Терминалга негизделген коддоо агенти

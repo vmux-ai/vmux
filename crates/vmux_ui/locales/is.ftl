@@ -1,0 +1,602 @@
+locale-name = íslenska
+common-open = Opna
+common-close = Loka
+common-install = Setja upp
+common-uninstall = Fjarlægja
+common-update = Uppfæra
+common-retry = Reyna aftur
+common-refresh = Endurhlaða
+common-remove = Fjarlægja
+common-enable = Virkja
+common-disable = Slökkva
+common-new = Nýtt
+common-active = virkt
+common-running = í gangi
+common-done = lokið
+common-failed = Mistókst
+common-installed = Uppsett
+common-items = { $count ->
+    [one] { $count } atriði
+   *[other] { $count } atriði
+}
+start-title = Byrja
+start-tagline = Ein fyrirmæli. Allt klárt.
+
+agents-title = AI-þjónar
+agents-search = Leita í ACP- og CLI-þjónum…
+agents-empty = Engir samsvarandi AI-þjónar
+agents-empty-detail = Prófaðu heiti, keyrsluumhverfi eða ACP/CLI.
+agents-install-failed = Uppsetning mistókst
+agents-updating = Uppfæri…
+agents-retrying = Reyni aftur…
+agents-preparing = Undirbý…
+
+extensions-title = Viðbætur
+extensions-search = Leita í uppsettum viðbótum eða Chrome Web Store…
+extensions-relaunch = Endurræstu til að virkja
+extensions-empty = Engar viðbætur uppsettar
+extensions-no-match = Engar samsvarandi viðbætur
+extensions-empty-detail = Leitaðu í Chrome Web Store hér að ofan og ýttu á Enter.
+extensions-no-match-detail = Prófaðu annað heiti eða auðkenni viðbótar.
+extensions-on = Kveikt
+extensions-off = Slökkt
+extensions-enable-confirm = Virkja { $name }?
+extensions-enable-permissions = Virkja { $name } og leyfa:
+
+lsp-title = Tungumálaþjónar
+lsp-search = Leita að tungumálaþjónum, linturum, sniðlum…
+lsp-loading = Hleð vörulista…
+lsp-empty = Engir samsvarandi tungumálaþjónar
+lsp-empty-detail = Prófaðu annað tungumál, linter eða sniðil.
+lsp-needs = þarf { $tool }
+lsp-status-available = Tiltækt
+lsp-status-on-path = Á PATH
+lsp-status-installing = Set upp…
+lsp-status-installed = Uppsett
+lsp-status-outdated = Uppfærsla tiltæk
+lsp-status-running = Í gangi
+lsp-status-failed = Mistókst
+
+spaces-title = Vinnurými
+spaces-new-placeholder = Heiti nýs vinnurýmis
+spaces-empty = Engin vinnurými
+spaces-default-name = Vinnurými { $number }
+spaces-tabs = { $count ->
+    [one] 1 flipi
+   *[other] { $count } flipar
+}
+spaces-delete = Eyða vinnurými
+
+team-title = Teymi
+team-just-you = Aðeins þú í þessu vinnurými
+team-agents = { $count ->
+    [one] Þú og 1 AI-þjónn
+   *[other] Þú og { $count } AI-þjónar
+}
+team-empty = Enginn hér enn
+team-you = Þú
+team-agent = AI-þjónn
+
+services-title = Bakgrunnsþjónustur
+services-processes = { $count ->
+    [one] 1 ferli
+   *[other] { $count } ferli
+}
+services-kill-all = Þvinga allt til lokunar
+services-not-running = Þjónustan er ekki í gangi
+services-start-with = Ræsa með:
+services-empty = Engin virk ferli
+services-filter = Sía ferli…
+services-no-match = Engin samsvarandi ferli
+services-connected = Tengd
+services-disconnected = Aftengd
+services-attached = tengt
+services-kill = Þvinga lokun
+services-memory = Minni
+services-size = Stærð
+services-shell = Skel
+
+error-title = Villa
+
+history-search = Leita í ferli
+history-clear-all = Hreinsa allt
+history-clear-confirm = Hreinsa allan feril?
+history-clear-warning = Þetta er ekki hægt að afturkalla.
+history-cancel = Hætta við
+history-today = Í dag
+history-yesterday = Í gær
+history-days-ago = fyrir { $count } dögum
+history-day-offset = Dagur -{ $count }
+
+settings-title = Stillingar
+settings-loading = Hleð stillingum…
+settings-stored = Vistað í ~/.vmux/settings.ron
+settings-other = Annað
+settings-software-update = Hugbúnaðaruppfærsla
+settings-check-updates = Leita að uppfærslum
+settings-check-updates-hint = Leitar sjálfkrafa við ræsingu og á klukkutíma fresti þegar sjálfvirkar uppfærslur eru virkar.
+settings-update-unavailable = Ekki tiltækt
+settings-update-unavailable-hint = Uppfærslukerfið er ekki innifalið í þessari útgáfu.
+settings-update-checking = Leita…
+settings-update-checking-hint = Leita að uppfærslum…
+settings-update-check-again = Leita aftur
+settings-update-current = Vmux er uppfært.
+settings-update-downloading = Sæki…
+settings-update-downloading-hint = Sæki Vmux { $version }…
+settings-update-installing = Set upp…
+settings-update-installing-hint = Set upp Vmux { $version }…
+settings-update-ready = Uppfærsla tilbúin
+settings-update-ready-hint = Vmux { $version } er tilbúið. Endurræstu til að virkja uppfærsluna.
+settings-update-try-again = Reyna aftur
+settings-update-failed = Ekki tókst að leita að uppfærslum.
+settings-item = Atriði
+settings-item-number = Atriði { $number }
+settings-press-key = Ýttu á lykil…
+settings-saved = Vistað
+settings-record-key = Smelltu til að taka upp nýja lyklasamsetningu
+
+tray-open-window = Opna glugga
+tray-close-window = Loka glugga
+tray-pause-recording = Gera hlé á upptöku
+tray-resume-recording = Halda upptöku áfram
+tray-finish-recording = Ljúka upptöku
+tray-quit = Hætta í Vmux
+
+composer-attach-files = Hengja við skrár (/upload)
+composer-remove-attachment = Fjarlægja viðhengi
+
+layout-back = Til baka
+layout-forward = Áfram
+layout-reload = Endurhlaða
+layout-bookmark-page = Setja þessa síðu í bókamerki
+layout-remove-bookmark = Fjarlægja bókamerki
+layout-pin-page = Festa þessa síðu
+layout-unpin-page = Losa þessa síðu
+layout-manage-extensions = Stjórna viðbótum
+layout-new-stack = Nýr stafli
+layout-close-tab = Loka flipa
+layout-bookmark = Bókamerki
+layout-pin = Festa
+layout-new-tab = Nýr flipi
+layout-team = Teymi
+
+command-switch-space = Skipta um vinnurými…
+command-search-ask = Leita eða spyrja…
+command-new-tab-placeholder = Leitaðu eða sláðu inn URL, eða veldu Terminal…
+command-placeholder = Sláðu inn URL, leitaðu í flipum eða notaðu > fyrir skipanir…
+command-composer-placeholder = Sláðu inn / fyrir skipanir eða @ fyrir miðla
+command-send = Senda (Enter)
+command-terminal = Terminal
+command-open-terminal = Opna í Terminal
+command-stack = Stafli
+command-tabs = { $count ->
+    [one] 1 flipi
+   *[other] { $count } flipar
+}
+command-prompt = Fyrirmæli
+command-new-tab = Nýr flipi
+command-search = Leita
+command-open-value = Opna „{ $value }“
+command-search-value = Leita að „{ $value }“
+
+schema-appearance = Útlit
+schema-general = Almennt
+schema-layout = Uppsetning
+schema-layout-detail = Gluggi, rúður, hliðarstika og fókusrammi.
+schema-agent = AI-þjónn
+schema-agent-detail = Hegðun AI-þjóna og heimildir fyrir verkfæri.
+schema-shortcuts = Flýtileiðir
+schema-shortcuts-detail = Aðeins til skoðunar. Breyttu settings.ron beint til að breyta bindingum.
+schema-terminal = Terminal
+schema-browser = Vafri
+schema-mode = Hamur
+schema-mode-detail = Litasnið fyrir vefsíður. Tæki fylgir kerfisstillingu.
+schema-device = Tæki
+schema-light = Ljóst
+schema-dark = Dökkt
+schema-language = Tungumál
+schema-language-detail = Notaðu kerfið, en-US, ja eða hvaða BCP 47 merki sem er með samsvarandi ~/.vmux/locales/<tag>.ftl vörulista.
+schema-auto-update = Sjálfvirkar uppfærslur
+schema-auto-update-detail = Leita að og setja upp uppfærslur við ræsingu og á klukkutíma fresti.
+schema-startup-url = URL við ræsingu
+schema-startup-url-detail = Ef tómt opnast fyrirmælasvæði skipanastikunnar.
+schema-search-engine = Leitarvél
+schema-search-engine-detail = Notuð fyrir vefleit úr Start og skipanastikunni.
+schema-window = Gluggi
+schema-pane = Rúða
+schema-side-sheet = Hliðarskúffa
+schema-focus-ring = Fókusrammi
+schema-run-placement = Leyfa hnekkingu á staðsetningu keyrslu
+schema-run-placement-detail = Leyfa AI-þjónum að velja ham, stefnu og festingu keyrslurúðu.
+schema-leader = Leiðtogi
+schema-leader-detail = Forskeytislykill fyrir raðflýtileiðir.
+schema-chord-timeout = Tímamörk raðflýtileiðar
+schema-chord-timeout-detail = Millisekúndur þar til forskeyti raðflýtileiðar rennur út.
+schema-bindings = Bindingar
+schema-confirm-close = Staðfesta lokun
+schema-confirm-close-detail = Spyrja áður en Terminal er lokað með ferli í gangi.
+schema-default-theme = Sjálfgefið þema
+schema-default-theme-detail = Heiti virka þemans úr þemalistanum.
+
+settings-empty = (tómt)
+settings-none = (ekkert)
+
+schema-system = Kerfi
+schema-editor = Ritill
+schema-recording = Upptaka
+schema-radius = Radíus
+schema-padding = Innfylling
+schema-gap = Bil
+schema-width = Breidd
+schema-color = Litur
+schema-red = Rauður
+schema-green = Grænn
+schema-blue = Blár
+schema-follow-files = Fylgja skrám
+schema-tidy-files = Taka til í skrám
+schema-tidy-files-max = Mörk skráatiltektar
+schema-tidy-files-auto = Taka sjálfvirkt til í skrám
+schema-app-providers = Forritsveitur
+schema-provider = Veitandi
+schema-kind = Gerð
+schema-models = Líkön
+schema-acp = ACP-agentar
+schema-id = ID
+schema-name = Heiti
+schema-command = Skipun
+schema-arguments = Viðföng
+schema-environment = Umhverfisbreytur
+schema-working-directory = Vinnumappa
+schema-shell = Skel
+schema-font-family = Leturfjölskylda
+schema-startup-directory = Upphafsmappa
+schema-themes = Þemu
+schema-color-scheme = Litastef
+schema-font-size = Leturstærð
+schema-line-height = Línuhæð
+schema-cursor-style = Bendilstíll
+schema-cursor-blink = Blikkandi bendill
+schema-custom-themes = Sérsniðin þemu
+schema-foreground = Forgrunnur
+schema-background = Bakgrunnur
+schema-cursor = Bendill
+schema-ansi-colors = ANSI-litir
+schema-keymap = Lyklavörpun
+schema-explorer = Könnuður
+schema-visible = Sýnilegt
+schema-language-servers = Tungumálaþjónar
+schema-servers = Þjónar
+schema-language-id = Tungumáls-ID
+schema-root-markers = Rótarmerki
+schema-output-directory = Úttaksmappa
+
+menu-scene = Sena
+menu-layout = Skipulag
+menu-terminal = Útstöð
+menu-browser = Vafri
+menu-service = Þjónusta
+menu-bookmark = Bókamerki
+menu-edit = Breyta
+
+layout-knowledge = Þekking
+layout-open-knowledge = Opna þekkingu
+layout-open-welcome-knowledge = Opna Velkomin í þekkingu
+layout-open-path = Opna { $path }
+layout-fold-knowledge = Fella saman þekkingu
+layout-unfold-knowledge = Fella út þekkingu
+layout-bookmarks = Bókamerki
+layout-new-folder = Ný mappa
+layout-add-to-bookmarks = Bæta við bókamerki
+layout-move-to-bookmarks = Færa í bókamerki
+layout-stack-number = Stafli { $number }
+layout-fold-stack = Fella saman stafla
+layout-unfold-stack = Fella út stafla
+layout-close-stack = Loka stafla
+layout-bookmark-in = Bókamerkja í { $folder }
+
+common-cancel = Hætta við
+common-delete = Eyða
+common-save = Vista
+common-rename = Endurnefna
+common-expand = Stækka
+common-collapse = Fella saman
+common-loading = Hleður…
+common-error = Villa
+common-output = Úttak
+common-pending = Í bið
+common-current = núverandi
+common-stop = Stöðva
+services-command = Vmux-þjónusta
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }klst { $minutes }m
+services-uptime-days = { $days }d { $hours }klst
+
+error-page-failed-load = Ekki tókst að hlaða síðu
+error-page-not-found = Síða fannst ekki
+error-unknown-host = Óþekktur hýsill Vmux-forrits: { $host }
+
+history-title = Ferill
+
+command-new-app-chat = Nýtt spjall með { $provider }/{ $model } (forrit)
+command-interactive-mode-user = Sena > Gagnvirkur hamur > Notandi
+command-interactive-mode-player = Sena > Gagnvirkur hamur > Spilari
+command-minimize-window = Útlit > Gluggi > Minnka
+command-toggle-layout = Útlit > Útlit > Víxla útliti
+command-close-tab = Útlit > Flipi > Loka flipa
+command-new-task = Útlit > Flipi > Nýtt verk…
+command-next-tab = Útlit > Flipi > Næsti flipi
+command-prev-tab = Útlit > Flipi > Fyrri flipi
+command-rename-tab = Útlit > Flipi > Endurnefna flipa
+command-tab-select-1 = Útlit > Flipi > Velja flipa 1
+command-tab-select-2 = Útlit > Flipi > Velja flipa 2
+command-tab-select-3 = Útlit > Flipi > Velja flipa 3
+command-tab-select-4 = Útlit > Flipi > Velja flipa 4
+command-tab-select-5 = Útlit > Flipi > Velja flipa 5
+command-tab-select-6 = Útlit > Flipi > Velja flipa 6
+command-tab-select-7 = Útlit > Flipi > Velja flipa 7
+command-tab-select-8 = Útlit > Flipi > Velja flipa 8
+command-tab-select-last = Útlit > Flipi > Velja síðasta flipa
+command-close-pane = Útlit > Svæði > Loka svæði
+command-select-pane-left = Útlit > Svæði > Velja svæði til vinstri
+command-select-pane-right = Útlit > Svæði > Velja svæði til hægri
+command-select-pane-up = Útlit > Svæði > Velja svæði fyrir ofan
+command-select-pane-down = Útlit > Svæði > Velja svæði fyrir neðan
+command-swap-pane-prev = Útlit > Svæði > Víxla við fyrra svæði
+command-swap-pane-next = Útlit > Svæði > Víxla við næsta svæði
+command-equalize-pane-size = Útlit > Svæði > Jafna stærð svæða
+command-resize-pane-left = Útlit > Svæði > Breyta stærð svæðis til vinstri
+command-resize-pane-right = Útlit > Svæði > Breyta stærð svæðis til hægri
+command-resize-pane-up = Útlit > Svæði > Breyta stærð svæðis upp
+command-resize-pane-down = Útlit > Svæði > Breyta stærð svæðis niður
+command-stack-close = Útlit > Stafli > Loka stafla
+command-stack-next = Útlit > Stafli > Næsti stafli
+command-stack-previous = Útlit > Stafli > Fyrri stafli
+command-stack-reopen = Útlit > Stafli > Opna lokaða síðu aftur
+command-stack-swap-prev = Útlit > Stafli > Færa stafla til vinstri
+command-stack-swap-next = Útlit > Stafli > Færa stafla til hægri
+command-space-open = Útlit > Svæði > Vinnusvæði
+command-terminal-close = Skel > Loka skel
+command-terminal-next = Skel > Næsta skel
+command-terminal-prev = Skel > Fyrri skel
+command-terminal-clear = Skel > Hreinsa skel
+command-browser-prev-page = Vafri > Leiðsögn > Til baka
+command-browser-next-page = Vafri > Leiðsögn > Áfram
+command-browser-reload = Vafri > Leiðsögn > Endurhlaða
+command-browser-hard-reload = Vafri > Leiðsögn > Þvinga endurhleðslu
+command-open-in-place = Vafri > Opna > Opna hér
+command-open-in-new-stack = Vafri > Opna > Opna í nýjum stafla
+command-open-in-pane-top = Vafri > Opna > Opna í svæði fyrir ofan
+command-open-in-pane-right = Vafri > Opna > Opna í svæði til hægri
+command-open-in-pane-bottom = Vafri > Opna > Opna í svæði fyrir neðan
+command-open-in-pane-left = Vafri > Opna > Opna í svæði til vinstri
+command-open-in-new-tab = Vafri > Opna > Opna í nýjum flipa
+command-open-in-new-space = Vafri > Opna > Opna í nýju vinnusvæði
+command-browser-zoom-in = Vafri > Skoða > Auka aðdrátt
+command-browser-zoom-out = Vafri > Skoða > Minnka aðdrátt
+command-browser-zoom-reset = Vafri > Skoða > Raunstærð
+command-browser-dev-tools = Vafri > Skoða > Verkfæri forritara
+command-browser-open-command-bar = Vafri > Stika > Skipanastika
+command-browser-open-page-in-command-bar = Vafri > Stika > Breyta síðu
+command-browser-open-path-bar = Vafri > Stika > Slóðaleiðsögn
+command-browser-open-commands = Vafri > Stika > Skipanir
+command-browser-open-history = Vafri > Stika > Ferill
+command-service-open = Þjónusta > Opna þjónustuvöktun
+command-bookmark-toggle-active = Bókamerki > Setja síðu í bókamerki
+command-bookmark-pin-active = Bókamerki > Festa síðu
+
+layout-tab = Flipi
+layout-no-stacks = Engir staflar
+layout-loading = Hleður…
+layout-no-markdown-files = Engar Markdown-skrár
+layout-empty-folder = Tóm mappa
+layout-worktree = vinnutré
+layout-folder-name = Heiti möppu
+layout-no-pins-bookmarks = Engar festingar eða bókamerki
+layout-move-to = Færa í { $folder }
+layout-bookmark-current-page = Setja núverandi síðu í bókamerki
+layout-rename-folder = Endurnefna möppu
+layout-remove-folder = Fjarlægja möppu
+layout-update-downloading = Sæki uppfærslu
+layout-update-installing = Set uppfærslu upp…
+layout-update-ready = Ný útgáfa tiltæk
+layout-restart-update = Endurræstu til að uppfæra
+
+agent-preparing = Undirbý forrita…
+agent-send-all-queued = Senda allar biðkvaðningar núna (Esc)
+agent-send = Senda (Enter)
+agent-ready = Tilbúinn þegar þú ert.
+agent-loading-older = Hleð eldri skilaboðum…
+agent-load-older = Hlaða eldri skilaboðum
+agent-continued-from = Framhald frá { $source }
+agent-older-context-omitted = eldri samhengi sleppt
+agent-interrupted = rofið
+agent-allow-tool = Leyfa { $tool }?
+agent-deny = Hafna
+agent-allow-always = Leyfa alltaf
+agent-allow = Leyfa
+agent-loading-sessions = Hleð lotum…
+agent-no-resumable-sessions = Engar lotur sem hægt er að halda áfram fundust
+agent-no-matching-sessions = Engar samsvarandi lotur
+agent-no-matching-models = Engin samsvarandi líkön
+agent-choice-help = ↑/↓ eða Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Veldu geymslumöppu
+agent-choose-repository-detail = Veldu staðbundna Git-geymslu sem forritinn á að nota.
+agent-choosing = Vel…
+agent-choose-folder = Veldu möppu
+agent-queued = í biðröð
+agent-attached = Viðhengt:
+agent-cancel-queued = Hætta við kvaðningu í biðröð
+agent-resume-queued = Halda áfram með kvaðningar í biðröð
+agent-clear-queue = Hreinsa biðröð
+agent-send-all-now = senda allt núna
+agent-choose-option = Veldu valkost hér að ofan
+agent-loading-media = Hleð miðli…
+agent-no-matching-media = Enginn samsvarandi miðill
+agent-prompt-context = Samhengi kvaðningar
+agent-details = Upplýsingar
+agent-path = Slóð
+agent-tool = Verkfæri
+agent-server = Þjónn
+agent-bytes = { $count } bæti
+agent-worked-for = Vann í { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Vann í { $duration } · 1 skref
+   *[other] Vann í { $duration } · { $count } skref
+}
+agent-tool-guardian-review = Guardian-yfirferð
+agent-tool-read-files = Las skrár
+agent-tool-viewed-image = Skoðaði mynd
+agent-tool-used-browser = Notaði vafra
+agent-tool-searched-files = Leitaði í skrám
+agent-tool-ran-commands = Keyrði skipanir
+agent-thinking = Hugsar
+agent-subagent = Undirforriti
+agent-prompt = Kvaðning
+agent-thread = Þráður
+agent-parent = Yfir
+agent-children = Undirliðir
+agent-call = Kall
+agent-raw-event = Hrátt tilvik
+agent-plan = Áætlun
+agent-tasks = { $count ->
+    [one] 1 verk
+   *[other] { $count } verk
+}
+agent-edited = Breytt
+agent-reconnecting = Tengist aftur { $attempt }/{ $total }
+agent-status-running = Í gangi
+agent-status-done = Lokið
+agent-status-failed = Mistókst
+agent-status-pending = Í bið
+agent-slash-attach-files = Hengja skrár við
+agent-slash-resume-session = Halda áfram með fyrri lotu
+agent-slash-select-model = Velja líkan
+agent-slash-continue-cli = Halda þessari lotu áfram í CLI
+agent-session-just-now = rétt í þessu
+agent-session-minutes-ago = fyrir { $count } mín.
+agent-session-hours-ago = fyrir { $count } klst.
+agent-session-days-ago = fyrir { $count } d.
+agent-working-working = Vinn
+agent-working-thinking = Hugsar
+agent-working-pondering = Veltir fyrir sér
+agent-working-noodling = Pælingar í gangi
+agent-working-percolating = Lætur malla
+agent-working-conjuring = Galdrar fram
+agent-working-cooking = Eldar
+agent-working-brewing = Bruggar
+agent-working-musing = Hugleiðir
+agent-working-ruminating = Ígrundar
+agent-working-scheming = Leggur á ráðin
+agent-working-synthesizing = Setur saman
+agent-working-tinkering = Fínstillir
+agent-working-churning = Vinnur úr
+agent-working-vibing = Fílar stemninguna
+agent-working-simmering = Mallar
+agent-working-crafting = Mótar
+agent-working-divining = Les í stöðuna
+agent-working-mulling = Veltir fyrir sér
+agent-working-spelunking = Kafar ofan í
+
+editor-toggle-explorer = Sýna/fela könnuð (Cmd+B)
+editor-unsaved = óvistað
+editor-rendered-markdown = Sniðbirt Markdown með lifandi ritun
+editor-note = Athugasemd
+editor-source-editor = Frumkóðaritill
+editor-editor = Ritill
+editor-git-diff = Git-mismunur
+editor-diff = Mismunur
+editor-tidy = Tiltekt
+editor-always = Alltaf
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 óbreytt forskoðun
+   *[other] ✦ { $count } óbreyttar forskoðanir
+}
+editor-open-externally = Opna utan forrits
+editor-changed-line = Breytt lína
+editor-go-to-definition = Fara í skilgreiningu
+editor-find-references = Finna tilvísanir
+editor-references = { $count ->
+    [one] 1 tilvísun
+   *[other] { $count } tilvísanir
+}
+editor-lsp-starting = { $server } ræsist…
+editor-lsp-not-installed = { $server } — ekki uppsett
+editor-explorer = Kannaður
+editor-open-editors = Opnir ritlar
+editor-outline = Yfirlit
+editor-new-file = Ný skrá
+editor-new-folder = Ný mappa
+editor-delete-confirm = Eyða „{ $name }“? Ekki er hægt að afturkalla þetta.
+editor-created-folder = Mappan { $name } var búin til
+editor-created-file = Skráin { $name } var búin til
+editor-renamed-to = Endurnefnt í { $name }
+editor-deleted = Eyddi { $name }
+editor-failed-decode-image = Ekki tókst að afkóða mynd
+editor-preview-large-image = mynd (of stór til forskoðunar)
+editor-preview-binary = tvíundarskrá
+editor-preview-file = skrá
+
+git-status-clean = hreint
+git-status-modified = breytt
+git-status-staged = sett á svið
+git-status-staged-modified = sett á svið*
+git-status-untracked = órekjað
+git-status-deleted = eytt
+git-status-conflict = árekstur
+git-accept-all = ✓ samþykkja allt
+git-unstage = Taka af sviði
+git-confirm-deny-all = Staðfesta höfnun á öllu
+git-deny-all = ✗ hafna öllu
+git-commit-message = færsluskilaboð
+git-commit = Færa inn ({ $count })
+git-push = ↑ Ýta
+git-loading-diff = Hleð mismun…
+git-no-changes = Engar breytingar til að sýna
+git-accept = ✓ samþykkja
+git-deny = ✗ hafna
+git-show-unchanged-lines = Sýna { $count } óbreyttar línur
+
+terminal-loading = Hleður…
+terminal-runs-when-ready = keyrir þegar tilbúið · Ctrl+C hreinsar · Esc sleppir
+terminal-booting = ræsist
+terminal-type-command = sláðu inn skipun · keyrir þegar tilbúið · Esc sleppir
+
+setup-tagline-claude = Kóðunarforriti Anthropic, í Vmux
+setup-tagline-codex = Kóðunarforriti OpenAI, í Vmux
+setup-tagline-vibe = Kóðunarforriti Mistral, í Vmux
+setup-install-title = Setja upp { $name } CLI
+setup-homebrew-required = Homebrew þarf til að setja upp { $command } og hefur ekki verið sett upp enn. Vmux setur Homebrew fyrst upp og síðan { $name }.
+setup-terminal-instructions = Ýttu á Return í skelinni til að byrja og sláðu svo inn Mac-lykilorðið þitt þegar beðið er um það.
+setup-command-missing = Vmux opnaði þessa síðu því staðbundna skipunin { $command } er ekki uppsett enn. Keyrðu skipunina hér fyrir neðan til að sækja hana.
+setup-install-failed = Uppsetningu lauk ekki. Skoðaðu skelina fyrir nánari upplýsingar og reyndu aftur.
+setup-installing = Set upp…
+setup-install-homebrew = Setja upp Homebrew + { $name }
+setup-run-install = Keyra uppsetningarskipun
+setup-auto-reload = Vmux keyrir hana í skel og endurhleður þegar { $command } er tilbúin.
+
+debug-title = Villuleit
+debug-auto-update = Sjálfvirk uppfærsla
+debug-simulate-update = Herma eftir tiltækri uppfærslu
+debug-simulate-download = Herma eftir niðurhali
+debug-clear-update = Hreinsa uppfærslu
+debug-trigger-restart = Kveikja á endurræsingu
+
+command-manage-spaces = Stjórna vinnusvæðum…
+command-pane-stack-location = svæði { $pane } / stafli { $stack }
+command-space-pane-stack-location = { $space } / svæði { $pane } / stafli { $stack }
+command-terminal-path = Skjáhermir ({ $path })
+command-group-interactive-mode = Gagnvirk stilling
+command-group-window = Gluggi
+command-group-tab = Flipi
+command-group-pane = Svæði
+command-group-stack = Stafli
+command-group-space = Vinnusvæði
+command-group-navigation = Flakk
+command-group-open = Opna
+command-group-view = Skoða
+command-group-bar = Stika
+
+menu-close-vmux = Loka Vmux
+
+agents-terminal-coding-agent = Kóðunarfulltrúi í skjáhermi

@@ -1,0 +1,602 @@
+locale-name = Afrikaans
+common-open = Maak oop
+common-close = Sluit
+common-install = Installeer
+common-uninstall = Deïnstalleer
+common-update = Werk by
+common-retry = Probeer weer
+common-refresh = Verfris
+common-remove = Verwyder
+common-enable = Aktiveer
+common-disable = Deaktiveer
+common-new = Nuut
+common-active = aktief
+common-running = loop
+common-done = klaar
+common-failed = Misluk
+common-installed = Geïnstalleer
+common-items = { $count ->
+    [one] { $count } item
+   *[other] { $count } items
+}
+start-title = Begin
+start-tagline = Een prompt. Enigiets, klaar.
+
+agents-title = Agente
+agents-search = Soek ACP- en CLI-agente…
+agents-empty = Geen ooreenstemmende agente nie
+agents-empty-detail = Probeer ’n naam, looptyd, of ACP/CLI.
+agents-install-failed = Installering het misluk
+agents-updating = Werk by…
+agents-retrying = Probeer weer…
+agents-preparing = Berei voor…
+
+extensions-title = Uitbreidings
+extensions-search = Soek geïnstalleerde uitbreidings of in die Chrome Web Store…
+extensions-relaunch = Herbegin om toe te pas
+extensions-empty = Geen uitbreidings geïnstalleer nie
+extensions-no-match = Geen ooreenstemmende uitbreidings nie
+extensions-empty-detail = Soek hierbo in die Chrome Web Store en druk Enter.
+extensions-no-match-detail = Probeer ’n ander naam of uitbreidings-ID.
+extensions-on = Aan
+extensions-off = Af
+extensions-enable-confirm = Aktiveer { $name }?
+extensions-enable-permissions = Aktiveer { $name } en laat toe:
+
+lsp-title = Taalbedieners
+lsp-search = Soek taalbedieners, linters, formatteerders…
+lsp-loading = Laai katalogus…
+lsp-empty = Geen ooreenstemmende taalbedieners nie
+lsp-empty-detail = Probeer ’n ander taal, linter of formatteerder.
+lsp-needs = benodig { $tool }
+lsp-status-available = Beskikbaar
+lsp-status-on-path = Op PATH
+lsp-status-installing = Installeer…
+lsp-status-installed = Geïnstalleer
+lsp-status-outdated = Bywerking beskikbaar
+lsp-status-running = Loop
+lsp-status-failed = Misluk
+
+spaces-title = Werkruimtes
+spaces-new-placeholder = Nuwe werkruimtenaam
+spaces-empty = Geen werkruimtes nie
+spaces-default-name = Werkruimte { $number }
+spaces-tabs = { $count ->
+    [one] 1 oortjie
+   *[other] { $count } oortjies
+}
+spaces-delete = Skrap werkruimte
+
+team-title = Span
+team-just-you = Net jy in hierdie werkruimte
+team-agents = { $count ->
+    [one] Jy en 1 agent
+   *[other] Jy en { $count } agente
+}
+team-empty = Nog niemand hier nie
+team-you = Jy
+team-agent = Agent
+
+services-title = Agtergronddienste
+services-processes = { $count ->
+    [one] 1 proses
+   *[other] { $count } prosesse
+}
+services-kill-all = Beëindig almal
+services-not-running = Diens loop nie
+services-start-with = Begin met:
+services-empty = Geen aktiewe prosesse nie
+services-filter = Filter prosesse…
+services-no-match = Geen ooreenstemmende prosesse nie
+services-connected = Gekoppel
+services-disconnected = Ontkoppel
+services-attached = aangeheg
+services-kill = Beëindig
+services-memory = Geheue
+services-size = Grootte
+services-shell = Dop
+
+error-title = Fout
+
+history-search = Soek geskiedenis
+history-clear-all = Maak alles skoon
+history-clear-confirm = Maak alle geskiedenis skoon?
+history-clear-warning = Dit kan nie ongedaan gemaak word nie.
+history-cancel = Kanselleer
+history-today = Vandag
+history-yesterday = Gister
+history-days-ago = { $count } dae gelede
+history-day-offset = Dag -{ $count }
+
+settings-title = Instellings
+settings-loading = Laai instellings…
+settings-stored = Gestoor in ~/.vmux/settings.ron
+settings-other = Ander
+settings-software-update = Sagtewarebywerking
+settings-check-updates = Kyk vir bywerkings
+settings-check-updates-hint = Kontroleer outomaties by aanvang en elke uur wanneer outobywerking geaktiveer is.
+settings-update-unavailable = Nie beskikbaar nie
+settings-update-unavailable-hint = Die bywerker is nie by hierdie bou ingesluit nie.
+settings-update-checking = Kontroleer…
+settings-update-checking-hint = Kontroleer vir bywerkings…
+settings-update-check-again = Kontroleer weer
+settings-update-current = Vmux is op datum.
+settings-update-downloading = Laai af…
+settings-update-downloading-hint = Laai Vmux { $version } af…
+settings-update-installing = Installeer…
+settings-update-installing-hint = Installeer Vmux { $version }…
+settings-update-ready = Bywerking gereed
+settings-update-ready-hint = Vmux { $version } is gereed. Herbegin om dit toe te pas.
+settings-update-try-again = Probeer weer
+settings-update-failed = Kan nie vir bywerkings kontroleer nie.
+settings-item = Item
+settings-item-number = Item { $number }
+settings-press-key = Druk ’n sleutel…
+settings-saved = Gestoor
+settings-record-key = Klik om ’n nuwe sleutelkombinasie op te neem
+
+tray-open-window = Maak venster oop
+tray-close-window = Sluit venster
+tray-pause-recording = Onderbreek opname
+tray-resume-recording = Hervat opname
+tray-finish-recording = Voltooi opname
+tray-quit = Sluit Vmux af
+
+composer-attach-files = Heg lêers aan (/upload)
+composer-remove-attachment = Verwyder aanhegsel
+
+layout-back = Terug
+layout-forward = Vorentoe
+layout-reload = Herlaai
+layout-bookmark-page = Voeg hierdie bladsy by boekmerke
+layout-remove-bookmark = Verwyder boekmerk
+layout-pin-page = Speld hierdie bladsy vas
+layout-unpin-page = Maak hierdie bladsy los
+layout-manage-extensions = Bestuur uitbreidings
+layout-new-stack = Nuwe stapel
+layout-close-tab = Sluit oortjie
+layout-bookmark = Boekmerk
+layout-pin = Speld vas
+layout-new-tab = Nuwe oortjie
+layout-team = Span
+
+command-switch-space = Wissel werkruimte…
+command-search-ask = Soek of vra…
+command-new-tab-placeholder = Soek of tik ’n URL, of kies Terminaal…
+command-placeholder = Tik ’n URL, soek oortjies, of > vir opdragte…
+command-composer-placeholder = Tik / vir opdragte of @ vir media
+command-send = Stuur (Enter)
+command-terminal = Terminaal
+command-open-terminal = Maak in Terminaal oop
+command-stack = Stapel
+command-tabs = { $count ->
+    [one] 1 oortjie
+   *[other] { $count } oortjies
+}
+command-prompt = Prompt
+command-new-tab = Nuwe oortjie
+command-search = Soek
+command-open-value = Maak “{ $value }” oop
+command-search-value = Soek “{ $value }”
+
+schema-appearance = Voorkoms
+schema-general = Algemeen
+schema-layout = Uitleg
+schema-layout-detail = Venster, panele, sybalk en fokusring.
+schema-agent = Agent
+schema-agent-detail = Agentgedrag en gereedskaptoestemmings.
+schema-shortcuts = Kortpaaie
+schema-shortcuts-detail = Leesalleen-aansig. Wysig settings.ron direk om bindings te verander.
+schema-terminal = Terminaal
+schema-browser = Blaaier
+schema-mode = Modus
+schema-mode-detail = Kleurskema vir webbladsye. Toestel volg jou stelsel.
+schema-device = Toestel
+schema-light = Lig
+schema-dark = Donker
+schema-language = Taal
+schema-language-detail = Gebruik die stelsel, en-US, ja, of enige BCP 47-etiket met ’n ooreenstemmende ~/.vmux/locales/<tag>.ftl-katalogus.
+schema-auto-update = Outobywerking
+schema-auto-update-detail = Kontroleer vir en installeer bywerkings by aanvang en elke uur.
+schema-startup-url = Aanvangs-URL
+schema-startup-url-detail = Leeg maak die opdragbalk se prompt oop.
+schema-search-engine = Soekenjin
+schema-search-engine-detail = Gebruik vir websoektogte vanaf Begin en die opdragbalk.
+schema-window = Venster
+schema-pane = Paneel
+schema-side-sheet = Syblad
+schema-focus-ring = Fokusring
+schema-run-placement = Laat loopplasing-oorskrywing toe
+schema-run-placement-detail = Laat agente die looppaneelmodus, rigting en anker kies.
+schema-leader = Leier
+schema-leader-detail = Voorvoegsleutel vir akkoordkortpaaie.
+schema-chord-timeout = Akkoord-uitteltyd
+schema-chord-timeout-detail = Millisekondes voordat ’n akkoordvoorvoegsel verval.
+schema-bindings = Bindings
+schema-confirm-close = Bevestig sluiting
+schema-confirm-close-detail = Vra voordat ’n terminaal met ’n lopende proses gesluit word.
+schema-default-theme = Verstektema
+schema-default-theme-detail = Naam van die aktiewe tema uit die temalys.
+
+settings-empty = (leeg)
+settings-none = (geen)
+
+schema-system = Stelsel
+schema-editor = Redigeerder
+schema-recording = Opname
+schema-radius = Radius
+schema-padding = Spasiëring
+schema-gap = Gaping
+schema-width = Breedte
+schema-color = Kleur
+schema-red = Rooi
+schema-green = Groen
+schema-blue = Blou
+schema-follow-files = Volg lêers
+schema-tidy-files = Ruim lêers op
+schema-tidy-files-max = Lêeropruimdrempel
+schema-tidy-files-auto = Ruim lêers outomaties op
+schema-app-providers = Toepverskaffers
+schema-provider = Verskaffer
+schema-kind = Soort
+schema-models = Modelle
+schema-acp = ACP-agente
+schema-id = ID
+schema-name = Naam
+schema-command = Opdrag
+schema-arguments = Argumente
+schema-environment = Omgewing
+schema-working-directory = Werkmap
+schema-shell = Skil
+schema-font-family = Lettertipefamilie
+schema-startup-directory = Beginmap
+schema-themes = Temas
+schema-color-scheme = Kleurskema
+schema-font-size = Lettergrootte
+schema-line-height = Lynhoogte
+schema-cursor-style = Wyserstyl
+schema-cursor-blink = Wyserknipper
+schema-custom-themes = Pasgemaakte temas
+schema-foreground = Voorgrond
+schema-background = Agtergrond
+schema-cursor = Wyser
+schema-ansi-colors = ANSI-kleure
+schema-keymap = Sleutelkartering
+schema-explorer = Verkenner
+schema-visible = Sigbaar
+schema-language-servers = Taalbedieners
+schema-servers = Bedieners
+schema-language-id = Taal-ID
+schema-root-markers = Wortelmerkers
+schema-output-directory = Uitvoermap
+
+menu-scene = Toneel
+menu-layout = Uitleg
+menu-terminal = Terminal
+menu-browser = Blaaier
+menu-service = Diens
+menu-bookmark = Boekmerk
+menu-edit = Wysig
+
+layout-knowledge = Kennis
+layout-open-knowledge = Maak Kennis oop
+layout-open-welcome-knowledge = Maak Welkom by Kennis oop
+layout-open-path = Maak { $path } oop
+layout-fold-knowledge = Vou kennis toe
+layout-unfold-knowledge = Vou kennis oop
+layout-bookmarks = Boekmerke
+layout-new-folder = Nuwe vouer
+layout-add-to-bookmarks = Voeg by Boekmerke
+layout-move-to-bookmarks = Skuif na Boekmerke
+layout-stack-number = Stapel { $number }
+layout-fold-stack = Vou stapel toe
+layout-unfold-stack = Vou stapel oop
+layout-close-stack = Sluit stapel
+layout-bookmark-in = Boekmerk in { $folder }
+
+common-cancel = Kanselleer
+common-delete = Skrap
+common-save = Stoor
+common-rename = Hernoem
+common-expand = Vou oop
+common-collapse = Vou toe
+common-loading = Laai…
+common-error = Fout
+common-output = Uitvoer
+common-pending = Hangend
+common-current = huidige
+common-stop = Stop
+services-command = Vmux-diens
+services-uptime-seconds = { $seconds } s
+services-uptime-minutes = { $minutes } m { $seconds } s
+services-uptime-hours = { $hours } u { $minutes } m
+services-uptime-days = { $days } d { $hours } u
+
+error-page-failed-load = Bladsy kon nie laai nie
+error-page-not-found = Bladsy nie gevind nie
+error-unknown-host = Onbekende Vmux-programgasheer: { $host }
+
+history-title = Geskiedenis
+
+command-new-app-chat = Nuwe { $provider }/{ $model }-klets (Program)
+command-interactive-mode-user = Toneel > Interaktiewe modus > Gebruiker
+command-interactive-mode-player = Toneel > Interaktiewe modus > Speler
+command-minimize-window = Uitleg > Venster > Minimaliseer
+command-toggle-layout = Uitleg > Uitleg > Wissel uitleg
+command-close-tab = Uitleg > Oortjie > Maak oortjie toe
+command-new-task = Uitleg > Oortjie > Nuwe taak…
+command-next-tab = Uitleg > Oortjie > Volgende oortjie
+command-prev-tab = Uitleg > Oortjie > Vorige oortjie
+command-rename-tab = Uitleg > Oortjie > Hernoem oortjie
+command-tab-select-1 = Uitleg > Oortjie > Kies oortjie 1
+command-tab-select-2 = Uitleg > Oortjie > Kies oortjie 2
+command-tab-select-3 = Uitleg > Oortjie > Kies oortjie 3
+command-tab-select-4 = Uitleg > Oortjie > Kies oortjie 4
+command-tab-select-5 = Uitleg > Oortjie > Kies oortjie 5
+command-tab-select-6 = Uitleg > Oortjie > Kies oortjie 6
+command-tab-select-7 = Uitleg > Oortjie > Kies oortjie 7
+command-tab-select-8 = Uitleg > Oortjie > Kies oortjie 8
+command-tab-select-last = Uitleg > Oortjie > Kies laaste oortjie
+command-close-pane = Uitleg > Paneel > Maak paneel toe
+command-select-pane-left = Uitleg > Paneel > Kies linkerpaneel
+command-select-pane-right = Uitleg > Paneel > Kies regterpaneel
+command-select-pane-up = Uitleg > Paneel > Kies paneel bo
+command-select-pane-down = Uitleg > Paneel > Kies paneel onder
+command-swap-pane-prev = Uitleg > Paneel > Ruil met vorige paneel
+command-swap-pane-next = Uitleg > Paneel > Ruil met volgende paneel
+command-equalize-pane-size = Uitleg > Paneel > Maak paneelgroottes gelyk
+command-resize-pane-left = Uitleg > Paneel > Verstel paneel links
+command-resize-pane-right = Uitleg > Paneel > Verstel paneel regs
+command-resize-pane-up = Uitleg > Paneel > Verstel paneel op
+command-resize-pane-down = Uitleg > Paneel > Verstel paneel af
+command-stack-close = Uitleg > Stapel > Maak stapel toe
+command-stack-next = Uitleg > Stapel > Volgende stapel
+command-stack-previous = Uitleg > Stapel > Vorige stapel
+command-stack-reopen = Uitleg > Stapel > Heropen geslote bladsy
+command-stack-swap-prev = Uitleg > Stapel > Skuif stapel links
+command-stack-swap-next = Uitleg > Stapel > Skuif stapel regs
+command-space-open = Uitleg > Space > Spaces
+command-terminal-close = Terminaal > Maak terminaal toe
+command-terminal-next = Terminaal > Volgende terminaal
+command-terminal-prev = Terminaal > Vorige terminaal
+command-terminal-clear = Terminaal > Maak terminaal skoon
+command-browser-prev-page = Blaaier > Navigasie > Terug
+command-browser-next-page = Blaaier > Navigasie > Vorentoe
+command-browser-reload = Blaaier > Navigasie > Herlaai
+command-browser-hard-reload = Blaaier > Navigasie > Dwing herlaai
+command-open-in-place = Blaaier > Open > Maak hier oop
+command-open-in-new-stack = Blaaier > Open > Maak in nuwe stapel oop
+command-open-in-pane-top = Blaaier > Open > Maak in paneel bo oop
+command-open-in-pane-right = Blaaier > Open > Maak in paneel regs oop
+command-open-in-pane-bottom = Blaaier > Open > Maak in paneel onder oop
+command-open-in-pane-left = Blaaier > Open > Maak in paneel links oop
+command-open-in-new-tab = Blaaier > Open > Maak in nuwe oortjie oop
+command-open-in-new-space = Blaaier > Open > Maak in nuwe Space oop
+command-browser-zoom-in = Blaaier > Aansig > Zoem in
+command-browser-zoom-out = Blaaier > Aansig > Zoem uit
+command-browser-zoom-reset = Blaaier > Aansig > Werklike grootte
+command-browser-dev-tools = Blaaier > Aansig > Ontwikkelaarnutsgoed
+command-browser-open-command-bar = Blaaier > Balk > Opdragbalk
+command-browser-open-page-in-command-bar = Blaaier > Balk > Wysig bladsy
+command-browser-open-path-bar = Blaaier > Balk > Padnavigator
+command-browser-open-commands = Blaaier > Balk > Opdragte
+command-browser-open-history = Blaaier > Balk > Geskiedenis
+command-service-open = Diens > Maak diensmonitor oop
+command-bookmark-toggle-active = Boekmerk > Boekmerk bladsy
+command-bookmark-pin-active = Boekmerk > Speld bladsy vas
+
+layout-tab = Oortjie
+layout-no-stacks = Geen stapels
+layout-loading = Laai…
+layout-no-markdown-files = Geen Markdown-lêers
+layout-empty-folder = Leë vouer
+layout-worktree = werkboom
+layout-folder-name = Vouernaam
+layout-no-pins-bookmarks = Geen vasgespelde items of boekmerke
+layout-move-to = Skuif na { $folder }
+layout-bookmark-current-page = Boekmerk huidige bladsy
+layout-rename-folder = Hernoem vouer
+layout-remove-folder = Verwyder vouer
+layout-update-downloading = Laai opdatering af
+layout-update-installing = Installeer opdatering…
+layout-update-ready = Nuwe weergawe beskikbaar
+layout-restart-update = Herbegin om op te dateer
+
+agent-preparing = Berei agent voor…
+agent-send-all-queued = Stuur alle tou-opdragte nou (Esc)
+agent-send = Stuur (Enter)
+agent-ready = Gereed wanneer jy is.
+agent-loading-older = Laai ouer boodskappe…
+agent-load-older = Laai ouer boodskappe
+agent-continued-from = Voortgesit vanaf { $source }
+agent-older-context-omitted = ouer konteks weggelaat
+agent-interrupted = onderbreek
+agent-allow-tool = Laat { $tool } toe?
+agent-deny = Weier
+agent-allow-always = Laat altyd toe
+agent-allow = Laat toe
+agent-loading-sessions = Laai sessies…
+agent-no-resumable-sessions = Geen hervatbare sessies gevind nie
+agent-no-matching-sessions = Geen ooreenstemmende sessies nie
+agent-no-matching-models = Geen ooreenstemmende modelle nie
+agent-choice-help = ↑/↓ of Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Kies bewaarplekvouer
+agent-choose-repository-detail = Kies die plaaslike Git-bewaarplek wat die agent moet gebruik.
+agent-choosing = Kies…
+agent-choose-folder = Kies vouer
+agent-queued = in tou
+agent-attached = Aangeheg:
+agent-cancel-queued = Kanselleer tou-opdrag
+agent-resume-queued = Hervat tou-opdragte
+agent-clear-queue = Maak tou skoon
+agent-send-all-now = stuur alles nou
+agent-choose-option = Kies ’n opsie hierbo
+agent-loading-media = Laai media…
+agent-no-matching-media = Geen ooreenstemmende media nie
+agent-prompt-context = Opdragkonteks
+agent-details = Besonderhede
+agent-path = Pad
+agent-tool = Nutsding
+agent-server = Bediener
+agent-bytes = { $count } grepe
+agent-worked-for = Gewerk vir { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Gewerk vir { $duration } · 1 stap
+   *[other] Gewerk vir { $duration } · { $count } stappe
+}
+agent-tool-guardian-review = Guardian-oorsig
+agent-tool-read-files = Lêers gelees
+agent-tool-viewed-image = Beeld bekyk
+agent-tool-used-browser = Blaaier gebruik
+agent-tool-searched-files = Lêers deursoek
+agent-tool-ran-commands = Opdragte uitgevoer
+agent-thinking = Dink
+agent-subagent = Subagent
+agent-prompt = Opdrag
+agent-thread = Draad
+agent-parent = Ouer
+agent-children = Kinders
+agent-call = Oproep
+agent-raw-event = Rou gebeurtenis
+agent-plan = Plan
+agent-tasks = { $count ->
+    [one] 1 taak
+   *[other] { $count } take
+}
+agent-edited = Gewysig
+agent-reconnecting = Herkoppel { $attempt }/{ $total }
+agent-status-running = Loop
+agent-status-done = Klaar
+agent-status-failed = Misluk
+agent-status-pending = Hangend
+agent-slash-attach-files = Heg lêers aan
+agent-slash-resume-session = Hervat ’n vorige sessie
+agent-slash-select-model = Kies model
+agent-slash-continue-cli = Gaan voort met hierdie sessie in die CLI
+agent-session-just-now = pas nou
+agent-session-minutes-ago = { $count } m gelede
+agent-session-hours-ago = { $count } u gelede
+agent-session-days-ago = { $count } d gelede
+agent-working-working = Werk
+agent-working-thinking = Dink
+agent-working-pondering = Peins
+agent-working-noodling = Broei
+agent-working-percolating = Sypel
+agent-working-conjuring = Tower
+agent-working-cooking = Kook
+agent-working-brewing = Brou
+agent-working-musing = Mijmer
+agent-working-ruminating = Herkou
+agent-working-scheming = Beplan
+agent-working-synthesizing = Sintetiseer
+agent-working-tinkering = Pruts
+agent-working-churning = Woel
+agent-working-vibing = Vibe
+agent-working-simmering = Prut
+agent-working-crafting = Skep
+agent-working-divining = Raai
+agent-working-mulling = Oorweeg
+agent-working-spelunking = Verken
+
+editor-toggle-explorer = Wissel Verkenner (Cmd+B)
+editor-unsaved = ongestoor
+editor-rendered-markdown = Weergegewe Markdown met lewendige redigering
+editor-note = Nota
+editor-source-editor = Bronredigeerder
+editor-editor = Redigeerder
+editor-git-diff = Git-verskil
+editor-diff = Verskil
+editor-tidy = Opruim
+editor-always = Altyd
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 onveranderde voorskou
+   *[other] ✦ { $count } onveranderde voorskoue
+}
+editor-open-externally = Maak ekstern oop
+editor-changed-line = Gewysigde reël
+editor-go-to-definition = Gaan na definisie
+editor-find-references = Vind verwysings
+editor-references = { $count ->
+    [one] 1 verwysing
+   *[other] { $count } verwysings
+}
+editor-lsp-starting = { $server } begin…
+editor-lsp-not-installed = { $server } — nie geïnstalleer nie
+editor-explorer = Verkenner
+editor-open-editors = Oop redigeerders
+editor-outline = Oorsig
+editor-new-file = Nuwe lêer
+editor-new-folder = Nuwe vouer
+editor-delete-confirm = Skrap “{ $name }”? Dit kan nie ongedaan gemaak word nie.
+editor-created-folder = Vouer { $name } geskep
+editor-created-file = Lêer { $name } geskep
+editor-renamed-to = Hernoem na { $name }
+editor-deleted = { $name } geskrap
+editor-failed-decode-image = Kon beeld nie dekodeer nie
+editor-preview-large-image = beeld (te groot vir voorskou)
+editor-preview-binary = binêr
+editor-preview-file = lêer
+
+git-status-clean = skoon
+git-status-modified = gewysig
+git-status-staged = gestage
+git-status-staged-modified = gestage*
+git-status-untracked = onopgespoor
+git-status-deleted = geskrap
+git-status-conflict = konflik
+git-accept-all = ✓ aanvaar alles
+git-unstage = Ontstage
+git-confirm-deny-all = Bevestig weier alles
+git-deny-all = ✗ weier alles
+git-commit-message = commit-boodskap
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Laai verskil…
+git-no-changes = Geen veranderinge om te wys nie
+git-accept = ✓ aanvaar
+git-deny = ✗ weier
+git-show-unchanged-lines = Wys { $count } onveranderde reëls
+
+terminal-loading = Laai…
+terminal-runs-when-ready = loop wanneer gereed · Ctrl+C maak skoon · Esc slaan oor
+terminal-booting = begin
+terminal-type-command = tik ’n opdrag · loop wanneer gereed · Esc slaan oor
+
+setup-tagline-claude = Anthropic se kodeeragent, in Vmux
+setup-tagline-codex = OpenAI se kodeeragent, in Vmux
+setup-tagline-vibe = Mistral se kodeeragent, in Vmux
+setup-install-title = Installeer { $name } CLI
+setup-homebrew-required = Homebrew word vereis om { $command } te installeer en is nog nie opgestel nie. Vmux sal eers Homebrew installeer, dan { $name }.
+setup-terminal-instructions = Druk Return in die terminaal om te begin, en voer dan jou Mac-wagwoord in wanneer jy gevra word.
+setup-command-missing = Vmux het hierdie bladsy oopgemaak omdat die plaaslike { $command }-opdrag nog nie geïnstalleer is nie. Voer die opdrag hieronder uit om dit te kry.
+setup-install-failed = Installasie is nie voltooi nie. Gaan die terminaal na vir besonderhede en probeer weer.
+setup-installing = Installeer…
+setup-install-homebrew = Installeer Homebrew + { $name }
+setup-run-install = Voer installasie-opdrag uit
+setup-auto-reload = Vmux voer dit in ’n terminaal uit en herlaai wanneer { $command } gereed is.
+
+debug-title = Ontfout
+debug-auto-update = Outomatiese opdatering
+debug-simulate-update = Simuleer beskikbare opdatering
+debug-simulate-download = Simuleer aflaai
+debug-clear-update = Vee opdatering uit
+debug-trigger-restart = Sneller herbegin
+
+command-manage-spaces = Bestuur spaces…
+command-pane-stack-location = pane { $pane } / stapel { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stapel { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Interaktiewe modus
+command-group-window = Venster
+command-group-tab = Oortjie
+command-group-pane = Paneel
+command-group-stack = Stapel
+command-group-space = Space
+command-group-navigation = Navigasie
+command-group-open = Maak oop
+command-group-view = Aansig
+command-group-bar = Balk
+
+menu-close-vmux = Sluit Vmux
+
+agents-terminal-coding-agent = Terminaalgebaseerde koderingsagent

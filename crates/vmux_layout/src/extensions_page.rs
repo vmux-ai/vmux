@@ -9,24 +9,29 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn approval_message(extension: &ExtRow) -> String {
     let mut requested = extension.required_permissions.clone();
     requested.extend(extension.required_host_permissions.iter().cloned());
     if requested.is_empty() {
-        format!("Enable {}?", extension.name)
-    } else {
-        format!(
-            "Enable {} and allow:\n\n{}",
-            extension.name,
-            requested.join("\n")
+        translate_with(
+            "extensions-enable-confirm",
+            &[("name", TranslationValue::String(&extension.name))],
         )
+    } else {
+        let permissions = requested.join("\n");
+        let message = translate_with(
+            "extensions-enable-permissions",
+            &[("name", TranslationValue::String(&extension.name))],
+        );
+        format!("{message}\n\n{permissions}")
     }
 }
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut state = use_signal(ExtensionsEvent::default);
     let mut progress = use_signal(HashMap::<String, ExtInstallProgress>::new);
     let mut loaded = use_signal(|| false);
@@ -47,8 +52,9 @@ pub fn Page() -> Element {
     let _status = use_bin_event_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_| {});
 
     use_effect(move || {
+        locale();
         if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title("Extensions");
+            doc.set_title(&translate("extensions-title"));
         }
         let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
     });
@@ -71,10 +77,10 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             ManagerHeader {
-                title: "Extensions",
+                title: translate("extensions-title"),
                 count: snapshot.extensions.len(),
                 search_value: search(),
-                search_placeholder: "Search installed or Chrome Web Store…",
+                search_placeholder: translate("extensions-search"),
                 onsearch: move |event: FormEvent| search.set(event.value()),
                 onkeydown: move |event: KeyboardEvent| {
                     if event.key() == Key::Enter {
@@ -91,7 +97,7 @@ pub fn Page() -> Element {
                             onclick: move |_| {
                                 let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
                             },
-                            "Relaunch to apply"
+                            {translate("extensions-relaunch")}
                         }
                     }
                 },
@@ -115,11 +121,11 @@ pub fn Page() -> Element {
                     ManagerSkeleton {}
                 } else if visible.is_empty() {
                     ManagerEmpty {
-                        title: if snapshot.extensions.is_empty() { "No extensions installed" } else { "No matching extensions" },
+                        title: if snapshot.extensions.is_empty() { translate("extensions-empty") } else { translate("extensions-no-match") },
                         detail: if snapshot.extensions.is_empty() {
-                            "Search the Chrome Web Store above and press Return."
+                            translate("extensions-empty-detail")
                         } else {
-                            "Try another name or extension ID."
+                            translate("extensions-no-match-detail")
                         },
                     }
                 }
@@ -153,7 +159,7 @@ fn render_extension(extension: &ExtRow) -> Element {
             meta: rsx! {
                 ManagerBadge {
                     tone: if item.enabled { ManagerTone::Green } else { ManagerTone::Neutral },
-                    if item.enabled { "On" } else { "Off" }
+                    if item.enabled { {translate("extensions-on")} } else { {translate("extensions-off")} }
                 }
             },
             actions: rsx! {
@@ -177,14 +183,14 @@ fn render_extension(extension: &ExtRow) -> Element {
                             approve_permissions,
                         });
                     },
-                    if item.enabled { "Disable" } else { "Enable" }
+                    if item.enabled { {translate("common-disable")} } else { {translate("common-enable")} }
                 }
                 ManagerButton {
                     variant: ManagerButtonVariant::Danger,
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&ExtUninstallRequest { id: remove_id.clone() });
                     },
-                    "Remove"
+                    {translate("common-remove")}
                 }
             },
         }

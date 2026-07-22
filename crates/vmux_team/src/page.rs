@@ -4,10 +4,14 @@ use dioxus::prelude::*;
 use vmux_core::event::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{use_event, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate("team-title"));
+    }
     let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let members = team().members;
@@ -16,9 +20,11 @@ pub fn Page() -> Element {
     let agents: Vec<TeamMemberRow> = members.iter().filter(|m| !m.is_user).cloned().collect();
     let agent_count = agents.len();
     let subtitle = match agent_count {
-        0 => "Just you in this space".to_string(),
-        1 => "You and 1 agent".to_string(),
-        n => format!("You and {n} agents"),
+        0 => translate("team-just-you"),
+        count => translate_with(
+            "team-agents",
+            &[("count", TranslationValue::Number(count as i64))],
+        ),
     };
 
     rsx! {
@@ -26,7 +32,7 @@ pub fn Page() -> Element {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
             header { class: "flex items-center justify-between border-b border-border px-5 py-4",
                 div { class: "min-w-0",
-                    h1 { class: "text-lg font-semibold tracking-tight", "Team" }
+                    h1 { class: "text-lg font-semibold tracking-tight", {translate("team-title")} }
                     p { class: "mt-0.5 truncate text-xs text-muted-foreground", "{subtitle}" }
                 }
                 if count > 0 {
@@ -50,7 +56,7 @@ pub fn Page() -> Element {
                                 path { d: "M22 21v-2a4 4 0 0 0-3-3.87" }
                             }
                         }
-                        span { class: "text-sm", "No one here yet" }
+                        span { class: "text-sm", {translate("team-empty")} }
                     }
                 } else {
                     div { class: "flex flex-col gap-0.5",
@@ -77,14 +83,14 @@ fn TeamRow(member: TeamMemberRow) -> Element {
     // since the session id is shown on its own line), else a role label.
     let default_title = format!("{} (", member.name);
     let subtitle = if member.is_user {
-        Some("You".to_string())
+        Some(translate("team-you"))
     } else if !member.title.is_empty()
         && member.title != member.name
         && !member.title.starts_with(&default_title)
     {
         Some(member.title.clone())
     } else if member.sid.is_empty() {
-        Some("Agent".to_string())
+        Some(translate("team-agent"))
     } else {
         None
     };
@@ -106,12 +112,12 @@ fn TeamRow(member: TeamMemberRow) -> Element {
                     if member.is_running {
                         span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400",
                             span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
-                            "running"
+                            {translate("common-running")}
                         }
                     } else if member.is_done_unseen {
                         span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400",
                             span { class: "size-1.5 rounded-full bg-amber-400 animate-pulse" }
-                            "done"
+                            {translate("common-done")}
                         }
                     }
                 }

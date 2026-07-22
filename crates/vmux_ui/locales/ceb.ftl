@@ -1,0 +1,602 @@
+locale-name = Sinugboanon
+common-open = Ablihi
+common-close = Sirad-i
+common-install = I-install
+common-uninstall = I-uninstall
+common-update = I-update
+common-retry = Sulayi pag-usab
+common-refresh = I-refresh
+common-remove = Tangtanga
+common-enable = I-enable
+common-disable = I-disable
+common-new = Bag-o
+common-active = aktibo
+common-running = nagdagan
+common-done = human na
+common-failed = Napakyas
+common-installed = Na-install
+common-items = { $count ->
+    [one] { $count } item
+   *[other] { $count } item
+}
+start-title = Sugod
+start-tagline = Usa ka prompt. Bisan unsa, mahuman.
+
+agents-title = Mga Agent
+agents-search = Pangitaa ang ACP ug CLI agents…
+agents-empty = Walay matching nga agents
+agents-empty-detail = Sulayi ang ngalan, runtime, o ACP/CLI.
+agents-install-failed = Napakyas ang pag-install
+agents-updating = Nag-update…
+agents-retrying = Gisulayan pag-usab…
+agents-preparing = Nag-andam…
+
+extensions-title = Mga Extension
+extensions-search = Pangitaa ang na-install o sa Chrome Web Store…
+extensions-relaunch = I-relaunch aron ma-apply
+extensions-empty = Walay na-install nga extension
+extensions-no-match = Walay matching nga extension
+extensions-empty-detail = Pangitaa sa Chrome Web Store sa taas ug pindota ang Return.
+extensions-no-match-detail = Sulayi ang laing ngalan o extension ID.
+extensions-on = On
+extensions-off = Off
+extensions-enable-confirm = I-enable ang { $name }?
+extensions-enable-permissions = I-enable ang { $name } ug tugoti ang:
+
+lsp-title = Mga Language Server
+lsp-search = Pangitaa ang language servers, linters, formatters…
+lsp-loading = Nag-load sa catalog…
+lsp-empty = Walay matching nga language server
+lsp-empty-detail = Sulayi ang laing language, linter, o formatter.
+lsp-needs = nanginahanglan og { $tool }
+lsp-status-available = Available
+lsp-status-on-path = Sa PATH
+lsp-status-installing = Nag-install…
+lsp-status-installed = Na-install
+lsp-status-outdated = Adunay update
+lsp-status-running = Nagdagan
+lsp-status-failed = Napakyas
+
+spaces-title = Mga Espasyo
+spaces-new-placeholder = Ngalan sa bag-ong espasyo
+spaces-empty = Walay espasyo
+spaces-default-name = Espasyo { $number }
+spaces-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+spaces-delete = I-delete ang espasyo
+
+team-title = Team
+team-just-you = Ikaw ra dinhi sa espasyong kini
+team-agents = { $count ->
+    [one] Ikaw ug 1 agent
+   *[other] Ikaw ug { $count } agents
+}
+team-empty = Wala pay tawo dinhi
+team-you = Ikaw
+team-agent = Agent
+
+services-title = Mga Background Service
+services-processes = { $count ->
+    [one] 1 proseso
+   *[other] { $count } proseso
+}
+services-kill-all = I-kill Tanan
+services-not-running = Wala nagdagan ang service
+services-start-with = Sugdi gamit ang:
+services-empty = Walay aktibong proseso
+services-filter = I-filter ang mga proseso…
+services-no-match = Walay matching nga proseso
+services-connected = Nakakonekta
+services-disconnected = Naputol
+services-attached = naka-attach
+services-kill = I-kill
+services-memory = Memorya
+services-size = Gidak-on
+services-shell = Shell
+
+error-title = Sayop
+
+history-search = Pangitaa sa history
+history-clear-all = Hawani tanan
+history-clear-confirm = Hawanan ang tanang history?
+history-clear-warning = Dili na kini mabawi.
+history-cancel = Kanselahon
+history-today = Karon
+history-yesterday = Kagahapon
+history-days-ago = { $count } ka adlaw ang milabay
+history-day-offset = Adlaw -{ $count }
+
+settings-title = Mga Setting
+settings-loading = Nag-load sa settings…
+settings-stored = Nakatipig sa ~/.vmux/settings.ron
+settings-other = Uban pa
+settings-software-update = Software Update
+settings-check-updates = Susiha ang Updates
+settings-check-updates-hint = Awtomatikong mosusi sa pag-launch ug kada oras kung naka-enable ang Auto-update.
+settings-update-unavailable = Dili available
+settings-update-unavailable-hint = Wala maapil ang updater niining build.
+settings-update-checking = Nagsusi…
+settings-update-checking-hint = Nagsusi og updates…
+settings-update-check-again = Susiha Pag-usab
+settings-update-current = Up to date ang Vmux.
+settings-update-downloading = Nag-download…
+settings-update-downloading-hint = Nag-download sa Vmux { $version }…
+settings-update-installing = Nag-install…
+settings-update-installing-hint = Nag-install sa Vmux { $version }…
+settings-update-ready = Andam na ang Update
+settings-update-ready-hint = Andam na ang Vmux { $version }. I-restart aron ma-apply.
+settings-update-try-again = Sulayi Pag-usab
+settings-update-failed = Dili masusi ang updates.
+settings-item = Item
+settings-item-number = Item { $number }
+settings-press-key = Pindota ang usa ka key…
+settings-saved = Natipig
+settings-record-key = I-click aron mag-record og bag-ong key combo
+
+tray-open-window = Ablihi ang Window
+tray-close-window = Sirad-i ang Window
+tray-pause-recording = I-pause ang Recording
+tray-resume-recording = Ipadayon ang Recording
+tray-finish-recording = Humana ang Recording
+tray-quit = Gawas sa Vmux
+
+composer-attach-files = I-attach ang mga file (/upload)
+composer-remove-attachment = Tangtanga ang attachment
+
+layout-back = Balik
+layout-forward = Padayon
+layout-reload = I-reload
+layout-bookmark-page = I-bookmark kining panid
+layout-remove-bookmark = Tangtanga ang bookmark
+layout-pin-page = I-pin kining panid
+layout-unpin-page = I-unpin kining panid
+layout-manage-extensions = Dumala ang extensions
+layout-new-stack = Bag-ong Stack
+layout-close-tab = Sirad-i ang tab
+layout-bookmark = Bookmark
+layout-pin = I-pin
+layout-new-tab = Bag-ong tab
+layout-team = Team
+
+command-switch-space = Balhin og espasyo…
+command-search-ask = Pangitaa o pangutana…
+command-new-tab-placeholder = Pangitaa o i-type ang URL, o pilia ang Terminal…
+command-placeholder = I-type ang URL, pangitaa ang tabs, o > para sa commands…
+command-composer-placeholder = I-type ang / para sa commands o @ para sa media
+command-send = Ipadala (Enter)
+command-terminal = Terminal
+command-open-terminal = Ablihi sa Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+command-prompt = Prompt
+command-new-tab = Bag-ong tab
+command-search = Pangitaa
+command-open-value = Ablihi ang “{ $value }”
+command-search-value = Pangitaa ang “{ $value }”
+
+schema-appearance = Panagway
+schema-general = Kinatibuk-an
+schema-layout = Layout
+schema-layout-detail = Window, panes, sidebar, ug focus ring.
+schema-agent = Agent
+schema-agent-detail = Kinaiya sa agent ug mga permiso sa tool.
+schema-shortcuts = Mga Shortcut
+schema-shortcuts-detail = Read-only nga view. Direkta usba ang settings.ron aron mausab ang bindings.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Mode
+schema-mode-detail = Color scheme para sa mga web page. Ang Device mosunod sa imong system.
+schema-device = Device
+schema-light = Hayag
+schema-dark = Ngitngit
+schema-language = Pinulongan
+schema-language-detail = Gamita ang system, en-US, ja, o bisan unsang BCP 47 tag nga naay matching nga ~/.vmux/locales/<tag>.ftl catalog.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Susihon ug i-install ang updates sa pag-launch ug kada oras.
+schema-startup-url = Startup URL
+schema-startup-url-detail = Kung walay sulod, ablihan ang prompt sa command bar.
+schema-search-engine = Search engine
+schema-search-engine-detail = Gigamit sa web search gikan sa Sugod ug command bar.
+schema-window = Window
+schema-pane = Pane
+schema-side-sheet = Side sheet
+schema-focus-ring = Focus ring
+schema-run-placement = Tugoti ang override sa run placement
+schema-run-placement-detail = Tugoti ang agents nga mopili sa run pane mode, direksyon, ug anchor.
+schema-leader = Leader
+schema-leader-detail = Prefix key para sa chord shortcuts.
+schema-chord-timeout = Chord timeout
+schema-chord-timeout-detail = Milliseconds sa dili pa mo-expire ang chord prefix.
+schema-bindings = Bindings
+schema-confirm-close = Kumpirmahi ang pagsira
+schema-confirm-close-detail = Mangayo og kumpirmasyon sa dili pa isira ang terminal nga naay nagdagang proseso.
+schema-default-theme = Default nga theme
+schema-default-theme-detail = Ngalan sa aktibong theme gikan sa listahan sa themes.
+
+settings-empty = (walay sulod)
+settings-none = (wala)
+
+schema-system = Sistema
+schema-editor = Editor
+schema-recording = Pagrekord
+schema-radius = Radius
+schema-padding = Padding
+schema-gap = Gap
+schema-width = Gilapdon
+schema-color = Kolor
+schema-red = Pula
+schema-green = Berde
+schema-blue = Asul
+schema-follow-files = Sunda ang mga file
+schema-tidy-files = Hinlosa ang mga file
+schema-tidy-files-max = Limit sa paghinlo sa file
+schema-tidy-files-auto = Awtomatikong hinlosa ang mga file
+schema-app-providers = Mga provider sa app
+schema-provider = Provider
+schema-kind = Matang
+schema-models = Mga model
+schema-acp = Mga agent sa ACP
+schema-id = ID
+schema-name = Ngalan
+schema-command = Command
+schema-arguments = Mga argumento
+schema-environment = Environment
+schema-working-directory = Working directory
+schema-shell = Shell
+schema-font-family = Pamilya sa font
+schema-startup-directory = Startup directory
+schema-themes = Mga tema
+schema-color-scheme = Skema sa kolor
+schema-font-size = Gidak-on sa font
+schema-line-height = Taas sa linya
+schema-cursor-style = Estilo sa cursor
+schema-cursor-blink = Pagpamilok sa cursor
+schema-custom-themes = Pasadyang mga tema
+schema-foreground = Foreground
+schema-background = Background
+schema-cursor = Cursor
+schema-ansi-colors = Mga kolor sa ANSI
+schema-keymap = Keymap
+schema-explorer = Explorer
+schema-visible = Makita
+schema-language-servers = Mga server sa pinulongan
+schema-servers = Mga server
+schema-language-id = Language ID
+schema-root-markers = Mga marka sa root
+schema-output-directory = Output directory
+
+menu-scene = Eksena
+menu-layout = Layout
+menu-terminal = Terminal
+menu-browser = Browser
+menu-service = Serbisyo
+menu-bookmark = Bookmark
+menu-edit = Edit
+
+layout-knowledge = Kahibalo
+layout-open-knowledge = Ablihi ang Kahibalo
+layout-open-welcome-knowledge = Ablihi ang Welcome to Knowledge
+layout-open-path = Ablihi ang { $path }
+layout-fold-knowledge = Pil-a ang kahibalo
+layout-unfold-knowledge = Bukha ang kahibalo
+layout-bookmarks = Mga bookmark
+layout-new-folder = Bag-ong Folder
+layout-add-to-bookmarks = Idugang sa mga Bookmark
+layout-move-to-bookmarks = Ibalhin sa mga Bookmark
+layout-stack-number = Stack { $number }
+layout-fold-stack = Pil-a ang stack
+layout-unfold-stack = Bukha ang stack
+layout-close-stack = Isira ang stack
+layout-bookmark-in = I-bookmark sa { $folder }
+
+common-cancel = Kanselahon
+common-delete = Papason
+common-save = I-save
+common-rename = Ilisan og ngalan
+common-expand = Palapdan
+common-collapse = Pilo-on
+common-loading = Nag-load…
+common-error = Sayop
+common-output = Output
+common-pending = Naghulat
+common-current = kasamtangan
+common-stop = Hunong
+services-command = Serbisyo sa Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Wala ma-load ang panid
+error-page-not-found = Wala makit-i ang panid
+error-unknown-host = Wala mailhing Vmux app host: { $host }
+
+history-title = Kasaysayan
+
+command-new-app-chat = Bag-ong { $provider }/{ $model } chat (App)
+command-interactive-mode-user = Eksena > Interactive Mode > User
+command-interactive-mode-player = Eksena > Interactive Mode > Player
+command-minimize-window = Ayos > Bintana > I-minimize
+command-toggle-layout = Ayos > Ayos > I-toggle ang Ayos
+command-close-tab = Ayos > Tab > Isira ang Tab
+command-new-task = Ayos > Tab > Bag-ong Task…
+command-next-tab = Ayos > Tab > Sunod nga Tab
+command-prev-tab = Ayos > Tab > Niaging Tab
+command-rename-tab = Ayos > Tab > Ilisan og Ngalan ang Tab
+command-tab-select-1 = Ayos > Tab > Pilia ang Tab 1
+command-tab-select-2 = Ayos > Tab > Pilia ang Tab 2
+command-tab-select-3 = Ayos > Tab > Pilia ang Tab 3
+command-tab-select-4 = Ayos > Tab > Pilia ang Tab 4
+command-tab-select-5 = Ayos > Tab > Pilia ang Tab 5
+command-tab-select-6 = Ayos > Tab > Pilia ang Tab 6
+command-tab-select-7 = Ayos > Tab > Pilia ang Tab 7
+command-tab-select-8 = Ayos > Tab > Pilia ang Tab 8
+command-tab-select-last = Ayos > Tab > Pilia ang Kataposang Tab
+command-close-pane = Ayos > Pane > Isira ang Pane
+command-select-pane-left = Ayos > Pane > Pilia ang Wala nga Pane
+command-select-pane-right = Ayos > Pane > Pilia ang Tuo nga Pane
+command-select-pane-up = Ayos > Pane > Pilia ang Taas nga Pane
+command-select-pane-down = Ayos > Pane > Pilia ang Ubos nga Pane
+command-swap-pane-prev = Ayos > Pane > Ibaylo sa Niaging Pane
+command-swap-pane-next = Ayos > Pane > Ibaylo sa Sunod nga Pane
+command-equalize-pane-size = Ayos > Pane > Iparehas ang Gidak-on sa Pane
+command-resize-pane-left = Ayos > Pane > Usba ang Gidak-on sa Pane pa Wala
+command-resize-pane-right = Ayos > Pane > Usba ang Gidak-on sa Pane pa Tuo
+command-resize-pane-up = Ayos > Pane > Usba ang Gidak-on sa Pane pa Taas
+command-resize-pane-down = Ayos > Pane > Usba ang Gidak-on sa Pane pa Ubos
+command-stack-close = Ayos > Stack > Isira ang Stack
+command-stack-next = Ayos > Stack > Sunod nga Stack
+command-stack-previous = Ayos > Stack > Niaging Stack
+command-stack-reopen = Ayos > Stack > Ablihi Pag-usab ang Gisirang Panid
+command-stack-swap-prev = Ayos > Stack > Ibalhin ang Stack pa Wala
+command-stack-swap-next = Ayos > Stack > Ibalhin ang Stack pa Tuo
+command-space-open = Ayos > Space > Mga Space
+command-terminal-close = Terminal > Isira ang Terminal
+command-terminal-next = Terminal > Sunod nga Terminal
+command-terminal-prev = Terminal > Niaging Terminal
+command-terminal-clear = Terminal > Limpyohi ang Terminal
+command-browser-prev-page = Browser > Nabigasyon > Balik
+command-browser-next-page = Browser > Nabigasyon > Padayon
+command-browser-reload = Browser > Nabigasyon > I-reload
+command-browser-hard-reload = Browser > Nabigasyon > Kusog nga Reload
+command-open-in-place = Browser > Ablihi > Ablihi Dinhi
+command-open-in-new-stack = Browser > Ablihi > Ablihi sa Bag-ong Stack
+command-open-in-pane-top = Browser > Ablihi > Ablihi sa Pane sa Ibabaw
+command-open-in-pane-right = Browser > Ablihi > Ablihi sa Pane sa Tuo
+command-open-in-pane-bottom = Browser > Ablihi > Ablihi sa Pane sa Ubos
+command-open-in-pane-left = Browser > Ablihi > Ablihi sa Pane sa Wala
+command-open-in-new-tab = Browser > Ablihi > Ablihi sa Bag-ong Tab
+command-open-in-new-space = Browser > Ablihi > Ablihi sa Bag-ong Space
+command-browser-zoom-in = Browser > Tan-aw > Padak-a
+command-browser-zoom-out = Browser > Tan-aw > Pagamaya
+command-browser-zoom-reset = Browser > Tan-aw > Tinuod nga Gidak-on
+command-browser-dev-tools = Browser > Tan-aw > Mga Developer Tool
+command-browser-open-command-bar = Browser > Bar > Command Bar
+command-browser-open-page-in-command-bar = Browser > Bar > I-edit ang Panid
+command-browser-open-path-bar = Browser > Bar > Path Navigator
+command-browser-open-commands = Browser > Bar > Mga Command
+command-browser-open-history = Browser > Bar > Kasaysayan
+command-service-open = Serbisyo > Ablihi ang Service Monitor
+command-bookmark-toggle-active = Bookmark > I-bookmark ang Panid
+command-bookmark-pin-active = Bookmark > I-pin ang Panid
+
+layout-tab = Tab
+layout-no-stacks = Walay stack
+layout-loading = Nag-load…
+layout-no-markdown-files = Walay Markdown file
+layout-empty-folder = Walay sulod nga folder
+layout-worktree = worktree
+layout-folder-name = Ngalan sa folder
+layout-no-pins-bookmarks = Walay pin o bookmark
+layout-move-to = Ibalhin sa { $folder }
+layout-bookmark-current-page = I-bookmark ang Kasamtangang Panid
+layout-rename-folder = Ilisan og Ngalan ang Folder
+layout-remove-folder = Tangtanga ang Folder
+layout-update-downloading = Nag-download og update
+layout-update-installing = Nag-install og update…
+layout-update-ready = Adunay bag-ong bersyon
+layout-restart-update = I-restart aron ma-update
+
+agent-preparing = Giandam ang agent…
+agent-send-all-queued = Ipadala karon ang tanang queued prompt (Esc)
+agent-send = Ipadala (Enter)
+agent-ready = Andam na kung andam ka.
+agent-loading-older = Nag-load sa mas daang mga mensahe…
+agent-load-older = I-load ang mas daang mga mensahe
+agent-continued-from = Gipadayon gikan sa { $source }
+agent-older-context-omitted = gitangtang ang mas daang context
+agent-interrupted = naputol
+agent-allow-tool = Tugotan ang { $tool }?
+agent-deny = Dili tugotan
+agent-allow-always = Kanunay tugotan
+agent-allow = Tugotan
+agent-loading-sessions = Nag-load sa mga session…
+agent-no-resumable-sessions = Walay resumable session nga nakit-an
+agent-no-matching-sessions = Walay parehas nga session
+agent-no-matching-models = Walay parehas nga model
+agent-choice-help = ↑/↓ o Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Pilia ang repository folder
+agent-choose-repository-detail = Pilia ang lokal nga Git repository nga gamiton sa agent.
+agent-choosing = Nagpili…
+agent-choose-folder = Pilia ang folder
+agent-queued = naka-queue
+agent-attached = Gi-attach:
+agent-cancel-queued = Kanselahon ang queued prompt
+agent-resume-queued = Ipadayon ang queued prompts
+agent-clear-queue = Hawani ang queue
+agent-send-all-now = ipadala tanan karon
+agent-choose-option = Pagpili og opsyon sa ibabaw
+agent-loading-media = Nag-load sa media…
+agent-no-matching-media = Walay parehas nga media
+agent-prompt-context = Context sa prompt
+agent-details = Mga detalye
+agent-path = Path
+agent-tool = Tool
+agent-server = Server
+agent-bytes = { $count } byte
+agent-worked-for = Nagtrabaho sulod sa { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Nagtrabaho sulod sa { $duration } · 1 ka lakang
+   *[other] Nagtrabaho sulod sa { $duration } · { $count } ka lakang
+}
+agent-tool-guardian-review = Guardian Review
+agent-tool-read-files = Gibasa ang mga file
+agent-tool-viewed-image = Gitan-aw ang hulagway
+agent-tool-used-browser = Gigamit ang browser
+agent-tool-searched-files = Nangita sa mga file
+agent-tool-ran-commands = Nagpadagan og mga command
+agent-thinking = Naghunahuna
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Thread
+agent-parent = Parent
+agent-children = Children
+agent-call = Call
+agent-raw-event = Hilaw nga event
+agent-plan = Plano
+agent-tasks = { $count ->
+    [one] 1 ka task
+   *[other] { $count } ka task
+}
+agent-edited = Gi-edit
+agent-reconnecting = Nag-reconnect { $attempt }/{ $total }
+agent-status-running = Nagdagan
+agent-status-done = Nahuman
+agent-status-failed = Napakyas
+agent-status-pending = Naghulat
+agent-slash-attach-files = I-attach ang mga file
+agent-slash-resume-session = Ipadayon ang miaging session
+agent-slash-select-model = Pilia ang model
+agent-slash-continue-cli = Ipadayon kini nga session sa CLI
+agent-session-just-now = karon lang
+agent-session-minutes-ago = { $count }m ang milabay
+agent-session-hours-ago = { $count }h ang milabay
+agent-session-days-ago = { $count }d ang milabay
+agent-working-working = Nagtrabaho
+agent-working-thinking = Naghunahuna
+agent-working-pondering = Nagpalandong
+agent-working-noodling = Nagpangitag paagi
+agent-working-percolating = Nagpaandar sa hunahuna
+agent-working-conjuring = Naghimog solusyon
+agent-working-cooking = Nagluto og ideya
+agent-working-brewing = Nag-andam og ideya
+agent-working-musing = Nagpamalandong
+agent-working-ruminating = Naghinuktok
+agent-working-scheming = Nagplano
+agent-working-synthesizing = Naghiusa sa ideya
+agent-working-tinkering = Nag-usab-usab
+agent-working-churning = Nagproseso
+agent-working-vibing = Nag-vibe
+agent-working-simmering = Naghinay-hinay og luto
+agent-working-crafting = Naghimo
+agent-working-divining = Nangitag timailhan
+agent-working-mulling = Nagpalandong
+agent-working-spelunking = Nangukay
+
+editor-toggle-explorer = I-toggle ang Explorer (Cmd+B)
+editor-unsaved = wala ma-save
+editor-rendered-markdown = Gi-render nga Markdown nga naay live editing
+editor-note = Nota
+editor-source-editor = Source editor
+editor-editor = Editor
+editor-git-diff = Git diff
+editor-diff = Diff
+editor-tidy = Tidy
+editor-always = Kanunay
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 ka preview nga walay kausaban
+   *[other] ✦ { $count } ka preview nga walay kausaban
+}
+editor-open-externally = Ablihi sa gawas
+editor-changed-line = Nausab nga linya
+editor-go-to-definition = Adto sa Definition
+editor-find-references = Pangitaa ang References
+editor-references = { $count ->
+    [one] 1 ka reference
+   *[other] { $count } ka reference
+}
+editor-lsp-starting = Nagsugod ang { $server }…
+editor-lsp-not-installed = { $server } — wala ma-install
+editor-explorer = Explorer
+editor-open-editors = Bukas nga mga Editor
+editor-outline = Outline
+editor-new-file = Bag-ong File
+editor-new-folder = Bag-ong Folder
+editor-delete-confirm = Papason ang “{ $name }”? Dili na kini mabawi.
+editor-created-folder = Nahimo ang folder { $name }
+editor-created-file = Nahimo ang file { $name }
+editor-renamed-to = Giilisan og ngalan ngadto sa { $name }
+editor-deleted = Gipapas ang { $name }
+editor-failed-decode-image = Napakyas pag-decode sa hulagway
+editor-preview-large-image = hulagway (dako ra kaayo para i-preview)
+editor-preview-binary = binary
+editor-preview-file = file
+
+git-status-clean = limpyo
+git-status-modified = giusab
+git-status-staged = naka-stage
+git-status-staged-modified = naka-stage*
+git-status-untracked = wala gi-track
+git-status-deleted = gipapas
+git-status-conflict = conflict
+git-accept-all = ✓ dawata tanan
+git-unstage = Kuhaa sa stage
+git-confirm-deny-all = Kumpirmaha ang dili pagtugot tanan
+git-deny-all = ✗ dili tugotan tanan
+git-commit-message = mensahe sa commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Nag-load sa diff…
+git-no-changes = Walay kausaban nga ipakita
+git-accept = ✓ dawata
+git-deny = ✗ dili tugotan
+git-show-unchanged-lines = Ipakita ang { $count } ka linyang walay kausaban
+
+terminal-loading = Nag-load…
+terminal-runs-when-ready = modagan kung andam na · Ctrl+C molimpyo · Esc molaktaw
+terminal-booting = nag-boot
+terminal-type-command = i-type ang command · modagan kung andam na · Esc molaktaw
+
+setup-tagline-claude = Coding agent sa Anthropic, sulod sa Vmux
+setup-tagline-codex = Coding agent sa OpenAI, sulod sa Vmux
+setup-tagline-vibe = Coding agent sa Mistral, sulod sa Vmux
+setup-install-title = I-install ang { $name } CLI
+setup-homebrew-required = Gikinahanglan ang Homebrew para ma-install ang { $command } ug wala pa kini ma-setup. I-install una sa Vmux ang Homebrew, dayon ang { $name }.
+setup-terminal-instructions = Sa terminal, pindota ang Return aron magsugod, unya isulod ang imong Mac password kung pangayoon.
+setup-command-missing = Giablihan sa Vmux kini nga panid kay ang lokal nga { $command } command wala pa ma-install. Padagana ang command sa ubos aron makuha kini.
+setup-install-failed = Wala nahuman ang install. Tan-awa ang terminal para sa detalye, unya sulayi pag-usab.
+setup-installing = Nag-install…
+setup-install-homebrew = I-install ang Homebrew + { $name }
+setup-run-install = Padagana ang install command
+setup-auto-reload = Gipadagan kini sa Vmux sa terminal ug mo-reload kung andam na ang { $command }.
+
+debug-title = Debug
+debug-auto-update = Auto-update
+debug-simulate-update = I-simulate nga naay update
+debug-simulate-download = I-simulate ang download
+debug-clear-update = Hawani ang update
+debug-trigger-restart = I-trigger ang restart
+
+command-manage-spaces = Dumala og mga space…
+command-pane-stack-location = pane { $pane } / stack { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Interactive Mode
+command-group-window = Bintana
+command-group-tab = Tab
+command-group-pane = Pane
+command-group-stack = Stack
+command-group-space = Space
+command-group-navigation = Nabigasyon
+command-group-open = Ablihi
+command-group-view = Tan-aw
+command-group-bar = Bar
+
+menu-close-vmux = Sirad-i ang Vmux
+
+agents-terminal-coding-agent = Coding agent nga gamit og terminal

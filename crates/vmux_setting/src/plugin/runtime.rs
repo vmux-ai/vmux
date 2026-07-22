@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 use vmux_command::event::SearchEngine;
-use vmux_layout::settings::ConfirmCloseSettings;
 pub use vmux_layout::settings::LayoutSettings;
+use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
 pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -48,10 +48,25 @@ pub enum ColorScheme {
     Device,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AppearanceSettings {
     #[serde(default)]
     pub mode: ColorScheme,
+    #[serde(default = "default_locale_setting")]
+    pub locale: String,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            mode: ColorScheme::Device,
+            locale: default_locale_setting(),
+        }
+    }
+}
+
+fn default_locale_setting() -> String {
+    "system".to_string()
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -696,14 +711,18 @@ fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
         .map(merge_over_embedded)
 }
 
-pub fn load_settings(mut commands: Commands) {
+pub fn read_settings_from_disk() -> AppSettings {
+    read_settings_and_path().0
+}
+
+fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
     // Resolve the active settings file: per-build override (~/.vmux/<profile>/
     // settings.ron) if present, else the shared ~/.vmux/settings.ron.
     let path = vmux_core::profile::settings_path();
     let parent_ready = path
         .parent()
         .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
-    let (settings, config_path) = if parent_ready {
+    if parent_ready {
         let s = match std::fs::read_to_string(&path) {
             Ok(text) => match parse_settings(&text) {
                 Ok(s) => s,
@@ -720,7 +739,13 @@ pub fn load_settings(mut commands: Commands) {
         (s, Some(path))
     } else {
         (load_embedded_settings(), None)
-    };
+    }
+}
+
+pub fn load_settings(mut commands: Commands) {
+    let (settings, config_path) = read_settings_and_path();
+    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
+    vmux_ui::i18n::set_current_locale(&locale);
 
     sync_layout_resources(&mut commands, &settings);
     commands.insert_resource(settings);
@@ -762,6 +787,7 @@ pub(crate) fn reload_settings_on_change(
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
+    mut resolved_locale: ResMut<ResolvedLocale>,
     last_hash: Res<LastSelfWriteHash>,
 ) {
     let Some(watcher) = watcher else { return };
@@ -786,6 +812,10 @@ pub(crate) fn reload_settings_on_change(
             match parse_settings(&text) {
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
+                    let locale =
+                        vmux_ui::i18n::requested_locale(Some(&new_settings.appearance.locale));
+                    vmux_ui::i18n::set_current_locale(&locale);
+                    resolved_locale.0 = locale;
                     *layout_settings = new_settings.layout.clone();
                     confirm_close.enabled = new_settings
                         .terminal
@@ -810,6 +840,9 @@ fn load_embedded_settings() -> AppSettings {
 
 fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     commands.insert_resource(settings.layout.clone());
+    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::requested_locale(Some(
+        &settings.appearance.locale,
+    ))));
     commands.insert_resource(ConfirmCloseSettings {
         enabled: settings
             .terminal
@@ -1984,14 +2017,16 @@ mod tests {
     fn appearance_absent_falls_back_to_device() {
         let s = parse_settings("()").expect("parse empty");
         assert_eq!(s.appearance.mode, ColorScheme::Device);
+        assert_eq!(s.appearance.locale, "system");
     }
 
     #[test]
     fn appearance_round_trips_through_ron() {
         let s = parse_settings("(appearance: (mode: light))").expect("parse light");
         assert_eq!(s.appearance.mode, ColorScheme::Light);
-        let s = parse_settings("(appearance: (mode: dark))").expect("parse dark");
+        let s = parse_settings("(appearance: (mode: dark, locale: \"ja\"))").expect("parse dark");
         assert_eq!(s.appearance.mode, ColorScheme::Dark);
+        assert_eq!(s.appearance.locale, "ja");
     }
 
     #[test]
@@ -2000,15 +2035,18 @@ mod tests {
         assert!(!sparse_settings_ron(&s).unwrap().contains("appearance"));
         let mut s = s;
         s.appearance.mode = ColorScheme::Dark;
+        s.appearance.locale = "ja".to_string();
         let out = sparse_settings_ron(&s).unwrap();
         assert!(
             out.contains("appearance"),
             "changed appearance persisted: {out}"
         );
         assert!(out.contains("dark"), "mode value persisted: {out}");
+        assert!(out.contains("ja"), "locale value persisted: {out}");
         assert_eq!(
             parse_settings(&out).unwrap().appearance.mode,
             ColorScheme::Dark
         );
+        assert_eq!(parse_settings(&out).unwrap().appearance.locale, "ja");
     }
 }

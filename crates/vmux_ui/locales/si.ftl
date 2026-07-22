@@ -1,0 +1,602 @@
+locale-name = සිංහල
+common-open = විවෘත කරන්න
+common-close = වසන්න
+common-install = ස්ථාපනය කරන්න
+common-uninstall = අස්ථාපනය කරන්න
+common-update = යාවත්කාලීන කරන්න
+common-retry = නැවත උත්සාහ කරන්න
+common-refresh = නැවුම් කරන්න
+common-remove = ඉවත් කරන්න
+common-enable = සක්‍රීය කරන්න
+common-disable = අක්‍රීය කරන්න
+common-new = නව
+common-active = සක්‍රීයයි
+common-running = ධාවනය වේ
+common-done = අවසන්
+common-failed = අසාර්ථකයි
+common-installed = ස්ථාපිතයි
+common-items = { $count ->
+    [one] අයිතම { $count }
+   *[other] අයිතම { $count }
+}
+start-title = ආරම්භය
+start-tagline = එක් prompt එකක්. ඕනෑම දෙයක්, කරලා ඉවරයි.
+
+agents-title = ඒජන්ට්
+agents-search = ACP සහ CLI ඒජන්ට් සොයන්න…
+agents-empty = ගැලපෙන ඒජන්ට් නැත
+agents-empty-detail = නමක්, runtime එකක්, හෝ ACP/CLI උත්සාහ කරන්න.
+agents-install-failed = ස්ථාපනය අසාර්ථකයි
+agents-updating = යාවත්කාලීන වෙමින්…
+agents-retrying = නැවත උත්සාහ කරමින්…
+agents-preparing = සූදානම් කරමින්…
+
+extensions-title = Extensions
+extensions-search = ස්ථාපිත ඒවා හෝ Chrome Web Store සොයන්න…
+extensions-relaunch = ක්‍රියාත්මක කිරීමට නැවත ආරම්භ කරන්න
+extensions-empty = Extensions ස්ථාපනය කර නැත
+extensions-no-match = ගැලපෙන extensions නැත
+extensions-empty-detail = ඉහළින් Chrome Web Store සොයා Return ඔබන්න.
+extensions-no-match-detail = වෙනත් නමක් හෝ extension ID එකක් උත්සාහ කරන්න.
+extensions-on = සක්‍රීයයි
+extensions-off = අක්‍රීයයි
+extensions-enable-confirm = { $name } සක්‍රීය කරන්නද?
+extensions-enable-permissions = { $name } සක්‍රීය කර මෙයට අවසර දෙන්න:
+
+lsp-title = භාෂා සර්වර්
+lsp-search = භාෂා සර්වර්, linters, formatters සොයන්න…
+lsp-loading = නාමාවලිය පූරණය වෙමින්…
+lsp-empty = ගැලපෙන භාෂා සර්වර් නැත
+lsp-empty-detail = වෙනත් භාෂාවක්, linter එකක්, හෝ formatter එකක් උත්සාහ කරන්න.
+lsp-needs = { $tool } අවශ්‍යයි
+lsp-status-available = ලබාගත හැක
+lsp-status-on-path = PATH මත ඇත
+lsp-status-installing = ස්ථාපනය වෙමින්…
+lsp-status-installed = ස්ථාපිතයි
+lsp-status-outdated = යාවත්කාලීනයක් ඇත
+lsp-status-running = ධාවනය වේ
+lsp-status-failed = අසාර්ථකයි
+
+spaces-title = වැඩඅවකාශ
+spaces-new-placeholder = නව වැඩඅවකාශ නම
+spaces-empty = වැඩඅවකාශ නැත
+spaces-default-name = වැඩඅවකාශය { $number }
+spaces-tabs = { $count ->
+    [one] ටැබ් 1
+   *[other] ටැබ් { $count }
+}
+spaces-delete = වැඩඅවකාශය මකන්න
+
+team-title = කණ්ඩායම
+team-just-you = මේ වැඩඅවකාශයේ ඔබ පමණයි
+team-agents = { $count ->
+    [one] ඔබ සහ ඒජන්ට් 1
+   *[other] ඔබ සහ ඒජන්ට් { $count }
+}
+team-empty = තවම කිසිවෙකු නැත
+team-you = ඔබ
+team-agent = ඒජන්ට්
+
+services-title = පසුබිම් සේවා
+services-processes = { $count ->
+    [one] ක්‍රියාවලිය 1
+   *[other] ක්‍රියාවලි { $count }
+}
+services-kill-all = සියල්ල බලෙන් නවත්වන්න
+services-not-running = සේවාව ධාවනය නොවේ
+services-start-with = මෙයින් ආරම්භ කරන්න:
+services-empty = සක්‍රීය ක්‍රියාවලි නැත
+services-filter = ක්‍රියාවලි පෙරන්න…
+services-no-match = ගැලපෙන ක්‍රියාවලි නැත
+services-connected = සම්බන්ධයි
+services-disconnected = සම්බන්ධතාව විසන්ධියි
+services-attached = අමුණා ඇත
+services-kill = බලෙන් නවත්වන්න
+services-memory = මතකය
+services-size = ප්‍රමාණය
+services-shell = Shell
+
+error-title = දෝෂය
+
+history-search = ඉතිහාසය සොයන්න
+history-clear-all = සියල්ල මකන්න
+history-clear-confirm = සියලු ඉතිහාසය මකන්නද?
+history-clear-warning = මෙය ආපසු හැරවිය නොහැක.
+history-cancel = අවලංගු කරන්න
+history-today = අද
+history-yesterday = ඊයේ
+history-days-ago = දින { $count }කට පෙර
+history-day-offset = දිනය -{ $count }
+
+settings-title = සැකසුම්
+settings-loading = සැකසුම් පූරණය වෙමින්…
+settings-stored = ~/.vmux/settings.ron හි සුරක්ෂිත කර ඇත
+settings-other = වෙනත්
+settings-software-update = මෘදුකාංග යාවත්කාලීන
+settings-check-updates = යාවත්කාලීන පරීක්ෂා කරන්න
+settings-check-updates-hint = Auto-update සක්‍රීය නම් ආරම්භයේදී සහ පැයකට වරක් ස්වයංක්‍රීයව පරීක්ෂා කරයි.
+settings-update-unavailable = ලබාගත නොහැක
+settings-update-unavailable-hint = මෙම build එකට updater ඇතුළත් නැත.
+settings-update-checking = පරීක්ෂා කරමින්…
+settings-update-checking-hint = යාවත්කාලීන පරීක්ෂා කරමින්…
+settings-update-check-again = නැවත පරීක්ෂා කරන්න
+settings-update-current = Vmux යාවත්කාලීනයි.
+settings-update-downloading = බාගනිමින්…
+settings-update-downloading-hint = Vmux { $version } බාගනිමින්…
+settings-update-installing = ස්ථාපනය වෙමින්…
+settings-update-installing-hint = Vmux { $version } ස්ථාපනය වෙමින්…
+settings-update-ready = යාවත්කාලීනය සූදානම්
+settings-update-ready-hint = Vmux { $version } සූදානම්. ක්‍රියාත්මක කිරීමට නැවත ආරම්භ කරන්න.
+settings-update-try-again = නැවත උත්සාහ කරන්න
+settings-update-failed = යාවත්කාලීන පරීක්ෂා කළ නොහැක.
+settings-item = අයිතමය
+settings-item-number = අයිතමය { $number }
+settings-press-key = යතුරක් ඔබන්න…
+settings-saved = සුරැකිණි
+settings-record-key = නව යතුරු සංයෝජනයක් සටහන් කිරීමට ක්ලික් කරන්න
+
+tray-open-window = කවුළුව විවෘත කරන්න
+tray-close-window = කවුළුව වසන්න
+tray-pause-recording = පටිගත කිරීම විරාම කරන්න
+tray-resume-recording = පටිගත කිරීම නැවත ආරම්භ කරන්න
+tray-finish-recording = පටිගත කිරීම අවසන් කරන්න
+tray-quit = Vmux ඉවත් වන්න
+
+composer-attach-files = ගොනු අමුණන්න (/upload)
+composer-remove-attachment = ඇමුණුම ඉවත් කරන්න
+
+layout-back = ආපසු
+layout-forward = ඉදිරියට
+layout-reload = නැවත පූරණය කරන්න
+layout-bookmark-page = මෙම පිටුව bookmark කරන්න
+layout-remove-bookmark = bookmark ඉවත් කරන්න
+layout-pin-page = මෙම පිටුව pin කරන්න
+layout-unpin-page = මෙම පිටුව unpin කරන්න
+layout-manage-extensions = extensions කළමනාකරණය කරන්න
+layout-new-stack = නව ස්ටැක්
+layout-close-tab = ටැබ් වසන්න
+layout-bookmark = Bookmark
+layout-pin = Pin
+layout-new-tab = නව ටැබ්
+layout-team = කණ්ඩායම
+
+command-switch-space = වැඩඅවකාශය මාරු කරන්න…
+command-search-ask = සොයන්න හෝ අසන්න…
+command-new-tab-placeholder = සොයන්න, URL එකක් ටයිප් කරන්න, හෝ Terminal තෝරන්න…
+command-placeholder = URL එකක් ටයිප් කරන්න, ටැබ් සොයන්න, හෝ විධාන සඳහා > ටයිප් කරන්න…
+command-composer-placeholder = විධාන සඳහා / හෝ මාධ්‍ය සඳහා @ ටයිප් කරන්න
+command-send = යවන්න (Enter)
+command-terminal = Terminal
+command-open-terminal = Terminal තුළ විවෘත කරන්න
+command-stack = ස්ටැක්
+command-tabs = { $count ->
+    [one] ටැබ් 1
+   *[other] ටැබ් { $count }
+}
+command-prompt = Prompt
+command-new-tab = නව ටැබ්
+command-search = සොයන්න
+command-open-value = “{ $value }” විවෘත කරන්න
+command-search-value = “{ $value }” සොයන්න
+
+schema-appearance = පෙනුම
+schema-general = සාමාන්‍ය
+schema-layout = පිරිසැලසුම
+schema-layout-detail = කවුළුව, පැනල, පැති තීරුව, සහ focus ring.
+schema-agent = ඒජන්ට්
+schema-agent-detail = ඒජන්ට් හැසිරීම සහ මෙවලම් අවසර.
+schema-shortcuts = කෙටිමං
+schema-shortcuts-detail = කියවීමට පමණයි. bindings වෙනස් කිරීමට settings.ron සෘජුව සංස්කරණය කරන්න.
+schema-terminal = Terminal
+schema-browser = බ්‍රවුසරය
+schema-mode = ප්‍රකාරය
+schema-mode-detail = වෙබ් පිටු සඳහා වර්ණ සැලසුම. Device ඔබේ පද්ධතිය අනුගමනය කරයි.
+schema-device = උපාංගය
+schema-light = ආලෝක
+schema-dark = අඳුරු
+schema-language = භාෂාව
+schema-language-detail = පද්ධතිය, en-US, ja, හෝ ගැලපෙන ~/.vmux/locales/<tag>.ftl නාමාවලියක් ඇති ඕනෑම BCP 47 tag එකක් භාවිත කරන්න.
+schema-auto-update = ස්වයංක්‍රීය යාවත්කාලීන
+schema-auto-update-detail = ආරම්භයේදී සහ පැයකට වරක් යාවත්කාලීන පරීක්ෂා කර ස්ථාපනය කරන්න.
+schema-startup-url = ආරම්භක URL
+schema-startup-url-detail = හිස් නම් command bar prompt එක විවෘත වේ.
+schema-search-engine = සෙවුම් එන්ජිම
+schema-search-engine-detail = Start සහ command bar වෙතින් වෙබ් සෙවීම් සඳහා භාවිත වේ.
+schema-window = කවුළුව
+schema-pane = පැනලය
+schema-side-sheet = පැති පත්‍රය
+schema-focus-ring = Focus ring
+schema-run-placement = ධාවන ස්ථාන override කිරීමට ඉඩ දෙන්න
+schema-run-placement-detail = ධාවන පැනල ප්‍රකාරය, දිශාව, සහ anchor තේරීමට ඒජන්ට්වලට ඉඩ දෙන්න.
+schema-leader = Leader
+schema-leader-detail = chord කෙටිමං සඳහා prefix යතුර.
+schema-chord-timeout = Chord කල් ඉකුත් වීම
+schema-chord-timeout-detail = chord prefix එකක් කල් ඉකුත් වීමට පෙර මිලිසෙකන්ඩ්.
+schema-bindings = Bindings
+schema-confirm-close = වසාදැමීම තහවුරු කරන්න
+schema-confirm-close-detail = ධාවනය වන ක්‍රියාවලියක් ඇති terminal එකක් වසීමට පෙර prompt කරන්න.
+schema-default-theme = පෙරනිමි තේමාව
+schema-default-theme-detail = themes ලැයිස්තුවෙන් සක්‍රීය තේමාවේ නම.
+
+settings-empty = (හිස්)
+settings-none = (නැත)
+
+schema-system = පද්ධතිය
+schema-editor = සංස්කාරකය
+schema-recording = පටිගත කිරීම
+schema-radius = අරය
+schema-padding = පිරවුම
+schema-gap = පරතරය
+schema-width = පළල
+schema-color = වර්ණය
+schema-red = රතු
+schema-green = කොළ
+schema-blue = නිල්
+schema-follow-files = ගොනු අනුගමනය කරන්න
+schema-tidy-files = ගොනු පිළිවෙළට කරන්න
+schema-tidy-files-max = ගොනු පිළිවෙළ කිරීමේ සීමාව
+schema-tidy-files-auto = ගොනු ස්වයංක්‍රීයව පිළිවෙළට කරන්න
+schema-app-providers = යෙදුම් සැපයුම්කරුවන්
+schema-provider = සැපයුම්කරු
+schema-kind = වර්ගය
+schema-models = මාදිලි
+schema-acp = ACP නියෝජිතයන්
+schema-id = ID
+schema-name = නම
+schema-command = විධානය
+schema-arguments = තර්ක
+schema-environment = පරිසරය
+schema-working-directory = වැඩ කරන නාමාවලිය
+schema-shell = Shell
+schema-font-family = අකුරු පවුල
+schema-startup-directory = ආරම්භක නාමාවලිය
+schema-themes = තේමාවන්
+schema-color-scheme = වර්ණ යෝජනා ක්‍රමය
+schema-font-size = අකුරු ප්‍රමාණය
+schema-line-height = පේළි උස
+schema-cursor-style = කර්සර විලාසය
+schema-cursor-blink = කර්සරය දැල්වීම
+schema-custom-themes = අභිරුචි තේමාවන්
+schema-foreground = පෙරබිම
+schema-background = පසුබිම
+schema-cursor = කර්සරය
+schema-ansi-colors = ANSI වර්ණ
+schema-keymap = යතුරු සිතියම
+schema-explorer = ගවේෂකය
+schema-visible = දෘශ්‍ය
+schema-language-servers = භාෂා සේවාදායක
+schema-servers = සේවාදායක
+schema-language-id = භාෂා ID
+schema-root-markers = මූල සලකුණු
+schema-output-directory = ප්‍රතිදාන නාමාවලිය
+
+menu-scene = දර්ශනය
+menu-layout = සැකැස්ම
+menu-terminal = ටර්මිනලය
+menu-browser = බ්‍රවුසරය
+menu-service = සේවාව
+menu-bookmark = පොත්සලකුණ
+menu-edit = සංස්කරණය
+
+layout-knowledge = දැනුම
+layout-open-knowledge = දැනුම විවෘත කරන්න
+layout-open-welcome-knowledge = දැනුම වෙත පිළිගැනීම විවෘත කරන්න
+layout-open-path = { $path } විවෘත කරන්න
+layout-fold-knowledge = දැනුම හකුළන්න
+layout-unfold-knowledge = දැනුම විහිදන්න
+layout-bookmarks = පොත්සලකුණු
+layout-new-folder = නව ෆෝල්ඩරය
+layout-add-to-bookmarks = පොත්සලකුණු වෙත එක් කරන්න
+layout-move-to-bookmarks = පොත්සලකුණු වෙත ගෙන යන්න
+layout-stack-number = ස්ටැක් { $number }
+layout-fold-stack = ස්ටැක් හකුළන්න
+layout-unfold-stack = ස්ටැක් විහිදන්න
+layout-close-stack = ස්ටැක් වසන්න
+layout-bookmark-in = { $folder } තුළ පොත්සලකුණු කරන්න
+
+common-cancel = අවලංගු කරන්න
+common-delete = මකන්න
+common-save = සුරකින්න
+common-rename = නම වෙනස් කරන්න
+common-expand = විහිදුවන්න
+common-collapse = හකුළන්න
+common-loading = පූරණය වෙමින්…
+common-error = දෝෂය
+common-output = ප්‍රතිදානය
+common-pending = පොරොත්තුවේ
+common-current = වත්මන්
+common-stop = නවත්වන්න
+services-command = Vmux සේවාව
+services-uptime-seconds = තත් { $seconds }
+services-uptime-minutes = මිනි { $minutes } තත් { $seconds }
+services-uptime-hours = පැය { $hours } මිනි { $minutes }
+services-uptime-days = දින { $days } පැය { $hours }
+
+error-page-failed-load = පිටුව පූරණය වීමට අසමත් විය
+error-page-not-found = පිටුව හමු නොවීය
+error-unknown-host = නොදන්නා Vmux යෙදුම් සත්කාරකය: { $host }
+
+history-title = ඉතිහාසය
+
+command-new-app-chat = නව { $provider }/{ $model } කතාබහ (යෙදුම)
+command-interactive-mode-user = දර්ශනය > අන්තර්ක්‍රියාකාරී ප්‍රකාරය > පරිශීලක
+command-interactive-mode-player = දර්ශනය > අන්තර්ක්‍රියාකාරී ප්‍රකාරය > ධාවක
+command-minimize-window = සැකසුම > කවුළුව > කුඩා කරන්න
+command-toggle-layout = සැකසුම > සැකසුම > සැකසුම මාරු කරන්න
+command-close-tab = සැකසුම > ටැබය > ටැබය වසන්න
+command-new-task = සැකසුම > ටැබය > නව කාර්යය…
+command-next-tab = සැකසුම > ටැබය > ඊළඟ ටැබය
+command-prev-tab = සැකසුම > ටැබය > පෙර ටැබය
+command-rename-tab = සැකසුම > ටැබය > ටැබයේ නම වෙනස් කරන්න
+command-tab-select-1 = සැකසුම > ටැබය > ටැබය 1 තෝරන්න
+command-tab-select-2 = සැකසුම > ටැබය > ටැබය 2 තෝරන්න
+command-tab-select-3 = සැකසුම > ටැබය > ටැබය 3 තෝරන්න
+command-tab-select-4 = සැකසුම > ටැබය > ටැබය 4 තෝරන්න
+command-tab-select-5 = සැකසුම > ටැබය > ටැබය 5 තෝරන්න
+command-tab-select-6 = සැකසුම > ටැබය > ටැබය 6 තෝරන්න
+command-tab-select-7 = සැකසුම > ටැබය > ටැබය 7 තෝරන්න
+command-tab-select-8 = සැකසුම > ටැබය > ටැබය 8 තෝරන්න
+command-tab-select-last = සැකසුම > ටැබය > අවසන් ටැබය තෝරන්න
+command-close-pane = සැකසුම > පැනලය > පැනලය වසන්න
+command-select-pane-left = සැකසුම > පැනලය > වම් පැනලය තෝරන්න
+command-select-pane-right = සැකසුම > පැනලය > දකුණු පැනලය තෝරන්න
+command-select-pane-up = සැකසුම > පැනලය > ඉහළ පැනලය තෝරන්න
+command-select-pane-down = සැකසුම > පැනලය > පහළ පැනලය තෝරන්න
+command-swap-pane-prev = සැකසුම > පැනලය > පෙර පැනලය සමඟ හුවමාරු කරන්න
+command-swap-pane-next = සැකසුම > පැනලය > ඊළඟ පැනලය සමඟ හුවමාරු කරන්න
+command-equalize-pane-size = සැකසුම > පැනලය > පැනල ප්‍රමාණ සමාන කරන්න
+command-resize-pane-left = සැකසුම > පැනලය > පැනලය වමට ප්‍රමාණය වෙනස් කරන්න
+command-resize-pane-right = සැකසුම > පැනලය > පැනලය දකුණට ප්‍රමාණය වෙනස් කරන්න
+command-resize-pane-up = සැකසුම > පැනලය > පැනලය ඉහළට ප්‍රමාණය වෙනස් කරන්න
+command-resize-pane-down = සැකසුම > පැනලය > පැනලය පහළට ප්‍රමාණය වෙනස් කරන්න
+command-stack-close = සැකසුම > ස්ටැක් > ස්ටැක් වසන්න
+command-stack-next = සැකසුම > ස්ටැක් > ඊළඟ ස්ටැක්
+command-stack-previous = සැකසුම > ස්ටැක් > පෙර ස්ටැක්
+command-stack-reopen = සැකසුම > ස්ටැක් > වසා දැමූ පිටුව නැවත විවෘත කරන්න
+command-stack-swap-prev = සැකසුම > ස්ටැක් > ස්ටැක් වමට ගෙන යන්න
+command-stack-swap-next = සැකසුම > ස්ටැක් > ස්ටැක් දකුණට ගෙන යන්න
+command-space-open = සැකසුම > ස්පේස් > ස්පේස්
+command-terminal-close = ටර්මිනලය > ටර්මිනලය වසන්න
+command-terminal-next = ටර්මිනලය > ඊළඟ ටර්මිනලය
+command-terminal-prev = ටර්මිනලය > පෙර ටර්මිනලය
+command-terminal-clear = ටර්මිනලය > ටර්මිනලය හිස් කරන්න
+command-browser-prev-page = බ්‍රවුසරය > සංචාලනය > පසුපසට
+command-browser-next-page = බ්‍රවුසරය > සංචාලනය > ඉදිරියට
+command-browser-reload = බ්‍රවුසරය > සංචාලනය > නැවත පූරණය කරන්න
+command-browser-hard-reload = බ්‍රවුසරය > සංචාලනය > සම්පූර්ණයෙන් නැවත පූරණය කරන්න
+command-open-in-place = බ්‍රවුසරය > විවෘත කරන්න > මෙතැන විවෘත කරන්න
+command-open-in-new-stack = බ්‍රවුසරය > විවෘත කරන්න > නව ස්ටැක් එකක විවෘත කරන්න
+command-open-in-pane-top = බ්‍රවුසරය > විවෘත කරන්න > ඉහළ පැනලයක විවෘත කරන්න
+command-open-in-pane-right = බ්‍රවුසරය > විවෘත කරන්න > දකුණු පැනලයක විවෘත කරන්න
+command-open-in-pane-bottom = බ්‍රවුසරය > විවෘත කරන්න > පහළ පැනලයක විවෘත කරන්න
+command-open-in-pane-left = බ්‍රවුසරය > විවෘත කරන්න > වම් පැනලයක විවෘත කරන්න
+command-open-in-new-tab = බ්‍රවුසරය > විවෘත කරන්න > නව ටැබයක විවෘත කරන්න
+command-open-in-new-space = බ්‍රවුසරය > විවෘත කරන්න > නව ස්පේස් එකක විවෘත කරන්න
+command-browser-zoom-in = බ්‍රවුසරය > දර්ශනය > විශාල කරන්න
+command-browser-zoom-out = බ්‍රවුසරය > දර්ශනය > කුඩා කරන්න
+command-browser-zoom-reset = බ්‍රවුසරය > දර්ශනය > සත්‍ය ප්‍රමාණය
+command-browser-dev-tools = බ්‍රවුසරය > දර්ශනය > සංවර්ධක මෙවලම්
+command-browser-open-command-bar = බ්‍රවුසරය > තීරුව > විධාන තීරුව
+command-browser-open-page-in-command-bar = බ්‍රවුසරය > තීරුව > පිටුව සංස්කරණය කරන්න
+command-browser-open-path-bar = බ්‍රවුසරය > තීරුව > මාර්ග සංචාලකය
+command-browser-open-commands = බ්‍රවුසරය > තීරුව > විධාන
+command-browser-open-history = බ්‍රවුසරය > තීරුව > ඉතිහාසය
+command-service-open = සේවාව > සේවා නිරීක්ෂකය විවෘත කරන්න
+command-bookmark-toggle-active = පිටු සලකුණ > පිටුව සලකුණු කරන්න
+command-bookmark-pin-active = පිටු සලකුණ > පිටුව පින් කරන්න
+
+layout-tab = ටැබය
+layout-no-stacks = ස්ටැක් නැත
+layout-loading = පූරණය වෙමින්…
+layout-no-markdown-files = Markdown ගොනු නැත
+layout-empty-folder = හිස් ෆෝල්ඩරය
+layout-worktree = worktree
+layout-folder-name = ෆෝල්ඩරයේ නම
+layout-no-pins-bookmarks = පින් හෝ පිටු සලකුණු නැත
+layout-move-to = { $folder } වෙත ගෙන යන්න
+layout-bookmark-current-page = වත්මන් පිටුව සලකුණු කරන්න
+layout-rename-folder = ෆෝල්ඩරයේ නම වෙනස් කරන්න
+layout-remove-folder = ෆෝල්ඩරය ඉවත් කරන්න
+layout-update-downloading = යාවත්කාලීනය බාගත වෙමින්
+layout-update-installing = යාවත්කාලීනය ස්ථාපනය වෙමින්…
+layout-update-ready = නව අනුවාදයක් ලබා ගත හැක
+layout-restart-update = යාවත්කාලීන කිරීමට නැවත ආරම්භ කරන්න
+
+agent-preparing = ඒජන්ට් සූදානම් වෙමින්…
+agent-send-all-queued = පොරොත්තු ප්‍රොම්ප්ට් සියල්ල දැන් යවන්න (Esc)
+agent-send = යවන්න (Enter)
+agent-ready = ඔබ සූදානම් වූ විට මම සූදානම්.
+agent-loading-older = පැරණි පණිවිඩ පූරණය වෙමින්…
+agent-load-older = පැරණි පණිවිඩ පූරණය කරන්න
+agent-continued-from = { $source } වෙතින් අඛණ්ඩයි
+agent-older-context-omitted = පැරණි සන්දර්භය ඉවත් කර ඇත
+agent-interrupted = බාධා විය
+agent-allow-tool = { $tool } ට අවසර දෙන්නද?
+agent-deny = ප්‍රතික්ෂේප කරන්න
+agent-allow-always = සැමවිටම අවසර දෙන්න
+agent-allow = අවසර දෙන්න
+agent-loading-sessions = සැසි පූරණය වෙමින්…
+agent-no-resumable-sessions = නැවත ආරම්භ කළ හැකි සැසි හමු නොවීය
+agent-no-matching-sessions = ගැළපෙන සැසි නැත
+agent-no-matching-models = ගැළපෙන මාදිලි නැත
+agent-choice-help = ↑/↓ හෝ Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = රිපොසිටරි ෆෝල්ඩරය තෝරන්න
+agent-choose-repository-detail = ඒජන්ට් භාවිත කළ යුතු දේශීය Git රිපොසිටරිය තෝරන්න.
+agent-choosing = තෝරමින්…
+agent-choose-folder = ෆෝල්ඩරය තෝරන්න
+agent-queued = පෝලිමේ
+agent-attached = අමුණා ඇත:
+agent-cancel-queued = පෝලිමේ ඇති ප්‍රොම්ප්ට් අවලංගු කරන්න
+agent-resume-queued = පෝලිමේ ඇති ප්‍රොම්ප්ට් නැවත ආරම්භ කරන්න
+agent-clear-queue = පෝලිම හිස් කරන්න
+agent-send-all-now = සියල්ල දැන් යවන්න
+agent-choose-option = ඉහළින් විකල්පයක් තෝරන්න
+agent-loading-media = මාධ්‍ය පූරණය වෙමින්…
+agent-no-matching-media = ගැළපෙන මාධ්‍ය නැත
+agent-prompt-context = ප්‍රොම්ප්ට් සන්දර්භය
+agent-details = විස්තර
+agent-path = මාර්ගය
+agent-tool = මෙවලම
+agent-server = සේවාදායකය
+agent-bytes = බයිට් { $count }
+agent-worked-for = { $duration } ක් වැඩ කළා
+agent-worked-for-steps = { $count ->
+    [one] { $duration } ක් වැඩ කළා · පියවර 1
+   *[other] { $duration } ක් වැඩ කළා · පියවර { $count }
+}
+agent-tool-guardian-review = ආරක්ෂක සමාලෝචනය
+agent-tool-read-files = ගොනු කියවීය
+agent-tool-viewed-image = රූපය බැලීය
+agent-tool-used-browser = බ්‍රවුසරය භාවිත කළා
+agent-tool-searched-files = ගොනු සෙවීය
+agent-tool-ran-commands = විධාන ධාවනය කළා
+agent-thinking = සිතමින්
+agent-subagent = උප ඒජන්ට්
+agent-prompt = ප්‍රොම්ප්ට්
+agent-thread = Thread
+agent-parent = මූලිකය
+agent-children = උප අයිතම
+agent-call = ඇමතුම
+agent-raw-event = අමු සිදුවීම
+agent-plan = සැලැස්ම
+agent-tasks = { $count ->
+    [one] කාර්යය 1
+   *[other] කාර්යයන් { $count }
+}
+agent-edited = සංස්කරණය කළා
+agent-reconnecting = නැවත සම්බන්ධ වෙමින් { $attempt }/{ $total }
+agent-status-running = ධාවනය වෙමින්
+agent-status-done = අවසන්
+agent-status-failed = අසමත්
+agent-status-pending = පොරොත්තුවේ
+agent-slash-attach-files = ගොනු අමුණන්න
+agent-slash-resume-session = පෙර සැසියක් නැවත ආරම්භ කරන්න
+agent-slash-select-model = මාදිලිය තෝරන්න
+agent-slash-continue-cli = මෙම සැසිය CLI තුළ දිගටම කරගෙන යන්න
+agent-session-just-now = දැන්ම
+agent-session-minutes-ago = මිනි { $count }කට පෙර
+agent-session-hours-ago = පැය { $count }කට පෙර
+agent-session-days-ago = දින { $count }කට පෙර
+agent-working-working = වැඩ කරමින්
+agent-working-thinking = සිතමින්
+agent-working-pondering = ගැඹුරින් සිතමින්
+agent-working-noodling = අදහස් ගොනු කරමින්
+agent-working-percolating = අදහස් පැහැදිලි වෙමින්
+agent-working-conjuring = අදහස් මතු කරමින්
+agent-working-cooking = සකසමින්
+agent-working-brewing = සම්පාදනය වෙමින්
+agent-working-musing = කල්පනා කරමින්
+agent-working-ruminating = නැවත නැවත සිතමින්
+agent-working-scheming = සැලසුම් කරමින්
+agent-working-synthesizing = සංයෝජනය කරමින්
+agent-working-tinkering = අත්හදා බලමින්
+agent-working-churning = ක්‍රියාත්මක වෙමින්
+agent-working-vibing = රිද්මය අල්ලමින්
+agent-working-simmering = මැදින් සකසමින්
+agent-working-crafting = නිර්මාණය කරමින්
+agent-working-divining = හඳුනා ගනිමින්
+agent-working-mulling = සිතා බලමින්
+agent-working-spelunking = ගැඹුරට සොයමින්
+
+editor-toggle-explorer = Explorer මාරු කරන්න (Cmd+B)
+editor-unsaved = සුරකින ලද නැත
+editor-rendered-markdown = සජීවී සංස්කරණය සමඟ රෙන්ඩර් කළ Markdown
+editor-note = සටහන
+editor-source-editor = මූලාශ්‍ර සංස්කාරකය
+editor-editor = සංස්කාරකය
+editor-git-diff = Git වෙනස්කම්
+editor-diff = වෙනස
+editor-tidy = පිරිසිදු කරන්න
+editor-always = සැමවිටම
+editor-unchanged-previews = { $count ->
+    [one] ✦ වෙනස් නොවූ පෙරදසුන 1
+   *[other] ✦ වෙනස් නොවූ පෙරදසුන් { $count }
+}
+editor-open-externally = බාහිරව විවෘත කරන්න
+editor-changed-line = වෙනස් කළ පේළිය
+editor-go-to-definition = අර්ථ දැක්වීමට යන්න
+editor-find-references = යොමු සොයන්න
+editor-references = { $count ->
+    [one] යොමුව 1
+   *[other] යොමු { $count }
+}
+editor-lsp-starting = { $server } ආරම්භ වෙමින්…
+editor-lsp-not-installed = { $server } — ස්ථාපනය කර නැත
+editor-explorer = Explorer
+editor-open-editors = විවෘත සංස්කාරක
+editor-outline = සාරාංශය
+editor-new-file = නව ගොනුව
+editor-new-folder = නව ෆෝල්ඩරය
+editor-delete-confirm = “{ $name }” මකන්නද? මෙය ආපසු හැරවිය නොහැක.
+editor-created-folder = { $name } ෆෝල්ඩරය සාදන ලදි
+editor-created-file = { $name } ගොනුව සාදන ලදි
+editor-renamed-to = { $name } ලෙස නම වෙනස් කළා
+editor-deleted = { $name } මකා දැමුවා
+editor-failed-decode-image = රූපය ඩිකෝඩ් කිරීමට අසමත් විය
+editor-preview-large-image = රූපය (පෙරදසුන් කිරීමට ඉතා විශාලයි)
+editor-preview-binary = ද්විමය
+editor-preview-file = ගොනුව
+
+git-status-clean = පිරිසිදු
+git-status-modified = වෙනස් කර ඇත
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = අනනුගමනය
+git-status-deleted = මකා ඇත
+git-status-conflict = ගැටුම
+git-accept-all = ✓ සියල්ල පිළිගන්න
+git-unstage = Unstage කරන්න
+git-confirm-deny-all = සියල්ල ප්‍රතික්ෂේප කිරීම තහවුරු කරන්න
+git-deny-all = ✗ සියල්ල ප්‍රතික්ෂේප කරන්න
+git-commit-message = commit පණිවිඩය
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = වෙනස්කම් පූරණය වෙමින්…
+git-no-changes = පෙන්වීමට වෙනස්කම් නැත
+git-accept = ✓ පිළිගන්න
+git-deny = ✗ ප්‍රතික්ෂේප කරන්න
+git-show-unchanged-lines = වෙනස් නොවූ පේළි { $count } පෙන්වන්න
+
+terminal-loading = පූරණය වෙමින්…
+terminal-runs-when-ready = සූදානම් වූ විට ධාවනය වේ · Ctrl+C හිස් කරයි · Esc මඟහරී
+terminal-booting = ආරම්භ වෙමින්
+terminal-type-command = විධානයක් ටයිප් කරන්න · සූදානම් වූ විට ධාවනය වේ · Esc මඟහරී
+
+setup-tagline-claude = Anthropic හි කේතකරණ ඒජන්ට්, Vmux තුළ
+setup-tagline-codex = OpenAI හි කේතකරණ ඒජන්ට්, Vmux තුළ
+setup-tagline-vibe = Mistral හි කේතකරණ ඒජන්ට්, Vmux තුළ
+setup-install-title = { $name } CLI ස්ථාපනය කරන්න
+setup-homebrew-required = { $command } ස්ථාපනය කිරීමට Homebrew අවශ්‍යයි, එය තවම සකසා නැත. Vmux පළමුව Homebrew ස්ථාපනය කර, පසුව { $name } ස්ථාපනය කරයි.
+setup-terminal-instructions = ටර්මිනලයේ, ආරම්භ කිරීමට Return ඔබන්න; ඉන්පසු ඉල්ලා සිටින විට ඔබේ Mac මුරපදය ඇතුළත් කරන්න.
+setup-command-missing = දේශීය { $command } විධානය තවම ස්ථාපනය කර නැති නිසා Vmux මෙම පිටුව විවෘත කළේය. එය ලබා ගැනීමට පහත විධානය ධාවනය කරන්න.
+setup-install-failed = ස්ථාපනය අවසන් නොවීය. විස්තර සඳහා ටර්මිනලය පරීක්ෂා කර නැවත උත්සාහ කරන්න.
+setup-installing = ස්ථාපනය වෙමින්…
+setup-install-homebrew = Homebrew + { $name } ස්ථාපනය කරන්න
+setup-run-install = ස්ථාපන විධානය ධාවනය කරන්න
+setup-auto-reload = Vmux එය ටර්මිනලයක ධාවනය කර, { $command } සූදානම් වූ විට නැවත පූරණය කරයි.
+
+debug-title = දෝෂ සොයන්න
+debug-auto-update = ස්වයංක්‍රීය යාවත්කාලීනය
+debug-simulate-update = යාවත්කාලීනයක් ලබා ගත හැකි බව අනුකරණය කරන්න
+debug-simulate-download = බාගැනීම අනුකරණය කරන්න
+debug-clear-update = යාවත්කාලීනය හිස් කරන්න
+debug-trigger-restart = නැවත ආරම්භ කිරීම ක්‍රියාත්මක කරන්න
+
+command-manage-spaces = අවකාශ කළමනාකරණය කරන්න…
+command-pane-stack-location = පැනලය { $pane } / ස්ටැක් { $stack }
+command-space-pane-stack-location = { $space } / පැනලය { $pane } / ස්ටැක් { $stack }
+command-terminal-path = ටර්මිනලය ({ $path })
+command-group-interactive-mode = අන්තර්ක්‍රියාකාරී ප්‍රකාරය
+command-group-window = කවුළුව
+command-group-tab = ටැබය
+command-group-pane = පැනලය
+command-group-stack = ස්ටැක්
+command-group-space = අවකාශය
+command-group-navigation = සංචාලනය
+command-group-open = විවෘත කරන්න
+command-group-view = දසුන
+command-group-bar = තීරුව
+
+menu-close-vmux = Vmux වසන්න
+
+agents-terminal-coding-agent = ටර්මිනල්-පාදක කේතකරණ ඒජන්තයා

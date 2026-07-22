@@ -1,0 +1,602 @@
+locale-name = te reo Māori
+common-open = Huaki
+common-close = Katia
+common-install = Tāuta
+common-uninstall = Wetetāuta
+common-update = Whakahōu
+common-retry = Ngana anō
+common-refresh = Tāmata
+common-remove = Tango
+common-enable = Whakahohe
+common-disable = Monokia
+common-new = Hōu
+common-active = hohe
+common-running = e rere ana
+common-done = kua oti
+common-failed = I rahua
+common-installed = Kua tāutatia
+common-items = { $count ->
+    [one] { $count } tūemi
+   *[other] { $count } tūemi
+}
+start-title = Tīmata
+start-tagline = Kotahi te tohutohu. Ka oti te katoa.
+
+agents-title = Ngā āpiha AI
+agents-search = Rapua ngā āpiha ACP me CLI…
+agents-empty = Kāore he āpiha e ōrite ana
+agents-empty-detail = Whakamātauria he ingoa, he wāhaere, he ACP/CLI rānei.
+agents-install-failed = I rahua te tāuta
+agents-updating = E whakahōu ana…
+agents-retrying = E ngana anō ana…
+agents-preparing = E whakarite ana…
+
+extensions-title = Ngā toronga
+extensions-search = Rapua ngā mea kua tāutatia, te Chrome Web Store rānei…
+extensions-relaunch = Whakarewa anō kia mana ai
+extensions-empty = Kāore anō kia tāutatia he toronga
+extensions-no-match = Kāore he toronga e ōrite ana
+extensions-empty-detail = Rapua te Chrome Web Store i runga ake nei, kātahi pēhia te Return.
+extensions-no-match-detail = Whakamātauria tētahi atu ingoa, ID toronga rānei.
+extensions-on = Kā
+extensions-off = Weto
+extensions-enable-confirm = Whakahohe i a { $name }?
+extensions-enable-permissions = Whakahohe i a { $name } ka whakaae ki:
+
+lsp-title = Ngā Tūmau Reo
+lsp-search = Rapua ngā tūmau reo, ngā linter, ngā whakahōputu…
+lsp-loading = E uta ana i te rārangi…
+lsp-empty = Kāore he tūmau reo e ōrite ana
+lsp-empty-detail = Whakamātauria tētahi atu reo, linter, whakahōputu rānei.
+lsp-needs = me whai { $tool }
+lsp-status-available = E wātea ana
+lsp-status-on-path = Kei PATH
+lsp-status-installing = E tāuta ana…
+lsp-status-installed = Kua tāutatia
+lsp-status-outdated = He whakahōutanga e wātea ana
+lsp-status-running = E rere ana
+lsp-status-failed = I rahua
+
+spaces-title = Ngā wāhi
+spaces-new-placeholder = Ingoa wāhi hōu
+spaces-empty = Kāore he wāhi
+spaces-default-name = Wāhi { $number }
+spaces-tabs = { $count ->
+    [one] 1 ripa
+   *[other] { $count } ripa
+}
+spaces-delete = Mukua te wāhi
+
+team-title = Tīma
+team-just-you = Ko koe anake i tēnei wāhi
+team-agents = { $count ->
+    [one] Ko koe me te āpiha AI 1
+   *[other] Ko koe me ngā āpiha AI { $count }
+}
+team-empty = Kāore anō tētahi i konei
+team-you = Koe
+team-agent = Āpiha AI
+
+services-title = Ratonga Papamuri
+services-processes = { $count ->
+    [one] 1 tukanga
+   *[other] { $count } tukanga
+}
+services-kill-all = Whakamutu Katoa
+services-not-running = Kāore te ratonga i te rere
+services-start-with = Tīmata mā:
+services-empty = Kāore he tukanga hohe
+services-filter = Tātari tukanga…
+services-no-match = Kāore he tukanga e ōrite ana
+services-connected = Kua tūhono
+services-disconnected = Kua momotu
+services-attached = kua āpitihia
+services-kill = Whakamutu
+services-memory = Pūmahara
+services-size = Rahi
+services-shell = Anga
+
+error-title = Hapa
+
+history-search = Rapua te hītori
+history-clear-all = Ūkuia katoatia
+history-clear-confirm = Ūkuia katoatia te hītori?
+history-clear-warning = Kāore e taea te whakahoki.
+history-cancel = Whakakore
+history-today = Āianei
+history-yesterday = Inanahi
+history-days-ago = { $count } rā ki muri
+history-day-offset = Rā -{ $count }
+
+settings-title = Tautuhinga
+settings-loading = E uta ana i ngā tautuhinga…
+settings-stored = Kei ~/.vmux/settings.ron e rokiroki ana
+settings-other = Ētahi atu
+settings-software-update = Whakahōu Pūmanawa
+settings-check-updates = Tirohia ngā Whakahōutanga
+settings-check-updates-hint = Ka tirohia aunoa i te whakarewatanga me ia hāora ina whakahohea te whakahōu-aunoa.
+settings-update-unavailable = Kāore e wātea ana
+settings-update-unavailable-hint = Kāore te kaiwhakahōu i roto i tēnei hanganga.
+settings-update-checking = E tirotiro ana…
+settings-update-checking-hint = E tirotiro ana i ngā whakahōutanga…
+settings-update-check-again = Tirohia Anō
+settings-update-current = Kua hōu kē a Vmux.
+settings-update-downloading = E tikiake ana…
+settings-update-downloading-hint = E tikiake ana i a Vmux { $version }…
+settings-update-installing = E tāuta ana…
+settings-update-installing-hint = E tāuta ana i a Vmux { $version }…
+settings-update-ready = Kua Reri te Whakahōutanga
+settings-update-ready-hint = Kua reri a Vmux { $version }. Tīmata anō kia mana ai.
+settings-update-try-again = Ngana Anō
+settings-update-failed = Kāore i taea te tirotiro whakahōutanga.
+settings-item = Tūemi
+settings-item-number = Tūemi { $number }
+settings-press-key = Pēhia tētahi pātuhi…
+settings-saved = Kua tiakina
+settings-record-key = Pāwhiria hei hopu pahekotanga pātuhi hōu
+
+tray-open-window = Huaki Matapihi
+tray-close-window = Katia Matapihi
+tray-pause-recording = Whakatā te Hopu
+tray-resume-recording = Haere Tonu te Hopu
+tray-finish-recording = Whakaoti te Hopu
+tray-quit = Waiho i a Vmux
+
+composer-attach-files = Āpiti kōnae (/upload)
+composer-remove-attachment = Tango āpitihanga
+
+layout-back = Hoki
+layout-forward = Whakamua
+layout-reload = Uta anō
+layout-bookmark-page = Tohuwāhitia tēnei whārangi
+layout-remove-bookmark = Tango tohuwāhi
+layout-pin-page = Pinea tēnei whārangi
+layout-unpin-page = Wetepinea tēnei whārangi
+layout-manage-extensions = Whakahaere toronga
+layout-new-stack = Tāpae hōu
+layout-close-tab = Katia te ripa
+layout-bookmark = Tohuwāhi
+layout-pin = Pine
+layout-new-tab = Ripa hōu
+layout-team = Tīma
+
+command-switch-space = Whakawhiti wāhi…
+command-search-ask = Rapu, pātai rānei…
+command-new-tab-placeholder = Rapua, patohia rānei he URL, tīpakohia rānei te Terminal…
+command-placeholder = Patohia he URL, rapua ngā ripa, patohia rānei > mō ngā whakahau…
+command-composer-placeholder = Patohia / mō ngā whakahau, @ rānei mō te pāpāho
+command-send = Tukua (Enter)
+command-terminal = Terminal
+command-open-terminal = Huaki ki Terminal
+command-stack = Tāpae
+command-tabs = { $count ->
+    [one] 1 ripa
+   *[other] { $count } ripa
+}
+command-prompt = Tohutohu
+command-new-tab = Ripa hōu
+command-search = Rapu
+command-open-value = Huaki “{ $value }”
+command-search-value = Rapua “{ $value }”
+
+schema-appearance = Āhua
+schema-general = Whānui
+schema-layout = Tahora
+schema-layout-detail = Matapihi, pihanga, paetaha, me te mowhiti arotahi.
+schema-agent = Āpiha AI
+schema-agent-detail = Whanonga āpiha AI me ngā whakaaetanga taputapu.
+schema-shortcuts = Pokatata
+schema-shortcuts-detail = Tirohanga pānui-anake. Whakatikaina tikatia te settings.ron hei huri i ngā here.
+schema-terminal = Terminal
+schema-browser = Pūtirotiro
+schema-mode = Aratau
+schema-mode-detail = Kaupapa tae mō ngā whārangi tukutuku. Ka whai a Pūrere i tō pūnaha.
+schema-device = Pūrere
+schema-light = Mārama
+schema-dark = Pōuri
+schema-language = Reo
+schema-language-detail = Whakamahia te pūnaha, en-US, ja, tētahi tūtohu BCP 47 rānei me tētahi rārangi ~/.vmux/locales/<tag>.ftl e ōrite ana.
+schema-auto-update = Whakahōu-aunoa
+schema-auto-update-detail = Tirohia, tāutatia hoki ngā whakahōutanga i te whakarewatanga me ia hāora.
+schema-startup-url = URL whakaoho
+schema-startup-url-detail = Ki te noho kau, ka huaki te tohutohu pae whakahau.
+schema-search-engine = Pūkaha rapu
+schema-search-engine-detail = Ka whakamahia mō ngā rapunga tukutuku mai i Tīmata me te pae whakahau.
+schema-window = Matapihi
+schema-pane = Pihanga
+schema-side-sheet = Rau taha
+schema-focus-ring = Mowhiti arotahi
+schema-run-placement = Whakaae kia hipa te whakanoho oma
+schema-run-placement-detail = Tukua ngā āpiha AI kia kōwhiri i te aratau pihanga oma, te ahunga, me te punga.
+schema-leader = Arataki
+schema-leader-detail = Pātuhi tīmatanga mō ngā pokatata chord.
+schema-chord-timeout = Wāhiki chord
+schema-chord-timeout-detail = Ngā manomēkona i mua i te paunga o tētahi tīmatanga chord.
+schema-bindings = Here
+schema-confirm-close = Whakaū i te kati
+schema-confirm-close-detail = Pātai i mua i te kati i tētahi Terminal e rere ana tētahi tukanga.
+schema-default-theme = Kaupapa taunoa
+schema-default-theme-detail = Ingoa o te kaupapa hohe mai i te rārangi kaupapa.
+
+settings-empty = (takahanga)
+settings-none = (kore)
+
+schema-system = Pūnaha
+schema-editor = Kaiwhakatika
+schema-recording = Hopukanga
+schema-radius = Pūtoro
+schema-padding = Āputa ā-roto
+schema-gap = Āputa
+schema-width = Whānui
+schema-color = Tae
+schema-red = Whero
+schema-green = Kākāriki
+schema-blue = Kikorangi
+schema-follow-files = Whai i ngā kōnae
+schema-tidy-files = Whakapai kōnae
+schema-tidy-files-max = Paepae whakapai kōnae
+schema-tidy-files-auto = Whakapai aunoa i ngā kōnae
+schema-app-providers = Ngā kaiwhakarato taupānga
+schema-provider = Kaiwhakarato
+schema-kind = Momo
+schema-models = Tauira
+schema-acp = Ngā āpiha ACP
+schema-id = ID
+schema-name = Ingoa
+schema-command = Tono
+schema-arguments = Tohenga
+schema-environment = Taiao
+schema-working-directory = Kōpaki mahi
+schema-shell = Anga
+schema-font-family = Whānau momotuhi
+schema-startup-directory = Kōpaki tīmata
+schema-themes = Kaupapa
+schema-color-scheme = Kaupapa tae
+schema-font-size = Rahi momotuhi
+schema-line-height = Teitei rārangi
+schema-cursor-style = Kāhua pehu
+schema-cursor-blink = Kimo pehu
+schema-custom-themes = Ngā kaupapa ritenga
+schema-foreground = Papa mua
+schema-background = Papamuri
+schema-cursor = Pehu
+schema-ansi-colors = Ngā tae ANSI
+schema-keymap = Mahere pātuhi
+schema-explorer = Kaitirotiro
+schema-visible = Kitea
+schema-language-servers = Ngā tūmau reo
+schema-servers = Tūmau
+schema-language-id = ID reo
+schema-root-markers = Ngā tohu pūtake
+schema-output-directory = Kōpaki putanga
+
+menu-scene = Atamira
+menu-layout = Tahora
+menu-terminal = Kāpeka
+menu-browser = Pūtirotiro
+menu-service = Ratonga
+menu-bookmark = Tohuwāhi
+menu-edit = Whakatika
+
+layout-knowledge = Mātauranga
+layout-open-knowledge = Whakatuwhera Mātauranga
+layout-open-welcome-knowledge = Whakatuwhera Nau mai ki te Mātauranga
+layout-open-path = Whakatuwhera { $path }
+layout-fold-knowledge = Takai mātauranga
+layout-unfold-knowledge = Whakataki mātauranga
+layout-bookmarks = Tohuwāhi
+layout-new-folder = Kōpaki Hōu
+layout-add-to-bookmarks = Tāpiri ki ngā Tohuwāhi
+layout-move-to-bookmarks = Nuku ki ngā Tohuwāhi
+layout-stack-number = Tāpae { $number }
+layout-fold-stack = Takai tāpae
+layout-unfold-stack = Whakataki tāpae
+layout-close-stack = Katia tāpae
+layout-bookmark-in = Tohuwāhi ki { $folder }
+
+common-cancel = Whakakore
+common-delete = Muku
+common-save = Tiaki
+common-rename = Whakaingoa anō
+common-expand = Whakaroha
+common-collapse = Tiango
+common-loading = E uta ana…
+common-error = Hapa
+common-output = Huaputa
+common-pending = E tārewa ana
+common-current = nāianei
+common-stop = Kāti
+services-command = Ratonga Vmux
+services-uptime-seconds = { $seconds }h
+services-uptime-minutes = { $minutes }m { $seconds }h
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }r { $hours }h
+
+error-page-failed-load = Kāore te whārangi i uta
+error-page-not-found = Kāore te whārangi i kitea
+error-unknown-host = Kaihautū taupānga Vmux tē mōhiotia: { $host }
+
+history-title = Hītori
+
+command-new-app-chat = Kōrerorero { $provider }/{ $model } hōu (Taupānga)
+command-interactive-mode-user = Atamira > Aratau Pāhekoheko > Kaiwhakamahi
+command-interactive-mode-player = Atamira > Aratau Pāhekoheko > Kaitākaro
+command-minimize-window = Tahora > Matapihi > Whakaiti
+command-toggle-layout = Tahora > Tahora > Takahuri Tahora
+command-close-tab = Tahora > Ripa > Katia te Ripa
+command-new-task = Tahora > Ripa > Tūmahi Hōu…
+command-next-tab = Tahora > Ripa > Ripa Panuku
+command-prev-tab = Tahora > Ripa > Ripa Tōmua
+command-rename-tab = Tahora > Ripa > Whakaingoa anō te Ripa
+command-tab-select-1 = Tahora > Ripa > Tīpako Ripa 1
+command-tab-select-2 = Tahora > Ripa > Tīpako Ripa 2
+command-tab-select-3 = Tahora > Ripa > Tīpako Ripa 3
+command-tab-select-4 = Tahora > Ripa > Tīpako Ripa 4
+command-tab-select-5 = Tahora > Ripa > Tīpako Ripa 5
+command-tab-select-6 = Tahora > Ripa > Tīpako Ripa 6
+command-tab-select-7 = Tahora > Ripa > Tīpako Ripa 7
+command-tab-select-8 = Tahora > Ripa > Tīpako Ripa 8
+command-tab-select-last = Tahora > Ripa > Tīpako Ripa Whakamutunga
+command-close-pane = Tahora > Pihanga > Katia te Pihanga
+command-select-pane-left = Tahora > Pihanga > Tīpako Pihanga Mauī
+command-select-pane-right = Tahora > Pihanga > Tīpako Pihanga Matau
+command-select-pane-up = Tahora > Pihanga > Tīpako Pihanga Runga
+command-select-pane-down = Tahora > Pihanga > Tīpako Pihanga Raro
+command-swap-pane-prev = Tahora > Pihanga > Whakawhiti ki te Pihanga Tōmua
+command-swap-pane-next = Tahora > Pihanga > Whakawhiti ki te Pihanga Panuku
+command-equalize-pane-size = Tahora > Pihanga > Whakarite Ōrite te Rahi Pihanga
+command-resize-pane-left = Tahora > Pihanga > Whakarahi Pihanga ki te Mauī
+command-resize-pane-right = Tahora > Pihanga > Whakarahi Pihanga ki te Matau
+command-resize-pane-up = Tahora > Pihanga > Whakarahi Pihanga ki Runga
+command-resize-pane-down = Tahora > Pihanga > Whakarahi Pihanga ki Raro
+command-stack-close = Tahora > Tāpae > Katia te Tāpae
+command-stack-next = Tahora > Tāpae > Tāpae Panuku
+command-stack-previous = Tahora > Tāpae > Tāpae Tōmua
+command-stack-reopen = Tahora > Tāpae > Whakatuwhera Anō te Whārangi Kua Katia
+command-stack-swap-prev = Tahora > Tāpae > Nuku Tāpae ki te Mauī
+command-stack-swap-next = Tahora > Tāpae > Nuku Tāpae ki te Matau
+command-space-open = Tahora > Wāhi > Ngā Wāhi
+command-terminal-close = Kāpeka > Katia te Kāpeka
+command-terminal-next = Kāpeka > Kāpeka Panuku
+command-terminal-prev = Kāpeka > Kāpeka Tōmua
+command-terminal-clear = Kāpeka > Ūkui Kāpeka
+command-browser-prev-page = Pūtirotiro > Whakatere > Hoki
+command-browser-next-page = Pūtirotiro > Whakatere > Whakamua
+command-browser-reload = Pūtirotiro > Whakatere > Uta Anō
+command-browser-hard-reload = Pūtirotiro > Whakatere > Uta Anō Kaha
+command-open-in-place = Pūtirotiro > Tuwhera > Whakatuwhera ki Konei
+command-open-in-new-stack = Pūtirotiro > Tuwhera > Whakatuwhera ki Tāpae Hōu
+command-open-in-pane-top = Pūtirotiro > Tuwhera > Whakatuwhera ki te Pihanga o Runga
+command-open-in-pane-right = Pūtirotiro > Tuwhera > Whakatuwhera ki te Pihanga Matau
+command-open-in-pane-bottom = Pūtirotiro > Tuwhera > Whakatuwhera ki te Pihanga o Raro
+command-open-in-pane-left = Pūtirotiro > Tuwhera > Whakatuwhera ki te Pihanga Mauī
+command-open-in-new-tab = Pūtirotiro > Tuwhera > Whakatuwhera ki Ripa Hōu
+command-open-in-new-space = Pūtirotiro > Tuwhera > Whakatuwhera ki Wāhi Hōu
+command-browser-zoom-in = Pūtirotiro > Tirohanga > Topa Mai
+command-browser-zoom-out = Pūtirotiro > Tirohanga > Topa Atu
+command-browser-zoom-reset = Pūtirotiro > Tirohanga > Rahi Tūturu
+command-browser-dev-tools = Pūtirotiro > Tirohanga > Utauta Kaiwhakawhanake
+command-browser-open-command-bar = Pūtirotiro > Pae > Pae Tono
+command-browser-open-page-in-command-bar = Pūtirotiro > Pae > Whakatika Whārangi
+command-browser-open-path-bar = Pūtirotiro > Pae > Kaiwhakatere Ara
+command-browser-open-commands = Pūtirotiro > Pae > Ngā Tono
+command-browser-open-history = Pūtirotiro > Pae > Hītori
+command-service-open = Ratonga > Whakatuwhera Aroturuki Ratonga
+command-bookmark-toggle-active = Tohuwāhi > Tohuwāhi Whārangi
+command-bookmark-pin-active = Tohuwāhi > Titi Whārangi
+
+layout-tab = Ripa
+layout-no-stacks = Kāore he tāpae
+layout-loading = E uta ana…
+layout-no-markdown-files = Kāore he kōnae Markdown
+layout-empty-folder = Kōpaki kau
+layout-worktree = rākau mahi
+layout-folder-name = Ingoa kōpaki
+layout-no-pins-bookmarks = Kāore he titi, he tohuwāhi rānei
+layout-move-to = Nuku ki { $folder }
+layout-bookmark-current-page = Tohuwāhi i te Whārangi o Nāianei
+layout-rename-folder = Whakaingoa Anō Kōpaki
+layout-remove-folder = Tango Kōpaki
+layout-update-downloading = E tikiake ana i te whakahou
+layout-update-installing = E tāuta ana i te whakahou…
+layout-update-ready = He putanga hōu kei te wātea
+layout-restart-update = Tīmata anō hei whakahou
+
+agent-preparing = E whakarite ana i te kaiāwhina…
+agent-send-all-queued = Tukuna ngā akiaki katoa kua tūtira ināianei (Esc)
+agent-send = Tuku (Enter)
+agent-ready = Kua rite ina rite koe.
+agent-loading-older = E uta ana i ngā karere tawhito…
+agent-load-older = Uta karere tawhito
+agent-continued-from = I haere tonu i { $source }
+agent-older-context-omitted = kua waiho ngā horopaki tawhito
+agent-interrupted = i haukotia
+agent-allow-tool = Whakaaetia { $tool }?
+agent-deny = Whakakāhore
+agent-allow-always = Whakaae i ngā wā katoa
+agent-allow = Whakaae
+agent-loading-sessions = E uta ana i ngā wātū…
+agent-no-resumable-sessions = Kāore he wātū ka taea te whakaara anō
+agent-no-matching-sessions = Kāore he wātū ōrite
+agent-no-matching-models = Kāore he tauira ōrite
+agent-choice-help = ↑/↓, Ctrl+N/Ctrl+P rānei · 1–9 · Enter
+agent-choose-repository = Kōwhiri kōpaki putunga
+agent-choose-repository-detail = Tīpakohia te putunga Git paetata mā te kaiāwhina.
+agent-choosing = E kōwhiri ana…
+agent-choose-folder = Kōwhiri kōpaki
+agent-queued = kua tūtira
+agent-attached = Kua āpitihia:
+agent-cancel-queued = Whakakore akiaki kua tūtira
+agent-resume-queued = Whakaara anō ngā akiaki kua tūtira
+agent-clear-queue = Ūkui tūtira
+agent-send-all-now = tukuna katoa ināianei
+agent-choose-option = Kōwhiria tētahi kōwhiringa i runga
+agent-loading-media = E uta ana i te pāpāho…
+agent-no-matching-media = Kāore he pāpāho ōrite
+agent-prompt-context = Horopaki akiaki
+agent-details = Taipitopito
+agent-path = Ara
+agent-tool = Utauta
+agent-server = Tūmau
+agent-bytes = { $count } paita
+agent-worked-for = I mahi mō te { $duration }
+agent-worked-for-steps = { $count ->
+    [one] I mahi mō te { $duration } · 1 hīkoi
+   *[other] I mahi mō te { $duration } · { $count } hīkoi
+}
+agent-tool-guardian-review = Arotake Kaitiaki
+agent-tool-read-files = Pānui kōnae
+agent-tool-viewed-image = Tiro atahanga
+agent-tool-used-browser = Whakamahi pūtirotiro
+agent-tool-searched-files = Rapu kōnae
+agent-tool-ran-commands = Whakahaere tono
+agent-thinking = E whakaaro ana
+agent-subagent = Kaiāwhina-iti
+agent-prompt = Akiaki
+agent-thread = Miro
+agent-parent = Matua
+agent-children = Tamariki
+agent-call = Karanga
+agent-raw-event = Takahanga mata
+agent-plan = Mahere
+agent-tasks = { $count ->
+    [one] 1 tūmahi
+   *[other] { $count } tūmahi
+}
+agent-edited = Kua whakatikaina
+agent-reconnecting = E hono anō ana { $attempt }/{ $total }
+agent-status-running = E rere ana
+agent-status-done = Kua oti
+agent-status-failed = I rahua
+agent-status-pending = E tārewa ana
+agent-slash-attach-files = Āpiti kōnae
+agent-slash-resume-session = Whakaara anō i tētahi wātū o mua
+agent-slash-select-model = Tīpako tauira
+agent-slash-continue-cli = Haere tonu tēnei wātū ki te CLI
+agent-session-just-now = inā noa nei
+agent-session-minutes-ago = { $count }m ki mua
+agent-session-hours-ago = { $count }h ki mua
+agent-session-days-ago = { $count }r ki mua
+agent-working-working = E mahi ana
+agent-working-thinking = E whakaaro ana
+agent-working-pondering = E huritao ana
+agent-working-noodling = E takaro ana ki ngā whakaaro
+agent-working-percolating = E kōnatunatu ana
+agent-working-conjuring = E whakawai ana
+agent-working-cooking = E tunu ana
+agent-working-brewing = E kōhua ana
+agent-working-musing = E whakaaronui ana
+agent-working-ruminating = E ngau whakaaro ana
+agent-working-scheming = E whakatakoto mahere ana
+agent-working-synthesizing = E whakahiato ana
+agent-working-tinkering = E raweke ana
+agent-working-churning = E pokepoke ana
+agent-working-vibing = E rere ana te wairua
+agent-working-simmering = E koropupū māmā ana
+agent-working-crafting = E waihanga ana
+agent-working-divining = E matakite ana
+agent-working-mulling = E āta whakaaro ana
+agent-working-spelunking = E torotoro ana
+
+editor-toggle-explorer = Takahuri Kaitoro (Cmd+B)
+editor-unsaved = kāore anō kia tiakina
+editor-rendered-markdown = Markdown kua whakaaturia me te whakatika ora
+editor-note = Tuhipoka
+editor-source-editor = Kaiwhakatika pūtake
+editor-editor = Kaiwhakatika
+editor-git-diff = Rerekētanga Git
+editor-diff = Rerekētanga
+editor-tidy = Whakapaipai
+editor-always = I ngā wā katoa
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 arokite kāore i panoni
+   *[other] ✦ { $count } arokite kāore i panoni
+}
+editor-open-externally = Whakatuwhera ki waho
+editor-changed-line = Rārangi kua panoni
+editor-go-to-definition = Haere ki te Tautuhinga
+editor-find-references = Kimi Tohutoro
+editor-references = { $count ->
+    [one] 1 tohutoro
+   *[other] { $count } tohutoro
+}
+editor-lsp-starting = e tīmata ana a { $server }…
+editor-lsp-not-installed = { $server } — kāore i tāutatia
+editor-explorer = Kaitoro
+editor-open-editors = Ngā Kaiwhakatika Tuwhera
+editor-outline = Whakahuahua
+editor-new-file = Kōnae Hōu
+editor-new-folder = Kōpaki Hōu
+editor-delete-confirm = Mukua “{ $name }”? Kāore e taea te whakahoki.
+editor-created-folder = Kua hangaia te kōpaki { $name }
+editor-created-file = Kua hangaia te kōnae { $name }
+editor-renamed-to = Kua whakaingoatia anō hei { $name }
+editor-deleted = Kua mukua { $name }
+editor-failed-decode-image = I rahua te wetewaehere atahanga
+editor-preview-large-image = atahanga (he nui rawa hei arokite)
+editor-preview-binary = ā-rua
+editor-preview-file = kōnae
+
+git-status-clean = mā
+git-status-modified = kua panoni
+git-status-staged = kua whakaritea
+git-status-staged-modified = kua whakaritea*
+git-status-untracked = kāore i whaiarotia
+git-status-deleted = kua mukua
+git-status-conflict = papā
+git-accept-all = ✓ whakaae katoa
+git-unstage = Tango i te whakarite
+git-confirm-deny-all = Whakaū whakakāhore katoa
+git-deny-all = ✗ whakakāhore katoa
+git-commit-message = karere commit
+git-commit = Commit ({ $count })
+git-push = ↑ Tuku ake
+git-loading-diff = E uta ana i te rerekētanga…
+git-no-changes = Kāore he panoni hei whakaatu
+git-accept = ✓ whakaae
+git-deny = ✗ whakakāhore
+git-show-unchanged-lines = Whakaatu { $count } rārangi kāore i panoni
+
+terminal-loading = E uta ana…
+terminal-runs-when-ready = ka rere ina rite · ka ūkui a Ctrl+C · ka hipa a Esc
+terminal-booting = e whakaoho ana
+terminal-type-command = patohia he tono · ka rere ina rite · ka hipa a Esc
+
+setup-tagline-claude = Kaiāwhina waehere a Anthropic, ki Vmux
+setup-tagline-codex = Kaiāwhina waehere a OpenAI, ki Vmux
+setup-tagline-vibe = Kaiāwhina waehere a Mistral, ki Vmux
+setup-install-title = Tāuta { $name } CLI
+setup-homebrew-required = Me whai Homebrew hei tāuta i { $command }, ā, kāore anō kia whakaritea. Ka tāuta tuatahi a Vmux i Homebrew, kātahi ko { $name }.
+setup-terminal-instructions = I te kāpeka, pēhia Return hei tīmata, kātahi tāurua tō kupuhipa Mac ina tonoa.
+setup-command-missing = I whakatuwhera a Vmux i tēnei whārangi nā te mea kāore anō te tono paetata { $command } kia tāutatia. Whakahaerehia te tono i raro nei kia whiwhi ai.
+setup-install-failed = Kāore te tāutanga i oti. Tirohia te kāpeka mō ngā taipitopito, kātahi ngana anō.
+setup-installing = E tāuta ana…
+setup-install-homebrew = Tāuta Homebrew + { $name }
+setup-run-install = Whakahaere tono tāuta
+setup-auto-reload = Ka whakahaere a Vmux i tētahi kāpeka, ā, ka uta anō ina rite a { $command }.
+
+debug-title = Patuiro
+debug-auto-update = Whakahou aunoa
+debug-simulate-update = Whakaari he whakahou kei te wātea
+debug-simulate-download = Whakaari tikiake
+debug-clear-update = Ūkui whakahou
+debug-trigger-restart = Tīmata anō inaianei
+
+command-manage-spaces = Whakahaere wāhi…
+command-pane-stack-location = pihanga { $pane } / tāpae { $stack }
+command-space-pane-stack-location = { $space } / pihanga { $pane } / tāpae { $stack }
+command-terminal-path = Kāpeka ({ $path })
+command-group-interactive-mode = Aratau pāhekoheko
+command-group-window = Matapihi
+command-group-tab = Ripa
+command-group-pane = Pihanga
+command-group-stack = Tāpae
+command-group-space = Wāhi
+command-group-navigation = Whakatere
+command-group-open = Tuwhera
+command-group-view = Tirohanga
+command-group-bar = Pae
+
+menu-close-vmux = Katia Vmux
+
+agents-terminal-coding-agent = Āpiha waehere ā-kāpeka

@@ -1,0 +1,602 @@
+locale-name = Hausa
+common-open = Buɗe
+common-close = Rufe
+common-install = Shigar
+common-uninstall = Cire shigarwa
+common-update = Sabunta
+common-retry = Sake gwadawa
+common-refresh = Sabunta
+common-remove = Cire
+common-enable = Kunna
+common-disable = Kashe
+common-new = Sabo
+common-active = yana aiki
+common-running = yana gudana
+common-done = an gama
+common-failed = Ya gaza
+common-installed = An shigar
+common-items = { $count ->
+    [one] abu { $count }
+   *[other] abubuwa { $count }
+}
+start-title = Fara
+start-tagline = Umurni ɗaya. Komai ya gama.
+
+agents-title = Wakilan AI
+agents-search = Nemi wakilan ACP da CLI…
+agents-empty = Babu wakili da ya dace
+agents-empty-detail = Gwada suna, runtime, ko ACP/CLI.
+agents-install-failed = Shigarwa ta gaza
+agents-updating = Ana sabuntawa…
+agents-retrying = Ana sake gwadawa…
+agents-preparing = Ana shiryawa…
+
+extensions-title = Faɗaɗawa
+extensions-search = Nemi waɗanda aka shigar ko Chrome Web Store…
+extensions-relaunch = Sake buɗewa don aiwatarwa
+extensions-empty = Ba a shigar da faɗaɗawa ba
+extensions-no-match = Babu faɗaɗawa da ta dace
+extensions-empty-detail = Nemi a Chrome Web Store a sama sannan danna Return.
+extensions-no-match-detail = Gwada wani suna ko ID na faɗaɗawa.
+extensions-on = A kunne
+extensions-off = A kashe
+extensions-enable-confirm = A kunna { $name }?
+extensions-enable-permissions = Kunna { $name } kuma a ba da izinin:
+
+lsp-title = Sabobin Harsuna
+lsp-search = Nemi sabobin harsuna, linters, formatters…
+lsp-loading = Ana loda kasida…
+lsp-empty = Babu sabar harshe da ta dace
+lsp-empty-detail = Gwada wani harshe, linter, ko formatter.
+lsp-needs = yana buƙatar { $tool }
+lsp-status-available = Akwai
+lsp-status-on-path = A kan PATH
+lsp-status-installing = Ana shigarwa…
+lsp-status-installed = An shigar
+lsp-status-outdated = Akwai sabuntawa
+lsp-status-running = Yana gudana
+lsp-status-failed = Ya gaza
+
+spaces-title = Wurare
+spaces-new-placeholder = Sunan sabon wuri
+spaces-empty = Babu wurare
+spaces-default-name = Wuri { $number }
+spaces-tabs = { $count ->
+    [one] tab 1
+   *[other] tabs { $count }
+}
+spaces-delete = Goge wuri
+
+team-title = Ƙungiya
+team-just-you = Kai kaɗai ne a wannan wuri
+team-agents = { $count ->
+    [one] Kai da wakilin AI 1
+   *[other] Kai da wakilan AI { $count }
+}
+team-empty = Babu kowa a nan tukuna
+team-you = Kai
+team-agent = Wakilin AI
+
+services-title = Ayyukan Bayan Fage
+services-processes = { $count ->
+    [one] process 1
+   *[other] processes { $count }
+}
+services-kill-all = Kashe Duka
+services-not-running = Sabis ɗin baya gudana
+services-start-with = Fara da:
+services-empty = Babu processes masu aiki
+services-filter = Tace processes…
+services-no-match = Babu process da ya dace
+services-connected = An haɗa
+services-disconnected = An katse
+services-attached = a haɗe
+services-kill = Kashe
+services-memory = Ƙwaƙwalwa
+services-size = Girma
+services-shell = Shell
+
+error-title = Kuskure
+
+history-search = Nemi tarihi
+history-clear-all = Share duka
+history-clear-confirm = A share duk tarihin?
+history-clear-warning = Ba za a iya dawo da wannan ba.
+history-cancel = Soke
+history-today = Yau
+history-yesterday = Jiya
+history-days-ago = kwanaki { $count } da suka wuce
+history-day-offset = Rana -{ $count }
+
+settings-title = Saituna
+settings-loading = Ana loda saituna…
+settings-stored = An adana a ~/.vmux/settings.ron
+settings-other = Sauran
+settings-software-update = Sabunta Manhaja
+settings-check-updates = Duba Sabuntawa
+settings-check-updates-hint = Yana dubawa kai tsaye lokacin farawa da kowane awa idan an kunna sabuntawa ta atomatik.
+settings-update-unavailable = Babu
+settings-update-unavailable-hint = Ba a haɗa mai sabuntawa a wannan build ba.
+settings-update-checking = Ana dubawa…
+settings-update-checking-hint = Ana duba sabuntawa…
+settings-update-check-again = Sake dubawa
+settings-update-current = Vmux ya riga ya sabunta.
+settings-update-downloading = Ana saukewa…
+settings-update-downloading-hint = Ana sauke Vmux { $version }…
+settings-update-installing = Ana shigarwa…
+settings-update-installing-hint = Ana shigar da Vmux { $version }…
+settings-update-ready = Sabuntawa Ta Shirya
+settings-update-ready-hint = Vmux { $version } ya shirya. Sake kunnawa don aiwatarwa.
+settings-update-try-again = Sake gwadawa
+settings-update-failed = Ba a iya duba sabuntawa ba.
+settings-item = Abu
+settings-item-number = Abu { $number }
+settings-press-key = Danna maɓalli…
+settings-saved = An ajiye
+settings-record-key = Danna don ɗaukar sabon haɗin maɓalli
+
+tray-open-window = Buɗe Taga
+tray-close-window = Rufe Taga
+tray-pause-recording = Dakatar da Rikodi
+tray-resume-recording = Ci gaba da Rikodi
+tray-finish-recording = Kammala Rikodi
+tray-quit = Fita daga Vmux
+
+composer-attach-files = Haɗa fayiloli (/upload)
+composer-remove-attachment = Cire abin da aka haɗa
+
+layout-back = Baya
+layout-forward = Gaba
+layout-reload = Sake lodawa
+layout-bookmark-page = Ajiye wannan shafi
+layout-remove-bookmark = Cire alama
+layout-pin-page = Liƙa wannan shafi
+layout-unpin-page = Cire liƙawa daga wannan shafi
+layout-manage-extensions = Sarrafa faɗaɗawa
+layout-new-stack = Sabon Stack
+layout-close-tab = Rufe tab
+layout-bookmark = Alama
+layout-pin = Liƙa
+layout-new-tab = Sabon tab
+layout-team = Ƙungiya
+
+command-switch-space = Sauya wuri…
+command-search-ask = Nema ko tambaya…
+command-new-tab-placeholder = Nema ko rubuta URL, ko zaɓi Terminal…
+command-placeholder = Rubuta URL, nemi tabs, ko > don umarni…
+command-composer-placeholder = Rubuta / don umarni ko @ don media
+command-send = Aika (Enter)
+command-terminal = Terminal
+command-open-terminal = Buɗe a Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] tab 1
+   *[other] tabs { $count }
+}
+command-prompt = Umurnin AI
+command-new-tab = Sabon tab
+command-search = Nema
+command-open-value = Buɗe “{ $value }”
+command-search-value = Nemi “{ $value }”
+
+schema-appearance = Kamanni
+schema-general = Gaba ɗaya
+schema-layout = Tsari
+schema-layout-detail = Taga, yankuna, sandar gefe, da zoben mayar da hankali.
+schema-agent = Wakilin AI
+schema-agent-detail = Halayen wakilin AI da izinin kayan aiki.
+schema-shortcuts = Gajerun hanyoyi
+schema-shortcuts-detail = Kallo kawai. Gyara settings.ron kai tsaye don sauya maɗaura.
+schema-terminal = Terminal
+schema-browser = Burauza
+schema-mode = Yanayi
+schema-mode-detail = Tsarin launi na shafukan yanar gizo. Device yana bin tsarin na'urarka.
+schema-device = Device
+schema-light = Haske
+schema-dark = Duhu
+schema-language = Harshe
+schema-language-detail = Yi amfani da tsarin na'ura, en-US, ja, ko kowace alamar BCP 47 da ke da kasidar ~/.vmux/locales/<tag>.ftl da ta dace.
+schema-auto-update = Sabuntawa ta atomatik
+schema-auto-update-detail = Duba kuma shigar da sabuntawa lokacin farawa da kowane awa.
+schema-startup-url = URL na farawa
+schema-startup-url-detail = Idan babu komai, zai buɗe prompt ɗin sandar umarni.
+schema-search-engine = Injin nema
+schema-search-engine-detail = Ana amfani da shi don neman yanar gizo daga Fara da sandar umarni.
+schema-window = Taga
+schema-pane = Yanki
+schema-side-sheet = Takardar gefe
+schema-focus-ring = Zoben mayar da hankali
+schema-run-placement = Bari a sauya wurin gudu
+schema-run-placement-detail = Bari wakilan AI su zaɓi yanayin yankin gudu, alkibla, da anga.
+schema-leader = Leader
+schema-leader-detail = Maɓallin farko don gajerun chord.
+schema-chord-timeout = Lokacin ƙarewar chord
+schema-chord-timeout-detail = Milliseconds kafin prefix na chord ya ƙare.
+schema-bindings = Maɗaura
+schema-confirm-close = Tabbatar kafin rufewa
+schema-confirm-close-detail = Yi tambaya kafin rufe terminal da ke da process mai gudana.
+schema-default-theme = Tsohon jigo
+schema-default-theme-detail = Sunan jigon da ke aiki daga jerin jigogi.
+
+settings-empty = (babu komai)
+settings-none = (babu)
+
+schema-system = Tsari
+schema-editor = Edita
+schema-recording = Rikodi
+schema-radius = Radius
+schema-padding = Tazarar ciki
+schema-gap = Tazara
+schema-width = Faɗi
+schema-color = Launi
+schema-red = Ja
+schema-green = Kore
+schema-blue = Shuɗi
+schema-follow-files = Bi fayiloli
+schema-tidy-files = Tsaftace fayiloli
+schema-tidy-files-max = Iyakar tsaftace fayiloli
+schema-tidy-files-auto = Tsaftace fayiloli ta atomatik
+schema-app-providers = Masu samar da manhajoji
+schema-provider = Mai samarwa
+schema-kind = Nau’i
+schema-models = Samfura
+schema-acp = Wakilan ACP
+schema-id = ID
+schema-name = Suna
+schema-command = Umarni
+schema-arguments = Arguman
+schema-environment = Muhalli
+schema-working-directory = Kundin aiki
+schema-shell = Kwanso
+schema-font-family = Iyalin font
+schema-startup-directory = Kundin farawa
+schema-themes = Jigogi
+schema-color-scheme = Tsarin launi
+schema-font-size = Girman font
+schema-line-height = Tsayin layi
+schema-cursor-style = Salon siginan
+schema-cursor-blink = Kiftawar siginan
+schema-custom-themes = Jigogi na musamman
+schema-foreground = Gaba
+schema-background = Baya
+schema-cursor = Siginan
+schema-ansi-colors = Launukan ANSI
+schema-keymap = Taswirar maɓalli
+schema-explorer = Mai bincike
+schema-visible = A bayyane
+schema-language-servers = Sabobin harshe
+schema-servers = Sabobi
+schema-language-id = ID na harshe
+schema-root-markers = Alamomin tushen aiki
+schema-output-directory = Kundin fitarwa
+
+menu-scene = Fage
+menu-layout = Tsarawa
+menu-terminal = Tasha
+menu-browser = Burauza
+menu-service = Sabis
+menu-bookmark = Alamar shafi
+menu-edit = Gyara
+
+layout-knowledge = Ilimi
+layout-open-knowledge = Buɗe Ilimi
+layout-open-welcome-knowledge = Buɗe Maraba zuwa Ilimi
+layout-open-path = Buɗe { $path }
+layout-fold-knowledge = Ninke ilimi
+layout-unfold-knowledge = Buɗe ilimi
+layout-bookmarks = Alamomin shafi
+layout-new-folder = Sabon babban fayil
+layout-add-to-bookmarks = Ƙara zuwa Alamomin shafi
+layout-move-to-bookmarks = Matsar zuwa Alamomin shafi
+layout-stack-number = Tari { $number }
+layout-fold-stack = Ninke tari
+layout-unfold-stack = Buɗe tari
+layout-close-stack = Rufe tari
+layout-bookmark-in = Saka alamar shafi a { $folder }
+
+common-cancel = Soke
+common-delete = Share
+common-save = Ajiye
+common-rename = Sake suna
+common-expand = Faɗaɗa
+common-collapse = Naɗe
+common-loading = Ana lodawa…
+common-error = Kuskure
+common-output = Fitarwa
+common-pending = A jira
+common-current = na yanzu
+common-stop = Tsaya
+services-command = Sabis na Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = An kasa loda shafin
+error-page-not-found = Ba a sami shafin ba
+error-unknown-host = Mai masaukin app na Vmux da ba a sani ba: { $host }
+
+history-title = Tarihi
+
+command-new-app-chat = Sabuwar hira ta { $provider }/{ $model } (App)
+command-interactive-mode-user = Fage > Yanayin hulɗa > Mai amfani
+command-interactive-mode-player = Fage > Yanayin hulɗa > Mai kunnawa
+command-minimize-window = Tsari > Taga > Rage taga
+command-toggle-layout = Tsari > Tsari > Kunna/kashe tsari
+command-close-tab = Tsari > Tab > Rufe tab
+command-new-task = Tsari > Tab > Sabon aiki…
+command-next-tab = Tsari > Tab > Tab na gaba
+command-prev-tab = Tsari > Tab > Tab na baya
+command-rename-tab = Tsari > Tab > Sake sunan tab
+command-tab-select-1 = Tsari > Tab > Zaɓi Tab 1
+command-tab-select-2 = Tsari > Tab > Zaɓi Tab 2
+command-tab-select-3 = Tsari > Tab > Zaɓi Tab 3
+command-tab-select-4 = Tsari > Tab > Zaɓi Tab 4
+command-tab-select-5 = Tsari > Tab > Zaɓi Tab 5
+command-tab-select-6 = Tsari > Tab > Zaɓi Tab 6
+command-tab-select-7 = Tsari > Tab > Zaɓi Tab 7
+command-tab-select-8 = Tsari > Tab > Zaɓi Tab 8
+command-tab-select-last = Tsari > Tab > Zaɓi tab na ƙarshe
+command-close-pane = Tsari > Fanni > Rufe fanni
+command-select-pane-left = Tsari > Fanni > Zaɓi fannin hagu
+command-select-pane-right = Tsari > Fanni > Zaɓi fannin dama
+command-select-pane-up = Tsari > Fanni > Zaɓi fannin sama
+command-select-pane-down = Tsari > Fanni > Zaɓi fannin ƙasa
+command-swap-pane-prev = Tsari > Fanni > Musanya da fannin baya
+command-swap-pane-next = Tsari > Fanni > Musanya da fannin gaba
+command-equalize-pane-size = Tsari > Fanni > Daidaita girman fanni
+command-resize-pane-left = Tsari > Fanni > Ja girman fanni hagu
+command-resize-pane-right = Tsari > Fanni > Ja girman fanni dama
+command-resize-pane-up = Tsari > Fanni > Ja girman fanni sama
+command-resize-pane-down = Tsari > Fanni > Ja girman fanni ƙasa
+command-stack-close = Tsari > Tari > Rufe tari
+command-stack-next = Tsari > Tari > Tari na gaba
+command-stack-previous = Tsari > Tari > Tari na baya
+command-stack-reopen = Tsari > Tari > Sake buɗe shafin da aka rufe
+command-stack-swap-prev = Tsari > Tari > Matsar da tari hagu
+command-stack-swap-next = Tsari > Tari > Matsar da tari dama
+command-space-open = Tsari > Wuri > Wurare
+command-terminal-close = Tashar umarni > Rufe tashar umarni
+command-terminal-next = Tashar umarni > Tashar umarni ta gaba
+command-terminal-prev = Tashar umarni > Tashar umarni ta baya
+command-terminal-clear = Tashar umarni > Share tashar umarni
+command-browser-prev-page = Burauza > Kewayawa > Baya
+command-browser-next-page = Burauza > Kewayawa > Gaba
+command-browser-reload = Burauza > Kewayawa > Sake loda
+command-browser-hard-reload = Burauza > Kewayawa > Tilasta sake loda
+command-open-in-place = Burauza > Buɗe > Buɗe a nan
+command-open-in-new-stack = Burauza > Buɗe > Buɗe a sabon tari
+command-open-in-pane-top = Burauza > Buɗe > Buɗe a fannin sama
+command-open-in-pane-right = Burauza > Buɗe > Buɗe a fannin dama
+command-open-in-pane-bottom = Burauza > Buɗe > Buɗe a fannin ƙasa
+command-open-in-pane-left = Burauza > Buɗe > Buɗe a fannin hagu
+command-open-in-new-tab = Burauza > Buɗe > Buɗe a sabon tab
+command-open-in-new-space = Burauza > Buɗe > Buɗe a sabon wuri
+command-browser-zoom-in = Burauza > Duba > Zuƙowa ciki
+command-browser-zoom-out = Burauza > Duba > Zuƙowa waje
+command-browser-zoom-reset = Burauza > Duba > Girman asali
+command-browser-dev-tools = Burauza > Duba > Kayan aikin masu haɓakawa
+command-browser-open-command-bar = Burauza > Mashaya > Mashayar umarni
+command-browser-open-page-in-command-bar = Burauza > Mashaya > Gyara shafi
+command-browser-open-path-bar = Burauza > Mashaya > Mai kewayen hanya
+command-browser-open-commands = Burauza > Mashaya > Umarni
+command-browser-open-history = Burauza > Mashaya > Tarihi
+command-service-open = Sabis > Buɗe mai lura da sabis
+command-bookmark-toggle-active = Alama > Yi wa shafi alama
+command-bookmark-pin-active = Alama > Makala shafi
+
+layout-tab = Tab
+layout-no-stacks = Babu taruka
+layout-loading = Ana lodawa…
+layout-no-markdown-files = Babu fayilolin Markdown
+layout-empty-folder = Babban fayil babu komai
+layout-worktree = bishiyar aiki
+layout-folder-name = Sunan babban fayil
+layout-no-pins-bookmarks = Babu makalallu ko alamomi
+layout-move-to = Matsar zuwa { $folder }
+layout-bookmark-current-page = Yi wa shafin yanzu alama
+layout-rename-folder = Sake sunan babban fayil
+layout-remove-folder = Cire babban fayil
+layout-update-downloading = Ana zazzage sabuntawa
+layout-update-installing = Ana girka sabuntawa…
+layout-update-ready = Sabuwar sigar na nan
+layout-restart-update = Sake farawa don sabuntawa
+
+agent-preparing = Ana shirya agent…
+agent-send-all-queued = Aika duk prompts ɗin da ke jira yanzu (Esc)
+agent-send = Aika (Enter)
+agent-ready = A shirye nake idan ka shirya.
+agent-loading-older = Ana loda tsoffin saƙonni…
+agent-load-older = Loda tsoffin saƙonni
+agent-continued-from = An ci gaba daga { $source }
+agent-older-context-omitted = an tsallake tsohon mahalli
+agent-interrupted = an katse
+agent-allow-tool = A ba { $tool } izini?
+agent-deny = Ƙi
+agent-allow-always = Ba izini koyaushe
+agent-allow = Ba izini
+agent-loading-sessions = Ana loda zaman aiki…
+agent-no-resumable-sessions = Ba a sami zaman da za a iya ci gaba da shi ba
+agent-no-matching-sessions = Babu zaman da ya dace
+agent-no-matching-models = Babu model da ya dace
+agent-choice-help = ↑/↓ ko Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Zaɓi babban fayil ɗin ma’ajiyar lamba
+agent-choose-repository-detail = Zaɓi ma’ajiyar Git ta gida da agent zai yi amfani da ita.
+agent-choosing = Ana zaɓa…
+agent-choose-folder = Zaɓi babban fayil
+agent-queued = a layi
+agent-attached = An haɗa:
+agent-cancel-queued = Soke prompt ɗin da ke layi
+agent-resume-queued = Ci gaba da prompts ɗin da ke layi
+agent-clear-queue = Share layi
+agent-send-all-now = aika duka yanzu
+agent-choose-option = Zaɓi zaɓi a sama
+agent-loading-media = Ana loda midiya…
+agent-no-matching-media = Babu midiya da ta dace
+agent-prompt-context = Mahallin prompt
+agent-details = Cikakkun bayanai
+agent-path = Hanya
+agent-tool = Kayan aiki
+agent-server = Sabar
+agent-bytes = { $count } bytes
+agent-worked-for = Ya yi aiki na { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Ya yi aiki na { $duration } · mataki 1
+   *[other] Ya yi aiki na { $duration } · matakai { $count }
+}
+agent-tool-guardian-review = Binciken Mai tsaro
+agent-tool-read-files = Karanta fayiloli
+agent-tool-viewed-image = Duba hoto
+agent-tool-used-browser = Yi amfani da burauza
+agent-tool-searched-files = Bincika fayiloli
+agent-tool-ran-commands = Gudanar da umarni
+agent-thinking = Yana tunani
+agent-subagent = Ƙaramin agent
+agent-prompt = Prompt
+agent-thread = Zare
+agent-parent = Uba
+agent-children = ’Ya’ya
+agent-call = Kira
+agent-raw-event = Abun faruwa ɗanye
+agent-plan = Tsari
+agent-tasks = { $count ->
+    [one] aiki 1
+   *[other] ayyuka { $count }
+}
+agent-edited = An gyara
+agent-reconnecting = Ana sake haɗawa { $attempt }/{ $total }
+agent-status-running = Yana gudana
+agent-status-done = An gama
+agent-status-failed = Ya gaza
+agent-status-pending = A jira
+agent-slash-attach-files = Haɗa fayiloli
+agent-slash-resume-session = Ci gaba da zaman da ya gabata
+agent-slash-select-model = Zaɓi model
+agent-slash-continue-cli = Ci gaba da wannan zaman a cikin CLI
+agent-session-just-now = yanzu-yanzu
+agent-session-minutes-ago = minti { $count } da suka wuce
+agent-session-hours-ago = awa { $count } da suka wuce
+agent-session-days-ago = kwanaki { $count } da suka wuce
+agent-working-working = Yana aiki
+agent-working-thinking = Yana tunani
+agent-working-pondering = Yana zurfafa tunani
+agent-working-noodling = Yana laluben mafita
+agent-working-percolating = Yana sarrafa tunani
+agent-working-conjuring = Yana ƙirƙiro
+agent-working-cooking = Yana dafa mafita
+agent-working-brewing = Yana haɗawa
+agent-working-musing = Yana nazari
+agent-working-ruminating = Yana tauna tunani
+agent-working-scheming = Yana tsara dabaru
+agent-working-synthesizing = Yana haɗa bayanai
+agent-working-tinkering = Yana gwaji
+agent-working-churning = Yana sarrafawa
+agent-working-vibing = Yana kama salo
+agent-working-simmering = Yana tausa mafita
+agent-working-crafting = Yana ƙera
+agent-working-divining = Yana gano hanya
+agent-working-mulling = Yana nazari
+agent-working-spelunking = Yana tono bayanai
+
+editor-toggle-explorer = Kunna/kashe Mai bincike (Cmd+B)
+editor-unsaved = ba a ajiye ba
+editor-rendered-markdown = Markdown da aka nuna tare da gyara kai tsaye
+editor-note = Bayani
+editor-source-editor = Editan tushe
+editor-editor = Edita
+editor-git-diff = Bambancin Git
+editor-diff = Bambanci
+editor-tidy = Gyara
+editor-always = Koyaushe
+editor-unchanged-previews = { $count ->
+    [one] ✦ preview 1 da bai canza ba
+   *[other] ✦ previews { $count } da ba su canza ba
+}
+editor-open-externally = Buɗe a waje
+editor-changed-line = Layin da ya canza
+editor-go-to-definition = Je zuwa ma’ana
+editor-find-references = Nemo nassoshi
+editor-references = { $count ->
+    [one] nuni 1
+   *[other] nassoshi { $count }
+}
+editor-lsp-starting = { $server } yana farawa…
+editor-lsp-not-installed = { $server } — ba a girka ba
+editor-explorer = Mai bincike
+editor-open-editors = Editoci da aka buɗe
+editor-outline = Tsarin fayil
+editor-new-file = Sabon fayil
+editor-new-folder = Sabon babban fayil
+editor-delete-confirm = A share “{ $name }”? Ba za a iya maido da wannan ba.
+editor-created-folder = An ƙirƙiri babban fayil { $name }
+editor-created-file = An ƙirƙiri fayil { $name }
+editor-renamed-to = An sake suna zuwa { $name }
+editor-deleted = An share { $name }
+editor-failed-decode-image = An kasa fassara hoton
+editor-preview-large-image = hoto (ya yi girma a nuna preview)
+editor-preview-binary = binary
+editor-preview-file = fayil
+
+git-status-clean = tsafta
+git-status-modified = an gyara
+git-status-staged = an shirya
+git-status-staged-modified = an shirya*
+git-status-untracked = ba a bin sawu
+git-status-deleted = an share
+git-status-conflict = rikici
+git-accept-all = ✓ karɓi duka
+git-unstage = Cire daga shiri
+git-confirm-deny-all = Tabbatar da ƙin duka
+git-deny-all = ✗ ƙi duka
+git-commit-message = saƙon commit
+git-commit = Commit ({ $count })
+git-push = ↑ Tura
+git-loading-diff = Ana loda bambanci…
+git-no-changes = Babu canje-canje da za a nuna
+git-accept = ✓ karɓa
+git-deny = ✗ ƙi
+git-show-unchanged-lines = Nuna layuka { $count } da ba su canza ba
+
+terminal-loading = Ana lodawa…
+terminal-runs-when-ready = yana gudana idan ya shirya · Ctrl+C yana sharewa · Esc yana tsallakewa
+terminal-booting = yana farawa
+terminal-type-command = rubuta umarni · zai gudana idan ya shirya · Esc yana tsallakewa
+
+setup-tagline-claude = Agent ɗin coding na Anthropic, a cikin Vmux
+setup-tagline-codex = Agent ɗin coding na OpenAI, a cikin Vmux
+setup-tagline-vibe = Agent ɗin coding na Mistral, a cikin Vmux
+setup-install-title = Girka CLI na { $name }
+setup-homebrew-required = Ana buƙatar Homebrew don girka { $command }, kuma ba a saita shi tukuna ba. Vmux zai fara girka Homebrew, sannan { $name }.
+setup-terminal-instructions = A cikin tashar umarni, danna Return don farawa, sannan shigar da kalmar sirrin Mac ɗinka idan an nema.
+setup-command-missing = Vmux ya buɗe wannan shafin saboda umarnin gida { $command } bai girku ba tukuna. Gudanar da umarnin da ke ƙasa don samunsa.
+setup-install-failed = Girka bai kammala ba. Duba tashar umarni don cikakkun bayanai, sannan sake gwadawa.
+setup-installing = Ana girkawa…
+setup-install-homebrew = Girka Homebrew + { $name }
+setup-run-install = Gudanar da umarnin girka
+setup-auto-reload = Vmux yana gudanar da shi a tashar umarni kuma yana sake loda idan { $command } ya shirya.
+
+debug-title = Gyaran kurakurai
+debug-auto-update = Sabunta kai tsaye
+debug-simulate-update = Kwaikwayi akwai sabuntawa
+debug-simulate-download = Kwaikwayi zazzagewa
+debug-clear-update = Share sabuntawa
+debug-trigger-restart = Tayar da sake farawa
+
+command-manage-spaces = Sarrafa sarari…
+command-pane-stack-location = fanni { $pane } / tari { $stack }
+command-space-pane-stack-location = { $space } / fanni { $pane } / tari { $stack }
+command-terminal-path = Tasha ({ $path })
+command-group-interactive-mode = Yanayin Mu'amala
+command-group-window = Taga
+command-group-tab = Shafi
+command-group-pane = Fanni
+command-group-stack = Tari
+command-group-space = Sarari
+command-group-navigation = Kewayawa
+command-group-open = Buɗe
+command-group-view = Kallo
+command-group-bar = Mashaya
+
+menu-close-vmux = Rufe Vmux
+
+agents-terminal-coding-agent = Wakilin rubuta lamba ta tasha

@@ -11,8 +11,13 @@ default = []
 gallery = ["dep:regex", "dep:sha2"]
 
 [dependencies]
+fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
+unic-langid = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sys-locale = { workspace = true }
 
 [build-dependencies]
 regex = { workspace = true, optional = true }
@@ -32,6 +37,7 @@ web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",
     "CssStyleDeclaration", "DomRect",
     "EventTarget", "Event", "HtmlTextAreaElement", "KeyboardEvent",
+    "Navigator",
 ] }
 dioxus = { workspace = true }
 time = { version = "0.3", default-features = false, features = [

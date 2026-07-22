@@ -41,6 +41,9 @@ use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{LastActivatedAt, now_millis};
+use vmux_ui::i18n::{TranslationValue, requested_locale, translate_for, translate_for_with};
+
+use crate::settings::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -175,13 +178,13 @@ pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
 /// History page shows the History shortcut. Their menu items + shortcuts stay.
 const COMMAND_BAR_SKIP_IDS: &[&str] = &["service_open", "browser_open_history"];
 
-pub fn command_list(app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry> {
+pub fn command_list(locale: &str, app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
         .filter(|(id, _, _)| !COMMAND_BAR_SKIP_IDS.contains(id))
         .map(|(id, name, shortcut)| CommandBarEntry {
             id: id.to_string(),
-            name,
+            name: localized_command_name(locale, id, name),
             shortcut: shortcut.to_string(),
         })
         .collect();
@@ -191,6 +194,76 @@ pub fn command_list(app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntr
         shortcut: String::new(),
     }));
     entries
+}
+
+/// Resolve a command-bar menu path for the requested locale.
+pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> String {
+    let message_id = format!("command-{}", id.replace('_', "-"));
+    let translated = translate_for(locale, &message_id);
+    if translated == message_id {
+        return fallback;
+    }
+    let Some((root_id, group_id)) = command_hierarchy_ids(id) else {
+        return translated;
+    };
+    let mut segments = translated
+        .split(" > ")
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if segments.is_empty() {
+        return translated;
+    }
+    segments[0] = translate_for(locale, root_id);
+    if let Some(group_id) = group_id
+        && segments.len() > 2
+    {
+        segments[1] = translate_for(locale, group_id);
+    }
+    segments.join(" > ")
+}
+
+fn command_hierarchy_ids(id: &str) -> Option<(&'static str, Option<&'static str>)> {
+    if id.starts_with("interactive_mode_") {
+        Some(("menu-scene", Some("command-group-interactive-mode")))
+    } else if id == "minimize_window" {
+        Some(("menu-layout", Some("command-group-window")))
+    } else if id == "toggle_layout" {
+        Some(("menu-layout", Some("menu-layout")))
+    } else if matches!(
+        id,
+        "close_tab" | "new_task" | "next_tab" | "prev_tab" | "rename_tab"
+    ) || id.starts_with("tab_select_")
+    {
+        Some(("menu-layout", Some("command-group-tab")))
+    } else if id.starts_with("open_in_") {
+        Some(("menu-browser", Some("command-group-open")))
+    } else if id.contains("pane") {
+        Some(("menu-layout", Some("command-group-pane")))
+    } else if id.starts_with("stack_") {
+        Some(("menu-layout", Some("command-group-stack")))
+    } else if id == "space_open" {
+        Some(("menu-layout", Some("command-group-space")))
+    } else if id.starts_with("terminal_") {
+        Some(("menu-terminal", None))
+    } else if matches!(
+        id,
+        "browser_prev_page" | "browser_next_page" | "browser_reload" | "browser_hard_reload"
+    ) {
+        Some(("menu-browser", Some("command-group-navigation")))
+    } else if matches!(
+        id,
+        "browser_zoom_in" | "browser_zoom_out" | "browser_zoom_reset" | "browser_dev_tools"
+    ) {
+        Some(("menu-browser", Some("command-group-view")))
+    } else if id.starts_with("browser_open_") {
+        Some(("menu-browser", Some("command-group-bar")))
+    } else if id == "service_open" {
+        Some(("menu-service", None))
+    } else if id.starts_with("bookmark_") {
+        Some(("menu-bookmark", None))
+    } else {
+        None
+    }
 }
 
 /// Display string for a command's shortcut, looked up by menu id. Used to show
@@ -641,6 +714,7 @@ fn handle_open_command_bar(
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
         Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
+        Option<Res<ResolvedLocale>>,
     )>,
     mut commands: Commands,
 ) {
@@ -651,6 +725,11 @@ fn handle_open_command_bar(
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
     let pages_snap = snapshot_params.p5().clone();
     let work_snap = snapshot_params.p6().clone();
+    let locale = snapshot_params
+        .p7()
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(|| requested_locale(None));
 
     let request = command_bar_open_request(reader.read().cloned());
     let mut should_open = false;
@@ -914,6 +993,7 @@ fn handle_open_command_bar(
         &browser_meta,
         &child_of_q,
         &space_name,
+        &locale,
     );
 
     let has_browser = browsers.has_browser(modal_e);
@@ -958,6 +1038,7 @@ fn handle_open_command_bar(
         &agents_snap,
         &pages_snap,
         &work_snap,
+        &locale,
         active_stack_count,
         bar_tabs,
         target,
@@ -1066,6 +1147,7 @@ pub(crate) fn gather_command_bar_tabs(
     browser_meta: &Query<&PageMetadata, With<Browser>>,
     child_of_q: &Query<&ChildOf>,
     space_name: &str,
+    locale: &str,
 ) -> Vec<CommandBarTab> {
     let mut bar_tabs = Vec::new();
     let Some(active_tab_e) = active_tab else {
@@ -1093,13 +1175,26 @@ pub(crate) fn gather_command_bar_tabs(
                 continue;
             }
             let stack_is_active = active_stack == Some(child) && is_active_pane;
+            let pane_number = pane_pos as i64 + 1;
+            let stack_number = tab_index as i64 + 1;
             let location = if space_name.is_empty() {
-                format!("pane {} / stack {}", pane_pos + 1, tab_index + 1)
+                translate_for_with(
+                    locale,
+                    "command-pane-stack-location",
+                    &[
+                        ("pane", TranslationValue::Number(pane_number)),
+                        ("stack", TranslationValue::Number(stack_number)),
+                    ],
+                )
             } else {
-                format!(
-                    "{space_name} / pane {} / stack {}",
-                    pane_pos + 1,
-                    tab_index + 1
+                translate_for_with(
+                    locale,
+                    "command-space-pane-stack-location",
+                    &[
+                        ("space", TranslationValue::String(space_name)),
+                        ("pane", TranslationValue::Number(pane_number)),
+                        ("stack", TranslationValue::Number(stack_number)),
+                    ],
                 )
             };
             if let Ok(tab_kids) = all_children.get(child) {
@@ -1134,6 +1229,7 @@ pub(crate) fn build_command_bar_open_payload(
     agents_snapshot: &CommandBarAgentsSnapshot,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
+    locale: &str,
     active_stack_count: usize,
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
@@ -1143,10 +1239,22 @@ pub(crate) fn build_command_bar_open_payload(
         .iter()
         .map(|s| AppAgentEntry {
             id: app_agent_id(&s.provider, &s.model),
-            name: format!("New {}/{} chat (App)", s.provider, s.model),
+            name: translate_for_with(
+                locale,
+                "command-new-app-chat",
+                &[
+                    ("provider", TranslationValue::String(&s.provider)),
+                    ("model", TranslationValue::String(&s.model)),
+                ],
+            ),
         })
         .collect();
     let mut pages = pages_snapshot.pages.clone();
+    for page in &mut pages {
+        if let Some(message_id) = page_title_message_id(&page.host) {
+            page.title = translate_for(locale, message_id);
+        }
+    }
     pages.extend(agent_pages(agents_snapshot));
     let history_shortcut = command_shortcut("browser_open_history");
     if !history_shortcut.is_empty()
@@ -1154,7 +1262,7 @@ pub(crate) fn build_command_bar_open_payload(
     {
         page.shortcut = history_shortcut;
     }
-    let commands: Vec<CommandBarCommandEntry> = command_list(app_agent_entries)
+    let commands: Vec<CommandBarCommandEntry> = command_list(locale, app_agent_entries)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id,
@@ -1194,6 +1302,22 @@ pub(crate) fn build_command_bar_open_payload(
         work_snapshot.recent_files.clone(),
         work_snapshot.search_engines.clone(),
     )
+}
+
+fn page_title_message_id(host: &str) -> Option<&'static str> {
+    match host {
+        "agents" => Some("agents-title"),
+        "extensions" => Some("extensions-title"),
+        "history" => Some("history-title"),
+        "lsp" => Some("lsp-title"),
+        "services" => Some("services-title"),
+        "settings" => Some("settings-title"),
+        "spaces" => Some("spaces-title"),
+        "start" => Some("start-title"),
+        "team" => Some("team-title"),
+        "terminal" => Some("command-terminal"),
+        _ => None,
+    }
 }
 
 #[derive(SystemParam)]
@@ -1305,6 +1429,7 @@ fn on_command_bar_action(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
         Res<CommandBarAgentsSnapshot>,
+        Option<Res<ResolvedLocale>>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut writer_params: ParamSet<(
@@ -1333,6 +1458,11 @@ fn on_command_bar_action(
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
     let inline_transition_stack = start_agent_transition_stack(webview, &queries);
+    let locale = resource_params
+        .p3()
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(|| requested_locale(None));
 
     match evt.action.as_str() {
         "prompt" => {
@@ -1416,7 +1546,11 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
                         url: terminal_page_url.clone(),
-                        title: format!("Terminal ({})", dir.display()),
+                        title: translate_for_with(
+                            &locale,
+                            "command-terminal-path",
+                            &[("path", TranslationValue::String(&dir.display().to_string()))],
+                        ),
                         ..default()
                     });
                     writer_params.p3().write(TerminalSpawnRequest {
@@ -1517,7 +1651,7 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
                         url: terminal_page_url.clone(),
-                        title: "Terminal".to_string(),
+                        title: translate_for(&locale, "command-terminal"),
                         ..default()
                     });
                     writer_params.p3().write(TerminalSpawnRequest {
@@ -1546,7 +1680,7 @@ fn on_command_bar_action(
                             .id();
                         commands.entity(stack_e).insert(PageMetadata {
                             url: terminal_page_url.clone(),
-                            title: "Terminal".to_string(),
+                            title: translate_for(&locale, "command-terminal"),
                             ..default()
                         });
                         writer_params.p3().write(TerminalSpawnRequest {
@@ -2096,6 +2230,7 @@ mod tests {
             &agents,
             &pages,
             &work,
+            "en-US",
             0,
             Vec::new(),
             Some(OpenTarget::InPlace),
@@ -2103,6 +2238,18 @@ mod tests {
         assert_eq!(payload.open_id, 7);
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
         assert!(!payload.commands.is_empty());
+    }
+
+    #[test]
+    fn command_names_localize_every_hierarchy_segment() {
+        assert_eq!(
+            localized_command_name("ja", "browser_prev_page", "fallback".to_string()),
+            "ブラウザ > ナビゲーション > 戻る"
+        );
+        assert_eq!(
+            localized_command_name("ja", "close_pane", "fallback".to_string()),
+            "レイアウト > ペイン > ペインを閉じる"
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use vmux_ui::hooks::use_theme;
+use vmux_ui::i18n::translate;
 
 #[component]
 pub fn Page() -> Element {
@@ -13,9 +14,17 @@ pub fn Page() -> Element {
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.clone())
     };
-    let title = lookup("title").unwrap_or_else(|| "Error".to_string());
+    let title = match lookup("title").as_deref() {
+        Some("Page failed to load") => translate("error-page-failed-load"),
+        Some("Page not found") => translate("error-page-not-found"),
+        Some(title) => title.to_string(),
+        None => translate("error-title"),
+    };
     let message = lookup("message").unwrap_or_default();
     let url = lookup("url").unwrap_or_default();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&title);
+    }
 
     rsx! {
         div { class: "flex h-full min-h-0 items-center justify-center bg-background p-10 text-foreground",

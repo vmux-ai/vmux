@@ -168,9 +168,18 @@ mod host_tests {
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 #[component]
 fn UnknownPage(host: String) -> Element {
+    use vmux_ui::i18n::{TranslationValue, translate_with};
+
+    vmux_ui::hooks::use_theme();
     rsx! {
         div { class: "flex h-screen items-center justify-center bg-background text-foreground",
-            div { class: "text-sm text-muted-foreground", "Unknown vmux app host: {host}" }
+            div {
+                class: "text-sm text-muted-foreground",
+                {translate_with(
+                    "error-unknown-host",
+                    &[("host", TranslationValue::String(&host))],
+                )}
+            }
         }
     }
 }

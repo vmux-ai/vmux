@@ -1,0 +1,602 @@
+locale-name = lietuvių
+common-open = Atidaryti
+common-close = Uždaryti
+common-install = Įdiegti
+common-uninstall = Pašalinti
+common-update = Atnaujinti
+common-retry = Bandyti dar kartą
+common-refresh = Įkelti iš naujo
+common-remove = Pašalinti
+common-enable = Įjungti
+common-disable = Išjungti
+common-new = Naujas
+common-active = aktyvu
+common-running = veikia
+common-done = atlikta
+common-failed = Nepavyko
+common-installed = Įdiegta
+common-items = { $count ->
+    [one] { $count } elementas
+   *[other] { $count } elementai
+}
+start-title = Pradžia
+start-tagline = Viena užklausa. Viskas atlikta.
+
+agents-title = Agentai
+agents-search = Ieškoti ACP ir CLI agentų…
+agents-empty = Atitinkančių agentų nėra
+agents-empty-detail = Bandykite įvesti pavadinimą, vykdymo aplinką arba ACP/CLI.
+agents-install-failed = Įdiegti nepavyko
+agents-updating = Atnaujinama…
+agents-retrying = Bandoma dar kartą…
+agents-preparing = Ruošiama…
+
+extensions-title = Plėtiniai
+extensions-search = Ieškoti įdiegtų arba Chrome Web Store…
+extensions-relaunch = Paleiskite iš naujo, kad įsigaliotų
+extensions-empty = Plėtinių neįdiegta
+extensions-no-match = Atitinkančių plėtinių nėra
+extensions-empty-detail = Ieškokite Chrome Web Store aukščiau ir paspauskite „Enter“.
+extensions-no-match-detail = Bandykite kitą pavadinimą arba plėtinio ID.
+extensions-on = Įjungta
+extensions-off = Išjungta
+extensions-enable-confirm = Įjungti { $name }?
+extensions-enable-permissions = Įjungti { $name } ir leisti:
+
+lsp-title = Kalbų serveriai
+lsp-search = Ieškoti kalbų serverių, lint įrankių, formatuoklių…
+lsp-loading = Įkeliamas katalogas…
+lsp-empty = Atitinkančių kalbų serverių nėra
+lsp-empty-detail = Bandykite kitą kalbą, lint įrankį arba formatuoklį.
+lsp-needs = reikia { $tool }
+lsp-status-available = Pasiekiama
+lsp-status-on-path = PATH kelyje
+lsp-status-installing = Diegiama…
+lsp-status-installed = Įdiegta
+lsp-status-outdated = Yra naujinys
+lsp-status-running = Veikia
+lsp-status-failed = Nepavyko
+
+spaces-title = Darbo sritys
+spaces-new-placeholder = Naujos darbo srities pavadinimas
+spaces-empty = Darbo sričių nėra
+spaces-default-name = Darbo sritis { $number }
+spaces-tabs = { $count ->
+    [one] 1 kortelė
+   *[other] { $count } kortelės
+}
+spaces-delete = Ištrinti darbo sritį
+
+team-title = Komanda
+team-just-you = Šioje darbo srityje esate tik jūs
+team-agents = { $count ->
+    [one] Jūs ir 1 agentas
+   *[other] Jūs ir { $count } agentai
+}
+team-empty = Čia dar nieko nėra
+team-you = Jūs
+team-agent = Agentas
+
+services-title = Foninės tarnybos
+services-processes = { $count ->
+    [one] 1 procesas
+   *[other] { $count } procesai
+}
+services-kill-all = Nutraukti visus priverstinai
+services-not-running = Tarnyba neveikia
+services-start-with = Paleisti su:
+services-empty = Aktyvių procesų nėra
+services-filter = Filtruoti procesus…
+services-no-match = Atitinkančių procesų nėra
+services-connected = Prisijungta
+services-disconnected = Atsijungta
+services-attached = prijungta
+services-kill = Nutraukti priverstinai
+services-memory = Atmintis
+services-size = Dydis
+services-shell = Apvalkalas
+
+error-title = Klaida
+
+history-search = Ieškoti istorijoje
+history-clear-all = Išvalyti viską
+history-clear-confirm = Išvalyti visą istoriją?
+history-clear-warning = Šio veiksmo anuliuoti nepavyks.
+history-cancel = Atšaukti
+history-today = Šiandien
+history-yesterday = Vakar
+history-days-ago = Prieš { $count } d.
+history-day-offset = Diena -{ $count }
+
+settings-title = Nuostatos
+settings-loading = Įkeliamos nuostatos…
+settings-stored = Saugoma ~/.vmux/settings.ron
+settings-other = Kita
+settings-software-update = Programos naujinimas
+settings-check-updates = Tikrinti naujinius
+settings-check-updates-hint = Tikrinama automatiškai paleidžiant ir kas valandą, kai įjungtas automatinis naujinimas.
+settings-update-unavailable = Nepasiekiama
+settings-update-unavailable-hint = Šiame komponavime naujintuvo nėra.
+settings-update-checking = Tikrinama…
+settings-update-checking-hint = Tikrinama, ar yra naujinių…
+settings-update-check-again = Tikrinti dar kartą
+settings-update-current = Naudojate naujausią Vmux versiją.
+settings-update-downloading = Atsisiunčiama…
+settings-update-downloading-hint = Atsisiunčiama Vmux { $version }…
+settings-update-installing = Diegiama…
+settings-update-installing-hint = Diegiama Vmux { $version }…
+settings-update-ready = Naujinys paruoštas
+settings-update-ready-hint = Vmux { $version } paruošta. Paleiskite iš naujo, kad įsigaliotų.
+settings-update-try-again = Bandyti dar kartą
+settings-update-failed = Nepavyko patikrinti naujinių.
+settings-item = Elementas
+settings-item-number = Elementas { $number }
+settings-press-key = Paspauskite klavišą…
+settings-saved = Išsaugota
+settings-record-key = Spustelėkite, kad įrašytumėte naują klavišų derinį
+
+tray-open-window = Atidaryti langą
+tray-close-window = Uždaryti langą
+tray-pause-recording = Pristabdyti įrašymą
+tray-resume-recording = Tęsti įrašymą
+tray-finish-recording = Baigti įrašymą
+tray-quit = Baigti Vmux darbą
+
+composer-attach-files = Pridėti failų (/upload)
+composer-remove-attachment = Pašalinti priedą
+
+layout-back = Atgal
+layout-forward = Pirmyn
+layout-reload = Įkelti iš naujo
+layout-bookmark-page = Įtraukti šį puslapį į adresyną
+layout-remove-bookmark = Pašalinti iš adresyno
+layout-pin-page = Prisegti šį puslapį
+layout-unpin-page = Atsegti šį puslapį
+layout-manage-extensions = Tvarkyti plėtinius
+layout-new-stack = Naujas sluoksnis
+layout-close-tab = Uždaryti kortelę
+layout-bookmark = Adresynas
+layout-pin = Prisegti
+layout-new-tab = Nauja kortelė
+layout-team = Komanda
+
+command-switch-space = Perjungti darbo sritį…
+command-search-ask = Ieškoti arba klausti…
+command-new-tab-placeholder = Ieškokite, įveskite URL arba pasirinkite terminalą…
+command-placeholder = Įveskite URL, ieškokite kortelių arba naudokite > komandoms…
+command-composer-placeholder = Įveskite / komandoms arba @ medijai
+command-send = Siųsti („Enter“)
+command-terminal = Terminalas
+command-open-terminal = Atidaryti terminale
+command-stack = Sluoksnis
+command-tabs = { $count ->
+    [one] 1 kortelė
+   *[other] { $count } kortelės
+}
+command-prompt = Užklausa
+command-new-tab = Nauja kortelė
+command-search = Ieškoti
+command-open-value = Atidaryti „{ $value }“
+command-search-value = Ieškoti „{ $value }“
+
+schema-appearance = Išvaizda
+schema-general = Bendrosios
+schema-layout = Išdėstymas
+schema-layout-detail = Langas, sritys, šoninė juosta ir fokusavimo rėmelis.
+schema-agent = Agentas
+schema-agent-detail = Agento elgsena ir įrankių leidimai.
+schema-shortcuts = Spartieji klavišai
+schema-shortcuts-detail = Tik peržiūra. Norėdami keisti susiejimus, redaguokite settings.ron tiesiogiai.
+schema-terminal = Terminalas
+schema-browser = Naršyklė
+schema-mode = Režimas
+schema-mode-detail = Tinklalapių spalvų schema. Įrenginys naudoja sistemos nustatymus.
+schema-device = Įrenginys
+schema-light = Šviesi
+schema-dark = Tamsi
+schema-language = Kalba
+schema-language-detail = Naudokite sistemos kalbą, en-US, ja arba bet kurią BCP 47 žymą su atitinkančiu ~/.vmux/locales/<tag>.ftl katalogu.
+schema-auto-update = Automatinis naujinimas
+schema-auto-update-detail = Tikrinti ir diegti naujinius paleidžiant ir kas valandą.
+schema-startup-url = Paleidimo URL
+schema-startup-url-detail = Jei tuščia, atidaroma komandų juostos užklausa.
+schema-search-engine = Paieškos sistema
+schema-search-engine-detail = Naudojama žiniatinklio paieškoms iš pradžios ekrano ir komandų juostos.
+schema-window = Langas
+schema-pane = Sritis
+schema-side-sheet = Šoninis skydelis
+schema-focus-ring = Fokusavimo rėmelis
+schema-run-placement = Leisti keisti vykdymo vietą
+schema-run-placement-detail = Leisti agentams pasirinkti vykdymo srities režimą, kryptį ir inkarą.
+schema-leader = Priešdėlio klavišas
+schema-leader-detail = Priešdėlio klavišas akordiniams spartiesiems klavišams.
+schema-chord-timeout = Akordo skirtasis laikas
+schema-chord-timeout-detail = Milisekundės, po kurių akordo priešdėlis nustoja galioti.
+schema-bindings = Susiejimai
+schema-confirm-close = Patvirtinti uždarymą
+schema-confirm-close-detail = Klausti prieš uždarant terminalą, kuriame veikia procesas.
+schema-default-theme = Numatytoji tema
+schema-default-theme-detail = Aktyvios temos pavadinimas iš temų sąrašo.
+
+settings-empty = (tuščia)
+settings-none = (nėra)
+
+schema-system = Sistema
+schema-editor = Redaktorius
+schema-recording = Įrašymas
+schema-radius = Spindulys
+schema-padding = Vidinė paraštė
+schema-gap = Tarpas
+schema-width = Plotis
+schema-color = Spalva
+schema-red = Raudona
+schema-green = Žalia
+schema-blue = Mėlyna
+schema-follow-files = Sekti failus
+schema-tidy-files = Tvarkyti failus
+schema-tidy-files-max = Failų tvarkymo slenkstis
+schema-tidy-files-auto = Automatiškai tvarkyti failus
+schema-app-providers = Programų teikėjai
+schema-provider = Teikėjas
+schema-kind = Tipas
+schema-models = Modeliai
+schema-acp = ACP agentai
+schema-id = ID
+schema-name = Pavadinimas
+schema-command = Komanda
+schema-arguments = Argumentai
+schema-environment = Aplinka
+schema-working-directory = Darbinis katalogas
+schema-shell = Apvalkalas
+schema-font-family = Šriftų šeima
+schema-startup-directory = Paleisties katalogas
+schema-themes = Temos
+schema-color-scheme = Spalvų schema
+schema-font-size = Šrifto dydis
+schema-line-height = Eilutės aukštis
+schema-cursor-style = Žymeklio stilius
+schema-cursor-blink = Žymeklio mirksėjimas
+schema-custom-themes = Pasirinktinės temos
+schema-foreground = Priekinis planas
+schema-background = Fonas
+schema-cursor = Žymeklis
+schema-ansi-colors = ANSI spalvos
+schema-keymap = Klavišų schema
+schema-explorer = Naršyklė
+schema-visible = Matoma
+schema-language-servers = Kalbų serveriai
+schema-servers = Serveriai
+schema-language-id = Kalbos ID
+schema-root-markers = Šaknies žymekliai
+schema-output-directory = Išvesties katalogas
+
+menu-scene = Scena
+menu-layout = Išdėstymas
+menu-terminal = Terminalas
+menu-browser = Naršyklė
+menu-service = Paslauga
+menu-bookmark = Žymelė
+menu-edit = Redagavimas
+
+layout-knowledge = Žinios
+layout-open-knowledge = Atidaryti žinias
+layout-open-welcome-knowledge = Atidaryti „Sveiki atvykę į žinias“
+layout-open-path = Atidaryti { $path }
+layout-fold-knowledge = Suskleisti žinias
+layout-unfold-knowledge = Išskleisti žinias
+layout-bookmarks = Žymelės
+layout-new-folder = Naujas aplankas
+layout-add-to-bookmarks = Pridėti prie žymelių
+layout-move-to-bookmarks = Perkelti į žymeles
+layout-stack-number = Stekas { $number }
+layout-fold-stack = Suskleisti steką
+layout-unfold-stack = Išskleisti steką
+layout-close-stack = Uždaryti steką
+layout-bookmark-in = Įrašyti žymelę į { $folder }
+
+common-cancel = Atšaukti
+common-delete = Ištrinti
+common-save = Įrašyti
+common-rename = Pervardyti
+common-expand = Išskleisti
+common-collapse = Suskleisti
+common-loading = Įkeliama…
+common-error = Klaida
+common-output = Išvestis
+common-pending = Laukiama
+common-current = dabartinis
+common-stop = Stabdyti
+services-command = Vmux paslauga
+services-uptime-seconds = { $seconds } sek.
+services-uptime-minutes = { $minutes } min. { $seconds } sek.
+services-uptime-hours = { $hours } val. { $minutes } min.
+services-uptime-days = { $days } d. { $hours } val.
+
+error-page-failed-load = Nepavyko įkelti puslapio
+error-page-not-found = Puslapis nerastas
+error-unknown-host = Nežinomas Vmux programos serveris: { $host }
+
+history-title = Istorija
+
+command-new-app-chat = Naujas { $provider }/{ $model } pokalbis (programa)
+command-interactive-mode-user = Scena > Interaktyvus režimas > Naudotojas
+command-interactive-mode-player = Scena > Interaktyvus režimas > Leistuvas
+command-minimize-window = Išdėstymas > Langas > Sumažinti
+command-toggle-layout = Išdėstymas > Išdėstymas > Perjungti išdėstymą
+command-close-tab = Išdėstymas > Kortelė > Uždaryti kortelę
+command-new-task = Išdėstymas > Kortelė > Nauja užduotis…
+command-next-tab = Išdėstymas > Kortelė > Kita kortelė
+command-prev-tab = Išdėstymas > Kortelė > Ankstesnė kortelė
+command-rename-tab = Išdėstymas > Kortelė > Pervardyti kortelę
+command-tab-select-1 = Išdėstymas > Kortelė > Pasirinkti 1 kortelę
+command-tab-select-2 = Išdėstymas > Kortelė > Pasirinkti 2 kortelę
+command-tab-select-3 = Išdėstymas > Kortelė > Pasirinkti 3 kortelę
+command-tab-select-4 = Išdėstymas > Kortelė > Pasirinkti 4 kortelę
+command-tab-select-5 = Išdėstymas > Kortelė > Pasirinkti 5 kortelę
+command-tab-select-6 = Išdėstymas > Kortelė > Pasirinkti 6 kortelę
+command-tab-select-7 = Išdėstymas > Kortelė > Pasirinkti 7 kortelę
+command-tab-select-8 = Išdėstymas > Kortelė > Pasirinkti 8 kortelę
+command-tab-select-last = Išdėstymas > Kortelė > Pasirinkti paskutinę kortelę
+command-close-pane = Išdėstymas > Sritis > Uždaryti sritį
+command-select-pane-left = Išdėstymas > Sritis > Pasirinkti kairiąją sritį
+command-select-pane-right = Išdėstymas > Sritis > Pasirinkti dešiniąją sritį
+command-select-pane-up = Išdėstymas > Sritis > Pasirinkti viršutinę sritį
+command-select-pane-down = Išdėstymas > Sritis > Pasirinkti apatinę sritį
+command-swap-pane-prev = Išdėstymas > Sritis > Sukeisti su ankstesne sritimi
+command-swap-pane-next = Išdėstymas > Sritis > Sukeisti su kita sritimi
+command-equalize-pane-size = Išdėstymas > Sritis > Sulyginti sričių dydį
+command-resize-pane-left = Išdėstymas > Sritis > Keisti sritį į kairę
+command-resize-pane-right = Išdėstymas > Sritis > Keisti sritį į dešinę
+command-resize-pane-up = Išdėstymas > Sritis > Keisti sritį aukštyn
+command-resize-pane-down = Išdėstymas > Sritis > Keisti sritį žemyn
+command-stack-close = Išdėstymas > Dėklas > Uždaryti dėklą
+command-stack-next = Išdėstymas > Dėklas > Kitas dėklas
+command-stack-previous = Išdėstymas > Dėklas > Ankstesnis dėklas
+command-stack-reopen = Išdėstymas > Dėklas > Vėl atidaryti uždarytą puslapį
+command-stack-swap-prev = Išdėstymas > Dėklas > Perkelti dėklą kairėn
+command-stack-swap-next = Išdėstymas > Dėklas > Perkelti dėklą dešinėn
+command-space-open = Išdėstymas > Erdvė > Erdvės
+command-terminal-close = Terminalas > Uždaryti terminalą
+command-terminal-next = Terminalas > Kitas terminalas
+command-terminal-prev = Terminalas > Ankstesnis terminalas
+command-terminal-clear = Terminalas > Išvalyti terminalą
+command-browser-prev-page = Naršyklė > Naršymas > Atgal
+command-browser-next-page = Naršyklė > Naršymas > Pirmyn
+command-browser-reload = Naršyklė > Naršymas > Įkelti iš naujo
+command-browser-hard-reload = Naršyklė > Naršymas > Įkelti iš naujo be podėlio
+command-open-in-place = Naršyklė > Atidaryti > Atidaryti čia
+command-open-in-new-stack = Naršyklė > Atidaryti > Atidaryti naujame dėkle
+command-open-in-pane-top = Naršyklė > Atidaryti > Atidaryti viršutinėje srityje
+command-open-in-pane-right = Naršyklė > Atidaryti > Atidaryti dešinėje srityje
+command-open-in-pane-bottom = Naršyklė > Atidaryti > Atidaryti apatinėje srityje
+command-open-in-pane-left = Naršyklė > Atidaryti > Atidaryti kairėje srityje
+command-open-in-new-tab = Naršyklė > Atidaryti > Atidaryti naujoje kortelėje
+command-open-in-new-space = Naršyklė > Atidaryti > Atidaryti naujoje erdvėje
+command-browser-zoom-in = Naršyklė > Rodinys > Priartinti
+command-browser-zoom-out = Naršyklė > Rodinys > Nutolinti
+command-browser-zoom-reset = Naršyklė > Rodinys > Faktinis dydis
+command-browser-dev-tools = Naršyklė > Rodinys > Kūrėjo įrankiai
+command-browser-open-command-bar = Naršyklė > Juosta > Komandų juosta
+command-browser-open-page-in-command-bar = Naršyklė > Juosta > Redaguoti puslapį
+command-browser-open-path-bar = Naršyklė > Juosta > Kelio naršyklė
+command-browser-open-commands = Naršyklė > Juosta > Komandos
+command-browser-open-history = Naršyklė > Juosta > Istorija
+command-service-open = Paslauga > Atidaryti paslaugų stebėjimą
+command-bookmark-toggle-active = Žymė > Pažymėti puslapį
+command-bookmark-pin-active = Žymė > Prisegti puslapį
+
+layout-tab = Kortelė
+layout-no-stacks = Dėklų nėra
+layout-loading = Įkeliama…
+layout-no-markdown-files = Markdown failų nėra
+layout-empty-folder = Tuščias aplankas
+layout-worktree = darbinis medis
+layout-folder-name = Aplanko pavadinimas
+layout-no-pins-bookmarks = Nėra prisegtų puslapių ar žymių
+layout-move-to = Perkelti į { $folder }
+layout-bookmark-current-page = Pažymėti dabartinį puslapį
+layout-rename-folder = Pervardyti aplanką
+layout-remove-folder = Pašalinti aplanką
+layout-update-downloading = Atsisiunčiamas naujinys
+layout-update-installing = Diegiamas naujinys…
+layout-update-ready = Yra nauja versija
+layout-restart-update = Paleiskite iš naujo, kad atnaujintumėte
+
+agent-preparing = Ruošiamas agentas…
+agent-send-all-queued = Siųsti visas eilėje esančias užklausas dabar (Esc)
+agent-send = Siųsti (Enter)
+agent-ready = Pasiruošęs, kai būsite pasiruošę.
+agent-loading-older = Įkeliami senesni pranešimai…
+agent-load-older = Įkelti senesnius pranešimus
+agent-continued-from = Tęsiama iš { $source }
+agent-older-context-omitted = senesnis kontekstas praleistas
+agent-interrupted = pertraukta
+agent-allow-tool = Leisti { $tool }?
+agent-deny = Neleisti
+agent-allow-always = Visada leisti
+agent-allow = Leisti
+agent-loading-sessions = Įkeliamos sesijos…
+agent-no-resumable-sessions = Tęstinų sesijų nerasta
+agent-no-matching-sessions = Atitinkančių sesijų nėra
+agent-no-matching-models = Atitinkančių modelių nėra
+agent-choice-help = ↑/↓ arba Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Pasirinkite saugyklos aplanką
+agent-choose-repository-detail = Pasirinkite vietinę Git saugyklą, kurią turėtų naudoti agentas.
+agent-choosing = Pasirenkama…
+agent-choose-folder = Pasirinkti aplanką
+agent-queued = eilėje
+agent-attached = Pridėta:
+agent-cancel-queued = Atšaukti eilėje esančią užklausą
+agent-resume-queued = Tęsti eilėje esančias užklausas
+agent-clear-queue = Išvalyti eilę
+agent-send-all-now = siųsti visas dabar
+agent-choose-option = Pasirinkite parinktį aukščiau
+agent-loading-media = Įkeliama medija…
+agent-no-matching-media = Atitinkančios medijos nėra
+agent-prompt-context = Užklausos kontekstas
+agent-details = Išsamiau
+agent-path = Kelias
+agent-tool = Įrankis
+agent-server = Serveris
+agent-bytes = { $count } baitų
+agent-worked-for = Dirbo { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Dirbo { $duration } · 1 veiksmas
+   *[other] Dirbo { $duration } · { $count } veiksmai
+}
+agent-tool-guardian-review = Guardian peržiūra
+agent-tool-read-files = Skaitė failus
+agent-tool-viewed-image = Peržiūrėjo vaizdą
+agent-tool-used-browser = Naudojo naršyklę
+agent-tool-searched-files = Ieškojo failuose
+agent-tool-ran-commands = Vykdė komandas
+agent-thinking = Galvoja
+agent-subagent = Poagentis
+agent-prompt = Užklausa
+agent-thread = Gija
+agent-parent = Pirminis
+agent-children = Antriniai
+agent-call = Iškvietimas
+agent-raw-event = Neapdorotas įvykis
+agent-plan = Planas
+agent-tasks = { $count ->
+    [one] 1 užduotis
+   *[other] { $count } užduotys
+}
+agent-edited = Redaguota
+agent-reconnecting = Jungiamasi iš naujo { $attempt }/{ $total }
+agent-status-running = Vykdoma
+agent-status-done = Atlikta
+agent-status-failed = Nepavyko
+agent-status-pending = Laukiama
+agent-slash-attach-files = Pridėti failus
+agent-slash-resume-session = Tęsti ankstesnę sesiją
+agent-slash-select-model = Pasirinkti modelį
+agent-slash-continue-cli = Tęsti šią sesiją CLI
+agent-session-just-now = ką tik
+agent-session-minutes-ago = prieš { $count } min.
+agent-session-hours-ago = prieš { $count } val.
+agent-session-days-ago = prieš { $count } d.
+agent-working-working = Dirba
+agent-working-thinking = Galvoja
+agent-working-pondering = Svarsto
+agent-working-noodling = Mąsto
+agent-working-percolating = Brandina mintį
+agent-working-conjuring = Kuria
+agent-working-cooking = Ruošia
+agent-working-brewing = Verda
+agent-working-musing = Apmąsto
+agent-working-ruminating = Permąsto
+agent-working-scheming = Planuoja
+agent-working-synthesizing = Sintezuoja
+agent-working-tinkering = Krapštosi
+agent-working-churning = Apdoroja
+agent-working-vibing = Gaudo ritmą
+agent-working-simmering = Lėtai ruošia
+agent-working-crafting = Konstruoja
+agent-working-divining = Ieško įžvalgų
+agent-working-mulling = Svarsto
+agent-working-spelunking = Naršo gelmėse
+
+editor-toggle-explorer = Rodyti / slėpti naršyklę (Cmd+B)
+editor-unsaved = neįrašyta
+editor-rendered-markdown = Atvaizduotas Markdown su tiesioginiu redagavimu
+editor-note = Pastaba
+editor-source-editor = Pirminio kodo redaktorius
+editor-editor = Redaktorius
+editor-git-diff = Git skirtumai
+editor-diff = Skirtumai
+editor-tidy = Tvarkyti
+editor-always = Visada
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 nepakeista peržiūra
+   *[other] ✦ { $count } nepakeistos peržiūros
+}
+editor-open-externally = Atidaryti išorinėje programoje
+editor-changed-line = Pakeista eilutė
+editor-go-to-definition = Eiti į apibrėžimą
+editor-find-references = Rasti nuorodas
+editor-references = { $count ->
+    [one] 1 nuoroda
+   *[other] { $count } nuorodos
+}
+editor-lsp-starting = Paleidžiama { $server }…
+editor-lsp-not-installed = { $server } — neįdiegta
+editor-explorer = Naršyklė
+editor-open-editors = Atviri redaktoriai
+editor-outline = Struktūra
+editor-new-file = Naujas failas
+editor-new-folder = Naujas aplankas
+editor-delete-confirm = Ištrinti „{ $name }“? Šio veiksmo anuliuoti nepavyks.
+editor-created-folder = Sukurtas aplankas { $name }
+editor-created-file = Sukurtas failas { $name }
+editor-renamed-to = Pervardyta į { $name }
+editor-deleted = Ištrinta { $name }
+editor-failed-decode-image = Nepavyko iškoduoti vaizdo
+editor-preview-large-image = vaizdas (per didelis peržiūrai)
+editor-preview-binary = dvejetainis
+editor-preview-file = failas
+
+git-status-clean = švaru
+git-status-modified = pakeista
+git-status-staged = paruošta
+git-status-staged-modified = paruošta*
+git-status-untracked = nesekama
+git-status-deleted = ištrinta
+git-status-conflict = konfliktas
+git-accept-all = ✓ priimti viską
+git-unstage = Pašalinti iš paruoštų
+git-confirm-deny-all = Patvirtinti visų atmetimą
+git-deny-all = ✗ atmesti viską
+git-commit-message = komito pranešimas
+git-commit = Komitas ({ $count })
+git-push = ↑ Siųsti
+git-loading-diff = Įkeliami skirtumai…
+git-no-changes = Nėra pakeitimų
+git-accept = ✓ priimti
+git-deny = ✗ atmesti
+git-show-unchanged-lines = Rodyti { $count } nepakeistas eilutes
+
+terminal-loading = Įkeliama…
+terminal-runs-when-ready = vykdoma, kai paruošta · Ctrl+C išvalo · Esc praleidžia
+terminal-booting = paleidžiama
+terminal-type-command = įveskite komandą · vykdoma, kai paruošta · Esc praleidžia
+
+setup-tagline-claude = Anthropic kodavimo agentas Vmux aplinkoje
+setup-tagline-codex = OpenAI kodavimo agentas Vmux aplinkoje
+setup-tagline-vibe = Mistral kodavimo agentas Vmux aplinkoje
+setup-install-title = Įdiegti { $name } CLI
+setup-homebrew-required = Norint įdiegti { $command }, reikalinga Homebrew, bet ji dar nesukonfigūruota. Vmux pirmiausia įdiegs Homebrew, tada { $name }.
+setup-terminal-instructions = Terminale paspauskite Return, kad pradėtumėte, tada, kai būsite paprašyti, įveskite savo Mac slaptažodį.
+setup-command-missing = Vmux atidarė šį puslapį, nes vietinė { $command } komanda dar neįdiegta. Paleiskite toliau pateiktą komandą, kad ją gautumėte.
+setup-install-failed = Diegimas nebaigtas. Išsamesnę informaciją rasite terminale, tada bandykite dar kartą.
+setup-installing = Diegiama…
+setup-install-homebrew = Įdiegti Homebrew + { $name }
+setup-run-install = Paleisti diegimo komandą
+setup-auto-reload = Vmux paleidžia ją terminale ir įkelia iš naujo, kai { $command } paruošta.
+
+debug-title = Derinimas
+debug-auto-update = Automatinis naujinimas
+debug-simulate-update = Imituoti galimą naujinį
+debug-simulate-download = Imituoti atsisiuntimą
+debug-clear-update = Išvalyti naujinį
+debug-trigger-restart = Suaktyvinti paleidimą iš naujo
+
+command-manage-spaces = Tvarkyti erdves…
+command-pane-stack-location = polangis { $pane } / dėklas { $stack }
+command-space-pane-stack-location = { $space } / polangis { $pane } / dėklas { $stack }
+command-terminal-path = Terminalas ({ $path })
+command-group-interactive-mode = Interaktyvusis režimas
+command-group-window = Langas
+command-group-tab = Kortelė
+command-group-pane = Polangis
+command-group-stack = Dėklas
+command-group-space = Erdvė
+command-group-navigation = Naršymas
+command-group-open = Atidaryti
+command-group-view = Rodymas
+command-group-bar = Juosta
+
+menu-close-vmux = Uždaryti Vmux
+
+agents-terminal-coding-agent = Terminalu pagrįstas programavimo agentas

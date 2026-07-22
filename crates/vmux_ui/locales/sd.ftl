@@ -1,0 +1,602 @@
+locale-name = سنڌي
+common-open = کوليو
+common-close = بند ڪريو
+common-install = انسٽال ڪريو
+common-uninstall = انسٽال هٽايو
+common-update = اپڊيٽ ڪريو
+common-retry = ٻيهر ڪوشش ڪريو
+common-refresh = تازو ڪريو
+common-remove = هٽايو
+common-enable = فعال ڪريو
+common-disable = غيرفعال ڪريو
+common-new = نئون
+common-active = فعال
+common-running = هلندڙ
+common-done = ٿي ويو
+common-failed = ناڪام
+common-installed = انسٽال ٿيل
+common-items = { $count ->
+    [one] { $count } شئي
+   *[other] { $count } شيون
+}
+start-title = شروع
+start-tagline = هڪ پرامپٽ. هر ڪم، پورو.
+
+agents-title = ايجنٽ
+agents-search = ACP ۽ CLI ايجنٽ ڳوليو…
+agents-empty = ملندڙ ايجنٽ ڪونهي
+agents-empty-detail = نالو، رن ٽائيم، يا ACP/CLI آزمايو.
+agents-install-failed = انسٽال ناڪام
+agents-updating = اپڊيٽ ٿي رهيو آهي…
+agents-retrying = ٻيهر ڪوشش ٿي رهي آهي…
+agents-preparing = تياري ٿي رهي آهي…
+
+extensions-title = ايڪسٽينشنون
+extensions-search = انسٽال ٿيل يا Chrome Web Store ۾ ڳوليو…
+extensions-relaunch = لاڳو ڪرڻ لاءِ ٻيهر کوليو
+extensions-empty = ڪا ايڪسٽينشن انسٽال ٿيل ناهي
+extensions-no-match = ڪا ملندڙ ايڪسٽينشن ناهي
+extensions-empty-detail = مٿي Chrome Web Store ۾ ڳوليو ۽ Return دٻايو.
+extensions-no-match-detail = ٻيو نالو يا ايڪسٽينشن ID آزمايو.
+extensions-on = آن
+extensions-off = آف
+extensions-enable-confirm = { $name } فعال ڪجي؟
+extensions-enable-permissions = { $name } فعال ڪري هنن اجازتن جي اجازت ڏيو:
+
+lsp-title = ٻولي سرور
+lsp-search = ٻولي سرور، لنٽر، فارميٽر ڳوليو…
+lsp-loading = ڪئٽلاگ لوڊ ٿي رهيو آهي…
+lsp-empty = ڪو ملندڙ ٻولي سرور ناهي
+lsp-empty-detail = ٻي ٻولي، لنٽر، يا فارميٽر آزمايو.
+lsp-needs = { $tool } گهرجي
+lsp-status-available = موجود
+lsp-status-on-path = PATH تي
+lsp-status-installing = انسٽال ٿي رهيو آهي…
+lsp-status-installed = انسٽال ٿيل
+lsp-status-outdated = اپڊيٽ موجود
+lsp-status-running = هلندڙ
+lsp-status-failed = ناڪام
+
+spaces-title = جايون
+spaces-new-placeholder = نئين جاءِ جو نالو
+spaces-empty = ڪا جاءِ ناهي
+spaces-default-name = جاءِ { $number }
+spaces-tabs = { $count ->
+    [one] 1 ٽيب
+   *[other] { $count } ٽيب
+}
+spaces-delete = جاءِ ختم ڪريو
+
+team-title = ٽيم
+team-just-you = هن جاءِ ۾ فقط توهان آهيو
+team-agents = { $count ->
+    [one] توهان ۽ 1 ايجنٽ
+   *[other] توهان ۽ { $count } ايجنٽ
+}
+team-empty = هتي اڃا ڪو به ناهي
+team-you = توهان
+team-agent = ايجنٽ
+
+services-title = پس منظر جون خدمتون
+services-processes = { $count ->
+    [one] 1 پروسيس
+   *[other] { $count } پروسيس
+}
+services-kill-all = سڀ ختم ڪريو
+services-not-running = خدمت نه پئي هلي
+services-start-with = هن سان شروع ڪريو:
+services-empty = ڪو فعال پروسيس ناهي
+services-filter = پروسيس فلٽر ڪريو…
+services-no-match = ڪو ملندڙ پروسيس ناهي
+services-connected = ڳنڍيل
+services-disconnected = ڪٽيل
+services-attached = ڳنڍيل
+services-kill = ختم ڪريو
+services-memory = ميموري
+services-size = سائيز
+services-shell = شيل
+
+error-title = غلطي
+
+history-search = تاريخ ڳوليو
+history-clear-all = سڀ صاف ڪريو
+history-clear-confirm = سموري تاريخ صاف ڪجي؟
+history-clear-warning = اهو واپس نه ٿي سگهندو.
+history-cancel = رد ڪريو
+history-today = اڄ
+history-yesterday = ڪالهه
+history-days-ago = { $count } ڏينهن اڳ
+history-day-offset = ڏينهن -{ $count }
+
+settings-title = سيٽنگون
+settings-loading = سيٽنگون لوڊ ٿي رهيون آهن…
+settings-stored = ~/.vmux/settings.ron ۾ محفوظ
+settings-other = ٻيو
+settings-software-update = سافٽويئر اپڊيٽ
+settings-check-updates = اپڊيٽون چيڪ ڪريو
+settings-check-updates-hint = Auto-update فعال هجي ته شروع ٿيڻ وقت ۽ هر ڪلاڪ پاڻمرادو چيڪ ڪري ٿو.
+settings-update-unavailable = موجود ناهي
+settings-update-unavailable-hint = هن بلڊ ۾ اپڊيٽر شامل ناهي.
+settings-update-checking = چيڪ ٿي رهيو آهي…
+settings-update-checking-hint = اپڊيٽون چيڪ ٿي رهيون آهن…
+settings-update-check-again = ٻيهر چيڪ ڪريو
+settings-update-current = Vmux تازو آهي.
+settings-update-downloading = ڊائونلوڊ ٿي رهيو آهي…
+settings-update-downloading-hint = Vmux { $version } ڊائونلوڊ ٿي رهيو آهي…
+settings-update-installing = انسٽال ٿي رهيو آهي…
+settings-update-installing-hint = Vmux { $version } انسٽال ٿي رهيو آهي…
+settings-update-ready = اپڊيٽ تيار
+settings-update-ready-hint = Vmux { $version } تيار آهي. لاڳو ڪرڻ لاءِ ٻيهر شروع ڪريو.
+settings-update-try-again = ٻيهر ڪوشش ڪريو
+settings-update-failed = اپڊيٽون چيڪ نه ٿي سگهيون.
+settings-item = شئي
+settings-item-number = شئي { $number }
+settings-press-key = ڪي دٻايو…
+settings-saved = محفوظ ٿيو
+settings-record-key = نئون ڪي ڪمبو رڪارڊ ڪرڻ لاءِ ڪلڪ ڪريو
+
+tray-open-window = ونڊو کوليو
+tray-close-window = ونڊو بند ڪريو
+tray-pause-recording = رڪارڊنگ روڪيو
+tray-resume-recording = رڪارڊنگ جاري ڪريو
+tray-finish-recording = رڪارڊنگ ختم ڪريو
+tray-quit = Vmux بند ڪريو
+
+composer-attach-files = فائلون لڳايو (/upload)
+composer-remove-attachment = لڳايل فائل هٽايو
+
+layout-back = پوئتي
+layout-forward = اڳتي
+layout-reload = ٻيهر لوڊ ڪريو
+layout-bookmark-page = هي صفحو بڪ مارڪ ڪريو
+layout-remove-bookmark = بڪ مارڪ هٽايو
+layout-pin-page = هي صفحو پن ڪريو
+layout-unpin-page = هن صفحي جو پن هٽايو
+layout-manage-extensions = ايڪسٽينشنون سنڀاليو
+layout-new-stack = نئون اسٽيڪ
+layout-close-tab = ٽيب بند ڪريو
+layout-bookmark = بڪ مارڪ
+layout-pin = پن ڪريو
+layout-new-tab = نئون ٽيب
+layout-team = ٽيم
+
+command-switch-space = جاءِ مٽايو…
+command-search-ask = ڳوليو يا پڇو…
+command-new-tab-placeholder = ڳوليو يا URL لکو، يا Terminal چونڊيو…
+command-placeholder = URL لکو، ٽيب ڳوليو، يا ڪمانڊن لاءِ >…
+command-composer-placeholder = ڪمانڊن لاءِ / يا ميڊيا لاءِ @ لکو
+command-send = موڪليو (Enter)
+command-terminal = ٽرمينل
+command-open-terminal = ٽرمينل ۾ کوليو
+command-stack = اسٽيڪ
+command-tabs = { $count ->
+    [one] 1 ٽيب
+   *[other] { $count } ٽيب
+}
+command-prompt = پرامپٽ
+command-new-tab = نئون ٽيب
+command-search = ڳوليو
+command-open-value = “{ $value }” کوليو
+command-search-value = “{ $value }” ڳوليو
+
+schema-appearance = ڏيک
+schema-general = عام
+schema-layout = لي آئوٽ
+schema-layout-detail = ونڊو، پين، سائيڊ بار، ۽ فوڪس رنگ.
+schema-agent = ايجنٽ
+schema-agent-detail = ايجنٽ جو رويو ۽ ٽول اجازتون.
+schema-shortcuts = شارٽ ڪٽ
+schema-shortcuts-detail = رڳو پڙهڻ لاءِ ڏيک. بائنڊنگون بدلائڻ لاءِ settings.ron سڌو ايڊٽ ڪريو.
+schema-terminal = ٽرمينل
+schema-browser = برائوزر
+schema-mode = موڊ
+schema-mode-detail = ويب صفحن لاءِ رنگ اسڪيم. Device توهان جي سسٽم جي پيروي ڪري ٿو.
+schema-device = ڊوائيس
+schema-light = هلڪو
+schema-dark = اونداهو
+schema-language = ٻولي
+schema-language-detail = سسٽم، en-US، ja، يا ڪنهن به BCP 47 ٽيگ کي استعمال ڪريو جنهن سان ملندڙ ~/.vmux/locales/<tag>.ftl ڪئٽلاگ هجي.
+schema-auto-update = Auto-update
+schema-auto-update-detail = شروع ٿيڻ وقت ۽ هر ڪلاڪ اپڊيٽون چيڪ ڪري انسٽال ڪريو.
+schema-startup-url = شروعاتي URL
+schema-startup-url-detail = خالي هجي ته ڪمانڊ بار پرامپٽ کلي ٿو.
+schema-search-engine = سرچ انجڻ
+schema-search-engine-detail = Start ۽ ڪمانڊ بار مان ويب ڳولا لاءِ استعمال ٿئي ٿو.
+schema-window = ونڊو
+schema-pane = پين
+schema-side-sheet = پاسي واري شيٽ
+schema-focus-ring = فوڪس رنگ
+schema-run-placement = رن جي جڳهه مٽائڻ جي اجازت ڏيو
+schema-run-placement-detail = ايجنٽن کي رن پين جو موڊ، رخ، ۽ اينڪر چونڊڻ ڏيو.
+schema-leader = ليڊر
+schema-leader-detail = chord شارٽ ڪٽن لاءِ اڳواٽ ڪي.
+schema-chord-timeout = chord ٽائيم آئوٽ
+schema-chord-timeout-detail = chord پريفڪس ختم ٿيڻ کان اڳ ملي سيڪنڊ.
+schema-bindings = بائنڊنگون
+schema-confirm-close = بند ڪرڻ جي تصديق
+schema-confirm-close-detail = هلندڙ پروسيس واري ٽرمينل کي بند ڪرڻ کان اڳ پڇو.
+schema-default-theme = ڊفالٽ ٿيم
+schema-default-theme-detail = ٿيمز لسٽ مان فعال ٿيم جو نالو.
+
+settings-empty = (خالي)
+settings-none = (ڪوبه نه)
+
+schema-system = نظام
+schema-editor = ايڊيٽر
+schema-recording = رڪارڊنگ
+schema-radius = ريڊيس
+schema-padding = پيڊنگ
+schema-gap = وٿي
+schema-width = ويڪر
+schema-color = رنگ
+schema-red = ڳاڙهو
+schema-green = سائو
+schema-blue = نيرو
+schema-follow-files = فائلن جي پيروي ڪريو
+schema-tidy-files = فائلون صاف ڪريو
+schema-tidy-files-max = فائل صاف ڪرڻ جي حد
+schema-tidy-files-auto = فائلون پاڻمرادو صاف ڪريو
+schema-app-providers = ايپ مهيا ڪندڙ
+schema-provider = مهيا ڪندڙ
+schema-kind = قسم
+schema-models = ماڊل
+schema-acp = ACP ايجنٽ
+schema-id = ID
+schema-name = نالو
+schema-command = حڪم
+schema-arguments = آرگيومينٽس
+schema-environment = ماحول
+schema-working-directory = ڪم ڪندڙ ڊائريڪٽري
+schema-shell = شيل
+schema-font-family = فونٽ خاندان
+schema-startup-directory = شروعاتي ڊائريڪٽري
+schema-themes = ٿيمون
+schema-color-scheme = رنگ اسڪيم
+schema-font-size = فونٽ سائيز
+schema-line-height = لڪير اوچائي
+schema-cursor-style = ڪرسر انداز
+schema-cursor-blink = ڪرسر ٽمٽار
+schema-custom-themes = مرضي جون ٿيمون
+schema-foreground = اڳيون رنگ
+schema-background = پسمنظر
+schema-cursor = ڪرسر
+schema-ansi-colors = ANSI رنگ
+schema-keymap = ڪِي ميپ
+schema-explorer = ايڪسپلورر
+schema-visible = نظر ايندڙ
+schema-language-servers = ٻولي سرور
+schema-servers = سرور
+schema-language-id = ٻولي ID
+schema-root-markers = روٽ نشان
+schema-output-directory = آئوٽ پُٽ ڊائريڪٽري
+
+menu-scene = منظر
+menu-layout = ترتيب
+menu-terminal = ٽرمينل
+menu-browser = برائوزر
+menu-service = خدمت
+menu-bookmark = نشان
+menu-edit = سنوار
+
+layout-knowledge = ڄاڻ
+layout-open-knowledge = ڄاڻ کوليو
+layout-open-welcome-knowledge = ڄاڻ ۾ ڀليڪار کوليو
+layout-open-path = { $path } کوليو
+layout-fold-knowledge = ڄاڻ ويڙهو
+layout-unfold-knowledge = ڄاڻ کوليو
+layout-bookmarks = نشان
+layout-new-folder = نئون فولڊر
+layout-add-to-bookmarks = نشانن ۾ شامل ڪريو
+layout-move-to-bookmarks = نشانن ڏانهن منتقل ڪريو
+layout-stack-number = تهه { $number }
+layout-fold-stack = تهه ويڙهو
+layout-unfold-stack = تهه کوليو
+layout-close-stack = تهه بند ڪريو
+layout-bookmark-in = { $folder } ۾ نشان لڳايو
+
+common-cancel = رد
+common-delete = حذف
+common-save = محفوظ
+common-rename = نالو مٽايو
+common-expand = وڌايو
+common-collapse = سميٽو
+common-loading = لوڊ ٿي رهيو آهي…
+common-error = غلطي
+common-output = آئوٽ پٽ
+common-pending = انتظار ۾
+common-current = موجوده
+common-stop = روڪيو
+services-command = Vmux سروس
+services-uptime-seconds = { $seconds } سيڪنڊ
+services-uptime-minutes = { $minutes } منٽ { $seconds } سيڪنڊ
+services-uptime-hours = { $hours } ڪلاڪ { $minutes } منٽ
+services-uptime-days = { $days } ڏينهن { $hours } ڪلاڪ
+
+error-page-failed-load = صفحو لوڊ نه ٿي سگهيو
+error-page-not-found = صفحو نه مليو
+error-unknown-host = اڻڄاتل Vmux ايپ هوسٽ: { $host }
+
+history-title = تاريخ
+
+command-new-app-chat = نئين { $provider }/{ $model } چيٽ (ايپ)
+command-interactive-mode-user = منظر > انٽرايڪٽو موڊ > يوزر
+command-interactive-mode-player = منظر > انٽرايڪٽو موڊ > پليئر
+command-minimize-window = لي آئوٽ > ونڊو > ننڍي ڪريو
+command-toggle-layout = لي آئوٽ > لي آئوٽ > لي آئوٽ ٽوگل ڪريو
+command-close-tab = لي آئوٽ > ٽيب > ٽيب بند ڪريو
+command-new-task = لي آئوٽ > ٽيب > نئون ڪم…
+command-next-tab = لي آئوٽ > ٽيب > اڳيون ٽيب
+command-prev-tab = لي آئوٽ > ٽيب > پويون ٽيب
+command-rename-tab = لي آئوٽ > ٽيب > ٽيب جو نالو مٽايو
+command-tab-select-1 = لي آئوٽ > ٽيب > ٽيب 1 چونڊيو
+command-tab-select-2 = لي آئوٽ > ٽيب > ٽيب 2 چونڊيو
+command-tab-select-3 = لي آئوٽ > ٽيب > ٽيب 3 چونڊيو
+command-tab-select-4 = لي آئوٽ > ٽيب > ٽيب 4 چونڊيو
+command-tab-select-5 = لي آئوٽ > ٽيب > ٽيب 5 چونڊيو
+command-tab-select-6 = لي آئوٽ > ٽيب > ٽيب 6 چونڊيو
+command-tab-select-7 = لي آئوٽ > ٽيب > ٽيب 7 چونڊيو
+command-tab-select-8 = لي آئوٽ > ٽيب > ٽيب 8 چونڊيو
+command-tab-select-last = لي آئوٽ > ٽيب > آخري ٽيب چونڊيو
+command-close-pane = لي آئوٽ > پين > پين بند ڪريو
+command-select-pane-left = لي آئوٽ > پين > کاٻو پين چونڊيو
+command-select-pane-right = لي آئوٽ > پين > ساڄو پين چونڊيو
+command-select-pane-up = لي آئوٽ > پين > مٿيون پين چونڊيو
+command-select-pane-down = لي آئوٽ > پين > هيٺيون پين چونڊيو
+command-swap-pane-prev = لي آئوٽ > پين > پين کي پوئين سان مٽايو
+command-swap-pane-next = لي آئوٽ > پين > پين کي اڳئين سان مٽايو
+command-equalize-pane-size = لي آئوٽ > پين > پينن جو سائيز برابر ڪريو
+command-resize-pane-left = لي آئوٽ > پين > پين کاٻي پاسي ري سائيز ڪريو
+command-resize-pane-right = لي آئوٽ > پين > پين ساڄي پاسي ري سائيز ڪريو
+command-resize-pane-up = لي آئوٽ > پين > پين مٿي ري سائيز ڪريو
+command-resize-pane-down = لي آئوٽ > پين > پين هيٺ ري سائيز ڪريو
+command-stack-close = لي آئوٽ > اسٽيڪ > اسٽيڪ بند ڪريو
+command-stack-next = لي آئوٽ > اسٽيڪ > اڳيون اسٽيڪ
+command-stack-previous = لي آئوٽ > اسٽيڪ > پويون اسٽيڪ
+command-stack-reopen = لي آئوٽ > اسٽيڪ > بند ٿيل صفحو ٻيهر کوليو
+command-stack-swap-prev = لي آئوٽ > اسٽيڪ > اسٽيڪ کاٻي پاسي منتقل ڪريو
+command-stack-swap-next = لي آئوٽ > اسٽيڪ > اسٽيڪ ساڄي پاسي منتقل ڪريو
+command-space-open = لي آئوٽ > اسپيس > اسپيسز
+command-terminal-close = ٽرمينل > ٽرمينل بند ڪريو
+command-terminal-next = ٽرمينل > اڳيون ٽرمينل
+command-terminal-prev = ٽرمينل > پويون ٽرمينل
+command-terminal-clear = ٽرمينل > ٽرمينل صاف ڪريو
+command-browser-prev-page = برائوزر > نيوليگيشن > پوئتي
+command-browser-next-page = برائوزر > نيوليگيشن > اڳتي
+command-browser-reload = برائوزر > نيوليگيشن > ٻيهر لوڊ
+command-browser-hard-reload = برائوزر > نيوليگيشن > سخت ٻيهر لوڊ
+command-open-in-place = برائوزر > کوليو > هتي کوليو
+command-open-in-new-stack = برائوزر > کوليو > نئين اسٽيڪ ۾ کوليو
+command-open-in-pane-top = برائوزر > کوليو > مٿين پين ۾ کوليو
+command-open-in-pane-right = برائوزر > کوليو > ساڄي پين ۾ کوليو
+command-open-in-pane-bottom = برائوزر > کوليو > هيٺين پين ۾ کوليو
+command-open-in-pane-left = برائوزر > کوليو > کاٻي پين ۾ کوليو
+command-open-in-new-tab = برائوزر > کوليو > نئين ٽيب ۾ کوليو
+command-open-in-new-space = برائوزر > کوليو > نئين اسپيس ۾ کوليو
+command-browser-zoom-in = برائوزر > ڏيک > زوم اِن
+command-browser-zoom-out = برائوزر > ڏيک > زوم آئوٽ
+command-browser-zoom-reset = برائوزر > ڏيک > اصل سائيز
+command-browser-dev-tools = برائوزر > ڏيک > ڊولپر ٽولز
+command-browser-open-command-bar = برائوزر > بار > ڪمانڊ بار
+command-browser-open-page-in-command-bar = برائوزر > بار > صفحو ايڊٽ ڪريو
+command-browser-open-path-bar = برائوزر > بار > پاٿ نيوليگيٽر
+command-browser-open-commands = برائوزر > بار > ڪمانڊز
+command-browser-open-history = برائوزر > بار > تاريخ
+command-service-open = سروس > سروس مانيٽر کوليو
+command-bookmark-toggle-active = بوڪ مارڪ > صفحو بوڪ مارڪ ڪريو
+command-bookmark-pin-active = بوڪ مارڪ > صفحو پن ڪريو
+
+layout-tab = ٽيب
+layout-no-stacks = اسٽيڪ ناهن
+layout-loading = لوڊ ٿي رهيو آهي…
+layout-no-markdown-files = Markdown فائلون ناهن
+layout-empty-folder = خالي فولڊر
+layout-worktree = ورڪ ٽري
+layout-folder-name = فولڊر جو نالو
+layout-no-pins-bookmarks = پن يا بوڪ مارڪ ناهن
+layout-move-to = { $folder } ڏانهن منتقل ڪريو
+layout-bookmark-current-page = موجوده صفحو بوڪ مارڪ ڪريو
+layout-rename-folder = فولڊر جو نالو مٽايو
+layout-remove-folder = فولڊر هٽايو
+layout-update-downloading = اپڊيٽ ڊائونلوڊ ٿي رهي آهي
+layout-update-installing = اپڊيٽ انسٽال ٿي رهي آهي…
+layout-update-ready = نئون ورزن موجود آهي
+layout-restart-update = اپڊيٽ لاءِ ٻيهر شروع ڪريو
+
+agent-preparing = ايجنٽ تيار ٿي رهيو آهي…
+agent-send-all-queued = قطار ۾ رکيل سڀ پرامپٽ هاڻي موڪليو (Esc)
+agent-send = موڪليو (Enter)
+agent-ready = جڏهن توهان تيار آهيو.
+agent-loading-older = پراڻا پيغام لوڊ ٿي رهيا آهن…
+agent-load-older = پراڻا پيغام لوڊ ڪريو
+agent-continued-from = { $source } کان جاري
+agent-older-context-omitted = پراڻو حوالو ڇڏيل
+agent-interrupted = رڪاوٽ آئي
+agent-allow-tool = { $tool } جي اجازت ڏيو؟
+agent-deny = انڪار
+agent-allow-always = هميشه اجازت ڏيو
+agent-allow = اجازت ڏيو
+agent-loading-sessions = سيشن لوڊ ٿي رهيا آهن…
+agent-no-resumable-sessions = ٻيهر شروع ڪرڻ لائق سيشن نه مليا
+agent-no-matching-sessions = ملندڙ سيشن ناهن
+agent-no-matching-models = ملندڙ ماڊل ناهن
+agent-choice-help = ↑/↓ يا Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = ريپازٽري فولڊر چونڊيو
+agent-choose-repository-detail = مقامي Git ريپازٽري چونڊيو جنهن کي ايجنٽ استعمال ڪندو.
+agent-choosing = چونڊ ٿي رهي آهي…
+agent-choose-folder = فولڊر چونڊيو
+agent-queued = قطار ۾
+agent-attached = ڳنڍيل:
+agent-cancel-queued = قطار وارو پرامپٽ رد ڪريو
+agent-resume-queued = قطار وارا پرامپٽ ٻيهر شروع ڪريو
+agent-clear-queue = قطار صاف ڪريو
+agent-send-all-now = سڀ هاڻي موڪليو
+agent-choose-option = مٿي هڪ آپشن چونڊيو
+agent-loading-media = ميڊيا لوڊ ٿي رهي آهي…
+agent-no-matching-media = ملندڙ ميڊيا ناهي
+agent-prompt-context = پرامپٽ جو حوالو
+agent-details = تفصيل
+agent-path = پاٿ
+agent-tool = ٽول
+agent-server = سرور
+agent-bytes = { $count } بائيٽ
+agent-worked-for = { $duration } تائين ڪم ڪيو
+agent-worked-for-steps = { $count ->
+    [one] { $duration } تائين ڪم ڪيو · 1 قدم
+   *[other] { $duration } تائين ڪم ڪيو · { $count } قدم
+}
+agent-tool-guardian-review = گارڊين ريويو
+agent-tool-read-files = فائلون پڙهيون
+agent-tool-viewed-image = تصوير ڏٺي
+agent-tool-used-browser = برائوزر استعمال ڪيو
+agent-tool-searched-files = فائلون ڳوليون
+agent-tool-ran-commands = ڪمانڊز هلايا
+agent-thinking = سوچي رهيو آهي
+agent-subagent = ذيلي ايجنٽ
+agent-prompt = پرامپٽ
+agent-thread = ٿريڊ
+agent-parent = والد
+agent-children = ٻار
+agent-call = ڪال
+agent-raw-event = خام ايونٽ
+agent-plan = پلان
+agent-tasks = { $count ->
+    [one] 1 ڪم
+   *[other] { $count } ڪم
+}
+agent-edited = ايڊٽ ٿيو
+agent-reconnecting = ٻيهر ڳنڍجي رهيو آهي { $attempt }/{ $total }
+agent-status-running = هلي رهيو آهي
+agent-status-done = مڪمل
+agent-status-failed = ناڪام
+agent-status-pending = انتظار ۾
+agent-slash-attach-files = فائلون ڳنڍيو
+agent-slash-resume-session = پويون سيشن ٻيهر شروع ڪريو
+agent-slash-select-model = ماڊل چونڊيو
+agent-slash-continue-cli = هي سيشن CLI ۾ جاري رکو
+agent-session-just-now = هاڻي ئي
+agent-session-minutes-ago = { $count } منٽ اڳ
+agent-session-hours-ago = { $count } ڪلاڪ اڳ
+agent-session-days-ago = { $count } ڏينهن اڳ
+agent-working-working = ڪم ڪري رهيو آهي
+agent-working-thinking = سوچي رهيو آهي
+agent-working-pondering = غور ڪري رهيو آهي
+agent-working-noodling = خيال آزمائي رهيو آهي
+agent-working-percolating = پچي رهيو آهي
+agent-working-conjuring = جوڙي رهيو آهي
+agent-working-cooking = پچائي رهيو آهي
+agent-working-brewing = تيار ڪري رهيو آهي
+agent-working-musing = سوچ ويچار ڪري رهيو آهي
+agent-working-ruminating = ڳوڙهو سوچي رهيو آهي
+agent-working-scheming = رٿابندي ڪري رهيو آهي
+agent-working-synthesizing = گڏ ڪري رهيو آهي
+agent-working-tinkering = چڪاس ڪري رهيو آهي
+agent-working-churning = پروسيس ڪري رهيو آهي
+agent-working-vibing = وهڪري ۾ آهي
+agent-working-simmering = آهستي پچي رهيو آهي
+agent-working-crafting = ٺاهيندو پيو وڃي
+agent-working-divining = اندازو لڳائي رهيو آهي
+agent-working-mulling = ويچار ڪري رهيو آهي
+agent-working-spelunking = کوٽائي ڪري رهيو آهي
+
+editor-toggle-explorer = ايڪسپلورر ٽوگل ڪريو (Cmd+B)
+editor-unsaved = محفوظ نه ٿيل
+editor-rendered-markdown = لائيو ايڊٽنگ سان رينڊر ٿيل Markdown
+editor-note = نوٽ
+editor-source-editor = سورس ايڊيٽر
+editor-editor = ايڊيٽر
+editor-git-diff = Git ڊف
+editor-diff = ڊف
+editor-tidy = ٽائيڊي
+editor-always = هميشه
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 اڻبدليل پريويو
+   *[other] ✦ { $count } اڻبدليل پريويو
+}
+editor-open-externally = ٻاهرين ايپ ۾ کوليو
+editor-changed-line = تبديل ٿيل لائن
+editor-go-to-definition = تعريف ڏانهن وڃو
+editor-find-references = حوالا ڳوليو
+editor-references = { $count ->
+    [one] 1 حوالو
+   *[other] { $count } حوالا
+}
+editor-lsp-starting = { $server } شروع ٿي رهيو آهي…
+editor-lsp-not-installed = { $server } — انسٽال ٿيل ناهي
+editor-explorer = ايڪسپلورر
+editor-open-editors = کليل ايڊيٽر
+editor-outline = آئوٽ لائن
+editor-new-file = نئين فائل
+editor-new-folder = نئون فولڊر
+editor-delete-confirm = “{ $name }” حذف ڪجي؟ اهو واپس نٿو ٿي سگهي.
+editor-created-folder = فولڊر { $name } ٺاهيو ويو
+editor-created-file = فائل { $name } ٺاهي وئي
+editor-renamed-to = نالو { $name } ڪيو ويو
+editor-deleted = { $name } حذف ڪيو ويو
+editor-failed-decode-image = تصوير ڊيڪوڊ نه ٿي سگهي
+editor-preview-large-image = تصوير (پريويو لاءِ تمام وڏي)
+editor-preview-binary = بائنري
+editor-preview-file = فائل
+
+git-status-clean = صاف
+git-status-modified = تبديل ٿيل
+git-status-staged = اسٽيج ٿيل
+git-status-staged-modified = اسٽيج ٿيل*
+git-status-untracked = ٽريڪ نه ٿيل
+git-status-deleted = حذف ٿيل
+git-status-conflict = ٽڪراءُ
+git-accept-all = ✓ سڀ قبول ڪريو
+git-unstage = اسٽيج مان هٽايو
+git-confirm-deny-all = سڀ انڪار ڪرڻ جي تصديق
+git-deny-all = ✗ سڀ انڪار ڪريو
+git-commit-message = ڪمٽ پيغام
+git-commit = ڪمٽ ({ $count })
+git-push = ↑ پش
+git-loading-diff = ڊف لوڊ ٿي رهيو آهي…
+git-no-changes = ڏيکارڻ لاءِ تبديليون ناهن
+git-accept = ✓ قبول
+git-deny = ✗ انڪار
+git-show-unchanged-lines = { $count } اڻبدليل لائنون ڏيکاريو
+
+terminal-loading = لوڊ ٿي رهيو آهي…
+terminal-runs-when-ready = تيار ٿيڻ تي هلندو · Ctrl+C صاف ڪري ٿو · Esc ڇڏيندو
+terminal-booting = بوٽ ٿي رهيو آهي
+terminal-type-command = ڪمانڊ لکو · تيار ٿيڻ تي هلندو · Esc ڇڏيندو
+
+setup-tagline-claude = Anthropic جو ڪوڊنگ ايجنٽ، Vmux ۾
+setup-tagline-codex = OpenAI جو ڪوڊنگ ايجنٽ، Vmux ۾
+setup-tagline-vibe = Mistral جو ڪوڊنگ ايجنٽ، Vmux ۾
+setup-install-title = { $name } CLI انسٽال ڪريو
+setup-homebrew-required = { $command } انسٽال ڪرڻ لاءِ Homebrew گهربل آهي ۽ اڃا سيٽ اپ ناهي. Vmux پهرين Homebrew انسٽال ڪندو، پوءِ { $name }.
+setup-terminal-instructions = ٽرمينل ۾، شروع ڪرڻ لاءِ Return دٻايو، پوءِ پڇڻ تي پنهنجي Mac جو پاسورڊ داخل ڪريو.
+setup-command-missing = Vmux هي صفحو کوليو آهي ڇو ته مقامي { $command } ڪمانڊ اڃا انسٽال ٿيل ناهي. اهو حاصل ڪرڻ لاءِ هيٺيون ڪمانڊ هلايو.
+setup-install-failed = انسٽال مڪمل نه ٿيو. تفصيل لاءِ ٽرمينل ڏسو، پوءِ ٻيهر ڪوشش ڪريو.
+setup-installing = انسٽال ٿي رهيو آهي…
+setup-install-homebrew = Homebrew + { $name } انسٽال ڪريو
+setup-run-install = انسٽال ڪمانڊ هلايو
+setup-auto-reload = Vmux ان کي ٽرمينل ۾ هلائيندو ۽ { $command } تيار ٿيڻ تي ٻيهر لوڊ ڪندو.
+
+debug-title = ڊيبگ
+debug-auto-update = خودڪار اپڊيٽ
+debug-simulate-update = اپڊيٽ موجود هجڻ جي نقالي ڪريو
+debug-simulate-download = ڊائونلوڊ جي نقالي ڪريو
+debug-clear-update = اپڊيٽ صاف ڪريو
+debug-trigger-restart = ٻيهر شروع ڪرائيو
+
+command-manage-spaces = اسپيسز سنڀاليو…
+command-pane-stack-location = پين { $pane } / اسٽيڪ { $stack }
+command-space-pane-stack-location = { $space } / پين { $pane } / اسٽيڪ { $stack }
+command-terminal-path = ٽرمينل ({ $path })
+command-group-interactive-mode = تعاملي موڊ
+command-group-window = ونڊو
+command-group-tab = ٽيب
+command-group-pane = پين
+command-group-stack = اسٽيڪ
+command-group-space = اسپيس
+command-group-navigation = نيويگيشن
+command-group-open = کوليو
+command-group-view = ڏيک
+command-group-bar = بار
+
+menu-close-vmux = Vmux بند ڪريو
+
+agents-terminal-coding-agent = ٽرمينل تي ٻڌل ڪوڊنگ ايجنٽ

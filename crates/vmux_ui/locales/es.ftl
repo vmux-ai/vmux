@@ -1,0 +1,602 @@
+locale-name = español
+common-open = Abrir
+common-close = Cerrar
+common-install = Instalar
+common-uninstall = Desinstalar
+common-update = Actualizar
+common-retry = Reintentar
+common-refresh = Actualizar
+common-remove = Eliminar
+common-enable = Activar
+common-disable = Desactivar
+common-new = Nuevo
+common-active = activo
+common-running = en ejecución
+common-done = listo
+common-failed = Error
+common-installed = Instalado
+common-items = { $count ->
+    [one] { $count } elemento
+   *[other] { $count } elementos
+}
+start-title = Inicio
+start-tagline = Un prompt. Cualquier cosa, hecha.
+
+agents-title = Agentes
+agents-search = Buscar agentes ACP y CLI…
+agents-empty = No hay agentes coincidentes
+agents-empty-detail = Prueba con un nombre, entorno de ejecución o ACP/CLI.
+agents-install-failed = Error al instalar
+agents-updating = Actualizando…
+agents-retrying = Reintentando…
+agents-preparing = Preparando…
+
+extensions-title = Extensiones
+extensions-search = Buscar instaladas o en Chrome Web Store…
+extensions-relaunch = Reinicia para aplicar
+extensions-empty = No hay extensiones instaladas
+extensions-no-match = No hay extensiones coincidentes
+extensions-empty-detail = Busca en Chrome Web Store arriba y pulsa Intro.
+extensions-no-match-detail = Prueba con otro nombre o ID de extensión.
+extensions-on = Activadas
+extensions-off = Desactivadas
+extensions-enable-confirm = ¿Activar { $name }?
+extensions-enable-permissions = Activar { $name } y permitir:
+
+lsp-title = Servidores de lenguaje
+lsp-search = Buscar servidores de lenguaje, linters, formateadores…
+lsp-loading = Cargando catálogo…
+lsp-empty = No hay servidores de lenguaje coincidentes
+lsp-empty-detail = Prueba con otro lenguaje, linter o formateador.
+lsp-needs = necesita { $tool }
+lsp-status-available = Disponible
+lsp-status-on-path = En PATH
+lsp-status-installing = Instalando…
+lsp-status-installed = Instalado
+lsp-status-outdated = Actualización disponible
+lsp-status-running = En ejecución
+lsp-status-failed = Error
+
+spaces-title = Espacios
+spaces-new-placeholder = Nombre del nuevo espacio
+spaces-empty = No hay espacios
+spaces-default-name = Espacio { $number }
+spaces-tabs = { $count ->
+    [one] 1 pestaña
+   *[other] { $count } pestañas
+}
+spaces-delete = Eliminar espacio
+
+team-title = Equipo
+team-just-you = Solo tú en este espacio
+team-agents = { $count ->
+    [one] Tú y 1 agente
+   *[other] Tú y { $count } agentes
+}
+team-empty = Aún no hay nadie aquí
+team-you = Tú
+team-agent = Agente
+
+services-title = Servicios en segundo plano
+services-processes = { $count ->
+    [one] 1 proceso
+   *[other] { $count } procesos
+}
+services-kill-all = Forzar cierre de todos
+services-not-running = El servicio no se está ejecutando
+services-start-with = Iniciar con:
+services-empty = No hay procesos activos
+services-filter = Filtrar procesos…
+services-no-match = No hay procesos coincidentes
+services-connected = Conectado
+services-disconnected = Desconectado
+services-attached = adjunto
+services-kill = Forzar cierre
+services-memory = Memoria
+services-size = Tamaño
+services-shell = Shell
+
+error-title = Error
+
+history-search = Buscar en el historial
+history-clear-all = Borrar todo
+history-clear-confirm = ¿Borrar todo el historial?
+history-clear-warning = Esta acción no se puede deshacer.
+history-cancel = Cancelar
+history-today = Hoy
+history-yesterday = Ayer
+history-days-ago = Hace { $count } días
+history-day-offset = Día -{ $count }
+
+settings-title = Ajustes
+settings-loading = Cargando ajustes…
+settings-stored = Guardado en ~/.vmux/settings.ron
+settings-other = Otros
+settings-software-update = Actualización de software
+settings-check-updates = Buscar actualizaciones
+settings-check-updates-hint = Se comprueba automáticamente al iniciar y cada hora si la actualización automática está activada.
+settings-update-unavailable = No disponible
+settings-update-unavailable-hint = El actualizador no está incluido en esta compilación.
+settings-update-checking = Comprobando…
+settings-update-checking-hint = Buscando actualizaciones…
+settings-update-check-again = Comprobar de nuevo
+settings-update-current = Vmux está actualizado.
+settings-update-downloading = Descargando…
+settings-update-downloading-hint = Descargando Vmux { $version }…
+settings-update-installing = Instalando…
+settings-update-installing-hint = Instalando Vmux { $version }…
+settings-update-ready = Actualización lista
+settings-update-ready-hint = Vmux { $version } está listo. Reinicia para aplicarlo.
+settings-update-try-again = Intentar de nuevo
+settings-update-failed = No se pudo buscar actualizaciones.
+settings-item = Elemento
+settings-item-number = Elemento { $number }
+settings-press-key = Pulsa una tecla…
+settings-saved = Guardado
+settings-record-key = Haz clic para grabar una nueva combinación de teclas
+
+tray-open-window = Abrir ventana
+tray-close-window = Cerrar ventana
+tray-pause-recording = Pausar grabación
+tray-resume-recording = Reanudar grabación
+tray-finish-recording = Finalizar grabación
+tray-quit = Salir de Vmux
+
+composer-attach-files = Adjuntar archivos (/upload)
+composer-remove-attachment = Quitar adjunto
+
+layout-back = Atrás
+layout-forward = Adelante
+layout-reload = Recargar
+layout-bookmark-page = Añadir esta página a marcadores
+layout-remove-bookmark = Quitar marcador
+layout-pin-page = Fijar esta página
+layout-unpin-page = Desfijar esta página
+layout-manage-extensions = Gestionar extensiones
+layout-new-stack = Nueva pila
+layout-close-tab = Cerrar pestaña
+layout-bookmark = Marcador
+layout-pin = Fijar
+layout-new-tab = Nueva pestaña
+layout-team = Equipo
+
+command-switch-space = Cambiar de espacio…
+command-search-ask = Buscar o preguntar…
+command-new-tab-placeholder = Busca, escribe una URL o selecciona Terminal…
+command-placeholder = Escribe una URL, busca pestañas o usa > para comandos…
+command-composer-placeholder = Escribe / para comandos o @ para multimedia
+command-send = Enviar (Intro)
+command-terminal = Terminal
+command-open-terminal = Abrir en Terminal
+command-stack = Pila
+command-tabs = { $count ->
+    [one] 1 pestaña
+   *[other] { $count } pestañas
+}
+command-prompt = Prompt
+command-new-tab = Nueva pestaña
+command-search = Buscar
+command-open-value = Abrir “{ $value }”
+command-search-value = Buscar “{ $value }”
+
+schema-appearance = Apariencia
+schema-general = General
+schema-layout = Disposición
+schema-layout-detail = Ventana, paneles, barra lateral y anillo de foco.
+schema-agent = Agente
+schema-agent-detail = Comportamiento del agente y permisos de herramientas.
+schema-shortcuts = Atajos de teclado
+schema-shortcuts-detail = Vista de solo lectura. Edita settings.ron directamente para cambiar las combinaciones.
+schema-terminal = Terminal
+schema-browser = Navegador
+schema-mode = Modo
+schema-mode-detail = Esquema de color para páginas web. Dispositivo sigue el sistema.
+schema-device = Dispositivo
+schema-light = Claro
+schema-dark = Oscuro
+schema-language = Idioma
+schema-language-detail = Usa el sistema, en-US, ja o cualquier etiqueta BCP 47 con un catálogo ~/.vmux/locales/<tag>.ftl correspondiente.
+schema-auto-update = Actualización automática
+schema-auto-update-detail = Buscar e instalar actualizaciones al iniciar y cada hora.
+schema-startup-url = URL de inicio
+schema-startup-url-detail = Si está vacío, abre el prompt de la barra de comandos.
+schema-search-engine = Motor de búsqueda
+schema-search-engine-detail = Se usa para búsquedas web desde Inicio y la barra de comandos.
+schema-window = Ventana
+schema-pane = Panel
+schema-side-sheet = Panel lateral
+schema-focus-ring = Anillo de foco
+schema-run-placement = Permitir anular la ubicación de ejecución
+schema-run-placement-detail = Permite que los agentes elijan el modo, la dirección y el anclaje del panel de ejecución.
+schema-leader = Líder
+schema-leader-detail = Tecla prefijo para atajos en acorde.
+schema-chord-timeout = Tiempo de espera del acorde
+schema-chord-timeout-detail = Milisegundos antes de que caduque un prefijo de acorde.
+schema-bindings = Combinaciones
+schema-confirm-close = Confirmar cierre
+schema-confirm-close-detail = Preguntar antes de cerrar una terminal con un proceso en ejecución.
+schema-default-theme = Tema predeterminado
+schema-default-theme-detail = Nombre del tema activo de la lista de temas.
+
+settings-empty = (vacío)
+settings-none = (ninguno)
+
+schema-system = Sistema
+schema-editor = Editor
+schema-recording = Grabación
+schema-radius = Radio
+schema-padding = Relleno
+schema-gap = Espacio
+schema-width = Anchura
+schema-color = Color
+schema-red = Rojo
+schema-green = Verde
+schema-blue = Azul
+schema-follow-files = Seguir archivos
+schema-tidy-files = Ordenar archivos
+schema-tidy-files-max = Umbral de ordenación de archivos
+schema-tidy-files-auto = Ordenar archivos automáticamente
+schema-app-providers = Proveedores de apps
+schema-provider = Proveedor
+schema-kind = Tipo
+schema-models = Modelos
+schema-acp = Agentes ACP
+schema-id = ID
+schema-name = Nombre
+schema-command = Comando
+schema-arguments = Argumentos
+schema-environment = Entorno
+schema-working-directory = Directorio de trabajo
+schema-shell = Shell
+schema-font-family = Familia tipográfica
+schema-startup-directory = Directorio de inicio
+schema-themes = Temas
+schema-color-scheme = Esquema de color
+schema-font-size = Tamaño de fuente
+schema-line-height = Interlineado
+schema-cursor-style = Estilo del cursor
+schema-cursor-blink = Parpadeo del cursor
+schema-custom-themes = Temas personalizados
+schema-foreground = Primer plano
+schema-background = Fondo
+schema-cursor = Cursor
+schema-ansi-colors = Colores ANSI
+schema-keymap = Mapa de teclas
+schema-explorer = Explorador
+schema-visible = Visible
+schema-language-servers = Servidores de lenguaje
+schema-servers = Servidores
+schema-language-id = ID de lenguaje
+schema-root-markers = Marcadores de raíz
+schema-output-directory = Directorio de salida
+
+menu-scene = Escena
+menu-layout = Disposición
+menu-terminal = Terminal
+menu-browser = Navegador
+menu-service = Servicio
+menu-bookmark = Marcador
+menu-edit = Edición
+
+layout-knowledge = Conocimiento
+layout-open-knowledge = Abrir Conocimiento
+layout-open-welcome-knowledge = Abrir Bienvenida a Conocimiento
+layout-open-path = Abrir { $path }
+layout-fold-knowledge = Plegar conocimiento
+layout-unfold-knowledge = Desplegar conocimiento
+layout-bookmarks = Marcadores
+layout-new-folder = Nueva carpeta
+layout-add-to-bookmarks = Añadir a Marcadores
+layout-move-to-bookmarks = Mover a Marcadores
+layout-stack-number = Pila { $number }
+layout-fold-stack = Plegar pila
+layout-unfold-stack = Desplegar pila
+layout-close-stack = Cerrar pila
+layout-bookmark-in = Marcador en { $folder }
+
+common-cancel = Cancelar
+common-delete = Eliminar
+common-save = Guardar
+common-rename = Renombrar
+common-expand = Expandir
+common-collapse = Contraer
+common-loading = Cargando…
+common-error = Error
+common-output = Salida
+common-pending = Pendiente
+common-current = actual
+common-stop = Detener
+services-command = Servicio de Vmux
+services-uptime-seconds = { $seconds } s
+services-uptime-minutes = { $minutes } min { $seconds } s
+services-uptime-hours = { $hours } h { $minutes } min
+services-uptime-days = { $days } d { $hours } h
+
+error-page-failed-load = No se pudo cargar la página
+error-page-not-found = Página no encontrada
+error-unknown-host = Host de app de Vmux desconocido: { $host }
+
+history-title = Historial
+
+command-new-app-chat = Nuevo chat de { $provider }/{ $model } (App)
+command-interactive-mode-user = Escena > Modo interactivo > Usuario
+command-interactive-mode-player = Escena > Modo interactivo > Reproductor
+command-minimize-window = Disposición > Ventana > Minimizar
+command-toggle-layout = Disposición > Disposición > Alternar disposición
+command-close-tab = Disposición > Pestaña > Cerrar pestaña
+command-new-task = Disposición > Pestaña > Nueva tarea…
+command-next-tab = Disposición > Pestaña > Pestaña siguiente
+command-prev-tab = Disposición > Pestaña > Pestaña anterior
+command-rename-tab = Disposición > Pestaña > Renombrar pestaña
+command-tab-select-1 = Disposición > Pestaña > Seleccionar pestaña 1
+command-tab-select-2 = Disposición > Pestaña > Seleccionar pestaña 2
+command-tab-select-3 = Disposición > Pestaña > Seleccionar pestaña 3
+command-tab-select-4 = Disposición > Pestaña > Seleccionar pestaña 4
+command-tab-select-5 = Disposición > Pestaña > Seleccionar pestaña 5
+command-tab-select-6 = Disposición > Pestaña > Seleccionar pestaña 6
+command-tab-select-7 = Disposición > Pestaña > Seleccionar pestaña 7
+command-tab-select-8 = Disposición > Pestaña > Seleccionar pestaña 8
+command-tab-select-last = Disposición > Pestaña > Seleccionar última pestaña
+command-close-pane = Disposición > Panel > Cerrar panel
+command-select-pane-left = Disposición > Panel > Seleccionar panel izquierdo
+command-select-pane-right = Disposición > Panel > Seleccionar panel derecho
+command-select-pane-up = Disposición > Panel > Seleccionar panel superior
+command-select-pane-down = Disposición > Panel > Seleccionar panel inferior
+command-swap-pane-prev = Disposición > Panel > Intercambiar con panel anterior
+command-swap-pane-next = Disposición > Panel > Intercambiar con panel siguiente
+command-equalize-pane-size = Disposición > Panel > Igualar tamaño de paneles
+command-resize-pane-left = Disposición > Panel > Redimensionar panel a la izquierda
+command-resize-pane-right = Disposición > Panel > Redimensionar panel a la derecha
+command-resize-pane-up = Disposición > Panel > Redimensionar panel hacia arriba
+command-resize-pane-down = Disposición > Panel > Redimensionar panel hacia abajo
+command-stack-close = Disposición > Pila > Cerrar pila
+command-stack-next = Disposición > Pila > Pila siguiente
+command-stack-previous = Disposición > Pila > Pila anterior
+command-stack-reopen = Disposición > Pila > Reabrir página cerrada
+command-stack-swap-prev = Disposición > Pila > Mover pila a la izquierda
+command-stack-swap-next = Disposición > Pila > Mover pila a la derecha
+command-space-open = Disposición > Espacio > Espacios
+command-terminal-close = Terminal > Cerrar terminal
+command-terminal-next = Terminal > Terminal siguiente
+command-terminal-prev = Terminal > Terminal anterior
+command-terminal-clear = Terminal > Limpiar terminal
+command-browser-prev-page = Navegador > Navegación > Atrás
+command-browser-next-page = Navegador > Navegación > Adelante
+command-browser-reload = Navegador > Navegación > Recargar
+command-browser-hard-reload = Navegador > Navegación > Forzar recarga
+command-open-in-place = Navegador > Abrir > Abrir aquí
+command-open-in-new-stack = Navegador > Abrir > Abrir en nueva pila
+command-open-in-pane-top = Navegador > Abrir > Abrir en panel superior
+command-open-in-pane-right = Navegador > Abrir > Abrir en panel derecho
+command-open-in-pane-bottom = Navegador > Abrir > Abrir en panel inferior
+command-open-in-pane-left = Navegador > Abrir > Abrir en panel izquierdo
+command-open-in-new-tab = Navegador > Abrir > Abrir en nueva pestaña
+command-open-in-new-space = Navegador > Abrir > Abrir en nuevo espacio
+command-browser-zoom-in = Navegador > Vista > Acercar
+command-browser-zoom-out = Navegador > Vista > Alejar
+command-browser-zoom-reset = Navegador > Vista > Tamaño real
+command-browser-dev-tools = Navegador > Vista > Herramientas de desarrollador
+command-browser-open-command-bar = Navegador > Barra > Barra de comandos
+command-browser-open-page-in-command-bar = Navegador > Barra > Editar página
+command-browser-open-path-bar = Navegador > Barra > Navegador de ruta
+command-browser-open-commands = Navegador > Barra > Comandos
+command-browser-open-history = Navegador > Barra > Historial
+command-service-open = Servicio > Abrir monitor de servicios
+command-bookmark-toggle-active = Marcador > Añadir página a marcadores
+command-bookmark-pin-active = Marcador > Fijar página
+
+layout-tab = Pestaña
+layout-no-stacks = No hay pilas
+layout-loading = Cargando…
+layout-no-markdown-files = No hay archivos Markdown
+layout-empty-folder = Carpeta vacía
+layout-worktree = árbol de trabajo
+layout-folder-name = Nombre de carpeta
+layout-no-pins-bookmarks = No hay páginas fijadas ni marcadores
+layout-move-to = Mover a { $folder }
+layout-bookmark-current-page = Añadir página actual a marcadores
+layout-rename-folder = Renombrar carpeta
+layout-remove-folder = Eliminar carpeta
+layout-update-downloading = Descargando actualización
+layout-update-installing = Instalando actualización…
+layout-update-ready = Nueva versión disponible
+layout-restart-update = Reiniciar para actualizar
+
+agent-preparing = Preparando agente…
+agent-send-all-queued = Enviar ahora todas las instrucciones en cola (Esc)
+agent-send = Enviar (Enter)
+agent-ready = Listo cuando quieras.
+agent-loading-older = Cargando mensajes anteriores…
+agent-load-older = Cargar mensajes anteriores
+agent-continued-from = Continuación de { $source }
+agent-older-context-omitted = se omitió el contexto anterior
+agent-interrupted = interrumpido
+agent-allow-tool = ¿Permitir { $tool }?
+agent-deny = Denegar
+agent-allow-always = Permitir siempre
+agent-allow = Permitir
+agent-loading-sessions = Cargando sesiones…
+agent-no-resumable-sessions = No se encontraron sesiones reanudables
+agent-no-matching-sessions = No hay sesiones coincidentes
+agent-no-matching-models = No hay modelos coincidentes
+agent-choice-help = ↑/↓ o Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Elegir carpeta del repositorio
+agent-choose-repository-detail = Selecciona el repositorio Git local que debe usar el agente.
+agent-choosing = Eligiendo…
+agent-choose-folder = Elegir carpeta
+agent-queued = en cola
+agent-attached = Adjuntos:
+agent-cancel-queued = Cancelar instrucción en cola
+agent-resume-queued = Reanudar instrucciones en cola
+agent-clear-queue = Vaciar cola
+agent-send-all-now = enviar todo ahora
+agent-choose-option = Elige una opción de arriba
+agent-loading-media = Cargando contenido multimedia…
+agent-no-matching-media = No hay contenido multimedia coincidente
+agent-prompt-context = Contexto de la instrucción
+agent-details = Detalles
+agent-path = Ruta
+agent-tool = Herramienta
+agent-server = Servidor
+agent-bytes = { $count } bytes
+agent-worked-for = Trabajó durante { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Trabajó durante { $duration } · 1 paso
+   *[other] Trabajó durante { $duration } · { $count } pasos
+}
+agent-tool-guardian-review = Revisión de Guardian
+agent-tool-read-files = Leyó archivos
+agent-tool-viewed-image = Vio una imagen
+agent-tool-used-browser = Usó el navegador
+agent-tool-searched-files = Buscó archivos
+agent-tool-ran-commands = Ejecutó comandos
+agent-thinking = Pensando
+agent-subagent = Subagente
+agent-prompt = Instrucción
+agent-thread = Hilo
+agent-parent = Padre
+agent-children = Hijos
+agent-call = Llamada
+agent-raw-event = Evento sin procesar
+agent-plan = Plan
+agent-tasks = { $count ->
+    [one] 1 tarea
+   *[other] { $count } tareas
+}
+agent-edited = Editado
+agent-reconnecting = Reconectando { $attempt }/{ $total }
+agent-status-running = En ejecución
+agent-status-done = Completado
+agent-status-failed = Falló
+agent-status-pending = Pendiente
+agent-slash-attach-files = Adjuntar archivos
+agent-slash-resume-session = Reanudar una sesión anterior
+agent-slash-select-model = Seleccionar modelo
+agent-slash-continue-cli = Continuar esta sesión en la CLI
+agent-session-just-now = ahora mismo
+agent-session-minutes-ago = hace { $count } min
+agent-session-hours-ago = hace { $count } h
+agent-session-days-ago = hace { $count } d
+agent-working-working = Trabajando
+agent-working-thinking = Pensando
+agent-working-pondering = Reflexionando
+agent-working-noodling = Dándole vueltas
+agent-working-percolating = Madurando ideas
+agent-working-conjuring = Conjurando
+agent-working-cooking = Cocinando
+agent-working-brewing = Preparando
+agent-working-musing = Meditando
+agent-working-ruminating = Rumiando
+agent-working-scheming = Trazando un plan
+agent-working-synthesizing = Sintetizando
+agent-working-tinkering = Trasteando
+agent-working-churning = Procesando
+agent-working-vibing = Fluyendo
+agent-working-simmering = Cocinando a fuego lento
+agent-working-crafting = Elaborando
+agent-working-divining = Adivinando
+agent-working-mulling = Sopesando
+agent-working-spelunking = Explorando a fondo
+
+editor-toggle-explorer = Mostrar/ocultar Explorador (Cmd+B)
+editor-unsaved = sin guardar
+editor-rendered-markdown = Markdown renderizado con edición en vivo
+editor-note = Nota
+editor-source-editor = Editor de código fuente
+editor-editor = Editor
+editor-git-diff = Diff de Git
+editor-diff = Diff
+editor-tidy = Ordenar
+editor-always = Siempre
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 vista previa sin cambios
+   *[other] ✦ { $count } vistas previas sin cambios
+}
+editor-open-externally = Abrir externamente
+editor-changed-line = Línea modificada
+editor-go-to-definition = Ir a la definición
+editor-find-references = Buscar referencias
+editor-references = { $count ->
+    [one] 1 referencia
+   *[other] { $count } referencias
+}
+editor-lsp-starting = { $server } iniciando…
+editor-lsp-not-installed = { $server } — no instalado
+editor-explorer = Explorador
+editor-open-editors = Editores abiertos
+editor-outline = Esquema
+editor-new-file = Nuevo archivo
+editor-new-folder = Nueva carpeta
+editor-delete-confirm = ¿Eliminar “{ $name }”? Esta acción no se puede deshacer.
+editor-created-folder = Carpeta { $name } creada
+editor-created-file = Archivo { $name } creado
+editor-renamed-to = Renombrado a { $name }
+editor-deleted = { $name } eliminado
+editor-failed-decode-image = No se pudo decodificar la imagen
+editor-preview-large-image = imagen (demasiado grande para vista previa)
+editor-preview-binary = binario
+editor-preview-file = archivo
+
+git-status-clean = limpio
+git-status-modified = modificado
+git-status-staged = preparado
+git-status-staged-modified = preparado*
+git-status-untracked = sin seguimiento
+git-status-deleted = eliminado
+git-status-conflict = conflicto
+git-accept-all = ✓ aceptar todo
+git-unstage = Sacar de preparados
+git-confirm-deny-all = Confirmar rechazar todo
+git-deny-all = ✗ rechazar todo
+git-commit-message = mensaje de commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Cargando diff…
+git-no-changes = No hay cambios para mostrar
+git-accept = ✓ aceptar
+git-deny = ✗ rechazar
+git-show-unchanged-lines = Mostrar { $count } líneas sin cambios
+
+terminal-loading = Cargando…
+terminal-runs-when-ready = se ejecuta cuando esté listo · Ctrl+C borra · Esc omite
+terminal-booting = arrancando
+terminal-type-command = escribe un comando · se ejecuta cuando esté listo · Esc omite
+
+setup-tagline-claude = El agente de programación de Anthropic, en Vmux
+setup-tagline-codex = El agente de programación de OpenAI, en Vmux
+setup-tagline-vibe = El agente de programación de Mistral, en Vmux
+setup-install-title = Instalar CLI de { $name }
+setup-homebrew-required = Homebrew es necesario para instalar { $command } y aún no está configurado. Vmux instalará primero Homebrew y luego { $name }.
+setup-terminal-instructions = En la terminal, pulsa Retorno para empezar y luego introduce la contraseña de tu Mac cuando se te solicite.
+setup-command-missing = Vmux abrió esta página porque el comando local { $command } aún no está instalado. Ejecuta el comando de abajo para obtenerlo.
+setup-install-failed = La instalación no terminó. Consulta la terminal para ver los detalles y vuelve a intentarlo.
+setup-installing = Instalando…
+setup-install-homebrew = Instalar Homebrew + { $name }
+setup-run-install = Ejecutar comando de instalación
+setup-auto-reload = Vmux lo ejecuta en una terminal y recarga cuando { $command } esté listo.
+
+debug-title = Depuración
+debug-auto-update = Actualización automática
+debug-simulate-update = Simular actualización disponible
+debug-simulate-download = Simular descarga
+debug-clear-update = Borrar actualización
+debug-trigger-restart = Activar reinicio
+
+command-manage-spaces = Gestionar espacios…
+command-pane-stack-location = panel { $pane } / pila { $stack }
+command-space-pane-stack-location = { $space } / panel { $pane } / pila { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Modo interactivo
+command-group-window = Ventana
+command-group-tab = Pestaña
+command-group-pane = Panel
+command-group-stack = Pila
+command-group-space = Espacio
+command-group-navigation = Navegación
+command-group-open = Abrir
+command-group-view = Ver
+command-group-bar = Barra
+
+menu-close-vmux = Cerrar Vmux
+
+agents-terminal-coding-agent = Agente de programación basado en terminal

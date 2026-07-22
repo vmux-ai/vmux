@@ -1,0 +1,602 @@
+locale-name = euskara
+common-open = Ireki
+common-close = Itxi
+common-install = Instalatu
+common-uninstall = Desinstalatu
+common-update = Eguneratu
+common-retry = Saiatu berriro
+common-refresh = Freskatu
+common-remove = Kendu
+common-enable = Gaitu
+common-disable = Desgaitu
+common-new = Berria
+common-active = aktibo
+common-running = martxan
+common-done = eginda
+common-failed = Huts egin du
+common-installed = Instalatuta
+common-items = { $count ->
+    [one] elementu { $count }
+   *[other] { $count } elementu
+}
+start-title = Hasi
+start-tagline = Prompt bakarra. Edozer, eginda.
+
+agents-title = Agenteak
+agents-search = Bilatu ACP eta CLI agenteak…
+agents-empty = Ez dago bat datorren agenterik
+agents-empty-detail = Saiatu izen, exekuzio-ingurune edo ACP/CLI batekin.
+agents-install-failed = Instalazioak huts egin du
+agents-updating = Eguneratzen…
+agents-retrying = Berriro saiatzen…
+agents-preparing = Prestatzen…
+
+extensions-title = Hedapenak
+extensions-search = Bilatu instalatuetan edo Chrome Web Store-n…
+extensions-relaunch = Berrabiarazi aplikatzeko
+extensions-empty = Ez dago hedapenik instalatuta
+extensions-no-match = Ez dago bat datorren hedapenik
+extensions-empty-detail = Bilatu goian Chrome Web Store-n eta sakatu Sartu.
+extensions-no-match-detail = Saiatu beste izen edo hedapen-ID batekin.
+extensions-on = Aktibatuta
+extensions-off = Desaktibatuta
+extensions-enable-confirm = Gaitu { $name }?
+extensions-enable-permissions = Gaitu { $name } eta baimendu:
+
+lsp-title = Hizkuntza-zerbitzariak
+lsp-search = Bilatu hizkuntza-zerbitzariak, linterrak, formatutzaileak…
+lsp-loading = Katalogoa kargatzen…
+lsp-empty = Ez dago bat datorren hizkuntza-zerbitzaririk
+lsp-empty-detail = Saiatu beste hizkuntza, linter edo formatutzaile batekin.
+lsp-needs = { $tool } behar du
+lsp-status-available = Eskuragarri
+lsp-status-on-path = PATHen
+lsp-status-installing = Instalatzen…
+lsp-status-installed = Instalatuta
+lsp-status-outdated = Eguneraketa eskuragarri
+lsp-status-running = Martxan
+lsp-status-failed = Huts egin du
+
+spaces-title = Guneak
+spaces-new-placeholder = Gune berriaren izena
+spaces-empty = Ez dago gunerik
+spaces-default-name = { $number }. gunea
+spaces-tabs = { $count ->
+    [one] fitxa 1
+   *[other] { $count } fitxa
+}
+spaces-delete = Ezabatu gunea
+
+team-title = Taldea
+team-just-you = Zu bakarrik zaude gune honetan
+team-agents = { $count ->
+    [one] Zu eta agente 1
+   *[other] Zu eta { $count } agente
+}
+team-empty = Oraindik ez dago inor hemen
+team-you = Zu
+team-agent = Agentea
+
+services-title = Atzeko planoko zerbitzuak
+services-processes = { $count ->
+    [one] prozesu 1
+   *[other] { $count } prozesu
+}
+services-kill-all = Behartu denak ixtera
+services-not-running = Zerbitzua ez dago martxan
+services-start-with = Hasi honekin:
+services-empty = Ez dago prozesu aktiborik
+services-filter = Iragazi prozesuak…
+services-no-match = Ez dago bat datorren prozesurik
+services-connected = Konektatuta
+services-disconnected = Deskonektatuta
+services-attached = erantsita
+services-kill = Behartu ixtera
+services-memory = Memoria
+services-size = Tamaina
+services-shell = Shell-a
+
+error-title = Errorea
+
+history-search = Bilatu historian
+history-clear-all = Garbitu dena
+history-clear-confirm = Garbitu historia osoa?
+history-clear-warning = Ezin da desegin.
+history-cancel = Utzi
+history-today = Gaur
+history-yesterday = Atzo
+history-days-ago = Duela { $count } egun
+history-day-offset = Eguna -{ $count }
+
+settings-title = Ezarpenak
+settings-loading = Ezarpenak kargatzen…
+settings-stored = ~/.vmux/settings.ron fitxategian gordeta
+settings-other = Bestelakoak
+settings-software-update = Software-eguneraketa
+settings-check-updates = Bilatu eguneraketak
+settings-check-updates-hint = Abiaraztean automatikoki eta orduro egiaztatzen du, eguneratze automatikoa gaituta badago.
+settings-update-unavailable = Ez dago erabilgarri
+settings-update-unavailable-hint = Eguneratzailea ez dago build honetan sartuta.
+settings-update-checking = Egiaztatzen…
+settings-update-checking-hint = Eguneraketak bilatzen…
+settings-update-check-again = Egiaztatu berriro
+settings-update-current = Vmux eguneratuta dago.
+settings-update-downloading = Deskargatzen…
+settings-update-downloading-hint = Vmux { $version } deskargatzen…
+settings-update-installing = Instalatzen…
+settings-update-installing-hint = Vmux { $version } instalatzen…
+settings-update-ready = Eguneraketa prest
+settings-update-ready-hint = Vmux { $version } prest dago. Berrabiarazi aplikatzeko.
+settings-update-try-again = Saiatu berriro
+settings-update-failed = Ezin izan dira eguneraketak egiaztatu.
+settings-item = Elementua
+settings-item-number = { $number }. elementua
+settings-press-key = Sakatu tekla bat…
+settings-saved = Gordeta
+settings-record-key = Egin klik tekla-konbinazio berria grabatzeko
+
+tray-open-window = Ireki leihoa
+tray-close-window = Itxi leihoa
+tray-pause-recording = Pausatu grabazioa
+tray-resume-recording = Berrekin grabazioari
+tray-finish-recording = Amaitu grabazioa
+tray-quit = Irten Vmuxetik
+
+composer-attach-files = Erantsi fitxategiak (/upload)
+composer-remove-attachment = Kendu eranskina
+
+layout-back = Atzera
+layout-forward = Aurrera
+layout-reload = Birkargatu
+layout-bookmark-page = Gehitu orri hau laster-marketara
+layout-remove-bookmark = Kendu laster-marka
+layout-pin-page = Finkatu orri hau
+layout-unpin-page = Askatu orri hau
+layout-manage-extensions = Kudeatu hedapenak
+layout-new-stack = Pila berria
+layout-close-tab = Itxi fitxa
+layout-bookmark = Laster-marka
+layout-pin = Finkatu
+layout-new-tab = Fitxa berria
+layout-team = Taldea
+
+command-switch-space = Aldatu gunea…
+command-search-ask = Bilatu edo galdetu…
+command-new-tab-placeholder = Bilatu edo idatzi URL bat, edo hautatu Terminala…
+command-placeholder = Idatzi URL bat, bilatu fitxak, edo > komandoetarako…
+command-composer-placeholder = Idatzi / komandoetarako edo @ multimedia eransteko
+command-send = Bidali (Sartu)
+command-terminal = Terminala
+command-open-terminal = Ireki terminalean
+command-stack = Pila
+command-tabs = { $count ->
+    [one] fitxa 1
+   *[other] { $count } fitxa
+}
+command-prompt = Prompta
+command-new-tab = Fitxa berria
+command-search = Bilatu
+command-open-value = Ireki “{ $value }”
+command-search-value = Bilatu “{ $value }”
+
+schema-appearance = Itxura
+schema-general = Orokorra
+schema-layout = Diseinua
+schema-layout-detail = Leihoa, panelak, alboko barra eta foku-eraztuna.
+schema-agent = Agentea
+schema-agent-detail = Agentearen portaera eta tresnen baimenak.
+schema-shortcuts = Lasterbideak
+schema-shortcuts-detail = Irakurtzeko soilik. Lasterbideak aldatzeko, editatu settings.ron zuzenean.
+schema-terminal = Terminala
+schema-browser = Arakatzailea
+schema-mode = Modua
+schema-mode-detail = Web-orrien kolore-eskema. Gailuak zure sistemari jarraitzen dio.
+schema-device = Gailua
+schema-light = Argia
+schema-dark = Iluna
+schema-language = Hizkuntza
+schema-language-detail = Erabili sistema, en-US, ja, edo edozein BCP 47 etiketa, dagokion ~/.vmux/locales/<tag>.ftl katalogoarekin.
+schema-auto-update = Eguneratze automatikoa
+schema-auto-update-detail = Bilatu eta instalatu eguneraketak abiaraztean eta orduro.
+schema-startup-url = Abioko URLa
+schema-startup-url-detail = Hutsik badago, komando-barraren prompta irekitzen du.
+schema-search-engine = Bilaketa-motorra
+schema-search-engine-detail = Hasieratik eta komando-barratik egindako web-bilaketetarako erabiltzen da.
+schema-window = Leihoa
+schema-pane = Panela
+schema-side-sheet = Alboko orria
+schema-focus-ring = Foku-eraztuna
+schema-run-placement = Baimendu exekuzio-kokapena gainidaztea
+schema-run-placement-detail = Utzi agenteei exekuzio-panelaren modua, norabidea eta aingura aukeratzen.
+schema-leader = Aitzindaria
+schema-leader-detail = Lasterbide-sekuentzietarako aurrizki-tekla.
+schema-chord-timeout = Sekuentziaren denbora-muga
+schema-chord-timeout-detail = Milisegundoak, sekuentzia-aurrizkia iraungi aurretik.
+schema-bindings = Lasterbide-loturak
+schema-confirm-close = Berretsi ixtea
+schema-confirm-close-detail = Galdetu martxan dagoen prozesu bat duen terminala itxi aurretik.
+schema-default-theme = Gai lehenetsia
+schema-default-theme-detail = Gaien zerrendako gai aktiboaren izena.
+
+settings-empty = (hutsik)
+settings-none = (bat ere ez)
+
+schema-system = Sistema
+schema-editor = Editorea
+schema-recording = Grabazioa
+schema-radius = Erradioa
+schema-padding = Barne-tartea
+schema-gap = Tartea
+schema-width = Zabalera
+schema-color = Kolorea
+schema-red = Gorria
+schema-green = Berdea
+schema-blue = Urdina
+schema-follow-files = Jarraitu fitxategiei
+schema-tidy-files = Txukundu fitxategiak
+schema-tidy-files-max = Fitxategiak txukuntzeko atalasea
+schema-tidy-files-auto = Txukundu fitxategiak automatikoki
+schema-app-providers = Aplikazio-hornitzaileak
+schema-provider = Hornitzailea
+schema-kind = Mota
+schema-models = Modeloak
+schema-acp = ACP agenteak
+schema-id = ID
+schema-name = Izena
+schema-command = Komandoa
+schema-arguments = Argumentuak
+schema-environment = Ingurunea
+schema-working-directory = Laneko direktorioa
+schema-shell = Shell-a
+schema-font-family = Letra-tipo familia
+schema-startup-directory = Abioko direktorioa
+schema-themes = Gaiak
+schema-color-scheme = Kolore-eskema
+schema-font-size = Letra-tamaina
+schema-line-height = Lerro-altuera
+schema-cursor-style = Kurtsore-estiloa
+schema-cursor-blink = Kurtsorearen keinua
+schema-custom-themes = Gai pertsonalizatuak
+schema-foreground = Aurreko planoa
+schema-background = Atzeko planoa
+schema-cursor = Kurtsorea
+schema-ansi-colors = ANSI koloreak
+schema-keymap = Tekla-mapa
+schema-explorer = Arakatzailea
+schema-visible = Ikusgai
+schema-language-servers = Hizkuntza-zerbitzariak
+schema-servers = Zerbitzariak
+schema-language-id = Hizkuntza-ID
+schema-root-markers = Erro-markatzaileak
+schema-output-directory = Irteera-direktorioa
+
+menu-scene = Eszena
+menu-layout = Diseinua
+menu-terminal = Terminala
+menu-browser = Nabigatzailea
+menu-service = Zerbitzua
+menu-bookmark = Laster-marka
+menu-edit = Editatu
+
+layout-knowledge = Ezagutza
+layout-open-knowledge = Ireki Ezagutza
+layout-open-welcome-knowledge = Ireki Ongi etorri Ezagutzara
+layout-open-path = Ireki { $path }
+layout-fold-knowledge = Tolestu Ezagutza
+layout-unfold-knowledge = Zabaldu Ezagutza
+layout-bookmarks = Laster-markak
+layout-new-folder = Karpeta berria
+layout-add-to-bookmarks = Gehitu laster-marketara
+layout-move-to-bookmarks = Eraman laster-marketara
+layout-stack-number = Pila { $number }
+layout-fold-stack = Tolestu pila
+layout-unfold-stack = Zabaldu pila
+layout-close-stack = Itxi pila
+layout-bookmark-in = Laster-marka hemen: { $folder }
+
+common-cancel = Utzi
+common-delete = Ezabatu
+common-save = Gorde
+common-rename = Aldatu izena
+common-expand = Zabaldu
+common-collapse = Tolestu
+common-loading = Kargatzen…
+common-error = Errorea
+common-output = Irteera
+common-pending = Zain
+common-current = unekoa
+common-stop = Gelditu
+services-command = Vmux zerbitzua
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Ezin izan da orria kargatu
+error-page-not-found = Ez da orria aurkitu
+error-unknown-host = Vmux aplikazio-ostalari ezezaguna: { $host }
+
+history-title = Historia
+
+command-new-app-chat = { $provider }/{ $model } txat berria (aplikazioa)
+command-interactive-mode-user = Eszena > Modu interaktiboa > Erabiltzailea
+command-interactive-mode-player = Eszena > Modu interaktiboa > Erreproduzitzailea
+command-minimize-window = Diseinua > Leihoa > Minimizatu
+command-toggle-layout = Diseinua > Diseinua > Txandakatu diseinua
+command-close-tab = Diseinua > Fitxa > Itxi fitxa
+command-new-task = Diseinua > Fitxa > Zeregin berria…
+command-next-tab = Diseinua > Fitxa > Hurrengo fitxa
+command-prev-tab = Diseinua > Fitxa > Aurreko fitxa
+command-rename-tab = Diseinua > Fitxa > Aldatu fitxaren izena
+command-tab-select-1 = Diseinua > Fitxa > Hautatu 1. fitxa
+command-tab-select-2 = Diseinua > Fitxa > Hautatu 2. fitxa
+command-tab-select-3 = Diseinua > Fitxa > Hautatu 3. fitxa
+command-tab-select-4 = Diseinua > Fitxa > Hautatu 4. fitxa
+command-tab-select-5 = Diseinua > Fitxa > Hautatu 5. fitxa
+command-tab-select-6 = Diseinua > Fitxa > Hautatu 6. fitxa
+command-tab-select-7 = Diseinua > Fitxa > Hautatu 7. fitxa
+command-tab-select-8 = Diseinua > Fitxa > Hautatu 8. fitxa
+command-tab-select-last = Diseinua > Fitxa > Hautatu azken fitxa
+command-close-pane = Diseinua > Panela > Itxi panela
+command-select-pane-left = Diseinua > Panela > Hautatu ezkerreko panela
+command-select-pane-right = Diseinua > Panela > Hautatu eskuineko panela
+command-select-pane-up = Diseinua > Panela > Hautatu goiko panela
+command-select-pane-down = Diseinua > Panela > Hautatu beheko panela
+command-swap-pane-prev = Diseinua > Panela > Trukatu panela aurrekoarekin
+command-swap-pane-next = Diseinua > Panela > Trukatu panela hurrengoarekin
+command-equalize-pane-size = Diseinua > Panela > Berdindu panelen tamaina
+command-resize-pane-left = Diseinua > Panela > Aldatu panelaren tamaina ezkerrera
+command-resize-pane-right = Diseinua > Panela > Aldatu panelaren tamaina eskuinera
+command-resize-pane-up = Diseinua > Panela > Aldatu panelaren tamaina gora
+command-resize-pane-down = Diseinua > Panela > Aldatu panelaren tamaina behera
+command-stack-close = Diseinua > Pila > Itxi pila
+command-stack-next = Diseinua > Pila > Hurrengo pila
+command-stack-previous = Diseinua > Pila > Aurreko pila
+command-stack-reopen = Diseinua > Pila > Berrireki itxitako orria
+command-stack-swap-prev = Diseinua > Pila > Eraman pila ezkerrera
+command-stack-swap-next = Diseinua > Pila > Eraman pila eskuinera
+command-space-open = Diseinua > Espazioa > Espazioak
+command-terminal-close = Terminala > Itxi terminala
+command-terminal-next = Terminala > Hurrengo terminala
+command-terminal-prev = Terminala > Aurreko terminala
+command-terminal-clear = Terminala > Garbitu terminala
+command-browser-prev-page = Nabigatzailea > Nabigazioa > Atzera
+command-browser-next-page = Nabigatzailea > Nabigazioa > Aurrera
+command-browser-reload = Nabigatzailea > Nabigazioa > Birkargatu
+command-browser-hard-reload = Nabigatzailea > Nabigazioa > Birkargatze osoa
+command-open-in-place = Nabigatzailea > Ireki > Ireki hemen
+command-open-in-new-stack = Nabigatzailea > Ireki > Ireki pila berrian
+command-open-in-pane-top = Nabigatzailea > Ireki > Ireki goiko panelean
+command-open-in-pane-right = Nabigatzailea > Ireki > Ireki eskuineko panelean
+command-open-in-pane-bottom = Nabigatzailea > Ireki > Ireki beheko panelean
+command-open-in-pane-left = Nabigatzailea > Ireki > Ireki ezkerreko panelean
+command-open-in-new-tab = Nabigatzailea > Ireki > Ireki fitxa berrian
+command-open-in-new-space = Nabigatzailea > Ireki > Ireki espazio berrian
+command-browser-zoom-in = Nabigatzailea > Ikusi > Handiagotu
+command-browser-zoom-out = Nabigatzailea > Ikusi > Txikiagotu
+command-browser-zoom-reset = Nabigatzailea > Ikusi > Benetako tamaina
+command-browser-dev-tools = Nabigatzailea > Ikusi > Garatzaile-tresnak
+command-browser-open-command-bar = Nabigatzailea > Barra > Komando-barra
+command-browser-open-page-in-command-bar = Nabigatzailea > Barra > Editatu orria
+command-browser-open-path-bar = Nabigatzailea > Barra > Bide-nabigatzailea
+command-browser-open-commands = Nabigatzailea > Barra > Komandoak
+command-browser-open-history = Nabigatzailea > Barra > Historia
+command-service-open = Zerbitzua > Ireki zerbitzuen monitorea
+command-bookmark-toggle-active = Laster-marka > Gehitu orria laster-marketara
+command-bookmark-pin-active = Laster-marka > Finkatu orria
+
+layout-tab = Fitxa
+layout-no-stacks = Ez dago pilarik
+layout-loading = Kargatzen…
+layout-no-markdown-files = Ez dago Markdown fitxategirik
+layout-empty-folder = Karpeta hutsa
+layout-worktree = lan-zuhaitza
+layout-folder-name = Karpetaren izena
+layout-no-pins-bookmarks = Ez dago finkaturik edo laster-markarik
+layout-move-to = Eraman hona: { $folder }
+layout-bookmark-current-page = Gehitu uneko orria laster-marketara
+layout-rename-folder = Aldatu karpetaren izena
+layout-remove-folder = Kendu karpeta
+layout-update-downloading = Eguneraketa deskargatzen
+layout-update-installing = Eguneraketa instalatzen…
+layout-update-ready = Bertsio berria erabilgarri
+layout-restart-update = Berrabiarazi eguneratzeko
+
+agent-preparing = Agentea prestatzen…
+agent-send-all-queued = Bidali ilaran dauden prompt guztiak orain (Esc)
+agent-send = Bidali (Enter)
+agent-ready = Prest nago zu prest zaudenean.
+agent-loading-older = Mezu zaharragoak kargatzen…
+agent-load-older = Kargatu mezu zaharragoak
+agent-continued-from = Hemendik jarraitua: { $source }
+agent-older-context-omitted = testuinguru zaharragoa ezkutatu da
+agent-interrupted = eten da
+agent-allow-tool = Baimendu { $tool }?
+agent-deny = Ukatu
+agent-allow-always = Baimendu beti
+agent-allow = Baimendu
+agent-loading-sessions = Saioak kargatzen…
+agent-no-resumable-sessions = Ez da berrekiteko moduko saiorik aurkitu
+agent-no-matching-sessions = Ez dago bat datorren saiorik
+agent-no-matching-models = Ez dago bat datorren modelorik
+agent-choice-help = ↑/↓ edo Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Aukeratu biltegiaren karpeta
+agent-choose-repository-detail = Hautatu agenteak erabili behar duen Git biltegi lokala.
+agent-choosing = Aukeratzen…
+agent-choose-folder = Aukeratu karpeta
+agent-queued = ilaran
+agent-attached = Erantsita:
+agent-cancel-queued = Utzi ilarako prompta
+agent-resume-queued = Berrekin ilarako promptei
+agent-clear-queue = Garbitu ilara
+agent-send-all-now = bidali dena orain
+agent-choose-option = Aukeratu goiko aukera bat
+agent-loading-media = Media kargatzen…
+agent-no-matching-media = Ez dago bat datorren mediarik
+agent-prompt-context = Promptaren testuingurua
+agent-details = Xehetasunak
+agent-path = Bidea
+agent-tool = Tresna
+agent-server = Zerbitzaria
+agent-bytes = { $count } byte
+agent-worked-for = Lanean aritu da { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Lanean aritu da { $duration } · urrats 1
+   *[other] Lanean aritu da { $duration } · { $count } urrats
+}
+agent-tool-guardian-review = Guardian berrikuspena
+agent-tool-read-files = Fitxategiak irakurri ditu
+agent-tool-viewed-image = Irudia ikusi du
+agent-tool-used-browser = Nabigatzailea erabili du
+agent-tool-searched-files = Fitxategiak bilatu ditu
+agent-tool-ran-commands = Komandoak exekutatu ditu
+agent-thinking = Pentsatzen
+agent-subagent = Azpiagentea
+agent-prompt = Prompta
+agent-thread = Haria
+agent-parent = Gurasoa
+agent-children = Haurrak
+agent-call = Deia
+agent-raw-event = Gertaera gordina
+agent-plan = Plana
+agent-tasks = { $count ->
+    [one] zeregin 1
+   *[other] { $count } zeregin
+}
+agent-edited = Editatua
+agent-reconnecting = Berriro konektatzen { $attempt }/{ $total }
+agent-status-running = Martxan
+agent-status-done = Eginda
+agent-status-failed = Huts egin du
+agent-status-pending = Zain
+agent-slash-attach-files = Erantsi fitxategiak
+agent-slash-resume-session = Berrekin aurreko saio bati
+agent-slash-select-model = Hautatu modeloa
+agent-slash-continue-cli = Jarraitu saio hau CLIan
+agent-session-just-now = oraintxe
+agent-session-minutes-ago = duela { $count }m
+agent-session-hours-ago = duela { $count }h
+agent-session-days-ago = duela { $count }d
+agent-working-working = Lanean
+agent-working-thinking = Pentsatzen
+agent-working-pondering = Hausnartzen
+agent-working-noodling = Ideiak lantzen
+agent-working-percolating = Mamitzeko bidean
+agent-working-conjuring = Sortzen
+agent-working-cooking = Sukaldatzen
+agent-working-brewing = Prestatzen
+agent-working-musing = Gogoetan
+agent-working-ruminating = Hausnarrean
+agent-working-scheming = Plana fintzen
+agent-working-synthesizing = Sintetizatzen
+agent-working-tinkering = Probak egiten
+agent-working-churning = Buru-belarri
+agent-working-vibing = Giroa hartzen
+agent-working-simmering = Su motelean
+agent-working-crafting = Moldatzen
+agent-working-divining = Asmatzen
+agent-working-mulling = Bueltak ematen
+agent-working-spelunking = Sakonean arakatzen
+
+editor-toggle-explorer = Erakutsi/ezkutatu esploratzailea (Cmd+B)
+editor-unsaved = gorde gabe
+editor-rendered-markdown = Markdown errendatua zuzeneko edizioarekin
+editor-note = Oharra
+editor-source-editor = Iturburu-editorea
+editor-editor = Editorea
+editor-git-diff = Git diff-a
+editor-diff = Diff-a
+editor-tidy = Txukundu
+editor-always = Beti
+editor-unchanged-previews = { $count ->
+    [one] ✦ aldatu gabeko aurrebista 1
+   *[other] ✦ aldatu gabeko { $count } aurrebista
+}
+editor-open-externally = Ireki kanpoko aplikazioan
+editor-changed-line = Aldatutako lerroa
+editor-go-to-definition = Joan definiziora
+editor-find-references = Bilatu erreferentziak
+editor-references = { $count ->
+    [one] erreferentzia 1
+   *[other] { $count } erreferentzia
+}
+editor-lsp-starting = { $server } abiarazten…
+editor-lsp-not-installed = { $server } — ez dago instalatuta
+editor-explorer = Esploratzailea
+editor-open-editors = Irekitako editoreak
+editor-outline = Eskema
+editor-new-file = Fitxategi berria
+editor-new-folder = Karpeta berria
+editor-delete-confirm = Ezabatu “{ $name }”? Ezin da desegin.
+editor-created-folder = { $name } karpeta sortu da
+editor-created-file = { $name } fitxategia sortu da
+editor-renamed-to = Izena honetara aldatu da: { $name }
+editor-deleted = { $name } ezabatu da
+editor-failed-decode-image = Ezin izan da irudia deskodetu
+editor-preview-large-image = irudia (handiegia aurrebistarako)
+editor-preview-binary = bitarra
+editor-preview-file = fitxategia
+
+git-status-clean = garbi
+git-status-modified = aldatuta
+git-status-staged = prestatuta
+git-status-staged-modified = prestatuta*
+git-status-untracked = jarraitu gabe
+git-status-deleted = ezabatuta
+git-status-conflict = gatazka
+git-accept-all = ✓ onartu dena
+git-unstage = Kendu prestaketatik
+git-confirm-deny-all = Berretsi dena ukatzea
+git-deny-all = ✗ ukatu dena
+git-commit-message = commit mezua
+git-commit = Commit ({ $count })
+git-push = ↑ Push egin
+git-loading-diff = Diff-a kargatzen…
+git-no-changes = Ez dago erakusteko aldaketarik
+git-accept = ✓ onartu
+git-deny = ✗ ukatu
+git-show-unchanged-lines = Erakutsi aldatu gabeko { $count } lerro
+
+terminal-loading = Kargatzen…
+terminal-runs-when-ready = prest dagoenean exekutatzen da · Ctrl+C garbitzeko · Esc saltatzeko
+terminal-booting = abiarazten
+terminal-type-command = idatzi komando bat · prest dagoenean exekutatzen da · Esc saltatzeko
+
+setup-tagline-claude = Anthropic-en kode-agentea, Vmux-en
+setup-tagline-codex = OpenAIren kode-agentea, Vmux-en
+setup-tagline-vibe = Mistralen kode-agentea, Vmux-en
+setup-install-title = Instalatu { $name } CLIa
+setup-homebrew-required = Homebrew behar da { $command } instalatzeko, eta oraindik ez dago konfiguratuta. Vmux-ek Homebrew instalatuko du lehenik, eta gero { $name }.
+setup-terminal-instructions = Terminalean, sakatu Return hasteko, eta sartu zure Mac pasahitza eskatzen zaizunean.
+setup-command-missing = Vmux-ek orri hau ireki du tokiko { $command } komandoa oraindik instalatuta ez dagoelako. Exekutatu beheko komandoa eskuratzeko.
+setup-install-failed = Instalazioa ez da amaitu. Begiratu terminalean xehetasunak, eta saiatu berriro.
+setup-installing = Instalatzen…
+setup-install-homebrew = Instalatu Homebrew + { $name }
+setup-run-install = Exekutatu instalazio-komandoa
+setup-auto-reload = Vmux-ek terminal batean exekutatzen du, eta { $command } prest dagoenean berriro kargatzen du.
+
+debug-title = Arazketa
+debug-auto-update = Eguneratze automatikoa
+debug-simulate-update = Simulatu eguneraketa erabilgarri
+debug-simulate-download = Simulatu deskarga
+debug-clear-update = Garbitu eguneraketa
+debug-trigger-restart = Eragin berrabiaraztea
+
+command-manage-spaces = Kudeatu espazioak…
+command-pane-stack-location = panela { $pane } / pila { $stack }
+command-space-pane-stack-location = { $space } / panela { $pane } / pila { $stack }
+command-terminal-path = Terminala ({ $path })
+command-group-interactive-mode = Modu interaktiboa
+command-group-window = Leihoa
+command-group-tab = Fitxa
+command-group-pane = Panela
+command-group-stack = Pila
+command-group-space = Espazioa
+command-group-navigation = Nabigazioa
+command-group-open = Ireki
+command-group-view = Ikusi
+command-group-bar = Barra
+
+menu-close-vmux = Itxi Vmux
+
+agents-terminal-coding-agent = Terminalean oinarritutako kode-agentea

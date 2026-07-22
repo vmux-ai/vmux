@@ -1,0 +1,602 @@
+locale-name = Basa Sunda
+common-open = Buka
+common-close = Tutup
+common-install = Pasang
+common-uninstall = Cabut
+common-update = Perbarui
+common-retry = Cobian deui
+common-refresh = Segerkeun
+common-remove = Pupus
+common-enable = Hurungkeun
+common-disable = Pareuman
+common-new = Anyar
+common-active = aktip
+common-running = jalan
+common-done = réngsé
+common-failed = Gagal
+common-installed = Kapasang
+common-items = { $count ->
+    [one] { $count } item
+   *[other] { $count } item
+}
+start-title = Mimiti
+start-tagline = Hiji prompt. Naon waé, réngsé.
+
+agents-title = Agén
+agents-search = Téangan agén ACP jeung CLI…
+agents-empty = Teu aya agén nu cocog
+agents-empty-detail = Cobian ku ngaran, runtime, atawa ACP/CLI.
+agents-install-failed = Gagal masang
+agents-updating = Ngapdet…
+agents-retrying = Nyobian deui…
+agents-preparing = Nyiapkeun…
+
+extensions-title = Éksténsi
+extensions-search = Téangan nu geus dipasang atawa Chrome Web Store…
+extensions-relaunch = Jalankeun deui pikeun nerapkeun
+extensions-empty = Teu aya éksténsi nu dipasang
+extensions-no-match = Teu aya éksténsi nu cocog
+extensions-empty-detail = Téangan di Chrome Web Store di luhur tuluy pencét Return.
+extensions-no-match-detail = Cobian ngaran atawa ID éksténsi séjén.
+extensions-on = Hurung
+extensions-off = Pareum
+extensions-enable-confirm = Hurungkeun { $name }?
+extensions-enable-permissions = Hurungkeun { $name } jeung idinan:
+
+lsp-title = Server Basa
+lsp-search = Téangan server basa, linter, formatter…
+lsp-loading = Ngamuat katalog…
+lsp-empty = Teu aya server basa nu cocog
+lsp-empty-detail = Cobian basa, linter, atawa formatter séjén.
+lsp-needs = perlu { $tool }
+lsp-status-available = Sadia
+lsp-status-on-path = Aya dina PATH
+lsp-status-installing = Masang…
+lsp-status-installed = Kapasang
+lsp-status-outdated = Aya apdet
+lsp-status-running = Jalan
+lsp-status-failed = Gagal
+
+spaces-title = Rohangan
+spaces-new-placeholder = Ngaran rohangan anyar
+spaces-empty = Teu aya rohangan
+spaces-default-name = Rohangan { $number }
+spaces-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+spaces-delete = Pupus rohangan
+
+team-title = Tim
+team-just-you = Ngan anjeun di rohangan ieu
+team-agents = { $count ->
+    [one] Anjeun jeung 1 agén
+   *[other] Anjeun jeung { $count } agén
+}
+team-empty = Can aya sasaha di dieu
+team-you = Anjeun
+team-agent = Agén
+
+services-title = Ladenan Latar
+services-processes = { $count ->
+    [one] 1 prosés
+   *[other] { $count } prosés
+}
+services-kill-all = Paksa eureun sadayana
+services-not-running = Ladenan teu jalan
+services-start-with = Mimitian ku:
+services-empty = Teu aya prosés aktip
+services-filter = Saring prosés…
+services-no-match = Teu aya prosés nu cocog
+services-connected = Nyambung
+services-disconnected = Teu nyambung
+services-attached = napel
+services-kill = Paksa eureun
+services-memory = Mémori
+services-size = Ukuran
+services-shell = Shell
+
+error-title = Kasalahan
+
+history-search = Téangan riwayat
+history-clear-all = Bersihan sadayana
+history-clear-confirm = Bersihan sadaya riwayat?
+history-clear-warning = Ieu teu bisa dibalikeun.
+history-cancel = Bolay
+history-today = Dinten ieu
+history-yesterday = Kamari
+history-days-ago = { $count } poé ka tukang
+history-day-offset = Poé -{ $count }
+
+settings-title = Setélan
+settings-loading = Ngamuat setélan…
+settings-stored = Disimpen di ~/.vmux/settings.ron
+settings-other = Séjénna
+settings-software-update = Apdet Parangkat Lunak
+settings-check-updates = Pariksa Apdet
+settings-check-updates-hint = Dipariksa otomatis nalika ngamimitian jeung unggal jam lamun Auto-update dihurungkeun.
+settings-update-unavailable = Teu sadia
+settings-update-unavailable-hint = Pangapdet teu kaasup dina build ieu.
+settings-update-checking = Mariksa…
+settings-update-checking-hint = Mariksa apdet…
+settings-update-check-again = Pariksa deui
+settings-update-current = Vmux geus panganyarna.
+settings-update-downloading = Ngundeur…
+settings-update-downloading-hint = Ngundeur Vmux { $version }…
+settings-update-installing = Masang…
+settings-update-installing-hint = Masang Vmux { $version }…
+settings-update-ready = Apdet Siap
+settings-update-ready-hint = Vmux { $version } geus siap. Balikan deui pikeun nerapkeun.
+settings-update-try-again = Cobian deui
+settings-update-failed = Teu tiasa mariksa apdet.
+settings-item = Item
+settings-item-number = Item { $number }
+settings-press-key = Pencét konci…
+settings-saved = Kasimpen
+settings-record-key = Klik pikeun ngarékam kombinasi konci anyar
+
+tray-open-window = Buka Jandéla
+tray-close-window = Tutup Jandéla
+tray-pause-recording = Reureuhkeun Rékaman
+tray-resume-recording = Teruskeun Rékaman
+tray-finish-recording = Réngsékeun Rékaman
+tray-quit = Kaluar tina Vmux
+
+composer-attach-files = Gantelkeun file (/upload)
+composer-remove-attachment = Pupus gantelan
+
+layout-back = Balik
+layout-forward = Maju
+layout-reload = Muat deui
+layout-bookmark-page = Tandaan kaca ieu
+layout-remove-bookmark = Pupus tetengger
+layout-pin-page = Sematkeun kaca ieu
+layout-unpin-page = Leupaskeun sematan kaca ieu
+layout-manage-extensions = Atur éksténsi
+layout-new-stack = Tumpukan anyar
+layout-close-tab = Tutup tab
+layout-bookmark = Tetengger
+layout-pin = Sematkeun
+layout-new-tab = Tab anyar
+layout-team = Tim
+
+command-switch-space = Pindah rohangan…
+command-search-ask = Téangan atawa tanyakeun…
+command-new-tab-placeholder = Téangan atawa ketik URL, atawa pilih Terminal…
+command-placeholder = Ketik URL, téangan tab, atawa > pikeun paréntah…
+command-composer-placeholder = Ketik / pikeun paréntah atawa @ pikeun média
+command-send = Kirim (Enter)
+command-terminal = Terminal
+command-open-terminal = Buka dina Terminal
+command-stack = Tumpukan
+command-tabs = { $count ->
+    [one] 1 tab
+   *[other] { $count } tab
+}
+command-prompt = Prompt
+command-new-tab = Tab anyar
+command-search = Téangan
+command-open-value = Buka “{ $value }”
+command-search-value = Téangan “{ $value }”
+
+schema-appearance = Tampilan
+schema-general = Umum
+schema-layout = Tata perenah
+schema-layout-detail = Jandéla, panel, sidebar, jeung cingcin fokus.
+schema-agent = Agén
+schema-agent-detail = Paripolah agén jeung idin pakakas.
+schema-shortcuts = Potong kompas
+schema-shortcuts-detail = Témbong wungkul. Édit settings.ron langsung pikeun ngarobah binding.
+schema-terminal = Terminal
+schema-browser = Pangotéktak
+schema-mode = Modeu
+schema-mode-detail = Skéma warna pikeun kaca wéb. Alat nuturkeun sistem anjeun.
+schema-device = Alat
+schema-light = Caang
+schema-dark = Poék
+schema-language = Basa
+schema-language-detail = Paké sistem, en-US, ja, atawa tag BCP 47 naon waé nu boga katalog ~/.vmux/locales/<tag>.ftl nu cocog.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Pariksa jeung pasang apdet nalika ngamimitian jeung unggal jam.
+schema-startup-url = URL mimiti
+schema-startup-url-detail = Lamun kosong, muka prompt palang paréntah.
+schema-search-engine = Mesin téangan
+schema-search-engine-detail = Dipaké pikeun téangan wéb ti Mimiti jeung palang paréntah.
+schema-window = Jandéla
+schema-pane = Panel
+schema-side-sheet = Lembar sisi
+schema-focus-ring = Cingcin fokus
+schema-run-placement = Idinan agén ngatur panempatan jalan
+schema-run-placement-detail = Idinan agén milih modeu panel jalan, arah, jeung jangkar.
+schema-leader = Leader
+schema-leader-detail = Konci awalan pikeun potong kompas chord.
+schema-chord-timeout = Wates waktu chord
+schema-chord-timeout-detail = Milidetik saméméh awalan chord kadaluwarsa.
+schema-bindings = Binding
+schema-confirm-close = Pastikeun saméméh nutup
+schema-confirm-close-detail = Ménta konfirmasi saméméh nutup terminal nu masih aya prosés jalan.
+schema-default-theme = Téma standar
+schema-default-theme-detail = Ngaran téma aktip tina daptar téma.
+
+settings-empty = (kosong)
+settings-none = (euweuh)
+
+schema-system = Sistem
+schema-editor = Pangédit
+schema-recording = Rékaman
+schema-radius = Radius
+schema-padding = Padding
+schema-gap = Jarak
+schema-width = Rubak
+schema-color = Warna
+schema-red = Beureum
+schema-green = Héjo
+schema-blue = Biru
+schema-follow-files = Tuturkeun payil
+schema-tidy-files = Rapihkeun payil
+schema-tidy-files-max = Ambang rapihkeun payil
+schema-tidy-files-auto = Rapihkeun payil otomatis
+schema-app-providers = Panyadia aplikasi
+schema-provider = Panyadia
+schema-kind = Jenis
+schema-models = Modél
+schema-acp = Agén ACP
+schema-id = ID
+schema-name = Ngaran
+schema-command = Paréntah
+schema-arguments = Argumén
+schema-environment = Lingkungan
+schema-working-directory = Diréktori gawé
+schema-shell = Shell
+schema-font-family = Kulawarga font
+schema-startup-directory = Diréktori mimiti
+schema-themes = Téma
+schema-color-scheme = Skéma warna
+schema-font-size = Ukuran font
+schema-line-height = Jangkung garis
+schema-cursor-style = Gaya kursor
+schema-cursor-blink = Kursor kedip
+schema-custom-themes = Téma kustom
+schema-foreground = Latar hareup
+schema-background = Latar tukang
+schema-cursor = Kursor
+schema-ansi-colors = Warna ANSI
+schema-keymap = Peta kenop
+schema-explorer = Panjelajah
+schema-visible = Katingali
+schema-language-servers = Server basa
+schema-servers = Server
+schema-language-id = ID basa
+schema-root-markers = Pananda akar
+schema-output-directory = Diréktori kaluaran
+
+menu-scene = Adegan
+menu-layout = Tata perenah
+menu-terminal = Terminal
+menu-browser = Panyungsi
+menu-service = Ladénan
+menu-bookmark = Tetengger
+menu-edit = Édit
+
+layout-knowledge = Pangaweruh
+layout-open-knowledge = Buka Pangaweruh
+layout-open-welcome-knowledge = Buka Wilujeng sumping ka Pangaweruh
+layout-open-path = Buka { $path }
+layout-fold-knowledge = Tilep pangaweruh
+layout-unfold-knowledge = Buka tilepan pangaweruh
+layout-bookmarks = Tetengger
+layout-new-folder = Poldeu Anyar
+layout-add-to-bookmarks = Tambahkeun ka Tetengger
+layout-move-to-bookmarks = Pindahkeun ka Tetengger
+layout-stack-number = Tumpukan { $number }
+layout-fold-stack = Tilep tumpukan
+layout-unfold-stack = Buka tilepan tumpukan
+layout-close-stack = Tutup tumpukan
+layout-bookmark-in = Tetengger dina { $folder }
+
+common-cancel = Batal
+common-delete = Pupus
+common-save = Simpen
+common-rename = Ganti ngaran
+common-expand = Bukakeun
+common-collapse = Ciutkeun
+common-loading = Ngamuat…
+common-error = Kasalahan
+common-output = Kaluaran
+common-pending = Ngantosan
+common-current = ayeuna
+common-stop = Eureun
+services-command = ladenan Vmux
+services-uptime-seconds = { $seconds }d
+services-uptime-minutes = { $minutes }m { $seconds }d
+services-uptime-hours = { $hours }j { $minutes }m
+services-uptime-days = { $days }poé { $hours }j
+
+error-page-failed-load = Kaca gagal dimuat
+error-page-not-found = Kaca teu kapanggih
+error-unknown-host = Host aplikasi Vmux teu dikenal: { $host }
+
+history-title = Riwayat
+
+command-new-app-chat = Chat { $provider }/{ $model } anyar (Aplikasi)
+command-interactive-mode-user = Adegan > Modeu Interaktif > Pamaké
+command-interactive-mode-player = Adegan > Modeu Interaktif > Pamaén
+command-minimize-window = Tata Letak > Jandéla > Leutikan
+command-toggle-layout = Tata Letak > Tata Letak > Togél Tata Letak
+command-close-tab = Tata Letak > Tab > Tutup Tab
+command-new-task = Tata Letak > Tab > Tugas Anyar…
+command-next-tab = Tata Letak > Tab > Tab Salajengna
+command-prev-tab = Tata Letak > Tab > Tab Saméméhna
+command-rename-tab = Tata Letak > Tab > Ganti Ngaran Tab
+command-tab-select-1 = Tata Letak > Tab > Pilih Tab 1
+command-tab-select-2 = Tata Letak > Tab > Pilih Tab 2
+command-tab-select-3 = Tata Letak > Tab > Pilih Tab 3
+command-tab-select-4 = Tata Letak > Tab > Pilih Tab 4
+command-tab-select-5 = Tata Letak > Tab > Pilih Tab 5
+command-tab-select-6 = Tata Letak > Tab > Pilih Tab 6
+command-tab-select-7 = Tata Letak > Tab > Pilih Tab 7
+command-tab-select-8 = Tata Letak > Tab > Pilih Tab 8
+command-tab-select-last = Tata Letak > Tab > Pilih Tab Panungtung
+command-close-pane = Tata Letak > Pane > Tutup Pane
+command-select-pane-left = Tata Letak > Pane > Pilih Pane Kénca
+command-select-pane-right = Tata Letak > Pane > Pilih Pane Katuhu
+command-select-pane-up = Tata Letak > Pane > Pilih Pane Luhur
+command-select-pane-down = Tata Letak > Pane > Pilih Pane Handap
+command-swap-pane-prev = Tata Letak > Pane > Tukeur Pane Saméméhna
+command-swap-pane-next = Tata Letak > Pane > Tukeur Pane Salajengna
+command-equalize-pane-size = Tata Letak > Pane > Saruakeun Ukuran Pane
+command-resize-pane-left = Tata Letak > Pane > Robah Ukuran Pane ka Kénca
+command-resize-pane-right = Tata Letak > Pane > Robah Ukuran Pane ka Katuhu
+command-resize-pane-up = Tata Letak > Pane > Robah Ukuran Pane ka Luhur
+command-resize-pane-down = Tata Letak > Pane > Robah Ukuran Pane ka Handap
+command-stack-close = Tata Letak > Stack > Tutup Stack
+command-stack-next = Tata Letak > Stack > Stack Salajengna
+command-stack-previous = Tata Letak > Stack > Stack Saméméhna
+command-stack-reopen = Tata Letak > Stack > Buka Deui Kaca nu Ditutup
+command-stack-swap-prev = Tata Letak > Stack > Pindahkeun Stack ka Kénca
+command-stack-swap-next = Tata Letak > Stack > Pindahkeun Stack ka Katuhu
+command-space-open = Tata Letak > Space > Spaces
+command-terminal-close = Terminal > Tutup Terminal
+command-terminal-next = Terminal > Terminal Salajengna
+command-terminal-prev = Terminal > Terminal Saméméhna
+command-terminal-clear = Terminal > Bersihan Terminal
+command-browser-prev-page = Pangotéktak > Napigasi > Balik
+command-browser-next-page = Pangotéktak > Napigasi > Maju
+command-browser-reload = Pangotéktak > Napigasi > Muat Deui
+command-browser-hard-reload = Pangotéktak > Napigasi > Muat Deui Paksa
+command-open-in-place = Pangotéktak > Buka > Buka di Dieu
+command-open-in-new-stack = Pangotéktak > Buka > Buka dina Stack Anyar
+command-open-in-pane-top = Pangotéktak > Buka > Buka dina Pane Luhur
+command-open-in-pane-right = Pangotéktak > Buka > Buka dina Pane Katuhu
+command-open-in-pane-bottom = Pangotéktak > Buka > Buka dina Pane Handap
+command-open-in-pane-left = Pangotéktak > Buka > Buka dina Pane Kénca
+command-open-in-new-tab = Pangotéktak > Buka > Buka dina Tab Anyar
+command-open-in-new-space = Pangotéktak > Buka > Buka dina Space Anyar
+command-browser-zoom-in = Pangotéktak > Témbongkeun > Gedékeun
+command-browser-zoom-out = Pangotéktak > Témbongkeun > Leutikan
+command-browser-zoom-reset = Pangotéktak > Témbongkeun > Ukuran Asli
+command-browser-dev-tools = Pangotéktak > Témbongkeun > Pakakas Pamekar
+command-browser-open-command-bar = Pangotéktak > Bar > Bar Paréntah
+command-browser-open-page-in-command-bar = Pangotéktak > Bar > Édit Kaca
+command-browser-open-path-bar = Pangotéktak > Bar > Navigator Path
+command-browser-open-commands = Pangotéktak > Bar > Paréntah
+command-browser-open-history = Pangotéktak > Bar > Riwayat
+command-service-open = Ladenan > Buka Monitor Ladenan
+command-bookmark-toggle-active = Tetengger > Tetengger Kaca
+command-bookmark-pin-active = Tetengger > Sematkeun Kaca
+
+layout-tab = Tab
+layout-no-stacks = Euweuh stack
+layout-loading = Ngamuat…
+layout-no-markdown-files = Euweuh file Markdown
+layout-empty-folder = Folder kosong
+layout-worktree = worktree
+layout-folder-name = Ngaran folder
+layout-no-pins-bookmarks = Euweuh sematan atawa tetengger
+layout-move-to = Pindahkeun ka { $folder }
+layout-bookmark-current-page = Tetengger Kaca Ayeuna
+layout-rename-folder = Ganti Ngaran Folder
+layout-remove-folder = Pupus Folder
+layout-update-downloading = Ngundeur apdet
+layout-update-installing = Masang apdet…
+layout-update-ready = Vérsi anyar sayogi
+layout-restart-update = Hurungkeun deui pikeun ngapdet
+
+agent-preparing = Nyiapkeun agén…
+agent-send-all-queued = Kirim sakabéh prompt antrian ayeuna (Esc)
+agent-send = Kirim (Enter)
+agent-ready = Siap iraha waé anjeun.
+agent-loading-older = Ngamuat pesen heubeul…
+agent-load-older = Muat pesen heubeul
+agent-continued-from = Diteruskeun ti { $source }
+agent-older-context-omitted = kontéks heubeul dileungitkeun
+agent-interrupted = kaganggu
+agent-allow-tool = Idinan { $tool }?
+agent-deny = Tampik
+agent-allow-always = Sok idinan
+agent-allow = Idinan
+agent-loading-sessions = Ngamuat sési…
+agent-no-resumable-sessions = Euweuh sési nu bisa diteruskeun
+agent-no-matching-sessions = Euweuh sési nu cocog
+agent-no-matching-models = Euweuh modél nu cocog
+agent-choice-help = ↑/↓ atawa Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Pilih folder repositori
+agent-choose-repository-detail = Pilih repositori Git lokal nu kudu dipaké ku agén.
+agent-choosing = Milih…
+agent-choose-folder = Pilih folder
+agent-queued = diasupkeun antrian
+agent-attached = Dilampirkeun:
+agent-cancel-queued = Batalkeun prompt antrian
+agent-resume-queued = Teruskeun prompt antrian
+agent-clear-queue = Bersihan antrian
+agent-send-all-now = kirim sadayana ayeuna
+agent-choose-option = Pilih hiji pilihan di luhur
+agent-loading-media = Ngamuat média…
+agent-no-matching-media = Euweuh média nu cocog
+agent-prompt-context = Kontéks prompt
+agent-details = Rincian
+agent-path = Path
+agent-tool = Pakakas
+agent-server = Server
+agent-bytes = { $count } byte
+agent-worked-for = Gawé salila { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Gawé salila { $duration } · 1 léngkah
+   *[other] Gawé salila { $duration } · { $count } léngkah
+}
+agent-tool-guardian-review = Tinjauan Guardian
+agent-tool-read-files = Maca file
+agent-tool-viewed-image = Ningali gambar
+agent-tool-used-browser = Ngagunakeun pangotéktak
+agent-tool-searched-files = Néangan file
+agent-tool-ran-commands = Ngajalankeun paréntah
+agent-thinking = Mikir
+agent-subagent = Subagén
+agent-prompt = Prompt
+agent-thread = Thread
+agent-parent = Indung
+agent-children = Anak
+agent-call = Telepon
+agent-raw-event = Kajadian atah
+agent-plan = Rencana
+agent-tasks = { $count ->
+    [one] 1 tugas
+   *[other] { $count } tugas
+}
+agent-edited = Diédit
+agent-reconnecting = Nyambung deui { $attempt }/{ $total }
+agent-status-running = Jalan
+agent-status-done = Réngsé
+agent-status-failed = Gagal
+agent-status-pending = Ngantosan
+agent-slash-attach-files = Lampirkeun file
+agent-slash-resume-session = Teruskeun sési baheula
+agent-slash-select-model = Pilih modél
+agent-slash-continue-cli = Teruskeun sési ieu di CLI
+agent-session-just-now = kakara
+agent-session-minutes-ago = { $count }m ka tukang
+agent-session-hours-ago = { $count }j ka tukang
+agent-session-days-ago = { $count }poé ka tukang
+agent-working-working = Gawé
+agent-working-thinking = Mikir
+agent-working-pondering = Nimbang-nimbang
+agent-working-noodling = Ngulik
+agent-working-percolating = Ngolah
+agent-working-conjuring = Nyipta
+agent-working-cooking = Masak
+agent-working-brewing = Ngaramu
+agent-working-musing = Ngarenung
+agent-working-ruminating = Mikiran deui
+agent-working-scheming = Nyusun siasat
+agent-working-synthesizing = Nyintésis
+agent-working-tinkering = Ngoprék
+agent-working-churning = Ngagiling
+agent-working-vibing = Ngarasakeun alur
+agent-working-simmering = Ngagodog lalaunan
+agent-working-crafting = Ngaracik
+agent-working-divining = Ngira-ngira
+agent-working-mulling = Nimbangkeun
+agent-working-spelunking = Ngagali jero
+
+editor-toggle-explorer = Togél Explorer (Cmd+B)
+editor-unsaved = can disimpen
+editor-rendered-markdown = Markdown dirender jeung édit langsung
+editor-note = Catetan
+editor-source-editor = Éditor sumber
+editor-editor = Éditor
+editor-git-diff = Diff Git
+editor-diff = Diff
+editor-tidy = Rapihkeun
+editor-always = Salawasna
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 pratinjau teu robah
+   *[other] ✦ { $count } pratinjau teu robah
+}
+editor-open-externally = Buka di luar
+editor-changed-line = Baris robah
+editor-go-to-definition = Ka Définisi
+editor-find-references = Téangan Rujukan
+editor-references = { $count ->
+    [one] 1 rujukan
+   *[other] { $count } rujukan
+}
+editor-lsp-starting = { $server } ngamimitian…
+editor-lsp-not-installed = { $server } — teu dipasang
+editor-explorer = Explorer
+editor-open-editors = Éditor Kabuka
+editor-outline = Rangkay
+editor-new-file = File Anyar
+editor-new-folder = Folder Anyar
+editor-delete-confirm = Pupus “{ $name }”? Ieu teu bisa dibolaykeun.
+editor-created-folder = Folder { $name } dijieun
+editor-created-file = File { $name } dijieun
+editor-renamed-to = Diganti ngaranna jadi { $name }
+editor-deleted = { $name } dipupus
+editor-failed-decode-image = Gagal ngadékode gambar
+editor-preview-large-image = gambar (kagedéan pikeun pratinjau)
+editor-preview-binary = binér
+editor-preview-file = file
+
+git-status-clean = bersih
+git-status-modified = dirobah
+git-status-staged = di-stage
+git-status-staged-modified = di-stage*
+git-status-untracked = teu dilacak
+git-status-deleted = dipupus
+git-status-conflict = konflik
+git-accept-all = ✓ tarima sadayana
+git-unstage = Cabut tina stage
+git-confirm-deny-all = Pastikeun tampik sadayana
+git-deny-all = ✗ tampik sadayana
+git-commit-message = pesen commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Ngamuat diff…
+git-no-changes = Euweuh parobahan pikeun ditembongkeun
+git-accept = ✓ tarima
+git-deny = ✗ tampik
+git-show-unchanged-lines = Témbongkeun { $count } baris teu robah
+
+terminal-loading = Ngamuat…
+terminal-runs-when-ready = jalan lamun geus siap · Ctrl+C ngabersihan · Esc ngaluncatan
+terminal-booting = keur boot
+terminal-type-command = ketik paréntah · jalan lamun geus siap · Esc ngaluncatan
+
+setup-tagline-claude = agén coding Anthropic, dina Vmux
+setup-tagline-codex = agén coding OpenAI, dina Vmux
+setup-tagline-vibe = agén coding Mistral, dina Vmux
+setup-install-title = Pasang CLI { $name }
+setup-homebrew-required = Homebrew diperlukeun pikeun masang { $command } jeung can disetél. Vmux bakal masang Homebrew heula, tuluy { $name }.
+setup-terminal-instructions = Dina terminal, pencét Return pikeun ngamimitian, tuluy lebetkeun kecap akses Mac anjeun lamun dipénta.
+setup-command-missing = Vmux muka kaca ieu sabab paréntah lokal { $command } can dipasang. Jalankeun paréntah di handap pikeun meunangkeunana.
+setup-install-failed = Pamasangan teu réngsé. Pariksa terminal pikeun rincian, tuluy cobian deui.
+setup-installing = Masang…
+setup-install-homebrew = Pasang Homebrew + { $name }
+setup-run-install = Jalankeun paréntah pamasangan
+setup-auto-reload = Vmux ngajalankeunana dina terminal jeung muat deui lamun { $command } geus siap.
+
+debug-title = Debug
+debug-auto-update = Apdet otomatis
+debug-simulate-update = Simulasikeun apdet sayogi
+debug-simulate-download = Simulasikeun undeuran
+debug-clear-update = Bersihan apdet
+debug-trigger-restart = Picu hurungkeun deui
+
+command-manage-spaces = Atur space…
+command-pane-stack-location = pane { $pane } / stack { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Modeu Interaktif
+command-group-window = Jandéla
+command-group-tab = Tab
+command-group-pane = Pane
+command-group-stack = Stack
+command-group-space = Space
+command-group-navigation = Navigasi
+command-group-open = Buka
+command-group-view = Témbongkeun
+command-group-bar = Bar
+
+menu-close-vmux = Tutup Vmux
+
+agents-terminal-coding-agent = Agen coding dumasar terminal

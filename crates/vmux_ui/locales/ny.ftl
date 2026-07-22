@@ -1,0 +1,602 @@
+locale-name = Chichewa
+common-open = Tsegula
+common-close = Tseka
+common-install = Ikani
+common-uninstall = Chotsa
+common-update = Sinthani
+common-retry = Yesaninso
+common-refresh = Tsitsimutsa
+common-remove = Chotsa
+common-enable = Yatsani
+common-disable = Zimitsani
+common-new = Chatsopano
+common-active = yogwira
+common-running = ikuyenda
+common-done = zatha
+common-failed = Zalephera
+common-installed = Yayikidwa
+common-items = { $count ->
+    [one] chinthu { $count }
+   *[other] zinthu { $count }
+}
+start-title = Yambani
+start-tagline = Lamulo limodzi. Chilichonse chitheka.
+
+agents-title = Maajenti a AI
+agents-search = Sakani maajenti a ACP ndi CLI…
+agents-empty = Palibe maajenti ofanana
+agents-empty-detail = Yesani dzina, runtime, kapena ACP/CLI.
+agents-install-failed = Kuyika kwalephera
+agents-updating = Ikusintha…
+agents-retrying = Ikuyesanso…
+agents-preparing = Ikukonzekera…
+
+extensions-title = Zowonjezera
+extensions-search = Sakani zoyikidwa kapena Chrome Web Store…
+extensions-relaunch = Yambitsaninso kuti zigwire
+extensions-empty = Palibe zowonjezera zoyikidwa
+extensions-no-match = Palibe zowonjezera zofanana
+extensions-empty-detail = Sakani mu Chrome Web Store pamwambapa kenako dinani Return.
+extensions-no-match-detail = Yesani dzina lina kapena ID ya chowonjezera.
+extensions-on = Yayatsidwa
+extensions-off = Yazimitsidwa
+extensions-enable-confirm = Yatsani { $name }?
+extensions-enable-permissions = Yatsani { $name } ndi kulola:
+
+lsp-title = Ma seva a zilankhulo
+lsp-search = Sakani ma seva a zilankhulo, ma linter, ma formatter…
+lsp-loading = Ikutsegula katalogi…
+lsp-empty = Palibe ma seva a zilankhulo ofanana
+lsp-empty-detail = Yesani chilankhulo china, linter, kapena formatter.
+lsp-needs = ikufuna { $tool }
+lsp-status-available = Ilipo
+lsp-status-on-path = Ili pa PATH
+lsp-status-installing = Ikuyika…
+lsp-status-installed = Yayikidwa
+lsp-status-outdated = Kusintha kulipo
+lsp-status-running = Ikuyenda
+lsp-status-failed = Yalephera
+
+spaces-title = Malo
+spaces-new-placeholder = Dzina la malo atsopano
+spaces-empty = Palibe malo
+spaces-default-name = Malo { $number }
+spaces-tabs = { $count ->
+    [one] tabu 1
+   *[other] tabu { $count }
+}
+spaces-delete = Chotsa malo
+
+team-title = Gulu
+team-just-you = Muli nokha m'malo muno
+team-agents = { $count ->
+    [one] Inu ndi ajenti 1
+   *[other] Inu ndi maajenti { $count }
+}
+team-empty = Palibe aliyense pano
+team-you = Inu
+team-agent = Ajenti
+
+services-title = Ntchito zakumbuyo
+services-processes = { $count ->
+    [one] process 1
+   *[other] ma process { $count }
+}
+services-kill-all = Imitsani Zonse
+services-not-running = Ntchitoyi siyikuyenda
+services-start-with = Yambitsani ndi:
+services-empty = Palibe ma process omwe akuyenda
+services-filter = Sefani ma process…
+services-no-match = Palibe ma process ofanana
+services-connected = Zalumikizidwa
+services-disconnected = Zalekanitsidwa
+services-attached = cholumikizidwa
+services-kill = Imitsa
+services-memory = Memory
+services-size = Kukula
+services-shell = Shell
+
+error-title = Vuto
+
+history-search = Sakani mbiri
+history-clear-all = Chotsani zonse
+history-clear-confirm = Chotsani mbiri yonse?
+history-clear-warning = Izi sizingabwezedwe.
+history-cancel = Letsani
+history-today = Lero
+history-yesterday = Dzulo
+history-days-ago = Masiku { $count } apitawo
+history-day-offset = Tsiku -{ $count }
+
+settings-title = Zokonda
+settings-loading = Ikutsegula zokonda…
+settings-stored = Zasungidwa mu ~/.vmux/settings.ron
+settings-other = Zina
+settings-software-update = Kusintha pulogalamu
+settings-check-updates = Fufuzani Zosintha
+settings-check-updates-hint = Imadzifufuza yokha ikayambika komanso ola lililonse ngati Auto-update yayatsidwa.
+settings-update-unavailable = Sizikupezeka
+settings-update-unavailable-hint = Chosinthira sichinaphatikizidwe mu build iyi.
+settings-update-checking = Ikufufuza…
+settings-update-checking-hint = Ikufufuza zosintha…
+settings-update-check-again = Fufuzaninso
+settings-update-current = Vmux ili ndi zosintha zaposachedwa.
+settings-update-downloading = Ikutsitsa…
+settings-update-downloading-hint = Ikutsitsa Vmux { $version }…
+settings-update-installing = Ikuyika…
+settings-update-installing-hint = Ikuyika Vmux { $version }…
+settings-update-ready = Kusintha Kwakonzeka
+settings-update-ready-hint = Vmux { $version } yakonzeka. Yambitsaninso kuti igwire.
+settings-update-try-again = Yesaninso
+settings-update-failed = Zalephera kufufuza zosintha.
+settings-item = Chinthu
+settings-item-number = Chinthu { $number }
+settings-press-key = Dinani kiyibodi…
+settings-saved = Zasungidwa
+settings-record-key = Dinani kuti mujambule makiyi atsopano
+
+tray-open-window = Tsegula Zenera
+tray-close-window = Tseka Zenera
+tray-pause-recording = Imitsani Kaye Kujambula
+tray-resume-recording = Pitirizani Kujambula
+tray-finish-recording = Malizani Kujambula
+tray-quit = Tulukani mu Vmux
+
+composer-attach-files = Onjezani mafayilo (/upload)
+composer-remove-attachment = Chotsa cholumikiza
+
+layout-back = Bwerera
+layout-forward = Pitani patsogolo
+layout-reload = Tsegulanso
+layout-bookmark-page = Ikani tsambali ku ma bookmark
+layout-remove-bookmark = Chotsa bookmark
+layout-pin-page = Mangiriza tsambali
+layout-unpin-page = Masula tsambali
+layout-manage-extensions = Konzani zowonjezera
+layout-new-stack = Stack yatsopano
+layout-close-tab = Tseka tabu
+layout-bookmark = Bookmark
+layout-pin = Mangiriza
+layout-new-tab = Tabu yatsopano
+layout-team = Gulu
+
+command-switch-space = Sinthani malo…
+command-search-ask = Sakani kapena funsani…
+command-new-tab-placeholder = Sakani kapena lembani URL, kapena sankhani Terminal…
+command-placeholder = Lembani URL, sakani ma tabu, kapena > pa malamulo…
+command-composer-placeholder = Lembani / pa malamulo kapena @ pa media
+command-send = Tumizani (Enter)
+command-terminal = Terminal
+command-open-terminal = Tsegula mu Terminal
+command-stack = Stack
+command-tabs = { $count ->
+    [one] tabu 1
+   *[other] tabu { $count }
+}
+command-prompt = Prompt
+command-new-tab = Tabu yatsopano
+command-search = Sakani
+command-open-value = Tsegula “{ $value }”
+command-search-value = Sakani “{ $value }”
+
+schema-appearance = Maonekedwe
+schema-general = Zonse
+schema-layout = Kapangidwe
+schema-layout-detail = Zenera, magawo, sidebar, ndi focus ring.
+schema-agent = Ajenti
+schema-agent-detail = Mmene ajenti amachitira ndi zilolezo za zida.
+schema-shortcuts = Njira zachidule
+schema-shortcuts-detail = Zowerenga zokha. Sinthani settings.ron mwachindunji kuti musinthe ma binding.
+schema-terminal = Terminal
+schema-browser = Msakatuli
+schema-mode = Mode
+schema-mode-detail = Mtundu wa masamba a webu. Device imatsatira dongosolo lanu.
+schema-device = Device
+schema-light = Kuwala
+schema-dark = Mdima
+schema-language = Chilankhulo
+schema-language-detail = Gwiritsani ntchito dongosolo, en-US, ja, kapena tag iliyonse ya BCP 47 yokhala ndi katalogi yofanana ya ~/.vmux/locales/<tag>.ftl.
+schema-auto-update = Auto-update
+schema-auto-update-detail = Fufuzani ndi kuyika zosintha ikayambika komanso ola lililonse.
+schema-startup-url = URL yoyambira
+schema-startup-url-detail = Ikakhala yopanda kanthu imatsegula prompt ya command bar.
+schema-search-engine = Injini yosakira
+schema-search-engine-detail = Imagwiritsidwa ntchito posaka pa webu kuchokera ku Start ndi command bar.
+schema-window = Zenera
+schema-pane = Gawo
+schema-side-sheet = Pepala la m'mbali
+schema-focus-ring = Mphete ya focus
+schema-run-placement = Lolani kusintha malo oyendetsera
+schema-run-placement-detail = Lolani maajenti kusankha mode ya gawo loyendetsera, njira, ndi anchor.
+schema-leader = Leader
+schema-leader-detail = Kiyi yoyambira ya ma shortcut a chord.
+schema-chord-timeout = Nthawi yodikirira chord
+schema-chord-timeout-detail = Ma millisecond chord prefix isanathe.
+schema-bindings = Ma binding
+schema-confirm-close = Tsimikizani kutseka
+schema-confirm-close-detail = Funsani musanatseke terminal yokhala ndi process yomwe ikuyenda.
+schema-default-theme = Theme yokhazikika
+schema-default-theme-detail = Dzina la theme yogwira kuchokera pa mndandanda wa ma theme.
+
+settings-empty = (mulibe kanthu)
+settings-none = (palibe)
+
+schema-system = Dongosolo
+schema-editor = Wosintha
+schema-recording = Kujambula
+schema-radius = Utali wozungulira
+schema-padding = Mpata wamkati
+schema-gap = Mpata
+schema-width = M'lifupi
+schema-color = Mtundu
+schema-red = Yofiira
+schema-green = Yobiriwira
+schema-blue = Yabuluu
+schema-follow-files = Tsatira mafayilo
+schema-tidy-files = Yeretsani mafayilo
+schema-tidy-files-max = Malire oyeretsera mafayilo
+schema-tidy-files-auto = Yeretsani mafayilo zokha
+schema-app-providers = Opereka mapulogalamu
+schema-provider = Wopereka
+schema-kind = Mtundu
+schema-models = Ma modeli
+schema-acp = Ma agent a ACP
+schema-id = ID
+schema-name = Dzina
+schema-command = Lamulo
+schema-arguments = Ma agumenti
+schema-environment = Zosintha za chilengedwe
+schema-working-directory = Foda yogwirira ntchito
+schema-shell = Malo a malamulo
+schema-font-family = Banja la zilembo
+schema-startup-directory = Foda yoyambira
+schema-themes = Mitu
+schema-color-scheme = Ndondomeko ya mitundu
+schema-font-size = Kukula kwa zilembo
+schema-line-height = Kutalika kwa mzere
+schema-cursor-style = Maonekedwe a cholozera
+schema-cursor-blink = Kuphethira kwa cholozera
+schema-custom-themes = Mitu yosinthidwa makonda
+schema-foreground = Patsogolo
+schema-background = Kumbuyo
+schema-cursor = Cholozera
+schema-ansi-colors = Mitundu ya ANSI
+schema-keymap = Mapu a makiyi
+schema-explorer = Wofufuza
+schema-visible = Zowoneka
+schema-language-servers = Ma seva a zilankhulo
+schema-servers = Ma seva
+schema-language-id = ID ya chilankhulo
+schema-root-markers = Zizindikiro za muzu
+schema-output-directory = Foda yotulutsa
+
+menu-scene = Malo
+menu-layout = Kapangidwe
+menu-terminal = Malo a malamulo
+menu-browser = Msakatuli
+menu-service = Ntchito
+menu-bookmark = Chosungira tsamba
+menu-edit = Sinthani
+
+layout-knowledge = Chidziwitso
+layout-open-knowledge = Tsegulani Chidziwitso
+layout-open-welcome-knowledge = Tsegulani Takulandirani ku Chidziwitso
+layout-open-path = Tsegulani { $path }
+layout-fold-knowledge = Pindani chidziwitso
+layout-unfold-knowledge = Tambasulani chidziwitso
+layout-bookmarks = Zosungira masamba
+layout-new-folder = Foda yatsopano
+layout-add-to-bookmarks = Onjezani ku Zosungira masamba
+layout-move-to-bookmarks = Sunthani ku Zosungira masamba
+layout-stack-number = Mulu { $number }
+layout-fold-stack = Pindani mulu
+layout-unfold-stack = Tambasulani mulu
+layout-close-stack = Tsekani mulu
+layout-bookmark-in = Sungani tsamba mu { $folder }
+
+common-cancel = Letsani
+common-delete = Chotsani
+common-save = Sungani
+common-rename = Sinthani dzina
+common-expand = Kulitsa
+common-collapse = Pinda
+common-loading = Ikutsegula…
+common-error = Cholakwika
+common-output = Zotuluka
+common-pending = Ikudikirira
+common-current = yapano
+common-stop = Imitsani
+services-command = Ntchito ya Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Tsamba lalephera kutseguka
+error-page-not-found = Tsamba silinapezeke
+error-unknown-host = Host ya pulogalamu ya Vmux yosadziwika: { $host }
+
+history-title = Mbiri
+
+command-new-app-chat = Chat yatsopano ya { $provider }/{ $model } (Pulogalamu)
+command-interactive-mode-user = Chiwonetsero > Njira Yolumikizana > Wogwiritsa
+command-interactive-mode-player = Chiwonetsero > Njira Yolumikizana > Wosewera
+command-minimize-window = Masanjidwe > Zenera > Chepetsani
+command-toggle-layout = Masanjidwe > Masanjidwe > Sinthani Masanjidwe
+command-close-tab = Masanjidwe > Tabu > Tsekani Tabu
+command-new-task = Masanjidwe > Tabu > Ntchito Yatsopano…
+command-next-tab = Masanjidwe > Tabu > Tabu Yotsatira
+command-prev-tab = Masanjidwe > Tabu > Tabu Yapita
+command-rename-tab = Masanjidwe > Tabu > Sinthani Dzina la Tabu
+command-tab-select-1 = Masanjidwe > Tabu > Sankhani Tabu 1
+command-tab-select-2 = Masanjidwe > Tabu > Sankhani Tabu 2
+command-tab-select-3 = Masanjidwe > Tabu > Sankhani Tabu 3
+command-tab-select-4 = Masanjidwe > Tabu > Sankhani Tabu 4
+command-tab-select-5 = Masanjidwe > Tabu > Sankhani Tabu 5
+command-tab-select-6 = Masanjidwe > Tabu > Sankhani Tabu 6
+command-tab-select-7 = Masanjidwe > Tabu > Sankhani Tabu 7
+command-tab-select-8 = Masanjidwe > Tabu > Sankhani Tabu 8
+command-tab-select-last = Masanjidwe > Tabu > Sankhani Tabu Yomaliza
+command-close-pane = Masanjidwe > Gawo > Tsekani Gawo
+command-select-pane-left = Masanjidwe > Gawo > Sankhani Gawo Lamanzere
+command-select-pane-right = Masanjidwe > Gawo > Sankhani Gawo Lakumanja
+command-select-pane-up = Masanjidwe > Gawo > Sankhani Gawo Lapamwamba
+command-select-pane-down = Masanjidwe > Gawo > Sankhani Gawo Lapansi
+command-swap-pane-prev = Masanjidwe > Gawo > Sinthanani ndi Gawo Lapita
+command-swap-pane-next = Masanjidwe > Gawo > Sinthanani ndi Gawo Lotsatira
+command-equalize-pane-size = Masanjidwe > Gawo > Fananitsani Kukula kwa Magawo
+command-resize-pane-left = Masanjidwe > Gawo > Sinthani Kukula Kumanzere
+command-resize-pane-right = Masanjidwe > Gawo > Sinthani Kukula Kumanja
+command-resize-pane-up = Masanjidwe > Gawo > Sinthani Kukula Mmwamba
+command-resize-pane-down = Masanjidwe > Gawo > Sinthani Kukula Pansi
+command-stack-close = Masanjidwe > Mulu > Tsekani Mulu
+command-stack-next = Masanjidwe > Mulu > Mulu Wotsatira
+command-stack-previous = Masanjidwe > Mulu > Mulu Wapita
+command-stack-reopen = Masanjidwe > Mulu > Tsegulanso Tsamba Lotsekedwa
+command-stack-swap-prev = Masanjidwe > Mulu > Sunthani Mulu Kumanzere
+command-stack-swap-next = Masanjidwe > Mulu > Sunthani Mulu Kumanja
+command-space-open = Masanjidwe > Malo > Malo
+command-terminal-close = Teminali > Tsekani Teminali
+command-terminal-next = Teminali > Teminali Yotsatira
+command-terminal-prev = Teminali > Teminali Yapita
+command-terminal-clear = Teminali > Yeretsani Teminali
+command-browser-prev-page = Msakatuli > Kuyenda > Kubwerera
+command-browser-next-page = Msakatuli > Kuyenda > Patsogolo
+command-browser-reload = Msakatuli > Kuyenda > Tsegulanso
+command-browser-hard-reload = Msakatuli > Kuyenda > Tsegulanso Mokakamiza
+command-open-in-place = Msakatuli > Tsegula > Tsegula Pano
+command-open-in-new-stack = Msakatuli > Tsegula > Tsegula mu Mulu Watsopano
+command-open-in-pane-top = Msakatuli > Tsegula > Tsegula mu Gawo Lapamwamba
+command-open-in-pane-right = Msakatuli > Tsegula > Tsegula mu Gawo Lakumanja
+command-open-in-pane-bottom = Msakatuli > Tsegula > Tsegula mu Gawo Lapansi
+command-open-in-pane-left = Msakatuli > Tsegula > Tsegula mu Gawo Lamanzere
+command-open-in-new-tab = Msakatuli > Tsegula > Tsegula mu Tabu Yatsopano
+command-open-in-new-space = Msakatuli > Tsegula > Tsegula mu Malo Atsopano
+command-browser-zoom-in = Msakatuli > Kuwona > Kulitsa
+command-browser-zoom-out = Msakatuli > Kuwona > Chepetsa
+command-browser-zoom-reset = Msakatuli > Kuwona > Kukula Kwenikweni
+command-browser-dev-tools = Msakatuli > Kuwona > Zida za Opanga
+command-browser-open-command-bar = Msakatuli > Bala > Bala ya Malamulo
+command-browser-open-page-in-command-bar = Msakatuli > Bala > Sinthani Tsamba
+command-browser-open-path-bar = Msakatuli > Bala > Woyendetsa Njira
+command-browser-open-commands = Msakatuli > Bala > Malamulo
+command-browser-open-history = Msakatuli > Bala > Mbiri
+command-service-open = Ntchito > Tsegula Chowunikira Ntchito
+command-bookmark-toggle-active = Chizindikiro > Ikani Chizindikiro pa Tsamba
+command-bookmark-pin-active = Chizindikiro > Khomani Tsamba
+
+layout-tab = Tabu
+layout-no-stacks = Palibe milu
+layout-loading = Ikutsegula…
+layout-no-markdown-files = Palibe mafayilo a Markdown
+layout-empty-folder = Foda yopanda kanthu
+layout-worktree = worktree
+layout-folder-name = Dzina la foda
+layout-no-pins-bookmarks = Palibe zokhomedwa kapena zizindikiro
+layout-move-to = Sunthani ku { $folder }
+layout-bookmark-current-page = Ikani Chizindikiro pa Tsamba Lapano
+layout-rename-folder = Sinthani Dzina la Foda
+layout-remove-folder = Chotsani Foda
+layout-update-downloading = Ikutsitsa zosintha
+layout-update-installing = Ikuyika zosintha…
+layout-update-ready = Mtundu watsopano ulipo
+layout-restart-update = Yambitsaninso kuti musinthe
+
+agent-preparing = Kukonzekera agent…
+agent-send-all-queued = Tumizani mawu onse odikirira tsopano (Esc)
+agent-send = Tumizani (Enter)
+agent-ready = Ndakonzeka mukakhala okonzeka.
+agent-loading-older = Kutsegula mauthenga akale…
+agent-load-older = Tsegula mauthenga akale
+agent-continued-from = Yapitirizidwa kuchokera ku { $source }
+agent-older-context-omitted = nkhani yakale yasiyidwa
+agent-interrupted = yasokonezedwa
+agent-allow-tool = Lolani { $tool }?
+agent-deny = Kanani
+agent-allow-always = Lolani nthawi zonse
+agent-allow = Lolani
+agent-loading-sessions = Kutsegula magawo…
+agent-no-resumable-sessions = Palibe magawo opitirizika omwe apezeka
+agent-no-matching-sessions = Palibe magawo ofanana
+agent-no-matching-models = Palibe ma model ofanana
+agent-choice-help = ↑/↓ kapena Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Sankhani foda ya repository
+agent-choose-repository-detail = Sankhani repository ya Git yakomweko yomwe agent agwiritse ntchito.
+agent-choosing = Kusankha…
+agent-choose-folder = Sankhani foda
+agent-queued = ili pamzere
+agent-attached = Zaphatikizidwa:
+agent-cancel-queued = Letsani mawu odikirira
+agent-resume-queued = Pitirizani mawu odikirira
+agent-clear-queue = Chotsani mzere
+agent-send-all-now = tumizani zonse tsopano
+agent-choose-option = Sankhani njira pamwambapa
+agent-loading-media = Kutsegula media…
+agent-no-matching-media = Palibe media yofanana
+agent-prompt-context = Nkhani ya mawu
+agent-details = Tsatanetsatane
+agent-path = Njira
+agent-tool = Chida
+agent-server = Seva
+agent-bytes = { $count } bytes
+agent-worked-for = Yagwira ntchito kwa { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Yagwira ntchito kwa { $duration } · sitepe 1
+   *[other] Yagwira ntchito kwa { $duration } · masitepe { $count }
+}
+agent-tool-guardian-review = Kuwunika kwa Guardian
+agent-tool-read-files = Werenga mafayilo
+agent-tool-viewed-image = Yawona chithunzi
+agent-tool-used-browser = Yagwiritsa ntchito msakatuli
+agent-tool-searched-files = Yafufuza mafayilo
+agent-tool-ran-commands = Yayendetsa malamulo
+agent-thinking = Ikuganiza
+agent-subagent = Agent yaying'ono
+agent-prompt = Mawu
+agent-thread = Ulusi
+agent-parent = Kholo
+agent-children = Ana
+agent-call = Kuyitana
+agent-raw-event = Chochitika chosakonzedwa
+agent-plan = Dongosolo
+agent-tasks = { $count ->
+    [one] ntchito 1
+   *[other] ntchito { $count }
+}
+agent-edited = Zasinthidwa
+agent-reconnecting = Kulumikizanso { $attempt }/{ $total }
+agent-status-running = Ikuyenda
+agent-status-done = Zatha
+agent-status-failed = Zalephera
+agent-status-pending = Ikudikirira
+agent-slash-attach-files = Phatikizani mafayilo
+agent-slash-resume-session = Pitirizani gawo lakale
+agent-slash-select-model = Sankhani model
+agent-slash-continue-cli = Pitirizani gawoli mu CLI
+agent-session-just-now = pakali pano
+agent-session-minutes-ago = mphindi { $count } zapitazo
+agent-session-hours-ago = maola { $count } apitawo
+agent-session-days-ago = masiku { $count } apitawo
+agent-working-working = Ikugwira ntchito
+agent-working-thinking = Ikuganiza
+agent-working-pondering = Ikusinkhasinkha
+agent-working-noodling = Ikufufuza maganizo
+agent-working-percolating = Ikupukusa
+agent-working-conjuring = Ikulenga
+agent-working-cooking = Ikuphika
+agent-working-brewing = Ikusakaniza
+agent-working-musing = Ikuganizira
+agent-working-ruminating = Ikusinkhasinkha mozama
+agent-working-scheming = Ikukonza njira
+agent-working-synthesizing = Ikuphatikiza
+agent-working-tinkering = Ikuyesayesa
+agent-working-churning = Ikugaya
+agent-working-vibing = Ikumvera vibe
+agent-working-simmering = Ikusira pang’onopang’ono
+agent-working-crafting = Ikupanga
+agent-working-divining = Ikufufuza
+agent-working-mulling = Ikulingalira
+agent-working-spelunking = Ikukumba mozama
+
+editor-toggle-explorer = Onetsa/Bisa Explorer (Cmd+B)
+editor-unsaved = sizinasungidwe
+editor-rendered-markdown = Markdown yowonetsedwa yokhala ndi kusintha pompopompo
+editor-note = Chidziwitso
+editor-source-editor = Editor ya source
+editor-editor = Editor
+editor-git-diff = Kusiyana kwa Git
+editor-diff = Kusiyana
+editor-tidy = Konzani
+editor-always = Nthawi zonse
+editor-unchanged-previews = { $count ->
+    [one] ✦ preview 1 yosasinthidwa
+   *[other] ✦ ma preview { $count } osasinthidwa
+}
+editor-open-externally = Tsegula kunja
+editor-changed-line = Mzere wosinthidwa
+editor-go-to-definition = Pitani ku Tanthauzo
+editor-find-references = Pezani Maumboni
+editor-references = { $count ->
+    [one] umboni 1
+   *[other] maumboni { $count }
+}
+editor-lsp-starting = { $server } ikuyamba…
+editor-lsp-not-installed = { $server } — sinayikidwe
+editor-explorer = Explorer
+editor-open-editors = Ma Editor Otseguka
+editor-outline = Chidule
+editor-new-file = Fayilo Yatsopano
+editor-new-folder = Foda Yatsopano
+editor-delete-confirm = Chotsani “{ $name }”? Izi sizingabwezedwe.
+editor-created-folder = Foda { $name } yapangidwa
+editor-created-file = Fayilo { $name } yapangidwa
+editor-renamed-to = Dzina lasinthidwa kukhala { $name }
+editor-deleted = { $name } yachotsedwa
+editor-failed-decode-image = Yalephera kutanthauzira chithunzi
+editor-preview-large-image = chithunzi (chachikulu kwambiri kuti chiwonetsedwe)
+editor-preview-binary = binary
+editor-preview-file = fayilo
+
+git-status-clean = yoyera
+git-status-modified = yasinthidwa
+git-status-staged = yaikidwa pa stage
+git-status-staged-modified = staged*
+git-status-untracked = yosatsatidwa
+git-status-deleted = yachotsedwa
+git-status-conflict = mkangano
+git-accept-all = ✓ vomerezani zonse
+git-unstage = Chotsani pa stage
+git-confirm-deny-all = Tsimikizani kukana zonse
+git-deny-all = ✗ kanani zonse
+git-commit-message = uthenga wa commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Kutsegula kusiyana…
+git-no-changes = Palibe zosintha zowonetsa
+git-accept = ✓ vomerezani
+git-deny = ✗ kanani
+git-show-unchanged-lines = Onetsani mizere { $count } yosasinthidwa
+
+terminal-loading = Ikutsegula…
+terminal-runs-when-ready = iyenda ikakonzeka · Ctrl+C imayeretsa · Esc imadumpha
+terminal-booting = ikuyamba
+terminal-type-command = lembani lamulo · liyenda likakonzeka · Esc imadumpha
+
+setup-tagline-claude = Agent yolemba code ya Anthropic, mu Vmux
+setup-tagline-codex = Agent yolemba code ya OpenAI, mu Vmux
+setup-tagline-vibe = Agent yolemba code ya Mistral, mu Vmux
+setup-install-title = Ikani CLI ya { $name }
+setup-homebrew-required = Homebrew ikufunika kuti muyike { $command } ndipo sinakonzedwebe. Vmux iyika Homebrew poyamba, kenako { $name }.
+setup-terminal-instructions = Mu teminali, dinani Return kuti muyambe, kenako lowetsani password ya Mac yanu mukafunsidwa.
+setup-command-missing = Vmux yatsegula tsambali chifukwa lamulo la { $command } lakomweko silinaikidwebe. Yendetsani lamulo ili pansipa kuti mulipeze.
+setup-install-failed = Kuyika sikunathe. Onani teminali kuti mudziwe zambiri, kenako yesaninso.
+setup-installing = Ikuyika…
+setup-install-homebrew = Ikani Homebrew + { $name }
+setup-run-install = Yendetsani lamulo loyika
+setup-auto-reload = Vmux imaliyendetsa mu teminali ndipo imatsegulanso { $command } ikakonzeka.
+
+debug-title = Kukonza zolakwika
+debug-auto-update = Kusintha zokha
+debug-simulate-update = Yeserani ngati zosintha zilipo
+debug-simulate-download = Yeserani kutsitsa
+debug-clear-update = Chotsani zosintha
+debug-trigger-restart = Yambitsani kuyambiranso
+
+command-manage-spaces = Samalira malo…
+command-pane-stack-location = gawo { $pane } / mulu { $stack }
+command-space-pane-stack-location = { $space } / gawo { $pane } / mulu { $stack }
+command-terminal-path = Teminali ({ $path })
+command-group-interactive-mode = Njira yolumikizirana
+command-group-window = Zenera
+command-group-tab = Tabu
+command-group-pane = Gawo
+command-group-stack = Mulu
+command-group-space = Malo
+command-group-navigation = Kuyenda
+command-group-open = Tsegula
+command-group-view = Onani
+command-group-bar = Bala
+
+menu-close-vmux = Tseka Vmux
+
+agents-terminal-coding-agent = Wothandizira kulemba khodi wa pa teminali

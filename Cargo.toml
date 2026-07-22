@@ -81,6 +81,9 @@ dioxus = { version = "=0.7.4", default-features = false, features = [
     "asset",
     "mounted",
 ] }
+fluent-bundle = "0.16"
+unic-langid = "0.9"
+sys-locale = "0.3"
 wasm-bindgen = "0.2"
 regex = "1"
 smallvec = "1"

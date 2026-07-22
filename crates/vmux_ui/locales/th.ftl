@@ -1,0 +1,602 @@
+locale-name = ไทย
+common-open = เปิด
+common-close = ปิด
+common-install = ติดตั้ง
+common-uninstall = ถอนการติดตั้ง
+common-update = อัปเดต
+common-retry = ลองอีกครั้ง
+common-refresh = รีเฟรช
+common-remove = เอาออก
+common-enable = เปิดใช้
+common-disable = ปิดใช้
+common-new = ใหม่
+common-active = ทำงานอยู่
+common-running = กำลังทำงาน
+common-done = เสร็จแล้ว
+common-failed = ล้มเหลว
+common-installed = ติดตั้งแล้ว
+common-items = { $count ->
+    [one] { $count } รายการ
+   *[other] { $count } รายการ
+}
+start-title = เริ่มต้น
+start-tagline = พรอมป์เดียว ทำได้ทุกอย่าง
+
+agents-title = เอเจนต์
+agents-search = ค้นหาเอเจนต์ ACP และ CLI…
+agents-empty = ไม่พบเอเจนต์ที่ตรงกัน
+agents-empty-detail = ลองค้นหาชื่อ รันไทม์ หรือ ACP/CLI
+agents-install-failed = ติดตั้งไม่สำเร็จ
+agents-updating = กำลังอัปเดต…
+agents-retrying = กำลังลองอีกครั้ง…
+agents-preparing = กำลังเตรียม…
+
+extensions-title = ส่วนขยาย
+extensions-search = ค้นหาที่ติดตั้งแล้วหรือใน Chrome Web Store…
+extensions-relaunch = เปิดใหม่เพื่อใช้การเปลี่ยนแปลง
+extensions-empty = ยังไม่มีส่วนขยายที่ติดตั้ง
+extensions-no-match = ไม่พบส่วนขยายที่ตรงกัน
+extensions-empty-detail = ค้นหาใน Chrome Web Store ด้านบน แล้วกด Enter
+extensions-no-match-detail = ลองใช้ชื่ออื่นหรือ ID ส่วนขยาย
+extensions-on = เปิด
+extensions-off = ปิด
+extensions-enable-confirm = เปิดใช้ { $name }?
+extensions-enable-permissions = เปิดใช้ { $name } และอนุญาต:
+
+lsp-title = เซิร์ฟเวอร์ภาษา
+lsp-search = ค้นหาเซิร์ฟเวอร์ภาษา ลินเตอร์ ตัวจัดรูปแบบ…
+lsp-loading = กำลังโหลดแค็ตตาล็อก…
+lsp-empty = ไม่พบเซิร์ฟเวอร์ภาษาที่ตรงกัน
+lsp-empty-detail = ลองภาษา ลินเตอร์ หรือตัวจัดรูปแบบอื่น
+lsp-needs = ต้องใช้ { $tool }
+lsp-status-available = พร้อมใช้งาน
+lsp-status-on-path = อยู่ใน PATH
+lsp-status-installing = กำลังติดตั้ง…
+lsp-status-installed = ติดตั้งแล้ว
+lsp-status-outdated = มีอัปเดต
+lsp-status-running = กำลังทำงาน
+lsp-status-failed = ล้มเหลว
+
+spaces-title = เวิร์กสเปซ
+spaces-new-placeholder = ชื่อเวิร์กสเปซใหม่
+spaces-empty = ไม่มีเวิร์กสเปซ
+spaces-default-name = เวิร์กสเปซ { $number }
+spaces-tabs = { $count ->
+    [one] 1 แท็บ
+   *[other] { $count } แท็บ
+}
+spaces-delete = ลบเวิร์กสเปซ
+
+team-title = ทีม
+team-just-you = มีแค่คุณในเวิร์กสเปซนี้
+team-agents = { $count ->
+    [one] คุณและเอเจนต์ 1 ตัว
+   *[other] คุณและเอเจนต์ { $count } ตัว
+}
+team-empty = ยังไม่มีใครอยู่ที่นี่
+team-you = คุณ
+team-agent = เอเจนต์
+
+services-title = บริการเบื้องหลัง
+services-processes = { $count ->
+    [one] 1 โปรเซส
+   *[other] { $count } โปรเซส
+}
+services-kill-all = บังคับหยุดทั้งหมด
+services-not-running = บริการไม่ได้ทำงาน
+services-start-with = เริ่มด้วย:
+services-empty = ไม่มีโปรเซสที่ทำงานอยู่
+services-filter = กรองโปรเซส…
+services-no-match = ไม่พบโปรเซสที่ตรงกัน
+services-connected = เชื่อมต่อแล้ว
+services-disconnected = ตัดการเชื่อมต่อแล้ว
+services-attached = แนบอยู่
+services-kill = บังคับหยุด
+services-memory = หน่วยความจำ
+services-size = ขนาด
+services-shell = เชลล์
+
+error-title = ข้อผิดพลาด
+
+history-search = ค้นหาประวัติ
+history-clear-all = ล้างทั้งหมด
+history-clear-confirm = ล้างประวัติทั้งหมด?
+history-clear-warning = การดำเนินการนี้ไม่สามารถเลิกทำได้
+history-cancel = ยกเลิก
+history-today = วันนี้
+history-yesterday = เมื่อวาน
+history-days-ago = { $count } วันที่แล้ว
+history-day-offset = วันที่ -{ $count }
+
+settings-title = การตั้งค่า
+settings-loading = กำลังโหลดการตั้งค่า…
+settings-stored = เก็บไว้ใน ~/.vmux/settings.ron
+settings-other = อื่นๆ
+settings-software-update = อัปเดตซอฟต์แวร์
+settings-check-updates = ตรวจหาอัปเดต
+settings-check-updates-hint = ตรวจอัตโนมัติเมื่อเปิดแอปและทุกชั่วโมงเมื่อเปิดอัปเดตอัตโนมัติ
+settings-update-unavailable = ไม่พร้อมใช้งาน
+settings-update-unavailable-hint = บิลด์นี้ไม่มีตัวอัปเดต
+settings-update-checking = กำลังตรวจสอบ…
+settings-update-checking-hint = กำลังตรวจหาอัปเดต…
+settings-update-check-again = ตรวจอีกครั้ง
+settings-update-current = Vmux เป็นเวอร์ชันล่าสุดแล้ว
+settings-update-downloading = กำลังดาวน์โหลด…
+settings-update-downloading-hint = กำลังดาวน์โหลด Vmux { $version }…
+settings-update-installing = กำลังติดตั้ง…
+settings-update-installing-hint = กำลังติดตั้ง Vmux { $version }…
+settings-update-ready = อัปเดตพร้อมติดตั้ง
+settings-update-ready-hint = Vmux { $version } พร้อมแล้ว รีสตาร์ทเพื่อใช้งาน
+settings-update-try-again = ลองอีกครั้ง
+settings-update-failed = ตรวจหาอัปเดตไม่ได้
+settings-item = รายการ
+settings-item-number = รายการ { $number }
+settings-press-key = กดปุ่ม…
+settings-saved = บันทึกแล้ว
+settings-record-key = คลิกเพื่อบันทึกคีย์ลัดใหม่
+
+tray-open-window = เปิดหน้าต่าง
+tray-close-window = ปิดหน้าต่าง
+tray-pause-recording = พักการบันทึก
+tray-resume-recording = บันทึกต่อ
+tray-finish-recording = เสร็จสิ้นการบันทึก
+tray-quit = ออกจาก Vmux
+
+composer-attach-files = แนบไฟล์ (/upload)
+composer-remove-attachment = เอาไฟล์แนบออก
+
+layout-back = ย้อนกลับ
+layout-forward = ไปข้างหน้า
+layout-reload = โหลดใหม่
+layout-bookmark-page = บุ๊กมาร์กหน้านี้
+layout-remove-bookmark = เอาบุ๊กมาร์กออก
+layout-pin-page = ปักหมุดหน้านี้
+layout-unpin-page = เลิกปักหมุดหน้านี้
+layout-manage-extensions = จัดการส่วนขยาย
+layout-new-stack = สแต็กใหม่
+layout-close-tab = ปิดแท็บ
+layout-bookmark = บุ๊กมาร์ก
+layout-pin = ปักหมุด
+layout-new-tab = แท็บใหม่
+layout-team = ทีม
+
+command-switch-space = สลับเวิร์กสเปซ…
+command-search-ask = ค้นหาหรือถาม…
+command-new-tab-placeholder = ค้นหาหรือพิมพ์ URL หรือเลือกเทอร์มินัล…
+command-placeholder = พิมพ์ URL ค้นหาแท็บ หรือพิมพ์ > เพื่อใช้คำสั่ง…
+command-composer-placeholder = พิมพ์ / เพื่อใช้คำสั่ง หรือ @ เพื่อเพิ่มสื่อ
+command-send = ส่ง (Enter)
+command-terminal = เทอร์มินัล
+command-open-terminal = เปิดในเทอร์มินัล
+command-stack = สแต็ก
+command-tabs = { $count ->
+    [one] 1 แท็บ
+   *[other] { $count } แท็บ
+}
+command-prompt = พรอมป์
+command-new-tab = แท็บใหม่
+command-search = ค้นหา
+command-open-value = เปิด “{ $value }”
+command-search-value = ค้นหา “{ $value }”
+
+schema-appearance = รูปลักษณ์
+schema-general = ทั่วไป
+schema-layout = เลย์เอาต์
+schema-layout-detail = หน้าต่าง พื้นที่แบ่ง แถบด้านข้าง และเส้นโฟกัส
+schema-agent = เอเจนต์
+schema-agent-detail = พฤติกรรมของเอเจนต์และสิทธิ์ใช้เครื่องมือ
+schema-shortcuts = คีย์ลัด
+schema-shortcuts-detail = มุมมองอ่านอย่างเดียว แก้การผูกคีย์โดยตรงใน settings.ron
+schema-terminal = เทอร์มินัล
+schema-browser = เบราว์เซอร์
+schema-mode = โหมด
+schema-mode-detail = ชุดสีสำหรับหน้าเว็บ อุปกรณ์จะใช้ตามระบบของคุณ
+schema-device = อุปกรณ์
+schema-light = สว่าง
+schema-dark = มืด
+schema-language = ภาษา
+schema-language-detail = ใช้ภาษาระบบ, en-US, ja หรือแท็ก BCP 47 ใดก็ได้ที่มีแค็ตตาล็อก ~/.vmux/locales/<tag>.ftl ตรงกัน
+schema-auto-update = อัปเดตอัตโนมัติ
+schema-auto-update-detail = ตรวจหาและติดตั้งอัปเดตเมื่อเปิดแอปและทุกชั่วโมง
+schema-startup-url = URL เริ่มต้น
+schema-startup-url-detail = หากเว้นว่าง จะเปิดพรอมป์แถบคำสั่ง
+schema-search-engine = เครื่องมือค้นหา
+schema-search-engine-detail = ใช้สำหรับค้นหาเว็บจากหน้าเริ่มต้นและแถบคำสั่ง
+schema-window = หน้าต่าง
+schema-pane = พื้นที่แบ่ง
+schema-side-sheet = แผงด้านข้าง
+schema-focus-ring = เส้นโฟกัส
+schema-run-placement = อนุญาตให้กำหนดตำแหน่งรันทับค่าเดิม
+schema-run-placement-detail = ให้เอเจนต์เลือกโหมดพื้นที่รัน ทิศทาง และจุดยึดได้
+schema-leader = คีย์นำ
+schema-leader-detail = คีย์นำหน้าสำหรับคีย์ลัดแบบคอร์ด
+schema-chord-timeout = เวลาหมดอายุคอร์ด
+schema-chord-timeout-detail = จำนวนมิลลิวินาทีก่อนคีย์นำหน้าของคอร์ดหมดอายุ
+schema-bindings = การผูกคีย์
+schema-confirm-close = ยืนยันก่อนปิด
+schema-confirm-close-detail = ถามก่อนปิดเทอร์มินัลที่มีโปรเซสกำลังทำงาน
+schema-default-theme = ธีมเริ่มต้น
+schema-default-theme-detail = ชื่อธีมที่ใช้งานอยู่จากรายการธีม
+
+settings-empty = (ว่าง)
+settings-none = (ไม่มี)
+
+schema-system = ระบบ
+schema-editor = ตัวแก้ไข
+schema-recording = การบันทึก
+schema-radius = รัศมี
+schema-padding = ระยะขอบใน
+schema-gap = ระยะห่าง
+schema-width = ความกว้าง
+schema-color = สี
+schema-red = แดง
+schema-green = เขียว
+schema-blue = น้ำเงิน
+schema-follow-files = ติดตามไฟล์
+schema-tidy-files = เก็บไฟล์
+schema-tidy-files-max = เกณฑ์เก็บไฟล์
+schema-tidy-files-auto = เก็บไฟล์อัตโนมัติ
+schema-app-providers = ผู้ให้บริการแอป
+schema-provider = ผู้ให้บริการ
+schema-kind = ชนิด
+schema-models = โมเดล
+schema-acp = เอเจนต์ ACP
+schema-id = ID
+schema-name = ชื่อ
+schema-command = คำสั่ง
+schema-arguments = อาร์กิวเมนต์
+schema-environment = ตัวแปรสภาพแวดล้อม
+schema-working-directory = ไดเรกทอรีทำงาน
+schema-shell = เชลล์
+schema-font-family = ตระกูลฟอนต์
+schema-startup-directory = ไดเรกทอรีเริ่มต้น
+schema-themes = ธีม
+schema-color-scheme = ชุดสี
+schema-font-size = ขนาดฟอนต์
+schema-line-height = ความสูงบรรทัด
+schema-cursor-style = รูปแบบเคอร์เซอร์
+schema-cursor-blink = เคอร์เซอร์กะพริบ
+schema-custom-themes = ธีมกำหนดเอง
+schema-foreground = พื้นหน้า
+schema-background = พื้นหลัง
+schema-cursor = เคอร์เซอร์
+schema-ansi-colors = สี ANSI
+schema-keymap = ผังคีย์
+schema-explorer = ตัวสำรวจ
+schema-visible = แสดง
+schema-language-servers = เซิร์ฟเวอร์ภาษา
+schema-servers = เซิร์ฟเวอร์
+schema-language-id = ID ภาษา
+schema-root-markers = ตัวระบุรากโปรเจกต์
+schema-output-directory = ไดเรกทอรีเอาต์พุต
+
+menu-scene = ฉาก
+menu-layout = เค้าโครง
+menu-terminal = เทอร์มินัล
+menu-browser = เบราว์เซอร์
+menu-service = บริการ
+menu-bookmark = ที่คั่นหน้า
+menu-edit = แก้ไข
+
+layout-knowledge = คลังความรู้
+layout-open-knowledge = เปิดคลังความรู้
+layout-open-welcome-knowledge = เปิดยินดีต้อนรับสู่คลังความรู้
+layout-open-path = เปิด { $path }
+layout-fold-knowledge = พับคลังความรู้
+layout-unfold-knowledge = กางคลังความรู้
+layout-bookmarks = ที่คั่นหน้า
+layout-new-folder = โฟลเดอร์ใหม่
+layout-add-to-bookmarks = เพิ่มไปยังที่คั่นหน้า
+layout-move-to-bookmarks = ย้ายไปยังที่คั่นหน้า
+layout-stack-number = สแต็ก { $number }
+layout-fold-stack = พับสแต็ก
+layout-unfold-stack = กางสแต็ก
+layout-close-stack = ปิดสแต็ก
+layout-bookmark-in = คั่นหน้าใน { $folder }
+
+common-cancel = ยกเลิก
+common-delete = ลบ
+common-save = บันทึก
+common-rename = เปลี่ยนชื่อ
+common-expand = ขยาย
+common-collapse = ยุบ
+common-loading = กำลังโหลด…
+common-error = ข้อผิดพลาด
+common-output = เอาต์พุต
+common-pending = รอดำเนินการ
+common-current = ปัจจุบัน
+common-stop = หยุด
+services-command = บริการ Vmux
+services-uptime-seconds = { $seconds }วิ
+services-uptime-minutes = { $minutes }น { $seconds }วิ
+services-uptime-hours = { $hours }ชม { $minutes }น
+services-uptime-days = { $days }วัน { $hours }ชม
+
+error-page-failed-load = โหลดหน้าไม่สำเร็จ
+error-page-not-found = ไม่พบหน้า
+error-unknown-host = ไม่รู้จักโฮสต์แอป Vmux: { $host }
+
+history-title = ประวัติ
+
+command-new-app-chat = แชต { $provider }/{ $model } ใหม่ (แอป)
+command-interactive-mode-user = Scene > โหมดโต้ตอบ > ผู้ใช้
+command-interactive-mode-player = Scene > โหมดโต้ตอบ > ผู้เล่น
+command-minimize-window = Layout > หน้าต่าง > ย่อ
+command-toggle-layout = Layout > เลย์เอาต์ > สลับเลย์เอาต์
+command-close-tab = Layout > แท็บ > ปิดแท็บ
+command-new-task = Layout > แท็บ > งานใหม่…
+command-next-tab = Layout > แท็บ > แท็บถัดไป
+command-prev-tab = Layout > แท็บ > แท็บก่อนหน้า
+command-rename-tab = Layout > แท็บ > เปลี่ยนชื่อแท็บ
+command-tab-select-1 = Layout > แท็บ > เลือกแท็บ 1
+command-tab-select-2 = Layout > แท็บ > เลือกแท็บ 2
+command-tab-select-3 = Layout > แท็บ > เลือกแท็บ 3
+command-tab-select-4 = Layout > แท็บ > เลือกแท็บ 4
+command-tab-select-5 = Layout > แท็บ > เลือกแท็บ 5
+command-tab-select-6 = Layout > แท็บ > เลือกแท็บ 6
+command-tab-select-7 = Layout > แท็บ > เลือกแท็บ 7
+command-tab-select-8 = Layout > แท็บ > เลือกแท็บ 8
+command-tab-select-last = Layout > แท็บ > เลือกแท็บสุดท้าย
+command-close-pane = Layout > Pane > ปิด Pane
+command-select-pane-left = Layout > Pane > เลือก Pane ซ้าย
+command-select-pane-right = Layout > Pane > เลือก Pane ขวา
+command-select-pane-up = Layout > Pane > เลือก Pane ด้านบน
+command-select-pane-down = Layout > Pane > เลือก Pane ด้านล่าง
+command-swap-pane-prev = Layout > Pane > สลับกับ Pane ก่อนหน้า
+command-swap-pane-next = Layout > Pane > สลับกับ Pane ถัดไป
+command-equalize-pane-size = Layout > Pane > ปรับขนาด Pane ให้เท่ากัน
+command-resize-pane-left = Layout > Pane > ปรับขนาด Pane ไปทางซ้าย
+command-resize-pane-right = Layout > Pane > ปรับขนาด Pane ไปทางขวา
+command-resize-pane-up = Layout > Pane > ปรับขนาด Pane ขึ้น
+command-resize-pane-down = Layout > Pane > ปรับขนาด Pane ลง
+command-stack-close = Layout > Stack > ปิด Stack
+command-stack-next = Layout > Stack > Stack ถัดไป
+command-stack-previous = Layout > Stack > Stack ก่อนหน้า
+command-stack-reopen = Layout > Stack > เปิดหน้าที่ปิดอีกครั้ง
+command-stack-swap-prev = Layout > Stack > ย้าย Stack ไปทางซ้าย
+command-stack-swap-next = Layout > Stack > ย้าย Stack ไปทางขวา
+command-space-open = Layout > Space > Spaces
+command-terminal-close = Terminal > ปิดเทอร์มินัล
+command-terminal-next = Terminal > เทอร์มินัลถัดไป
+command-terminal-prev = Terminal > เทอร์มินัลก่อนหน้า
+command-terminal-clear = Terminal > ล้างเทอร์มินัล
+command-browser-prev-page = Browser > การนำทาง > ย้อนกลับ
+command-browser-next-page = Browser > การนำทาง > ไปข้างหน้า
+command-browser-reload = Browser > การนำทาง > โหลดใหม่
+command-browser-hard-reload = Browser > การนำทาง > โหลดใหม่แบบเต็ม
+command-open-in-place = Browser > เปิด > เปิดที่นี่
+command-open-in-new-stack = Browser > เปิด > เปิดใน Stack ใหม่
+command-open-in-pane-top = Browser > เปิด > เปิดใน Pane ด้านบน
+command-open-in-pane-right = Browser > เปิด > เปิดใน Pane ขวา
+command-open-in-pane-bottom = Browser > เปิด > เปิดใน Pane ด้านล่าง
+command-open-in-pane-left = Browser > เปิด > เปิดใน Pane ซ้าย
+command-open-in-new-tab = Browser > เปิด > เปิดในแท็บใหม่
+command-open-in-new-space = Browser > เปิด > เปิดใน Space ใหม่
+command-browser-zoom-in = Browser > มุมมอง > ซูมเข้า
+command-browser-zoom-out = Browser > มุมมอง > ซูมออก
+command-browser-zoom-reset = Browser > มุมมอง > ขนาดจริง
+command-browser-dev-tools = Browser > มุมมอง > เครื่องมือนักพัฒนา
+command-browser-open-command-bar = Browser > แถบ > แถบคำสั่ง
+command-browser-open-page-in-command-bar = Browser > แถบ > แก้ไขหน้า
+command-browser-open-path-bar = Browser > แถบ > ตัวนำทางพาธ
+command-browser-open-commands = Browser > แถบ > คำสั่ง
+command-browser-open-history = Browser > แถบ > ประวัติ
+command-service-open = Service > เปิดตัวตรวจสอบบริการ
+command-bookmark-toggle-active = Bookmark > บุ๊กมาร์กหน้า
+command-bookmark-pin-active = Bookmark > ปักหมุดหน้า
+
+layout-tab = แท็บ
+layout-no-stacks = ไม่มี Stack
+layout-loading = กำลังโหลด…
+layout-no-markdown-files = ไม่มีไฟล์ Markdown
+layout-empty-folder = โฟลเดอร์ว่าง
+layout-worktree = worktree
+layout-folder-name = ชื่อโฟลเดอร์
+layout-no-pins-bookmarks = ไม่มีหมุดหรือบุ๊กมาร์ก
+layout-move-to = ย้ายไปยัง { $folder }
+layout-bookmark-current-page = บุ๊กมาร์กหน้าปัจจุบัน
+layout-rename-folder = เปลี่ยนชื่อโฟลเดอร์
+layout-remove-folder = ลบโฟลเดอร์
+layout-update-downloading = กำลังดาวน์โหลดอัปเดต
+layout-update-installing = กำลังติดตั้งอัปเดต…
+layout-update-ready = มีเวอร์ชันใหม่
+layout-restart-update = รีสตาร์ทเพื่ออัปเดต
+
+agent-preparing = กำลังเตรียมเอเจนต์…
+agent-send-all-queued = ส่งพรอมป์ที่คิวไว้ทั้งหมดตอนนี้ (Esc)
+agent-send = ส่ง (Enter)
+agent-ready = พร้อมเมื่อคุณพร้อม
+agent-loading-older = กำลังโหลดข้อความเก่า…
+agent-load-older = โหลดข้อความเก่า
+agent-continued-from = ต่อจาก { $source }
+agent-older-context-omitted = ละบริบทเก่าไว้
+agent-interrupted = ถูกขัดจังหวะ
+agent-allow-tool = อนุญาต { $tool } ไหม
+agent-deny = ปฏิเสธ
+agent-allow-always = อนุญาตเสมอ
+agent-allow = อนุญาต
+agent-loading-sessions = กำลังโหลดเซสชัน…
+agent-no-resumable-sessions = ไม่พบเซสชันที่กลับมาทำต่อได้
+agent-no-matching-sessions = ไม่มีเซสชันที่ตรงกัน
+agent-no-matching-models = ไม่มีโมเดลที่ตรงกัน
+agent-choice-help = ↑/↓ หรือ Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = เลือกโฟลเดอร์รีโพซิทอรี
+agent-choose-repository-detail = เลือกรีโพซิทอรี Git ในเครื่องที่เอเจนต์ควรใช้
+agent-choosing = กำลังเลือก…
+agent-choose-folder = เลือกโฟลเดอร์
+agent-queued = อยู่ในคิว
+agent-attached = แนบแล้ว:
+agent-cancel-queued = ยกเลิกพรอมป์ที่คิวไว้
+agent-resume-queued = ทำพรอมป์ในคิวต่อ
+agent-clear-queue = ล้างคิว
+agent-send-all-now = ส่งทั้งหมดตอนนี้
+agent-choose-option = เลือกตัวเลือกด้านบน
+agent-loading-media = กำลังโหลดสื่อ…
+agent-no-matching-media = ไม่มีสื่อที่ตรงกัน
+agent-prompt-context = บริบทพรอมป์
+agent-details = รายละเอียด
+agent-path = พาธ
+agent-tool = เครื่องมือ
+agent-server = เซิร์ฟเวอร์
+agent-bytes = { $count } ไบต์
+agent-worked-for = ทำงานไป { $duration }
+agent-worked-for-steps = { $count ->
+    [one] ทำงานไป { $duration } · 1 ขั้นตอน
+   *[other] ทำงานไป { $duration } · { $count } ขั้นตอน
+}
+agent-tool-guardian-review = การตรวจทานของ Guardian
+agent-tool-read-files = อ่านไฟล์
+agent-tool-viewed-image = ดูรูปภาพ
+agent-tool-used-browser = ใช้เบราว์เซอร์
+agent-tool-searched-files = ค้นหาไฟล์
+agent-tool-ran-commands = รันคำสั่ง
+agent-thinking = กำลังคิด
+agent-subagent = เอเจนต์ย่อย
+agent-prompt = พรอมป์
+agent-thread = เธรด
+agent-parent = แม่
+agent-children = ลูก
+agent-call = การเรียก
+agent-raw-event = เหตุการณ์ดิบ
+agent-plan = แผน
+agent-tasks = { $count ->
+    [one] 1 งาน
+   *[other] { $count } งาน
+}
+agent-edited = แก้ไขแล้ว
+agent-reconnecting = กำลังเชื่อมต่อใหม่ { $attempt }/{ $total }
+agent-status-running = กำลังรัน
+agent-status-done = เสร็จแล้ว
+agent-status-failed = ล้มเหลว
+agent-status-pending = รอดำเนินการ
+agent-slash-attach-files = แนบไฟล์
+agent-slash-resume-session = ทำเซสชันก่อนหน้าต่อ
+agent-slash-select-model = เลือกโมเดล
+agent-slash-continue-cli = ทำเซสชันนี้ต่อใน CLI
+agent-session-just-now = เมื่อสักครู่
+agent-session-minutes-ago = { $count } น. ที่แล้ว
+agent-session-hours-ago = { $count } ชม. ที่แล้ว
+agent-session-days-ago = { $count } วันก่อน
+agent-working-working = กำลังทำงาน
+agent-working-thinking = กำลังคิด
+agent-working-pondering = กำลังไตร่ตรอง
+agent-working-noodling = กำลังคิดหาทาง
+agent-working-percolating = กำลังตกผลึก
+agent-working-conjuring = กำลังร่ายมนตร์
+agent-working-cooking = กำลังปรุงงาน
+agent-working-brewing = กำลังบ่มไอเดีย
+agent-working-musing = กำลังครุ่นคิด
+agent-working-ruminating = กำลังทบทวน
+agent-working-scheming = กำลังวางแผน
+agent-working-synthesizing = กำลังสังเคราะห์
+agent-working-tinkering = กำลังปรับแต่ง
+agent-working-churning = กำลังประมวลผล
+agent-working-vibing = กำลังจับจังหวะ
+agent-working-simmering = กำลังเคี่ยวไอเดีย
+agent-working-crafting = กำลังประดิษฐ์
+agent-working-divining = กำลังหยั่งรู้
+agent-working-mulling = กำลังพิจารณา
+agent-working-spelunking = กำลังขุดสำรวจ
+
+editor-toggle-explorer = สลับ Explorer (Cmd+B)
+editor-unsaved = ยังไม่บันทึก
+editor-rendered-markdown = Markdown ที่เรนเดอร์พร้อมแก้ไขสด
+editor-note = หมายเหตุ
+editor-source-editor = ตัวแก้ไขซอร์ส
+editor-editor = ตัวแก้ไข
+editor-git-diff = Git diff
+editor-diff = Diff
+editor-tidy = จัดระเบียบ
+editor-always = เสมอ
+editor-unchanged-previews = { $count ->
+    [one] ✦ พรีวิวที่ไม่เปลี่ยน 1 รายการ
+   *[other] ✦ พรีวิวที่ไม่เปลี่ยน { $count } รายการ
+}
+editor-open-externally = เปิดด้วยแอปภายนอก
+editor-changed-line = บรรทัดที่เปลี่ยน
+editor-go-to-definition = ไปยังนิยาม
+editor-find-references = ค้นหาการอ้างอิง
+editor-references = { $count ->
+    [one] 1 การอ้างอิง
+   *[other] { $count } การอ้างอิง
+}
+editor-lsp-starting = { $server } กำลังเริ่ม…
+editor-lsp-not-installed = { $server } — ยังไม่ได้ติดตั้ง
+editor-explorer = Explorer
+editor-open-editors = ตัวแก้ไขที่เปิดอยู่
+editor-outline = โครงร่าง
+editor-new-file = ไฟล์ใหม่
+editor-new-folder = โฟลเดอร์ใหม่
+editor-delete-confirm = ลบ “{ $name }” ไหม การดำเนินการนี้ย้อนกลับไม่ได้
+editor-created-folder = สร้างโฟลเดอร์ { $name } แล้ว
+editor-created-file = สร้างไฟล์ { $name } แล้ว
+editor-renamed-to = เปลี่ยนชื่อเป็น { $name } แล้ว
+editor-deleted = ลบ { $name } แล้ว
+editor-failed-decode-image = ถอดรหัสรูปภาพไม่สำเร็จ
+editor-preview-large-image = รูปภาพ (ใหญ่เกินกว่าจะแสดงตัวอย่าง)
+editor-preview-binary = ไบนารี
+editor-preview-file = ไฟล์
+
+git-status-clean = สะอาด
+git-status-modified = แก้ไขแล้ว
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = ไม่ถูกติดตาม
+git-status-deleted = ลบแล้ว
+git-status-conflict = มีข้อขัดแย้ง
+git-accept-all = ✓ ยอมรับทั้งหมด
+git-unstage = เอาออกจาก stage
+git-confirm-deny-all = ยืนยันการปฏิเสธทั้งหมด
+git-deny-all = ✗ ปฏิเสธทั้งหมด
+git-commit-message = ข้อความ commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = กำลังโหลด diff…
+git-no-changes = ไม่มีการเปลี่ยนแปลงให้แสดง
+git-accept = ✓ ยอมรับ
+git-deny = ✗ ปฏิเสธ
+git-show-unchanged-lines = แสดงบรรทัดที่ไม่เปลี่ยน { $count } บรรทัด
+
+terminal-loading = กำลังโหลด…
+terminal-runs-when-ready = รันเมื่อพร้อม · Ctrl+C ล้าง · Esc ข้าม
+terminal-booting = กำลังบูต
+terminal-type-command = พิมพ์คำสั่ง · รันเมื่อพร้อม · Esc ข้าม
+
+setup-tagline-claude = เอเจนต์เขียนโค้ดของ Anthropic ใน Vmux
+setup-tagline-codex = เอเจนต์เขียนโค้ดของ OpenAI ใน Vmux
+setup-tagline-vibe = เอเจนต์เขียนโค้ดของ Mistral ใน Vmux
+setup-install-title = ติดตั้ง { $name } CLI
+setup-homebrew-required = ต้องใช้ Homebrew เพื่อติดตั้ง { $command } และยังไม่ได้ตั้งค่า Vmux จะติดตั้ง Homebrew ก่อน แล้วจึงติดตั้ง { $name }
+setup-terminal-instructions = ในเทอร์มินัล ให้กด Return เพื่อเริ่ม จากนั้นป้อนรหัสผ่าน Mac เมื่อระบบถาม
+setup-command-missing = Vmux เปิดหน้านี้เพราะยังไม่ได้ติดตั้งคำสั่ง { $command } ในเครื่อง รันคำสั่งด้านล่างเพื่อติดตั้ง
+setup-install-failed = ติดตั้งไม่เสร็จ ตรวจสอบรายละเอียดในเทอร์มินัล แล้วลองอีกครั้ง
+setup-installing = กำลังติดตั้ง…
+setup-install-homebrew = ติดตั้ง Homebrew + { $name }
+setup-run-install = รันคำสั่งติดตั้ง
+setup-auto-reload = Vmux จะรันในเทอร์มินัลและโหลดใหม่เมื่อ { $command } พร้อมใช้งาน
+
+debug-title = ดีบัก
+debug-auto-update = อัปเดตอัตโนมัติ
+debug-simulate-update = จำลองว่ามีอัปเดต
+debug-simulate-download = จำลองการดาวน์โหลด
+debug-clear-update = ล้างอัปเดต
+debug-trigger-restart = สั่งรีสตาร์ท
+
+command-manage-spaces = จัดการ Space…
+command-pane-stack-location = pane { $pane } / stack { $stack }
+command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
+command-terminal-path = เทอร์มินัล ({ $path })
+command-group-interactive-mode = โหมดโต้ตอบ
+command-group-window = หน้าต่าง
+command-group-tab = แท็บ
+command-group-pane = Pane
+command-group-stack = Stack
+command-group-space = Space
+command-group-navigation = การนำทาง
+command-group-open = เปิด
+command-group-view = มุมมอง
+command-group-bar = แถบ
+
+menu-close-vmux = ปิด Vmux
+
+agents-terminal-coding-agent = เอเจนต์เขียนโค้ดบนเทอร์มินัล

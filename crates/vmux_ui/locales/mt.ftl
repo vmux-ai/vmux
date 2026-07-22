@@ -1,0 +1,602 @@
+locale-name = Malti
+common-open = Iftaħ
+common-close = Agħlaq
+common-install = Installa
+common-uninstall = Iddiżinstalla
+common-update = Aġġorna
+common-retry = Erġa’ pprova
+common-refresh = Aġġorna
+common-remove = Neħħi
+common-enable = Ixgħel
+common-disable = Itfi
+common-new = Ġdid
+common-active = attiv
+common-running = għaddej
+common-done = lest
+common-failed = Falla
+common-installed = Installat
+common-items = { $count ->
+    [one] { $count } oġġett
+   *[other] { $count } oġġetti
+}
+start-title = Ibda
+start-tagline = Prompt wieħed. Kollox, lest.
+
+agents-title = Aġenti
+agents-search = Fittex aġenti ACP u CLI…
+agents-empty = Ma nstab l-ebda aġent jaqbel
+agents-empty-detail = Ipprova isem, runtime, jew ACP/CLI.
+agents-install-failed = L-installazzjoni falliet
+agents-updating = Qed jaġġorna…
+agents-retrying = Qed jerġa’ jipprova…
+agents-preparing = Qed jipprepara…
+
+extensions-title = Estensjonijiet
+extensions-search = Fittex fl-installati jew fil-Chrome Web Store…
+extensions-relaunch = Erġa’ niedi biex tapplika
+extensions-empty = M’hemm l-ebda estensjoni installata
+extensions-no-match = Ma nstabet l-ebda estensjoni taqbel
+extensions-empty-detail = Fittex fil-Chrome Web Store hawn fuq u agħfas Enter.
+extensions-no-match-detail = Ipprova isem ieħor jew ID tal-estensjoni.
+extensions-on = Mixgħul
+extensions-off = Mitfi
+extensions-enable-confirm = Tixgħel { $name }?
+extensions-enable-permissions = Ixgħel { $name } u ħalli:
+
+lsp-title = Servers tal-Lingwi
+lsp-search = Fittex servers tal-lingwi, linters, formatters…
+lsp-loading = Qed jitgħabba l-katalgu…
+lsp-empty = Ma nstab l-ebda server tal-lingwa jaqbel
+lsp-empty-detail = Ipprova lingwa, linter, jew formatter ieħor.
+lsp-needs = jeħtieġ { $tool }
+lsp-status-available = Disponibbli
+lsp-status-on-path = Fuq PATH
+lsp-status-installing = Qed jinstalla…
+lsp-status-installed = Installat
+lsp-status-outdated = Aġġornament disponibbli
+lsp-status-running = Għaddej
+lsp-status-failed = Falla
+
+spaces-title = Spazji
+spaces-new-placeholder = Isem tal-ispazju l-ġdid
+spaces-empty = M’hemm l-ebda spazju
+spaces-default-name = Spazju { $number }
+spaces-tabs = { $count ->
+    [one] tab wieħed
+   *[other] { $count } tabs
+}
+spaces-delete = Ħassar l-ispazju
+
+team-title = Tim
+team-just-you = Int biss f’dan l-ispazju
+team-agents = { $count ->
+    [one] Int u aġent wieħed
+   *[other] Int u { $count } aġenti
+}
+team-empty = Għadu m’hemm ħadd hawn
+team-you = Int
+team-agent = Aġent
+
+services-title = Servizzi fl-Isfond
+services-processes = { $count ->
+    [one] proċess wieħed
+   *[other] { $count } proċessi
+}
+services-kill-all = Waqqaf Kollha bil-Forza
+services-not-running = Is-servizz mhux qed jaħdem
+services-start-with = Ibda b’:
+services-empty = M’hemm l-ebda proċess attiv
+services-filter = Iffiltra l-proċessi…
+services-no-match = Ma nstab l-ebda proċess jaqbel
+services-connected = Konness
+services-disconnected = Skonness
+services-attached = imqabbad
+services-kill = Waqqaf bil-Forza
+services-memory = Memorja
+services-size = Daqs
+services-shell = Shell
+
+error-title = Żball
+
+history-search = Fittex fl-istorja
+history-clear-all = Ħassar kollox
+history-clear-confirm = Tħassar l-istorja kollha?
+history-clear-warning = Dan ma jistax jitreġġa’ lura.
+history-cancel = Ikkanċella
+history-today = Illum
+history-yesterday = Ilbieraħ
+history-days-ago = { $count } ijiem ilu
+history-day-offset = Jum -{ $count }
+
+settings-title = Settings
+settings-loading = Qed jitgħabbew is-settings…
+settings-stored = Maħżun fi ~/.vmux/settings.ron
+settings-other = Oħrajn
+settings-software-update = Aġġornament tas-Software
+settings-check-updates = Iċċekkja għal Aġġornamenti
+settings-check-updates-hint = Jiċċekkja awtomatikament mat-tnedija u kull siegħa meta l-aġġornament awtomatiku jkun mixgħul.
+settings-update-unavailable = Mhux disponibbli
+settings-update-unavailable-hint = L-aġġornatur mhuwiex inkluż f’din il-build.
+settings-update-checking = Qed jiċċekkja…
+settings-update-checking-hint = Qed jiċċekkja għal aġġornamenti…
+settings-update-check-again = Erġa’ ċċekkja
+settings-update-current = Vmux huwa aġġornat.
+settings-update-downloading = Qed iniżżel…
+settings-update-downloading-hint = Qed jitniżżel Vmux { $version }…
+settings-update-installing = Qed jinstalla…
+settings-update-installing-hint = Qed jinstalla Vmux { $version }…
+settings-update-ready = Aġġornament Lest
+settings-update-ready-hint = Vmux { $version } lest. Erġa’ ibda biex tapplikah.
+settings-update-try-again = Erġa’ pprova
+settings-update-failed = Ma setax jiċċekkja għal aġġornamenti.
+settings-item = Oġġett
+settings-item-number = Oġġett { $number }
+settings-press-key = Agħfas tast…
+settings-saved = Issejvjat
+settings-record-key = Ikklikkja biex tirreġistra kombinazzjoni ġdida ta’ tasti
+
+tray-open-window = Iftaħ Tieqa
+tray-close-window = Agħlaq Tieqa
+tray-pause-recording = Waqqaf ir-Reġistrazzjoni Temporanjament
+tray-resume-recording = Kompli r-Reġistrazzjoni
+tray-finish-recording = Temm ir-Reġistrazzjoni
+tray-quit = Oħroġ minn Vmux
+
+composer-attach-files = Waħħal fajls (/upload)
+composer-remove-attachment = Neħħi l-anness
+
+layout-back = Lura
+layout-forward = ’Il quddiem
+layout-reload = Erġa’ tgħabba
+layout-bookmark-page = Żid din il-paġna mal-bookmarks
+layout-remove-bookmark = Neħħi l-bookmark
+layout-pin-page = Ippinja din il-paġna
+layout-unpin-page = Neħħi l-pinn minn din il-paġna
+layout-manage-extensions = Immaniġġja l-estensjonijiet
+layout-new-stack = Stiva Ġdida
+layout-close-tab = Agħlaq it-tab
+layout-bookmark = Bookmark
+layout-pin = Ippinja
+layout-new-tab = Tab ġdid
+layout-team = Tim
+
+command-switch-space = Aqleb spazju…
+command-search-ask = Fittex jew staqsi…
+command-new-tab-placeholder = Fittex jew daħħal URL, jew agħżel Terminal…
+command-placeholder = Daħħal URL, fittex tabs, jew > għall-kmandi…
+command-composer-placeholder = Ittajpja / għall-kmandi jew @ għall-media
+command-send = Ibgħat (Enter)
+command-terminal = Terminal
+command-open-terminal = Iftaħ fit-Terminal
+command-stack = Stiva
+command-tabs = { $count ->
+    [one] tab wieħed
+   *[other] { $count } tabs
+}
+command-prompt = Prompt
+command-new-tab = Tab ġdid
+command-search = Fittex
+command-open-value = Iftaħ “{ $value }”
+command-search-value = Fittex “{ $value }”
+
+schema-appearance = Dehra
+schema-general = Ġenerali
+schema-layout = Tqassim
+schema-layout-detail = Tieqa, panewijiet, sidebar, u ċirku tal-fokus.
+schema-agent = Aġent
+schema-agent-detail = Imġiba tal-aġent u permessi għall-għodod.
+schema-shortcuts = Shortcuts
+schema-shortcuts-detail = Dehra biss għall-qari. Editja settings.ron direttament biex tbiddel il-bindings.
+schema-terminal = Terminal
+schema-browser = Browser
+schema-mode = Mod
+schema-mode-detail = Skema tal-kuluri għall-paġni web. Apparat isegwi s-sistema tiegħek.
+schema-device = Apparat
+schema-light = Ċar
+schema-dark = Skur
+schema-language = Lingwa
+schema-language-detail = Uża s-sistema, en-US, ja, jew kwalunkwe tag BCP 47 b’katalgu ~/.vmux/locales/<tag>.ftl li jaqbel.
+schema-auto-update = Aġġornament awtomatiku
+schema-auto-update-detail = Iċċekkja u installa aġġornamenti mat-tnedija u kull siegħa.
+schema-startup-url = URL tal-bidu
+schema-startup-url-detail = Jekk vojt, jiftaħ il-prompt tal-bar tal-kmandi.
+schema-search-engine = Magna tat-tiftix
+schema-search-engine-detail = Tintuaża għat-tiftix fuq il-web minn Ibda u mill-bar tal-kmandi.
+schema-window = Tieqa
+schema-pane = Panew
+schema-side-sheet = Folja tal-ġenb
+schema-focus-ring = Ċirku tal-fokus
+schema-run-placement = Ħalli bidla fil-pożizzjoni tat-tħaddim
+schema-run-placement-detail = Ħalli lill-aġenti jagħżlu l-mod tal-panew tat-tħaddim, id-direzzjoni, u l-ankra.
+schema-leader = Leader
+schema-leader-detail = Tast prefiss għal shortcuts b’chord.
+schema-chord-timeout = Skadenza tal-chord
+schema-chord-timeout-detail = Millisekondi qabel jiskadi prefiss ta’ chord.
+schema-bindings = Bindings
+schema-confirm-close = Ikkonferma l-għeluq
+schema-confirm-close-detail = Staqsi qabel tagħlaq terminal b’proċess għaddej.
+schema-default-theme = Tema predefinita
+schema-default-theme-detail = Isem tat-tema attiva mil-lista tat-temi.
+
+settings-empty = (vojt)
+settings-none = (xejn)
+
+schema-system = Sistema
+schema-editor = Editur
+schema-recording = Reġistrazzjoni
+schema-radius = Raġġ
+schema-padding = Spazjar intern
+schema-gap = Distakk
+schema-width = Wisa'
+schema-color = Kulur
+schema-red = Aħmar
+schema-green = Aħdar
+schema-blue = Blu
+schema-follow-files = Segwi l-fajls
+schema-tidy-files = Irranġa l-fajls
+schema-tidy-files-max = Limitu għat-tindif tal-fajls
+schema-tidy-files-auto = Irranġa l-fajls awtomatikament
+schema-app-providers = Fornituri tal-apps
+schema-provider = Fornitur
+schema-kind = Tip
+schema-models = Mudelli
+schema-acp = Aġenti ACP
+schema-id = ID
+schema-name = Isem
+schema-command = Kmand
+schema-arguments = Argumenti
+schema-environment = Ambjent
+schema-working-directory = Direttorju tax-xogħol
+schema-shell = Shell
+schema-font-family = Familja tat-tipa
+schema-startup-directory = Direttorju tal-bidu
+schema-themes = Temi
+schema-color-scheme = Skema tal-kuluri
+schema-font-size = Daqs tat-tipa
+schema-line-height = Għoli tal-linja
+schema-cursor-style = Stil tal-kerser
+schema-cursor-blink = Teptip tal-kerser
+schema-custom-themes = Temi personalizzati
+schema-foreground = Tagħrif ta' quddiem
+schema-background = Sfond
+schema-cursor = Kerser
+schema-ansi-colors = Kuluri ANSI
+schema-keymap = Mappa tat-tasti
+schema-explorer = Esploratur
+schema-visible = Viżibbli
+schema-language-servers = Servers tal-lingwa
+schema-servers = Servers
+schema-language-id = ID tal-lingwa
+schema-root-markers = Markaturi tal-għerq
+schema-output-directory = Direttorju tal-ħruġ
+
+menu-scene = Xena
+menu-layout = Tqassim
+menu-terminal = Terminal
+menu-browser = Browser
+menu-service = Servizz
+menu-bookmark = Bookmark
+menu-edit = Editja
+
+layout-knowledge = Għarfien
+layout-open-knowledge = Iftaħ l-Għarfien
+layout-open-welcome-knowledge = Iftaħ Merħba fl-Għarfien
+layout-open-path = Iftaħ { $path }
+layout-fold-knowledge = Itwi l-għarfien
+layout-unfold-knowledge = Iftaħ l-għarfien
+layout-bookmarks = Bookmarks
+layout-new-folder = Folder ġdid
+layout-add-to-bookmarks = Żid mal-Bookmarks
+layout-move-to-bookmarks = Mexxi għall-Bookmarks
+layout-stack-number = Munzell { $number }
+layout-fold-stack = Itwi l-munzell
+layout-unfold-stack = Iftaħ il-munzell
+layout-close-stack = Agħlaq il-munzell
+layout-bookmark-in = Bookmark f'{ $folder }
+
+common-cancel = Ikkanċella
+common-delete = Ħassar
+common-save = Issejvja
+common-rename = Semmi mill-ġdid
+common-expand = Espandi
+common-collapse = Ikkollassa
+common-loading = Qed jitgħabba…
+common-error = Żball
+common-output = Output
+common-pending = Pendenti
+common-current = attwali
+common-stop = Waqqaf
+services-command = servizz ta’ Vmux
+services-uptime-seconds = { $seconds }s
+services-uptime-minutes = { $minutes }m { $seconds }s
+services-uptime-hours = { $hours }h { $minutes }m
+services-uptime-days = { $days }d { $hours }h
+
+error-page-failed-load = Il-paġna ma setgħetx titgħabba
+error-page-not-found = Il-paġna ma nstabitx
+error-unknown-host = Host tal-app Vmux mhux magħruf: { $host }
+
+history-title = Storja
+
+command-new-app-chat = Chat ġdida ta’ { $provider }/{ $model } (App)
+command-interactive-mode-user = Xena > Modalità interattiva > Utent
+command-interactive-mode-player = Xena > Modalità interattiva > Player
+command-minimize-window = Tqassim > Tieqa > Imminimizza
+command-toggle-layout = Tqassim > Tqassim > Aqleb it-tqassim
+command-close-tab = Tqassim > Tab > Agħlaq it-tab
+command-new-task = Tqassim > Tab > Kompitu ġdid…
+command-next-tab = Tqassim > Tab > Tab li jmiss
+command-prev-tab = Tqassim > Tab > Tab ta’ qabel
+command-rename-tab = Tqassim > Tab > Semmi t-tab mill-ġdid
+command-tab-select-1 = Tqassim > Tab > Agħżel Tab 1
+command-tab-select-2 = Tqassim > Tab > Agħżel Tab 2
+command-tab-select-3 = Tqassim > Tab > Agħżel Tab 3
+command-tab-select-4 = Tqassim > Tab > Agħżel Tab 4
+command-tab-select-5 = Tqassim > Tab > Agħżel Tab 5
+command-tab-select-6 = Tqassim > Tab > Agħżel Tab 6
+command-tab-select-7 = Tqassim > Tab > Agħżel Tab 7
+command-tab-select-8 = Tqassim > Tab > Agħżel Tab 8
+command-tab-select-last = Tqassim > Tab > Agħżel l-aħħar tab
+command-close-pane = Tqassim > Pane > Agħlaq il-pane
+command-select-pane-left = Tqassim > Pane > Agħżel il-pane tax-xellug
+command-select-pane-right = Tqassim > Pane > Agħżel il-pane tal-lemin
+command-select-pane-up = Tqassim > Pane > Agħżel il-pane ta’ fuq
+command-select-pane-down = Tqassim > Pane > Agħżel il-pane t’isfel
+command-swap-pane-prev = Tqassim > Pane > Ibdel mal-pane ta’ qabel
+command-swap-pane-next = Tqassim > Pane > Ibdel mal-pane li jmiss
+command-equalize-pane-size = Tqassim > Pane > Ugwalizza d-daqs tal-panes
+command-resize-pane-left = Tqassim > Pane > Ridimensjona l-pane lejn ix-xellug
+command-resize-pane-right = Tqassim > Pane > Ridimensjona l-pane lejn il-lemin
+command-resize-pane-up = Tqassim > Pane > Ridimensjona l-pane ’l fuq
+command-resize-pane-down = Tqassim > Pane > Ridimensjona l-pane ’l isfel
+command-stack-close = Tqassim > Stack > Agħlaq l-istack
+command-stack-next = Tqassim > Stack > Stack li jmiss
+command-stack-previous = Tqassim > Stack > Stack ta’ qabel
+command-stack-reopen = Tqassim > Stack > Erġa’ iftaħ paġna magħluqa
+command-stack-swap-prev = Tqassim > Stack > Mexxi l-istack lejn ix-xellug
+command-stack-swap-next = Tqassim > Stack > Mexxi l-istack lejn il-lemin
+command-space-open = Tqassim > Spazju > Spazji
+command-terminal-close = Terminal > Agħlaq it-terminal
+command-terminal-next = Terminal > Terminal li jmiss
+command-terminal-prev = Terminal > Terminal ta’ qabel
+command-terminal-clear = Terminal > Naddaf it-terminal
+command-browser-prev-page = Browser > Navigazzjoni > Lura
+command-browser-next-page = Browser > Navigazzjoni > Quddiem
+command-browser-reload = Browser > Navigazzjoni > Erġa’ tella’
+command-browser-hard-reload = Browser > Navigazzjoni > Erġa’ tella’ kompletament
+command-open-in-place = Browser > Iftaħ > Iftaħ hawn
+command-open-in-new-stack = Browser > Iftaħ > Iftaħ fi stack ġdid
+command-open-in-pane-top = Browser > Iftaħ > Iftaħ fil-pane ta’ fuq
+command-open-in-pane-right = Browser > Iftaħ > Iftaħ fil-pane tal-lemin
+command-open-in-pane-bottom = Browser > Iftaħ > Iftaħ fil-pane t’isfel
+command-open-in-pane-left = Browser > Iftaħ > Iftaħ fil-pane tax-xellug
+command-open-in-new-tab = Browser > Iftaħ > Iftaħ f’tab ġdida
+command-open-in-new-space = Browser > Iftaħ > Iftaħ fi spazju ġdid
+command-browser-zoom-in = Browser > Dehra > Kabbar
+command-browser-zoom-out = Browser > Dehra > Ċekken
+command-browser-zoom-reset = Browser > Dehra > Daqs attwali
+command-browser-dev-tools = Browser > Dehra > Għodod tal-iżviluppatur
+command-browser-open-command-bar = Browser > Barra > Barra tal-kmandi
+command-browser-open-page-in-command-bar = Browser > Barra > Editja l-paġna
+command-browser-open-path-bar = Browser > Barra > Navigatur tal-mogħdija
+command-browser-open-commands = Browser > Barra > Kmandi
+command-browser-open-history = Browser > Barra > Storja
+command-service-open = Servizz > Iftaħ il-moniter tas-servizzi
+command-bookmark-toggle-active = Bookmark > Żid il-paġna mal-bookmarks
+command-bookmark-pin-active = Bookmark > Ippinja l-paġna
+
+layout-tab = Tab
+layout-no-stacks = L-ebda stack
+layout-loading = Qed jitgħabba…
+layout-no-markdown-files = L-ebda fajl Markdown
+layout-empty-folder = Folder vojt
+layout-worktree = worktree
+layout-folder-name = Isem il-folder
+layout-no-pins-bookmarks = L-ebda pins jew bookmarks
+layout-move-to = Mexxi għal { $folder }
+layout-bookmark-current-page = Żid il-paġna attwali mal-bookmarks
+layout-rename-folder = Semmi l-folder mill-ġdid
+layout-remove-folder = Neħħi l-folder
+layout-update-downloading = Qed jitniżżel aġġornament
+layout-update-installing = Qed jiġi installat aġġornament…
+layout-update-ready = Verżjoni ġdida disponibbli
+layout-restart-update = Erġa’ ibda biex taġġorna
+
+agent-preparing = Qed jitħejja l-agent…
+agent-send-all-queued = Ibgħat il-prompts kollha fil-kju issa (Esc)
+agent-send = Ibgħat (Enter)
+agent-ready = Lest meta tkun lest int.
+agent-loading-older = Qed jitgħabbew messaġġi eqdem…
+agent-load-older = Tella’ messaġġi eqdem
+agent-continued-from = Kompla minn { $source }
+agent-older-context-omitted = kuntest eqdem tħalla barra
+agent-interrupted = interrott
+agent-allow-tool = Tippermetti { $tool }?
+agent-deny = Irrifjuta
+agent-allow-always = Ippermetti dejjem
+agent-allow = Ippermetti
+agent-loading-sessions = Qed jitgħabbew is-sessjonijiet…
+agent-no-resumable-sessions = Ma nstabet l-ebda sessjoni li tista’ titkompla
+agent-no-matching-sessions = L-ebda sessjoni taqbel
+agent-no-matching-models = L-ebda mudell jaqbel
+agent-choice-help = ↑/↓ jew Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = Agħżel folder tar-repożitorju
+agent-choose-repository-detail = Agħżel ir-repożitorju Git lokali li għandu juża l-agent.
+agent-choosing = Qed jintgħażel…
+agent-choose-folder = Agħżel folder
+agent-queued = fil-kju
+agent-attached = Mehmuż:
+agent-cancel-queued = Ikkanċella l-prompt fil-kju
+agent-resume-queued = Kompli l-prompts fil-kju
+agent-clear-queue = Battal il-kju
+agent-send-all-now = ibgħathom kollha issa
+agent-choose-option = Agħżel għażla hawn fuq
+agent-loading-media = Qed titgħabba l-media…
+agent-no-matching-media = L-ebda media taqbel
+agent-prompt-context = Kuntest tal-prompt
+agent-details = Dettalji
+agent-path = Mogħdija
+agent-tool = Għodda
+agent-server = Server
+agent-bytes = { $count } bytes
+agent-worked-for = Ħadem għal { $duration }
+agent-worked-for-steps = { $count ->
+    [one] Ħadem għal { $duration } · pass 1
+   *[other] Ħadem għal { $duration } · { $count } passi
+}
+agent-tool-guardian-review = Reviżjoni tal-Gwardjan
+agent-tool-read-files = Qara fajls
+agent-tool-viewed-image = Ra immaġni
+agent-tool-used-browser = Uża browser
+agent-tool-searched-files = Fittex fil-fajls
+agent-tool-ran-commands = Ħaddem kmandi
+agent-thinking = Qed jaħseb
+agent-subagent = Subagent
+agent-prompt = Prompt
+agent-thread = Thread
+agent-parent = Ġenitur
+agent-children = Ulied
+agent-call = Sejħa
+agent-raw-event = Avveniment mhux ipproċessat
+agent-plan = Pjan
+agent-tasks = { $count ->
+    [one] kompitu 1
+   *[other] { $count } kompiti
+}
+agent-edited = Editjat
+agent-reconnecting = Qed jerġa’ jikkonnettja { $attempt }/{ $total }
+agent-status-running = Għaddej
+agent-status-done = Lest
+agent-status-failed = Falla
+agent-status-pending = Pendenti
+agent-slash-attach-files = Ehmeż fajls
+agent-slash-resume-session = Kompli sessjoni preċedenti
+agent-slash-select-model = Agħżel mudell
+agent-slash-continue-cli = Kompli din is-sessjoni fil-CLI
+agent-session-just-now = issa stess
+agent-session-minutes-ago = { $count }m ilu
+agent-session-hours-ago = { $count }h ilu
+agent-session-days-ago = { $count }d ilu
+agent-working-working = Qed jaħdem
+agent-working-thinking = Qed jaħseb
+agent-working-pondering = Qed jirrifletti
+agent-working-noodling = Qed jesplora ideat
+agent-working-percolating = Qed jissajjar
+agent-working-conjuring = Qed isejjaħ l-ideat
+agent-working-cooking = Qed isajjar
+agent-working-brewing = Qed jitħejja
+agent-working-musing = Qed jikkontempla
+agent-working-ruminating = Qed jixtarr
+agent-working-scheming = Qed jippjana
+agent-working-synthesizing = Qed jissintetizza
+agent-working-tinkering = Qed jirranġa
+agent-working-churning = Qed jipproċessa
+agent-working-vibing = Qed jaqbad ir-ritmu
+agent-working-simmering = Qed isajjar bil-mod
+agent-working-crafting = Qed joħloq
+agent-working-divining = Qed jiskopri
+agent-working-mulling = Qed jikkunsidra
+agent-working-spelunking = Qed jesplora fil-fond
+
+editor-toggle-explorer = Aqleb l-Explorer (Cmd+B)
+editor-unsaved = mhux issejvjat
+editor-rendered-markdown = Markdown irrenderjat b’editjar live
+editor-note = Nota
+editor-source-editor = Editur tas-sors
+editor-editor = Editur
+editor-git-diff = Diff ta’ Git
+editor-diff = Diff
+editor-tidy = Naddaf
+editor-always = Dejjem
+editor-unchanged-previews = { $count ->
+    [one] ✦ preview 1 mhux mibdul
+   *[other] ✦ { $count } previews mhux mibdula
+}
+editor-open-externally = Iftaħ esternament
+editor-changed-line = Linja mibdula
+editor-go-to-definition = Mur għad-definizzjoni
+editor-find-references = Sib referenzi
+editor-references = { $count ->
+    [one] referenza 1
+   *[other] { $count } referenzi
+}
+editor-lsp-starting = { $server } qed jibda…
+editor-lsp-not-installed = { $server } — mhux installat
+editor-explorer = Explorer
+editor-open-editors = Edituri miftuħa
+editor-outline = Outline
+editor-new-file = Fajl ġdid
+editor-new-folder = Folder ġdid
+editor-delete-confirm = Tħassar “{ $name }”? Dan ma jistax jitreġġa’ lura.
+editor-created-folder = Inħoloq il-folder { $name }
+editor-created-file = Inħoloq il-fajl { $name }
+editor-renamed-to = Issemma mill-ġdid għal { $name }
+editor-deleted = Tħassar { $name }
+editor-failed-decode-image = L-immaġni ma setgħetx tiġi dekodifikata
+editor-preview-large-image = immaġni (kbira wisq għall-preview)
+editor-preview-binary = binarju
+editor-preview-file = fajl
+
+git-status-clean = nadif
+git-status-modified = mibdul
+git-status-staged = staged
+git-status-staged-modified = staged*
+git-status-untracked = mhux tracked
+git-status-deleted = imħassar
+git-status-conflict = kunflitt
+git-accept-all = ✓ aċċetta kollox
+git-unstage = Neħħi minn staged
+git-confirm-deny-all = Ikkonferma li tirrifjuta kollox
+git-deny-all = ✗ irrifjuta kollox
+git-commit-message = messaġġ tal-commit
+git-commit = Commit ({ $count })
+git-push = ↑ Push
+git-loading-diff = Qed jitgħabba d-diff…
+git-no-changes = L-ebda tibdil x’turi
+git-accept = ✓ aċċetta
+git-deny = ✗ irrifjuta
+git-show-unchanged-lines = Uri { $count } linji mhux mibdula
+
+terminal-loading = Qed jitgħabba…
+terminal-runs-when-ready = jaħdem meta jkun lest · Ctrl+C inaddaf · Esc jaqbeż
+terminal-booting = qed jibda
+terminal-type-command = ikteb kmand · jaħdem meta jkun lest · Esc jaqbeż
+
+setup-tagline-claude = L-agent tal-koding ta’ Anthropic, f’Vmux
+setup-tagline-codex = L-agent tal-koding ta’ OpenAI, f’Vmux
+setup-tagline-vibe = L-agent tal-koding ta’ Mistral, f’Vmux
+setup-install-title = Installa l-CLI ta’ { $name }
+setup-homebrew-required = Homebrew huwa meħtieġ biex tinstalla { $command } u għadu mhux issettjat. Vmux se jinstalla Homebrew l-ewwel, imbagħad { $name }.
+setup-terminal-instructions = Fit-terminal, agħfas Return biex tibda, imbagħad daħħal il-password tal-Mac tiegħek meta tintalab.
+setup-command-missing = Vmux fetaħ din il-paġna għax il-kmand lokali { $command } għadu mhux installat. Ħaddem il-kmand hawn taħt biex tikseb dan.
+setup-install-failed = L-installazzjoni ma spiċċatx. Iċċekkja t-terminal għad-dettalji, imbagħad erġa’ pprova.
+setup-installing = Qed jiġi installat…
+setup-install-homebrew = Installa Homebrew + { $name }
+setup-run-install = Ħaddem il-kmand tal-installazzjoni
+setup-auto-reload = Vmux iħaddmu f’terminal u jerġa’ jtella’ meta { $command } ikun lest.
+
+debug-title = Debug
+debug-auto-update = Aġġornament awtomatiku
+debug-simulate-update = Issimula aġġornament disponibbli
+debug-simulate-download = Issimula tniżżil
+debug-clear-update = Neħħi l-aġġornament
+debug-trigger-restart = Skatta restart
+
+command-manage-spaces = Immaniġġja l-ispazji…
+command-pane-stack-location = żona { $pane } / saff { $stack }
+command-space-pane-stack-location = { $space } / żona { $pane } / saff { $stack }
+command-terminal-path = Terminal ({ $path })
+command-group-interactive-mode = Modalità interattiva
+command-group-window = Tieqa
+command-group-tab = Tab
+command-group-pane = Żona
+command-group-stack = Saff
+command-group-space = Spazju
+command-group-navigation = Navigazzjoni
+command-group-open = Iftaħ
+command-group-view = Dehra
+command-group-bar = Strixxa
+
+menu-close-vmux = Agħlaq Vmux
+
+agents-terminal-coding-agent = Aġent tal-kodifikazzjoni bbażat fuq it-Terminal

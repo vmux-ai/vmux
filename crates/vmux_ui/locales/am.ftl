@@ -1,0 +1,602 @@
+locale-name = አማርኛ
+common-open = ክፈት
+common-close = ዝጋ
+common-install = ጫን
+common-uninstall = አራግፍ
+common-update = አዘምን
+common-retry = እንደገና ሞክር
+common-refresh = አድስ
+common-remove = አስወግድ
+common-enable = አንቃ
+common-disable = አሰናክል
+common-new = አዲስ
+common-active = ንቁ
+common-running = እየሰራ
+common-done = ተጠናቋል
+common-failed = አልተሳካም
+common-installed = ተጭኗል
+common-items = { $count ->
+    [one] { $count } ንጥል
+   *[other] { $count } ንጥሎች
+}
+start-title = ጀምር
+start-tagline = አንድ prompt። ማንኛውም ስራ፣ ተጠናቋል።
+
+agents-title = ኤጀንቶች
+agents-search = የACP እና CLI ኤጀንቶችን ፈልግ…
+agents-empty = የሚዛመድ ኤጀንት የለም
+agents-empty-detail = ስም፣ runtime፣ ወይም ACP/CLI ይሞክሩ።
+agents-install-failed = መጫን አልተሳካም
+agents-updating = እየተዘመነ…
+agents-retrying = እንደገና እየተሞከረ…
+agents-preparing = እየተዘጋጀ…
+
+extensions-title = ቅጥያዎች
+extensions-search = የተጫኑትን ወይም Chrome Web Store ፈልግ…
+extensions-relaunch = ለማ 적용 እንደገና አስጀምር
+extensions-empty = የተጫነ ቅጥያ የለም
+extensions-no-match = የሚዛመድ ቅጥያ የለም
+extensions-empty-detail = ከላይ Chrome Web Store ውስጥ ፈልገው Return ይጫኑ።
+extensions-no-match-detail = ሌላ ስም ወይም የቅጥያ ID ይሞክሩ።
+extensions-on = በርቷል
+extensions-off = ጠፍቷል
+extensions-enable-confirm = { $name }ን ማንቃት?
+extensions-enable-permissions = { $name }ን አንቃ እና ፍቀድ፦
+
+lsp-title = የቋንቋ ሰርቨሮች
+lsp-search = የቋንቋ ሰርቨሮች፣ linters፣ formatters ፈልግ…
+lsp-loading = ካታሎግ እየተጫነ…
+lsp-empty = የሚዛመድ የቋንቋ ሰርቨር የለም
+lsp-empty-detail = ሌላ ቋንቋ፣ linter፣ ወይም formatter ይሞክሩ።
+lsp-needs = { $tool } ያስፈልገዋል
+lsp-status-available = ይገኛል
+lsp-status-on-path = በPATH ላይ አለ
+lsp-status-installing = እየተጫነ…
+lsp-status-installed = ተጭኗል
+lsp-status-outdated = ዝማኔ ይገኛል
+lsp-status-running = እየሰራ
+lsp-status-failed = አልተሳካም
+
+spaces-title = ቦታዎች
+spaces-new-placeholder = የአዲስ ቦታ ስም
+spaces-empty = ቦታ የለም
+spaces-default-name = ቦታ { $number }
+spaces-tabs = { $count ->
+    [one] 1 ትር
+   *[other] { $count } ትሮች
+}
+spaces-delete = ቦታ ሰርዝ
+
+team-title = ቡድን
+team-just-you = በዚህ ቦታ ውስጥ እርስዎ ብቻ ነዎት
+team-agents = { $count ->
+    [one] እርስዎ እና 1 ኤጀንት
+   *[other] እርስዎ እና { $count } ኤጀንቶች
+}
+team-empty = እስካሁን ማንም የለም
+team-you = እርስዎ
+team-agent = ኤጀንት
+
+services-title = የጀርባ አገልግሎቶች
+services-processes = { $count ->
+    [one] 1 ሂደት
+   *[other] { $count } ሂደቶች
+}
+services-kill-all = ሁሉንም አስገድደህ አቁም
+services-not-running = አገልግሎቱ እየሰራ አይደለም
+services-start-with = በዚህ ጀምር፦
+services-empty = ንቁ ሂደት የለም
+services-filter = ሂደቶችን አጣራ…
+services-no-match = የሚዛመድ ሂደት የለም
+services-connected = ተገናኝቷል
+services-disconnected = ተቋርጧል
+services-attached = ተያይዟል
+services-kill = አስገድደህ አቁም
+services-memory = ማህደረ ትውስታ
+services-size = መጠን
+services-shell = Shell
+
+error-title = ስህተት
+
+history-search = ታሪክ ፈልግ
+history-clear-all = ሁሉንም አጽዳ
+history-clear-confirm = ሁሉንም ታሪክ ማጽዳት?
+history-clear-warning = ይህን መመለስ አይቻልም።
+history-cancel = ይቅር
+history-today = ዛሬ
+history-yesterday = ትናንት
+history-days-ago = ከ{ $count } ቀናት በፊት
+history-day-offset = ቀን -{ $count }
+
+settings-title = ቅንብሮች
+settings-loading = ቅንብሮች እየተጫኑ…
+settings-stored = በ ~/.vmux/settings.ron ውስጥ ተቀምጧል
+settings-other = ሌላ
+settings-software-update = የሶፍትዌር ዝማኔ
+settings-check-updates = ዝማኔዎችን ፈትሽ
+settings-check-updates-hint = Auto-update ሲነቃ በመጀመሪያ ማስጀመር እና በየሰዓቱ በራስ-ሰር ይፈትሻል።
+settings-update-unavailable = አይገኝም
+settings-update-unavailable-hint = አዘማኙ በዚህ build ውስጥ አልተካተተም።
+settings-update-checking = እየተፈተሸ…
+settings-update-checking-hint = ዝማኔዎች እየተፈተሹ…
+settings-update-check-again = እንደገና ፈትሽ
+settings-update-current = Vmux ዘምኗል።
+settings-update-downloading = እየወረደ…
+settings-update-downloading-hint = Vmux { $version } እየወረደ…
+settings-update-installing = እየተጫነ…
+settings-update-installing-hint = Vmux { $version } እየተጫነ…
+settings-update-ready = ዝማኔው ዝግጁ ነው
+settings-update-ready-hint = Vmux { $version } ዝግጁ ነው። ለማ 적용 እንደገና አስጀምር።
+settings-update-try-again = እንደገና ሞክር
+settings-update-failed = ዝማኔዎችን መፈተሽ አልተቻለም።
+settings-item = ንጥል
+settings-item-number = ንጥል { $number }
+settings-press-key = ቁልፍ ይጫኑ…
+settings-saved = ተቀምጧል
+settings-record-key = አዲስ የቁልፍ ጥምር ለመቅረጽ ጠቅ ያድርጉ
+
+tray-open-window = መስኮት ክፈት
+tray-close-window = መስኮት ዝጋ
+tray-pause-recording = ቀረጻ አቁም ለጊዜው
+tray-resume-recording = ቀረጻ ቀጥል
+tray-finish-recording = ቀረጻ ጨርስ
+tray-quit = Vmuxን ውጣ
+
+composer-attach-files = ፋይሎችን አያይዝ (/upload)
+composer-remove-attachment = አባሪ አስወግድ
+
+layout-back = ተመለስ
+layout-forward = ወደፊት
+layout-reload = ዳግም ጫን
+layout-bookmark-page = ይህን ገጽ ዕልባት አድርግ
+layout-remove-bookmark = ዕልባት አስወግድ
+layout-pin-page = ይህን ገጽ ሰካ
+layout-unpin-page = ይህን ገጽ ንቀል
+layout-manage-extensions = ቅጥያዎችን አስተዳድር
+layout-new-stack = አዲስ ቁልል
+layout-close-tab = ትር ዝጋ
+layout-bookmark = ዕልባት
+layout-pin = ሰካ
+layout-new-tab = አዲስ ትር
+layout-team = ቡድን
+
+command-switch-space = ቦታ ቀይር…
+command-search-ask = ፈልግ ወይም ጠይቅ…
+command-new-tab-placeholder = ፈልግ፣ URL ጻፍ፣ ወይም Terminal ምረጥ…
+command-placeholder = URL ጻፍ፣ ትሮችን ፈልግ፣ ወይም ለትዕዛዞች > ጻፍ…
+command-composer-placeholder = ለትዕዛዞች / ወይም ለሚዲያ @ ጻፍ
+command-send = ላክ (Enter)
+command-terminal = Terminal
+command-open-terminal = በTerminal ክፈት
+command-stack = ቁልል
+command-tabs = { $count ->
+    [one] 1 ትር
+   *[other] { $count } ትሮች
+}
+command-prompt = Prompt
+command-new-tab = አዲስ ትር
+command-search = ፈልግ
+command-open-value = “{ $value }” ክፈት
+command-search-value = “{ $value }” ፈልግ
+
+schema-appearance = መልክ
+schema-general = አጠቃላይ
+schema-layout = አቀማመጥ
+schema-layout-detail = መስኮት፣ ክፍሎች፣ የጎን አሞሌ፣ እና የትኩረት ቀለበት።
+schema-agent = ኤጀንት
+schema-agent-detail = የኤጀንት ባህሪ እና የመሳሪያ ፈቃዶች።
+schema-shortcuts = አቋራጮች
+schema-shortcuts-detail = ለንባብ ብቻ። ጥምሮችን ለመቀየር settings.ronን በቀጥታ ያርትዑ።
+schema-terminal = Terminal
+schema-browser = አሳሽ
+schema-mode = ሁነታ
+schema-mode-detail = ለድር ገጾች የቀለም ገጽታ። Device የስርዓትዎን ይከተላል።
+schema-device = Device
+schema-light = ብርሃን
+schema-dark = ጨለማ
+schema-language = ቋንቋ
+schema-language-detail = ስርዓትን፣ en-US፣ ja፣ ወይም ከተዛመደ ~/.vmux/locales/<tag>.ftl ካታሎግ ጋር ማንኛውንም BCP 47 tag ተጠቀም።
+schema-auto-update = Auto-update
+schema-auto-update-detail = በመጀመሪያ ማስጀመር እና በየሰዓቱ ዝማኔዎችን ፈትሽና ጫን።
+schema-startup-url = የመነሻ URL
+schema-startup-url-detail = ባዶ ከሆነ የትዕዛዝ አሞሌ prompt ይከፍታል።
+schema-search-engine = የፍለጋ ሞተር
+schema-search-engine-detail = ከመነሻ እና ከትዕዛዝ አሞሌ ለድር ፍለጋዎች ይጠቀማል።
+schema-window = መስኮት
+schema-pane = ክፍል
+schema-side-sheet = የጎን ሉህ
+schema-focus-ring = የትኩረት ቀለበት
+schema-run-placement = የማስኬጃ ቦታ መተካትን ፍቀድ
+schema-run-placement-detail = ኤጀንቶች የማስኬጃ ክፍል ሁነታ፣ አቅጣጫ፣ እና መያዣ እንዲመርጡ ፍቀድ።
+schema-leader = Leader
+schema-leader-detail = ለchord አቋራጮች የቅድመ ቁልፍ።
+schema-chord-timeout = የChord ጊዜ ገደብ
+schema-chord-timeout-detail = የchord ቅድመ ቁልፍ ከማብቃቱ በፊት የሚቆዩ ሚሊሰከንዶች።
+schema-bindings = ጥምሮች
+schema-confirm-close = መዝጋት አረጋግጥ
+schema-confirm-close-detail = እየሰራ ያለ ሂደት ያለውን terminal ከመዝጋት በፊት ጠይቅ።
+schema-default-theme = ነባሪ ገጽታ
+schema-default-theme-detail = ከገጽታዎች ዝርዝር ውስጥ የንቁ ገጽታ ስም።
+
+settings-empty = (ባዶ)
+settings-none = (ምንም)
+
+schema-system = ስርዓት
+schema-editor = አርታዒ
+schema-recording = ቀረጻ
+schema-radius = ራዲየስ
+schema-padding = ውስጣዊ ክፍተት
+schema-gap = ክፍተት
+schema-width = ስፋት
+schema-color = ቀለም
+schema-red = ቀይ
+schema-green = አረንጓዴ
+schema-blue = ሰማያዊ
+schema-follow-files = ፋይሎችን ተከተል
+schema-tidy-files = ፋይሎችን አጽዳ
+schema-tidy-files-max = የፋይል ማጽዳት ገደብ
+schema-tidy-files-auto = ፋይሎችን በራስ-ሰር አጽዳ
+schema-app-providers = የመተግበሪያ አቅራቢዎች
+schema-provider = አቅራቢ
+schema-kind = አይነት
+schema-models = ሞዴሎች
+schema-acp = ACP ወኪሎች
+schema-id = ID
+schema-name = ስም
+schema-command = ትዕዛዝ
+schema-arguments = ነጋሪ እሴቶች
+schema-environment = አካባቢ ተለዋዋጮች
+schema-working-directory = የሥራ ማውጫ
+schema-shell = ሼል
+schema-font-family = የቅርጸ-ቁምፊ ቤተሰብ
+schema-startup-directory = የመነሻ ማውጫ
+schema-themes = ገጽታዎች
+schema-color-scheme = የቀለም ዘዴ
+schema-font-size = የቅርጸ-ቁምፊ መጠን
+schema-line-height = የመስመር ቁመት
+schema-cursor-style = የጠቋሚ ቅጥ
+schema-cursor-blink = የጠቋሚ ብልጭታ
+schema-custom-themes = ብጁ ገጽታዎች
+schema-foreground = ፊት ቀለም
+schema-background = ዳራ
+schema-cursor = ጠቋሚ
+schema-ansi-colors = ANSI ቀለሞች
+schema-keymap = የቁልፍ ካርታ
+schema-explorer = አሳሽ
+schema-visible = የሚታይ
+schema-language-servers = የቋንቋ ሰርቨሮች
+schema-servers = ሰርቨሮች
+schema-language-id = የቋንቋ ID
+schema-root-markers = የስር ምልክቶች
+schema-output-directory = የውጤት ማውጫ
+
+menu-scene = ትዕይንት
+menu-layout = አቀማመጥ
+menu-terminal = ተርሚናል
+menu-browser = አሳሽ
+menu-service = አገልግሎት
+menu-bookmark = ዕልባት
+menu-edit = አርትዕ
+
+layout-knowledge = ዕውቀት
+layout-open-knowledge = ዕውቀትን ክፈት
+layout-open-welcome-knowledge = የዕውቀት እንኳን ደህና መጡን ክፈት
+layout-open-path = { $path } ክፈት
+layout-fold-knowledge = ዕውቀትን ሰብስብ
+layout-unfold-knowledge = ዕውቀትን ዘርጋ
+layout-bookmarks = ዕልባቶች
+layout-new-folder = አዲስ አቃፊ
+layout-add-to-bookmarks = ወደ ዕልባቶች አክል
+layout-move-to-bookmarks = ወደ ዕልባቶች አንቀሳቅስ
+layout-stack-number = ቁልል { $number }
+layout-fold-stack = ቁልልን ሰብስብ
+layout-unfold-stack = ቁልልን ዘርጋ
+layout-close-stack = ቁልልን ዝጋ
+layout-bookmark-in = በ{ $folder } ውስጥ ዕልባት አድርግ
+
+common-cancel = ሰርዝ
+common-delete = ሰርዝ
+common-save = አስቀምጥ
+common-rename = ስም ቀይር
+common-expand = ዘርጋ
+common-collapse = ሰብስብ
+common-loading = በመጫን ላይ…
+common-error = ስህተት
+common-output = ውጤት
+common-pending = በመጠባበቅ ላይ
+common-current = የአሁኑ
+common-stop = አቁም
+services-command = Vmux አገልግሎት
+services-uptime-seconds = { $seconds }ሰ
+services-uptime-minutes = { $minutes }ደ { $seconds }ሰ
+services-uptime-hours = { $hours }ሰዓ { $minutes }ደ
+services-uptime-days = { $days }ቀን { $hours }ሰዓ
+
+error-page-failed-load = ገጹ መጫን አልቻለም
+error-page-not-found = ገጹ አልተገኘም
+error-unknown-host = ያልታወቀ የVmux መተግበሪያ አስተናጋጅ፦ { $host }
+
+history-title = ታሪክ
+
+command-new-app-chat = አዲስ { $provider }/{ $model } ውይይት (መተግበሪያ)
+command-interactive-mode-user = ትዕይንት > ተግባራዊ ሁነታ > ተጠቃሚ
+command-interactive-mode-player = ትዕይንት > ተግባራዊ ሁነታ > ተጫዋች
+command-minimize-window = አቀማመጥ > መስኮት > አሳንስ
+command-toggle-layout = አቀማመጥ > አቀማመጥ > አቀማመጥ ቀይር
+command-close-tab = አቀማመጥ > ትር > ትር ዝጋ
+command-new-task = አቀማመጥ > ትር > አዲስ ተግባር…
+command-next-tab = አቀማመጥ > ትር > ቀጣይ ትር
+command-prev-tab = አቀማመጥ > ትር > ቀዳሚ ትር
+command-rename-tab = አቀማመጥ > ትር > የትር ስም ቀይር
+command-tab-select-1 = አቀማመጥ > ትር > ትር 1 ምረጥ
+command-tab-select-2 = አቀማመጥ > ትር > ትር 2 ምረጥ
+command-tab-select-3 = አቀማመጥ > ትር > ትር 3 ምረጥ
+command-tab-select-4 = አቀማመጥ > ትር > ትር 4 ምረጥ
+command-tab-select-5 = አቀማመጥ > ትር > ትር 5 ምረጥ
+command-tab-select-6 = አቀማመጥ > ትር > ትር 6 ምረጥ
+command-tab-select-7 = አቀማመጥ > ትር > ትር 7 ምረጥ
+command-tab-select-8 = አቀማመጥ > ትር > ትር 8 ምረጥ
+command-tab-select-last = አቀማመጥ > ትር > የመጨረሻውን ትር ምረጥ
+command-close-pane = አቀማመጥ > ፔን > ፔን ዝጋ
+command-select-pane-left = አቀማመጥ > ፔን > የግራ ፔን ምረጥ
+command-select-pane-right = አቀማመጥ > ፔን > የቀኝ ፔን ምረጥ
+command-select-pane-up = አቀማመጥ > ፔን > የላይ ፔን ምረጥ
+command-select-pane-down = አቀማመጥ > ፔን > የታች ፔን ምረጥ
+command-swap-pane-prev = አቀማመጥ > ፔን > ከቀዳሚው ፔን ጋር ቀያይር
+command-swap-pane-next = አቀማመጥ > ፔን > ከቀጣዩ ፔን ጋር ቀያይር
+command-equalize-pane-size = አቀማመጥ > ፔን > የፔን መጠኖችን እኩል አድርግ
+command-resize-pane-left = አቀማመጥ > ፔን > ፔን ወደ ግራ አስተካክል
+command-resize-pane-right = አቀማመጥ > ፔን > ፔን ወደ ቀኝ አስተካክል
+command-resize-pane-up = አቀማመጥ > ፔን > ፔን ወደ ላይ አስተካክል
+command-resize-pane-down = አቀማመጥ > ፔን > ፔን ወደ ታች አስተካክል
+command-stack-close = አቀማመጥ > ስታክ > ስታክ ዝጋ
+command-stack-next = አቀማመጥ > ስታክ > ቀጣይ ስታክ
+command-stack-previous = አቀማመጥ > ስታክ > ቀዳሚ ስታክ
+command-stack-reopen = አቀማመጥ > ስታክ > የተዘጋ ገጽ እንደገና ክፈት
+command-stack-swap-prev = አቀማመጥ > ስታክ > ስታክ ወደ ግራ አንቀሳቅስ
+command-stack-swap-next = አቀማመጥ > ስታክ > ስታክ ወደ ቀኝ አንቀሳቅስ
+command-space-open = አቀማመጥ > ስፔስ > ስፔሶች
+command-terminal-close = ተርሚናል > ተርሚናል ዝጋ
+command-terminal-next = ተርሚናል > ቀጣይ ተርሚናል
+command-terminal-prev = ተርሚናል > ቀዳሚ ተርሚናል
+command-terminal-clear = ተርሚናል > ተርሚናል አጽዳ
+command-browser-prev-page = አሳሽ > አሰሳ > ወደ ኋላ
+command-browser-next-page = አሳሽ > አሰሳ > ወደ ፊት
+command-browser-reload = አሳሽ > አሰሳ > ዳግም ጫን
+command-browser-hard-reload = አሳሽ > አሰሳ > ሙሉ ዳግም ጫን
+command-open-in-place = አሳሽ > ክፈት > እዚህ ክፈት
+command-open-in-new-stack = አሳሽ > ክፈት > በአዲስ ስታክ ክፈት
+command-open-in-pane-top = አሳሽ > ክፈት > በላይኛው ፔን ክፈት
+command-open-in-pane-right = አሳሽ > ክፈት > በቀኝ ፔን ክፈት
+command-open-in-pane-bottom = አሳሽ > ክፈት > በታችኛው ፔን ክፈት
+command-open-in-pane-left = አሳሽ > ክፈት > በግራ ፔን ክፈት
+command-open-in-new-tab = አሳሽ > ክፈት > በአዲስ ትር ክፈት
+command-open-in-new-space = አሳሽ > ክፈት > በአዲስ ስፔስ ክፈት
+command-browser-zoom-in = አሳሽ > እይታ > አጉላ
+command-browser-zoom-out = አሳሽ > እይታ > አሳንስ
+command-browser-zoom-reset = አሳሽ > እይታ > ትክክለኛ መጠን
+command-browser-dev-tools = አሳሽ > እይታ > የገንቢ መሳሪያዎች
+command-browser-open-command-bar = አሳሽ > አሞሌ > የትዕዛዝ አሞሌ
+command-browser-open-page-in-command-bar = አሳሽ > አሞሌ > ገጽ አርትዕ
+command-browser-open-path-bar = አሳሽ > አሞሌ > የዱካ አሳሽ
+command-browser-open-commands = አሳሽ > አሞሌ > ትዕዛዞች
+command-browser-open-history = አሳሽ > አሞሌ > ታሪክ
+command-service-open = አገልግሎት > የአገልግሎት መቆጣጠሪያ ክፈት
+command-bookmark-toggle-active = ዕልባት > ገጽ ዕልባት አድርግ
+command-bookmark-pin-active = ዕልባት > ገጽ ሰካ
+
+layout-tab = ትር
+layout-no-stacks = ስታኮች የሉም
+layout-loading = በመጫን ላይ…
+layout-no-markdown-files = የMarkdown ፋይሎች የሉም
+layout-empty-folder = ባዶ አቃፊ
+layout-worktree = worktree
+layout-folder-name = የአቃፊ ስም
+layout-no-pins-bookmarks = የተሰኩ ገጾች ወይም ዕልባቶች የሉም
+layout-move-to = ወደ { $folder } አንቀሳቅስ
+layout-bookmark-current-page = የአሁኑን ገጽ ዕልባት አድርግ
+layout-rename-folder = የአቃፊ ስም ቀይር
+layout-remove-folder = አቃፊ አስወግድ
+layout-update-downloading = ዝማኔ በመውረድ ላይ
+layout-update-installing = ዝማኔ በመጫን ላይ…
+layout-update-ready = አዲስ ስሪት አለ
+layout-restart-update = ለማዘመን ዳግም አስጀምር
+
+agent-preparing = ኤጀንቱ በመዘጋጀት ላይ…
+agent-send-all-queued = በወረፋ ያሉ ፕሮምፕቶችን አሁን ላክ (Esc)
+agent-send = ላክ (Enter)
+agent-ready = ዝግጁ ነኝ።
+agent-loading-older = የቆዩ መልዕክቶች በመጫን ላይ…
+agent-load-older = የቆዩ መልዕክቶችን ጫን
+agent-continued-from = ከ{ $source } ቀጥሏል
+agent-older-context-omitted = የቆየ አውድ ተትቷል
+agent-interrupted = ተቋርጧል
+agent-allow-tool = { $tool } ይፈቀድ?
+agent-deny = ከልክል
+agent-allow-always = ሁልጊዜ ፍቀድ
+agent-allow = ፍቀድ
+agent-loading-sessions = ክፍለ ጊዜዎች በመጫን ላይ…
+agent-no-resumable-sessions = መቀጠል የሚችሉ ክፍለ ጊዜዎች አልተገኙም
+agent-no-matching-sessions = የሚዛመዱ ክፍለ ጊዜዎች የሉም
+agent-no-matching-models = የሚዛመዱ ሞዴሎች የሉም
+agent-choice-help = ↑/↓ ወይም Ctrl+N/Ctrl+P · 1–9 · Enter
+agent-choose-repository = የሪፖዚተሪ አቃፊ ምረጥ
+agent-choose-repository-detail = ኤጀንቱ መጠቀም ያለበትን አካባቢያዊ Git ሪፖዚተሪ ምረጥ።
+agent-choosing = በመምረጥ ላይ…
+agent-choose-folder = አቃፊ ምረጥ
+agent-queued = በወረፋ
+agent-attached = ተያይዟል፦
+agent-cancel-queued = በወረፋ ያለውን ፕሮምፕት ሰርዝ
+agent-resume-queued = በወረፋ ያሉ ፕሮምፕቶችን ቀጥል
+agent-clear-queue = ወረፋ አጽዳ
+agent-send-all-now = ሁሉንም አሁን ላክ
+agent-choose-option = ከላይ አማራጭ ምረጥ
+agent-loading-media = ሚዲያ በመጫን ላይ…
+agent-no-matching-media = የሚዛመድ ሚዲያ የለም
+agent-prompt-context = የፕሮምፕት አውድ
+agent-details = ዝርዝሮች
+agent-path = ዱካ
+agent-tool = መሳሪያ
+agent-server = አገልጋይ
+agent-bytes = { $count } ባይት
+agent-worked-for = ለ{ $duration } ሰርቷል
+agent-worked-for-steps = { $count ->
+    [one] ለ{ $duration } ሰርቷል · 1 ደረጃ
+   *[other] ለ{ $duration } ሰርቷል · { $count } ደረጃዎች
+}
+agent-tool-guardian-review = የጠባቂ ግምገማ
+agent-tool-read-files = ፋይሎችን አንብቧል
+agent-tool-viewed-image = ምስል አይቷል
+agent-tool-used-browser = አሳሽ ተጠቅሟል
+agent-tool-searched-files = ፋይሎች ፈልጎታል
+agent-tool-ran-commands = ትዕዛዞች አስኪዷል
+agent-thinking = በማሰብ ላይ
+agent-subagent = ንዑስ ኤጀንት
+agent-prompt = ፕሮምፕት
+agent-thread = ውይይት
+agent-parent = ወላጅ
+agent-children = ልጆች
+agent-call = ጥሪ
+agent-raw-event = ጥሬ ክስተት
+agent-plan = እቅድ
+agent-tasks = { $count ->
+    [one] 1 ተግባር
+   *[other] { $count } ተግባሮች
+}
+agent-edited = ተስተካክሏል
+agent-reconnecting = እንደገና በመገናኘት ላይ { $attempt }/{ $total }
+agent-status-running = በመሄድ ላይ
+agent-status-done = ተጠናቋል
+agent-status-failed = አልተሳካም
+agent-status-pending = በመጠባበቅ ላይ
+agent-slash-attach-files = ፋይሎች አያይዝ
+agent-slash-resume-session = ያለፈ ክፍለ ጊዜ ቀጥል
+agent-slash-select-model = ሞዴል ምረጥ
+agent-slash-continue-cli = ይህን ክፍለ ጊዜ በCLI ቀጥል
+agent-session-just-now = አሁን
+agent-session-minutes-ago = ከ{ $count }ደ በፊት
+agent-session-hours-ago = ከ{ $count }ሰዓ በፊት
+agent-session-days-ago = ከ{ $count }ቀን በፊት
+agent-working-working = በመስራት ላይ
+agent-working-thinking = በማሰብ ላይ
+agent-working-pondering = በማሰላሰል ላይ
+agent-working-noodling = እየተጫወተበት ነው
+agent-working-percolating = እየተንቀሳቀሰ ነው
+agent-working-conjuring = እየፈጠረ ነው
+agent-working-cooking = እየተዘጋጀ ነው
+agent-working-brewing = እየተጠመቀ ነው
+agent-working-musing = እያሰበ ነው
+agent-working-ruminating = እያሰላሰለ ነው
+agent-working-scheming = እቅድ እያወጣ ነው
+agent-working-synthesizing = እያዋሀደ ነው
+agent-working-tinkering = እያስተካከለ ነው
+agent-working-churning = እያቀናበረ ነው
+agent-working-vibing = በፍሰት ላይ ነው
+agent-working-simmering = በቀስታ እየተቀመመ ነው
+agent-working-crafting = እየሰራ ነው
+agent-working-divining = እያጣራ ነው
+agent-working-mulling = እያሰላሰለ ነው
+agent-working-spelunking = እየቆፈረ ነው
+
+editor-toggle-explorer = ኤክስፕሎረር አሳይ/ደብቅ (Cmd+B)
+editor-unsaved = ያልተቀመጠ
+editor-rendered-markdown = በቀጥታ አርትዕ የሚደረግ Markdown ቅድመ እይታ
+editor-note = ማስታወሻ
+editor-source-editor = የምንጭ አርታዒ
+editor-editor = አርታዒ
+editor-git-diff = የGit ልዩነት
+editor-diff = ልዩነት
+editor-tidy = አጽዳ
+editor-always = ሁልጊዜ
+editor-unchanged-previews = { $count ->
+    [one] ✦ 1 ያልተቀየረ ቅድመ እይታ
+   *[other] ✦ { $count } ያልተቀየሩ ቅድመ እይታዎች
+}
+editor-open-externally = በውጭ መተግበሪያ ክፈት
+editor-changed-line = የተቀየረ መስመር
+editor-go-to-definition = ወደ ትርጉም ሂድ
+editor-find-references = ማጣቀሻዎችን ፈልግ
+editor-references = { $count ->
+    [one] 1 ማጣቀሻ
+   *[other] { $count } ማጣቀሻዎች
+}
+editor-lsp-starting = { $server } በመጀመር ላይ…
+editor-lsp-not-installed = { $server } — አልተጫነም
+editor-explorer = ኤክስፕሎረር
+editor-open-editors = ክፍት አርታዒዎች
+editor-outline = አውትላይን
+editor-new-file = አዲስ ፋይል
+editor-new-folder = አዲስ አቃፊ
+editor-delete-confirm = “{ $name }” ይሰረዝ? ይህ መመለስ አይቻልም።
+editor-created-folder = አቃፊ { $name } ተፈጥሯል
+editor-created-file = ፋይል { $name } ተፈጥሯል
+editor-renamed-to = ስሙ ወደ { $name } ተቀይሯል
+editor-deleted = { $name } ተሰርዟል
+editor-failed-decode-image = ምስል መፍታት አልተሳካም
+editor-preview-large-image = ምስል (ለቅድመ እይታ በጣም ትልቅ)
+editor-preview-binary = ባይነሪ
+editor-preview-file = ፋይል
+
+git-status-clean = ንጹህ
+git-status-modified = ተቀይሯል
+git-status-staged = ተዘጋጅቷል
+git-status-staged-modified = ተዘጋጅቷል*
+git-status-untracked = ያልተከታተለ
+git-status-deleted = ተሰርዟል
+git-status-conflict = ግጭት
+git-accept-all = ✓ ሁሉንም ተቀበል
+git-unstage = ከመዘጋጀት አውጣ
+git-confirm-deny-all = ሁሉንም መከልከል አረጋግጥ
+git-deny-all = ✗ ሁሉንም ከልክል
+git-commit-message = የcommit መልዕክት
+git-commit = Commit ({ $count })
+git-push = ↑ ግፋ
+git-loading-diff = ልዩነት በመጫን ላይ…
+git-no-changes = ለማሳየት ለውጦች የሉም
+git-accept = ✓ ተቀበል
+git-deny = ✗ ከልክል
+git-show-unchanged-lines = { $count } ያልተቀየሩ መስመሮችን አሳይ
+
+terminal-loading = በመጫን ላይ…
+terminal-runs-when-ready = ሲዘጋጅ ይሄዳል · Ctrl+C ያጸዳል · Esc ይዘላል
+terminal-booting = በመጀመር ላይ
+terminal-type-command = ትዕዛዝ ይተይቡ · ሲዘጋጅ ይሄዳል · Esc ይዘላል
+
+setup-tagline-claude = የAnthropic ኮድ ኤጀንት፣ በVmux
+setup-tagline-codex = የOpenAI ኮድ ኤጀንት፣ በVmux
+setup-tagline-vibe = የMistral ኮድ ኤጀንት፣ በVmux
+setup-install-title = { $name } CLI ጫን
+setup-homebrew-required = { $command } ለመጫን Homebrew ያስፈልጋል፣ እስካሁንም አልተዘጋጀም። Vmux መጀመሪያ Homebrewን፣ ከዚያ { $name }ን ይጭናል።
+setup-terminal-instructions = በተርሚናል ውስጥ ለመጀመር Return ይጫኑ፣ ሲጠየቁም የMac የይለፍ ቃልዎን ያስገቡ።
+setup-command-missing = አካባቢያዊው { $command } ትዕዛዝ እስካሁን ስላልተጫነ Vmux ይህን ገጽ ከፍቷል። ለማግኘት ከታች ያለውን ትዕዛዝ አሂድ።
+setup-install-failed = መጫኑ አልተጠናቀቀም። ለዝርዝሮች ተርሚናሉን ይመልከቱ፣ ከዚያ እንደገና ይሞክሩ።
+setup-installing = በመጫን ላይ…
+setup-install-homebrew = Homebrew + { $name } ጫን
+setup-run-install = የመጫኛ ትዕዛዝ አሂድ
+setup-auto-reload = Vmux በተርሚናል ያስኬደዋል፣ { $command } ሲዘጋጅም ዳግም ይጫናል።
+
+debug-title = ማረሚያ
+debug-auto-update = ራስ-ሰር ዝማኔ
+debug-simulate-update = ዝማኔ እንዳለ አስመስል
+debug-simulate-download = ማውረድን አስመስል
+debug-clear-update = ዝማኔ አጽዳ
+debug-trigger-restart = ዳግም ማስጀመር አስነሳ
+
+command-manage-spaces = ቦታዎችን አስተዳድር…
+command-pane-stack-location = ክፍል { $pane } / ቁልል { $stack }
+command-space-pane-stack-location = { $space } / ክፍል { $pane } / ቁልል { $stack }
+command-terminal-path = ተርሚናል ({ $path })
+command-group-interactive-mode = ተግባቢ ሁነታ
+command-group-window = መስኮት
+command-group-tab = ትር
+command-group-pane = ክፍል
+command-group-stack = ቁልል
+command-group-space = ቦታ
+command-group-navigation = አሰሳ
+command-group-open = ክፈት
+command-group-view = እይታ
+command-group-bar = አሞሌ
+
+menu-close-vmux = Vmuxን ዝጋ
+
+agents-terminal-coding-agent = በተርሚናል ላይ የሚሰራ የኮድ ኤጀንት
