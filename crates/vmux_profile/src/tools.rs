@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 const MANIFEST_VERSION: u32 = 1;
 
-/// Desired package and dotfile state stored in `registry.toml`.
+/// Desired package and dotfile state stored in `tools.toml`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RegistryManifest {
+pub struct ToolsManifest {
     #[serde(default = "manifest_version")]
     pub version: u32,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -21,7 +21,7 @@ pub struct RegistryManifest {
     pub dotfiles: DotfilesManifest,
 }
 
-impl Default for RegistryManifest {
+impl Default for ToolsManifest {
     fn default() -> Self {
         Self {
             version: MANIFEST_VERSION,
@@ -32,7 +32,7 @@ impl Default for RegistryManifest {
     }
 }
 
-impl RegistryManifest {
+impl ToolsManifest {
     /// Returns whether a provider package is managed by the manifest.
     pub fn contains(&self, provider: &str, name: &str) -> bool {
         self.packages
@@ -152,7 +152,7 @@ pub struct BrewfileImport {
     pub casks: Vec<String>,
 }
 
-/// Enabled package directories under the Registry dotfile root.
+/// Enabled package directories under the Tools dotfile root.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DotfilesManifest {
     #[serde(default)]
@@ -165,7 +165,7 @@ impl DotfilesManifest {
     }
 }
 
-/// Current relationship between one Registry source and its home target.
+/// Current relationship between one Tools source and its home target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DotfileLinkState {
     Linked,
@@ -214,14 +214,14 @@ impl DotfilePlan {
     }
 }
 
-/// Profile-agnostic Registry directory under `~/.vmux`.
+/// Profile-agnostic Tools directory under `~/.vmux`.
 pub fn root_dir() -> PathBuf {
-    super::config_dir().join("registry")
+    super::config_dir().join("tools")
 }
 
 /// Desired-state manifest path.
 pub fn manifest_path() -> PathBuf {
-    root_dir().join("registry.toml")
+    root_dir().join("tools.toml")
 }
 
 /// Root of Stow-style package directories.
@@ -229,22 +229,64 @@ pub fn dotfiles_dir() -> PathBuf {
     root_dir().join("dotfiles")
 }
 
-/// Loads the user Registry manifest, returning an empty in-memory manifest when absent.
-pub fn load_manifest() -> Result<RegistryManifest, String> {
+fn migrate_legacy_storage() -> Result<(), String> {
+    migrate_legacy_storage_in(&super::config_dir())
+}
+
+fn migrate_legacy_storage_in(config_dir: &Path) -> Result<(), String> {
+    let legacy_root = config_dir.join("registry");
+    let tools_root = config_dir.join("tools");
+    if legacy_root.symlink_metadata().is_ok() {
+        if tools_root.symlink_metadata().is_ok() {
+            return Err(format!(
+                "cannot migrate {} because {} already exists",
+                legacy_root.display(),
+                tools_root.display()
+            ));
+        }
+        rename_for_migration(&legacy_root, &tools_root)?;
+    }
+    let legacy_manifest = tools_root.join("registry.toml");
+    let tools_manifest = tools_root.join("tools.toml");
+    if legacy_manifest.symlink_metadata().is_ok() {
+        if tools_manifest.symlink_metadata().is_ok() {
+            return Err(format!(
+                "cannot migrate {} because {} already exists",
+                legacy_manifest.display(),
+                tools_manifest.display()
+            ));
+        }
+        rename_for_migration(&legacy_manifest, &tools_manifest)?;
+    }
+    Ok(())
+}
+
+fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String> {
+    match std::fs::rename(source, destination) {
+        Ok(()) => Ok(()),
+        Err(_) if source.symlink_metadata().is_err() && destination.symlink_metadata().is_ok() => {
+            Ok(())
+        }
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Loads the user Tools manifest, returning an empty in-memory manifest when absent.
+pub fn load_manifest() -> Result<ToolsManifest, String> {
+    migrate_legacy_storage()?;
     load_manifest_from(&manifest_path())
 }
 
-/// Loads and validates a Registry manifest from an explicit path.
-pub fn load_manifest_from(path: &Path) -> Result<RegistryManifest, String> {
+/// Loads and validates a Tools manifest from an explicit path.
+pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
     if !path.is_file() {
-        return Ok(RegistryManifest::default());
+        return Ok(ToolsManifest::default());
     }
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let mut manifest: RegistryManifest =
-        toml::from_str(&source).map_err(|error| error.to_string())?;
+    let mut manifest: ToolsManifest = toml::from_str(&source).map_err(|error| error.to_string())?;
     if manifest.version != MANIFEST_VERSION {
         return Err(format!(
-            "unsupported registry manifest version: {}",
+            "unsupported tools manifest version: {}",
             manifest.version
         ));
     }
@@ -252,30 +294,32 @@ pub fn load_manifest_from(path: &Path) -> Result<RegistryManifest, String> {
     Ok(manifest)
 }
 
-/// Atomically writes the normalized user Registry manifest.
-pub fn write_manifest(manifest: &RegistryManifest) -> Result<(), String> {
+/// Atomically writes the normalized user Tools manifest.
+pub fn write_manifest(manifest: &ToolsManifest) -> Result<(), String> {
+    migrate_legacy_storage()?;
     write_manifest_to(&manifest_path(), manifest)
 }
 
-/// Atomically writes a normalized Registry manifest to an explicit path.
-pub fn write_manifest_to(path: &Path, manifest: &RegistryManifest) -> Result<(), String> {
+/// Atomically writes a normalized Tools manifest to an explicit path.
+pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
     let mut manifest = manifest.clone();
     manifest.version = MANIFEST_VERSION;
     manifest.normalize();
     let source = toml::to_string_pretty(&manifest).map_err(|error| error.to_string())?;
-    let parent = path.parent().ok_or("registry manifest has no parent")?;
+    let parent = path.parent().ok_or("tools manifest has no parent")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("toml.tmp");
     std::fs::write(&temporary, source).map_err(|error| error.to_string())?;
     std::fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
-/// Imports formulae and casks from a Brewfile into the Registry manifest.
+/// Imports formulae and casks from a Brewfile into the Tools manifest.
 pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
+    migrate_legacy_storage()?;
     import_brewfile_to(path, &manifest_path())
 }
 
-/// Imports a Brewfile into an explicit Registry manifest.
+/// Imports a Brewfile into an explicit Tools manifest.
 pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
     let path = expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -307,10 +351,11 @@ pub fn parse_brewfile(source: &str) -> BrewfileImport {
 
 /// Imports dependency names from a package.json as global npm desired state.
 pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     import_npm_manifest_to(path, &manifest_path())
 }
 
-/// Imports a package.json into an explicit Registry manifest.
+/// Imports a package.json into an explicit Tools manifest.
 pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
     let path = expand_user_path(path)?;
     let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
@@ -346,7 +391,7 @@ pub struct DiscoveredMcpServer {
     pub conflict: bool,
 }
 
-/// Default global MCP config files supported by Registry import.
+/// Default global MCP config files supported by Tools import.
 pub fn default_mcp_config_paths() -> Vec<PathBuf> {
     let home = home_dir();
     [
@@ -394,10 +439,11 @@ pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<Str
 
 /// Imports MCP servers from one Claude, Codex, or Vibe config.
 pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     import_mcp_config_to(path, &manifest_path())
 }
 
-/// Imports MCP servers into an explicit Registry manifest.
+/// Imports MCP servers into an explicit Tools manifest.
 pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
     let path = expand_user_path(path)?;
     let servers = parse_mcp_config_file(&path)?;
@@ -484,12 +530,13 @@ pub fn parse_mcp_config(source: &str) -> Result<BTreeMap<String, McpServerManife
     parse_toml_mcp_document(&document)
 }
 
-/// Copies package directories from an existing Stow root into Registry ownership.
+/// Copies package directories from an existing Stow root into Tools ownership.
 pub fn import_dotfiles(path: &Path) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     import_dotfiles_to(path, &dotfiles_dir(), &manifest_path())
 }
 
-/// Copies package directories into explicit Registry roots.
+/// Copies package directories into explicit Tools roots.
 pub fn import_dotfiles_to(
     path: &Path,
     dotfiles_root: &Path,
@@ -503,7 +550,7 @@ pub fn import_dotfiles_to(
         ));
     }
     if source.starts_with(dotfiles_root) || dotfiles_root.starts_with(&source) {
-        return Err("dotfile import source overlaps the Registry root".to_string());
+        return Err("dotfile import source overlaps the Tools root".to_string());
     }
     let mut packages = std::fs::read_dir(&source)
         .map_err(|error| error.to_string())?
@@ -524,7 +571,7 @@ pub fn import_dotfiles_to(
     }
     for (name, _) in &packages {
         if dotfiles_root.join(name).symlink_metadata().is_ok() {
-            return Err(format!("Registry dotfile package already exists: {name}"));
+            return Err(format!("Tools dotfile package already exists: {name}"));
         }
     }
     let mut manifest = load_manifest_from(manifest_path)?;
@@ -571,8 +618,9 @@ pub fn import_dotfiles_to(
 }
 
 /// Lists valid dotfile package directories.
-pub fn dotfile_packages() -> Vec<String> {
-    dotfile_packages_in(&dotfiles_dir())
+pub fn dotfile_packages() -> Result<Vec<String>, String> {
+    migrate_legacy_storage()?;
+    Ok(dotfile_packages_in(&dotfiles_dir()))
 }
 
 /// Lists valid dotfile package directories below an explicit root.
@@ -591,6 +639,7 @@ pub fn dotfile_packages_in(root: &Path) -> Vec<String> {
 
 /// Builds a non-mutating link plan for one user dotfile package.
 pub fn plan_dotfile_package(package: &str) -> Result<DotfilePlan, String> {
+    migrate_legacy_storage()?;
     plan_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
@@ -629,6 +678,7 @@ pub fn plan_dotfile_package_in(
 
 /// Applies one user dotfile package transactionally.
 pub fn apply_dotfile_package(package: &str) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     apply_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
@@ -675,6 +725,7 @@ fn apply_dotfile_plan(plan: &DotfilePlan) -> Result<Vec<PathBuf>, String> {
 
 /// Removes links owned by one user dotfile package.
 pub fn unlink_dotfile_package(package: &str) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     unlink_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
@@ -698,12 +749,13 @@ pub fn unlink_dotfile_package_in(
 }
 
 /// Applies every enabled dotfile package after a complete conflict preflight.
-pub fn apply_enabled_dotfiles(manifest: &RegistryManifest) -> Result<usize, String> {
+pub fn apply_enabled_dotfiles(manifest: &ToolsManifest) -> Result<usize, String> {
+    migrate_legacy_storage()?;
     apply_enabled_dotfiles_in(manifest, &dotfiles_dir(), &home_dir())
 }
 
 fn apply_enabled_dotfiles_in(
-    manifest: &RegistryManifest,
+    manifest: &ToolsManifest,
     dotfiles_root: &Path,
     home: &Path,
 ) -> Result<usize, String> {
@@ -735,6 +787,7 @@ fn apply_enabled_dotfiles_in(
 
 /// Moves a home file into a package, links it back, and enables the package.
 pub fn adopt_dotfile(path: &Path, package: &str) -> Result<PathBuf, String> {
+    migrate_legacy_storage()?;
     adopt_dotfile_in(
         &dotfiles_dir(),
         &home_dir(),
@@ -744,7 +797,7 @@ pub fn adopt_dotfile(path: &Path, package: &str) -> Result<PathBuf, String> {
     )
 }
 
-/// Adopts a home file using explicit Registry and manifest paths.
+/// Adopts a home file using explicit Tools and manifest paths.
 pub fn adopt_dotfile_in(
     dotfiles_root: &Path,
     home: &Path,
@@ -769,7 +822,7 @@ pub fn adopt_dotfile_in(
         return Err(format!("dotfile is not a file: {}", path.display()));
     }
     if path.starts_with(dotfiles_root) {
-        return Err("dotfile is already inside the registry".to_string());
+        return Err("dotfile is already inside the Tools directory".to_string());
     }
     let relative = path
         .strip_prefix(home)
@@ -780,7 +833,7 @@ pub fn adopt_dotfile_in(
     let destination = dotfiles_root.join(package).join(relative);
     if destination.exists() || destination.symlink_metadata().is_ok() {
         return Err(format!(
-            "registry dotfile already exists: {}",
+            "Tools dotfile already exists: {}",
             destination.display()
         ));
     }
@@ -802,7 +855,7 @@ pub fn adopt_dotfile_in(
     Ok(destination)
 }
 
-fn add_packages(manifest: &mut RegistryManifest, provider: &str, names: &[String]) -> usize {
+fn add_packages(manifest: &mut ToolsManifest, provider: &str, names: &[String]) -> usize {
     let mut imported = 0;
     for name in names {
         imported += usize::from(!manifest.contains(provider, name));
@@ -1136,7 +1189,7 @@ fn relative_path(from: &Path, to: &Path) -> PathBuf {
 }
 
 /// Returns the manifest's desired package set for one provider.
-pub fn managed_package_set(manifest: &RegistryManifest, provider: &str) -> BTreeSet<String> {
+pub fn managed_package_set(manifest: &ToolsManifest, provider: &str) -> BTreeSet<String> {
     manifest
         .packages
         .get(provider)
@@ -1153,8 +1206,8 @@ mod tests {
     #[test]
     fn manifest_roundtrip_normalizes_packages() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("registry.toml");
-        let mut manifest = RegistryManifest::default();
+        let path = temp.path().join("tools.toml");
+        let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "typescript", true);
         manifest.set_package("npm", "eslint", true);
         manifest.set_package("npm", "typescript", true);
@@ -1169,8 +1222,8 @@ mod tests {
     #[test]
     fn manifest_omits_empty_sections() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("registry.toml");
-        let mut manifest = RegistryManifest::default();
+        let path = temp.path().join("tools.toml");
+        let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "typescript", true);
 
         write_manifest_to(&path, &manifest).unwrap();
@@ -1182,14 +1235,42 @@ mod tests {
     }
 
     #[test]
+    fn legacy_registry_storage_moves_to_tools() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy_root = temp.path().join("registry");
+        std::fs::create_dir_all(legacy_root.join("dotfiles/shell")).unwrap();
+        std::fs::write(
+            legacy_root.join("registry.toml"),
+            "version = 1\n[packages]\nnpm = [\"typescript\"]\n",
+        )
+        .unwrap();
+        std::fs::write(legacy_root.join("dotfiles/shell/.zshrc"), "export VMUX=1").unwrap();
+
+        migrate_legacy_storage_in(temp.path()).unwrap();
+
+        assert!(!legacy_root.exists());
+        let tools_root = temp.path().join("tools");
+        assert_eq!(
+            load_manifest_from(&tools_root.join("tools.toml"))
+                .unwrap()
+                .packages["npm"],
+            ["typescript"]
+        );
+        assert_eq!(
+            std::fs::read_to_string(tools_root.join("dotfiles/shell/.zshrc")).unwrap(),
+            "export VMUX=1"
+        );
+    }
+
+    #[test]
     fn unsupported_manifest_versions_are_rejected() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("registry.toml");
+        let path = temp.path().join("tools.toml");
         std::fs::write(&path, "version = 2\n").unwrap();
         assert!(
             load_manifest_from(&path)
                 .unwrap_err()
-                .contains("unsupported registry manifest version: 2")
+                .contains("unsupported tools manifest version: 2")
         );
     }
 
@@ -1294,11 +1375,11 @@ command = "vmux"
     #[test]
     fn file_imports_merge_without_removing_existing_desired_state() {
         let temp = tempfile::tempdir().unwrap();
-        let manifest_path = temp.path().join("registry.toml");
+        let manifest_path = temp.path().join("tools.toml");
         let brewfile = temp.path().join("Brewfile");
         let package_json = temp.path().join("package.json");
         let mcp = temp.path().join("mcp.json");
-        let mut manifest = RegistryManifest::default();
+        let mut manifest = ToolsManifest::default();
         manifest.set_package("npm", "existing", true);
         write_manifest_to(&manifest_path, &manifest).unwrap();
         std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
@@ -1328,7 +1409,7 @@ command = "vmux"
     fn plan_apply_and_unlink_dotfile_package() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("registry/dotfiles");
+        let dotfiles = temp.path().join("tools/dotfiles");
         std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
         std::fs::write(dotfiles.join("shell/.config/nushell/config.nu"), "echo hi").unwrap();
 
@@ -1353,7 +1434,7 @@ command = "vmux"
     fn conflicts_block_the_entire_apply() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("registry/dotfiles");
+        let dotfiles = temp.path().join("tools/dotfiles");
         std::fs::create_dir_all(dotfiles.join("git")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(dotfiles.join("git/.gitconfig"), "managed").unwrap();
@@ -1372,14 +1453,14 @@ command = "vmux"
     fn enabled_packages_are_preflighted_before_any_links_are_created() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("registry/dotfiles");
+        let dotfiles = temp.path().join("tools/dotfiles");
         std::fs::create_dir_all(dotfiles.join("git")).unwrap();
         std::fs::create_dir_all(dotfiles.join("shell/.config/nushell")).unwrap();
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(dotfiles.join("git/.gitconfig"), "managed").unwrap();
         std::fs::write(dotfiles.join("shell/.config/nushell/config.nu"), "echo hi").unwrap();
         std::fs::write(home.join(".gitconfig"), "existing").unwrap();
-        let mut manifest = RegistryManifest::default();
+        let mut manifest = ToolsManifest::default();
         manifest.set_dotfile_package("shell", true);
         manifest.set_dotfile_package("git", true);
 
@@ -1394,8 +1475,8 @@ command = "vmux"
     fn adopt_moves_file_links_it_and_updates_manifest() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
-        let dotfiles = temp.path().join("registry/dotfiles");
-        let manifest = temp.path().join("registry/registry.toml");
+        let dotfiles = temp.path().join("tools/dotfiles");
+        let manifest = temp.path().join("tools/tools.toml");
         std::fs::create_dir_all(home.join(".config/nushell")).unwrap();
         let source = home.join(".config/nushell/config.nu");
         std::fs::write(&source, "echo hi").unwrap();
@@ -1417,8 +1498,8 @@ command = "vmux"
     fn dotfile_import_copies_stow_packages_and_enables_them() {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("stow");
-        let dotfiles = temp.path().join("registry/dotfiles");
-        let manifest = temp.path().join("registry/registry.toml");
+        let dotfiles = temp.path().join("tools/dotfiles");
+        let manifest = temp.path().join("tools/tools.toml");
         std::fs::create_dir_all(source.join("git")).unwrap();
         std::fs::create_dir_all(source.join("shell/.config/nushell")).unwrap();
         std::fs::write(source.join("git/.gitconfig"), "git").unwrap();

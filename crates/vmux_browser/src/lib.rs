@@ -4277,10 +4277,10 @@ fn on_side_sheet_command_emit(
             });
             messages.write(cmd);
         }
-        "open_registry" => {
+        "open_tools" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
             let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                url: Some("vmux://registry/".to_string()),
+                url: Some("vmux://tools/".to_string()),
             }));
             issued.write(vmux_command::CommandIssued {
                 caller,

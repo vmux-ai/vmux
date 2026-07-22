@@ -139,7 +139,7 @@ fn append_managed_mcp_args(args: &mut Vec<String>) {
     for (name, server) in crate::managed_mcp::load() {
         let prefix = format!("mcp_servers.{}", quote_toml(&name));
         match server.transport {
-            vmux_core::profile::registry::McpTransport::Stdio => {
+            vmux_core::profile::tools::McpTransport::Stdio => {
                 if let Some(command) = server.command {
                     push_config_override(
                         args,
@@ -162,8 +162,8 @@ fn append_managed_mcp_args(args: &mut Vec<String>) {
                     push_config_override(args, format!("{prefix}.cwd={}", quote_toml(&cwd)));
                 }
             }
-            vmux_core::profile::registry::McpTransport::Http
-            | vmux_core::profile::registry::McpTransport::Sse => {
+            vmux_core::profile::tools::McpTransport::Http
+            | vmux_core::profile::tools::McpTransport::Sse => {
                 if let Some(url) = server.url {
                     push_config_override(args, format!("{prefix}.url={}", quote_toml(&url)));
                 }

@@ -5,8 +5,8 @@ pub mod notify;
 pub mod notify_file_touch;
 pub mod notify_turn_end;
 pub mod open;
-pub mod registry;
 pub mod service;
+pub mod tools;
 
 #[derive(Debug, Parser)]
 #[command(name = "vmux", version, about = "Vmux command-line interface")]
@@ -48,6 +48,6 @@ pub enum Command {
         #[arg(long)]
         anchor: Option<String>,
     },
-    Registry(registry::RegistryArgs),
+    Tools(tools::ToolsArgs),
     Service(service::ServiceArgs),
 }

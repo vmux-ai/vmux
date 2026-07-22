@@ -6,38 +6,38 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
-use vmux_core::profile::registry::{self as manifest_store, RegistryManifest};
-use vmux_core::registry::{
-    REGISTRY_ACTION_RESULT_EVENT, REGISTRY_SNAPSHOT_EVENT, RegistryAction, RegistryActionRequest,
-    RegistryActionResult, RegistryCategory, RegistryItem, RegistryProvider, RegistryRefreshRequest,
-    RegistrySnapshot, RegistryStatus,
+use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
+use vmux_core::tools::{
+    TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
+    ToolActionResult, ToolCategory, ToolItem, ToolProvider, ToolStatus, ToolsRefreshRequest,
+    ToolsSnapshot,
 };
 use vmux_layout::LayoutCef;
 
 const PAGE_MANIFEST: PageManifest = PageManifest {
-    host: "registry",
-    title: "Registry",
+    host: "tools",
+    title: "Tools",
     keywords: &[
-        "registry", "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
+        "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
     ],
     icon: Some(vmux_core::BuiltinIcon::Layers),
     command_bar: true,
 };
 
-pub struct ToolRegistryPlugin;
+pub struct ToolsPlugin;
 
 #[derive(Resource)]
-struct ToolRegistryState {
+struct ToolsState {
     dirty: bool,
     refresh_catalogs: bool,
     generation: u64,
     revision: u64,
     loaded: bool,
-    snapshot: RegistrySnapshot,
+    snapshot: ToolsSnapshot,
     subscribers: HashMap<Entity, u64>,
 }
 
-impl Default for ToolRegistryState {
+impl Default for ToolsState {
     fn default() -> Self {
         Self {
             dirty: true,
@@ -45,27 +45,27 @@ impl Default for ToolRegistryState {
             generation: 1,
             revision: 0,
             loaded: false,
-            snapshot: RegistrySnapshot::default(),
+            snapshot: ToolsSnapshot::default(),
             subscribers: HashMap::new(),
         }
     }
 }
 
 #[derive(Component)]
-struct RegistryScanTask {
+struct ToolsScanTask {
     generation: u64,
-    task: Task<RegistrySnapshot>,
+    task: Task<ToolsSnapshot>,
 }
 
 #[derive(Component)]
-struct RegistryActionTask {
+struct ToolActionTask {
     target: Entity,
-    request: RegistryActionRequest,
+    request: ToolActionRequest,
     task: Task<Result<String, String>>,
 }
 
 #[derive(Resource, Default)]
-struct RegistryActionQueue(VecDeque<(Entity, RegistryActionRequest)>);
+struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
 
 #[derive(Clone, Debug)]
 struct InventoryItem {
@@ -73,48 +73,45 @@ struct InventoryItem {
     name: String,
     version: Option<String>,
     detail: String,
-    status: RegistryStatus,
+    status: ToolStatus,
     removable: bool,
 }
 
-impl Plugin for ToolRegistryPlugin {
+impl Plugin for ToolsPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
             PAGE_MANIFEST,
             PrewarmPage {
-                host: "registry",
-                url: "vmux://registry/",
-                title: "Registry",
+                host: "tools",
+                url: "vmux://tools/",
+                title: "Tools",
                 pool_size: 1,
             },
         ));
-        vmux_core::register_host_spawn(app, "registry");
-        app.init_resource::<ToolRegistryState>()
-            .init_resource::<RegistryActionQueue>()
+        vmux_core::register_host_spawn(app, "tools");
+        app.init_resource::<ToolsState>()
+            .init_resource::<ToolActionQueue>()
             .add_plugins(BinEventEmitterPlugin::<(
-                RegistryRefreshRequest,
-                RegistryActionRequest,
+                ToolsRefreshRequest,
+                ToolActionRequest,
             )>::default())
             .add_observer(on_refresh_request)
             .add_observer(on_action_request)
             .add_systems(
                 Update,
                 (
-                    start_registry_scan,
-                    drain_registry_scan,
-                    start_registry_action,
-                    drain_registry_actions,
-                    emit_registry_snapshot,
+                    start_tools_scan,
+                    drain_tools_scan,
+                    start_tool_action,
+                    drain_tool_actions,
+                    emit_tools_snapshot,
                 )
                     .chain(),
             );
     }
 }
 
-fn on_refresh_request(
-    trigger: On<BinReceive<RegistryRefreshRequest>>,
-    mut state: ResMut<ToolRegistryState>,
-) {
+fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: ResMut<ToolsState>) {
     let request = &trigger.event().payload;
     state.subscribers.insert(trigger.event().webview, 0);
     if request.refresh || !state.loaded {
@@ -125,9 +122,9 @@ fn on_refresh_request(
 }
 
 fn on_action_request(
-    trigger: On<BinReceive<RegistryActionRequest>>,
-    mut state: ResMut<ToolRegistryState>,
-    mut queue: ResMut<RegistryActionQueue>,
+    trigger: On<BinReceive<ToolActionRequest>>,
+    mut state: ResMut<ToolsState>,
+    mut queue: ResMut<ToolActionQueue>,
 ) {
     let target = trigger.event().webview;
     let request = trigger.event().payload.clone();
@@ -135,10 +132,10 @@ fn on_action_request(
     queue.0.push_back((target, request));
 }
 
-fn start_registry_action(
-    mut queue: ResMut<RegistryActionQueue>,
-    tasks: Query<(), With<RegistryActionTask>>,
-    scans: Query<(), With<RegistryScanTask>>,
+fn start_tool_action(
+    mut queue: ResMut<ToolActionQueue>,
+    tasks: Query<(), With<ToolActionTask>>,
+    scans: Query<(), With<ToolsScanTask>>,
     mut commands: Commands,
 ) {
     if !tasks.is_empty() || !scans.is_empty() {
@@ -149,18 +146,18 @@ fn start_registry_action(
     };
     let task_request = request.clone();
     let task = IoTaskPool::get().spawn(async move { perform_action(&task_request) });
-    commands.spawn(RegistryActionTask {
+    commands.spawn(ToolActionTask {
         target,
         request,
         task,
     });
 }
 
-fn start_registry_scan(
-    mut state: ResMut<ToolRegistryState>,
-    tasks: Query<(), With<RegistryScanTask>>,
-    action_tasks: Query<(), With<RegistryActionTask>>,
-    queue: Res<RegistryActionQueue>,
+fn start_tools_scan(
+    mut state: ResMut<ToolsState>,
+    tasks: Query<(), With<ToolsScanTask>>,
+    action_tasks: Query<(), With<ToolActionTask>>,
+    queue: Res<ToolActionQueue>,
     mut commands: Commands,
 ) {
     if !state.dirty || !tasks.is_empty() || !action_tasks.is_empty() || !queue.0.is_empty() {
@@ -170,13 +167,13 @@ fn start_registry_scan(
     let refresh_catalogs = state.refresh_catalogs;
     state.dirty = false;
     state.refresh_catalogs = false;
-    let task = IoTaskPool::get().spawn(async move { scan_registry(refresh_catalogs) });
-    commands.spawn(RegistryScanTask { generation, task });
+    let task = IoTaskPool::get().spawn(async move { scan_tools(refresh_catalogs) });
+    commands.spawn(ToolsScanTask { generation, task });
 }
 
-fn drain_registry_scan(
-    mut tasks: Query<(Entity, &mut RegistryScanTask)>,
-    mut state: ResMut<ToolRegistryState>,
+fn drain_tools_scan(
+    mut tasks: Query<(Entity, &mut ToolsScanTask)>,
+    mut state: ResMut<ToolsState>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -194,9 +191,9 @@ fn drain_registry_scan(
     }
 }
 
-fn drain_registry_actions(
-    mut tasks: Query<(Entity, &mut RegistryActionTask)>,
-    mut state: ResMut<ToolRegistryState>,
+fn drain_tool_actions(
+    mut tasks: Query<(Entity, &mut ToolActionTask)>,
+    mut state: ResMut<ToolsState>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -209,7 +206,7 @@ fn drain_registry_actions(
             Ok(message) => (true, message),
             Err(message) => (false, message),
         };
-        let event = RegistryActionResult {
+        let event = ToolActionResult {
             provider: task.request.provider,
             action: task.request.action,
             id: task.request.id.clone(),
@@ -219,7 +216,7 @@ fn drain_registry_actions(
         if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 task.target,
-                REGISTRY_ACTION_RESULT_EVENT,
+                TOOL_ACTION_RESULT_EVENT,
                 &event,
             ));
         }
@@ -230,8 +227,8 @@ fn drain_registry_actions(
     }
 }
 
-fn emit_registry_snapshot(
-    mut state: ResMut<ToolRegistryState>,
+fn emit_tools_snapshot(
+    mut state: ResMut<ToolsState>,
     browsers: NonSend<Browsers>,
     layout: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
     mut layout_revision: Local<u64>,
@@ -247,7 +244,7 @@ fn emit_registry_snapshot(
     {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
-            REGISTRY_SNAPSHOT_EVENT,
+            TOOLS_SNAPSHOT_EVENT,
             &state.snapshot,
         ));
         *layout_revision = state.revision;
@@ -261,7 +258,7 @@ fn emit_registry_snapshot(
         if *sent_revision != revision && browsers.host_emit_ready(entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 *entity,
-                REGISTRY_SNAPSHOT_EVENT,
+                TOOLS_SNAPSHOT_EVENT,
                 &snapshot,
             ));
             *sent_revision = revision;
@@ -270,25 +267,25 @@ fn emit_registry_snapshot(
     });
 }
 
-fn scan_registry(refresh_catalogs: bool) -> RegistrySnapshot {
+fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
     let (manifest, manifest_error) = match manifest_store::load_manifest() {
         Ok(manifest) => (manifest, None),
-        Err(error) => (RegistryManifest::default(), Some(error)),
+        Err(error) => (ToolsManifest::default(), Some(error)),
     };
     let mut categories = Vec::new();
     let mut errors = manifest_error.into_iter().collect::<Vec<_>>();
     let providers = [
         (
-            RegistryProvider::HomebrewFormula,
+            ToolProvider::HomebrewFormula,
             scan_homebrew(false, refresh_catalogs),
         ),
         (
-            RegistryProvider::HomebrewCask,
+            ToolProvider::HomebrewCask,
             scan_homebrew(true, refresh_catalogs),
         ),
-        (RegistryProvider::Npm, scan_npm(refresh_catalogs)),
-        (RegistryProvider::Acp, scan_acp(refresh_catalogs)),
-        (RegistryProvider::Lsp, scan_lsp(refresh_catalogs)),
+        (ToolProvider::Npm, scan_npm(refresh_catalogs)),
+        (ToolProvider::Acp, scan_acp(refresh_catalogs)),
+        (ToolProvider::Lsp, scan_lsp(refresh_catalogs)),
     ];
     for (provider, result) in providers {
         let inventory = match result {
@@ -305,24 +302,19 @@ fn scan_registry(refresh_catalogs: bool) -> RegistrySnapshot {
     let installed = categories
         .iter()
         .flat_map(|category| &category.items)
-        .filter(|item| {
-            matches!(
-                item.status,
-                RegistryStatus::Installed | RegistryStatus::Outdated
-            )
-        })
+        .filter(|item| matches!(item.status, ToolStatus::Installed | ToolStatus::Outdated))
         .count() as u32;
     let updates = categories
         .iter()
         .flat_map(|category| &category.items)
-        .filter(|item| item.status == RegistryStatus::Outdated)
+        .filter(|item| item.status == ToolStatus::Outdated)
         .count() as u32;
     let conflicts = categories
         .iter()
         .flat_map(|category| &category.items)
-        .filter(|item| item.status == RegistryStatus::Conflict)
+        .filter(|item| item.status == ToolStatus::Conflict)
         .count() as u32;
-    RegistrySnapshot {
+    ToolsSnapshot {
         root: manifest_store::root_dir().to_string_lossy().into_owned(),
         categories,
         installed,
@@ -333,15 +325,15 @@ fn scan_registry(refresh_catalogs: bool) -> RegistrySnapshot {
 }
 
 fn build_category(
-    provider: RegistryProvider,
+    provider: ToolProvider,
     inventory: Vec<InventoryItem>,
-    manifest: &RegistryManifest,
-) -> RegistryCategory {
+    manifest: &ToolsManifest,
+) -> ToolCategory {
     let mut items = inventory
         .into_iter()
         .map(|item| {
             let managed = manifest.contains(provider.id(), &item.id);
-            RegistryItem {
+            ToolItem {
                 provider,
                 actions: package_actions(item.status, managed, item.removable),
                 id: item.id,
@@ -359,15 +351,15 @@ fn build_category(
         .collect::<BTreeSet<_>>();
     for name in manifest_store::managed_package_set(manifest, provider.id()) {
         if !existing.contains(&name) {
-            items.push(RegistryItem {
+            items.push(ToolItem {
                 provider,
                 id: name.clone(),
                 name,
                 version: None,
-                detail: "Declared in registry.toml".to_string(),
-                status: RegistryStatus::Missing,
+                detail: "Declared in tools.toml".to_string(),
+                status: ToolStatus::Missing,
                 managed: true,
-                actions: vec![RegistryAction::Install, RegistryAction::Forget],
+                actions: vec![ToolAction::Install, ToolAction::Forget],
             });
         }
     }
@@ -377,22 +369,22 @@ fn build_category(
             .cmp(&right.name.to_ascii_lowercase())
             .then_with(|| left.name.cmp(&right.name))
     });
-    RegistryCategory { provider, items }
+    ToolCategory { provider, items }
 }
 
-fn package_actions(status: RegistryStatus, managed: bool, removable: bool) -> Vec<RegistryAction> {
+fn package_actions(status: ToolStatus, managed: bool, removable: bool) -> Vec<ToolAction> {
     let mut actions = Vec::new();
-    if !managed && matches!(status, RegistryStatus::Installed | RegistryStatus::Outdated) {
-        actions.push(RegistryAction::Adopt);
+    if !managed && matches!(status, ToolStatus::Installed | ToolStatus::Outdated) {
+        actions.push(ToolAction::Adopt);
     }
-    if status == RegistryStatus::Outdated {
-        actions.push(RegistryAction::Update);
+    if status == ToolStatus::Outdated {
+        actions.push(ToolAction::Update);
     }
-    if status == RegistryStatus::Missing {
-        actions.push(RegistryAction::Install);
+    if status == ToolStatus::Missing {
+        actions.push(ToolAction::Install);
     }
     if removable {
-        actions.push(RegistryAction::Uninstall);
+        actions.push(ToolAction::Uninstall);
     }
     actions
 }
@@ -418,9 +410,9 @@ fn scan_homebrew(cask: bool, refresh: bool) -> Result<Vec<InventoryItem>, String
         .into_iter()
         .map(|(name, version)| {
             let status = if outdated.contains(&name) {
-                RegistryStatus::Outdated
+                ToolStatus::Outdated
             } else {
-                RegistryStatus::Installed
+                ToolStatus::Installed
             };
             let removable = !cask || name != "vmux";
             InventoryItem {
@@ -496,9 +488,9 @@ fn parse_npm_inventory(
         .into_iter()
         .map(|(name, metadata)| {
             let status = if outdated.contains(&name) {
-                RegistryStatus::Outdated
+                ToolStatus::Outdated
             } else {
-                RegistryStatus::Installed
+                ToolStatus::Installed
             };
             InventoryItem {
                 id: name.clone(),
@@ -552,9 +544,9 @@ fn scan_acp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
                     && latest.is_some()
                     && receipt.version != latest
                 {
-                    RegistryStatus::Outdated
+                    ToolStatus::Outdated
                 } else {
-                    RegistryStatus::Installed
+                    ToolStatus::Installed
                 },
                 removable: true,
             }
@@ -597,9 +589,9 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
                     && latest.is_some()
                     && receipt.version != latest
                 {
-                    RegistryStatus::Outdated
+                    ToolStatus::Outdated
                 } else {
-                    RegistryStatus::Installed
+                    ToolStatus::Installed
                 },
                 removable: true,
             }
@@ -625,7 +617,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
                 name: package.name,
                 version: None,
                 detail: "Available on PATH".to_string(),
-                status: RegistryStatus::Installed,
+                status: ToolStatus::Installed,
                 removable: false,
             });
         }
@@ -633,7 +625,7 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     Ok(inventory)
 }
 
-fn scan_mcp(manifest: &RegistryManifest, errors: &mut Vec<String>) -> RegistryCategory {
+fn scan_mcp(manifest: &ToolsManifest, errors: &mut Vec<String>) -> ToolCategory {
     let (discovered, discovery_errors) = manifest_store::discover_mcp_servers();
     errors.extend(
         discovery_errors
@@ -648,11 +640,11 @@ fn scan_mcp(manifest: &RegistryManifest, errors: &mut Vec<String>) -> RegistryCa
             let managed = manifest.mcp.servers.contains_key(&name);
             let external = discovered.get(&name);
             let status = if managed {
-                RegistryStatus::Installed
+                ToolStatus::Installed
             } else if external.is_some_and(|server| server.conflict) {
-                RegistryStatus::Conflict
+                ToolStatus::Conflict
             } else {
-                RegistryStatus::Available
+                ToolStatus::Available
             };
             let definition = manifest
                 .mcp
@@ -675,21 +667,21 @@ fn scan_mcp(manifest: &RegistryManifest, errors: &mut Vec<String>) -> RegistryCa
             let detail = if external.is_some_and(|server| server.conflict) && !managed {
                 format!("Conflicting definitions in {sources}")
             } else if managed && sources.is_empty() {
-                format!("{transport} · Registry managed")
+                format!("{transport} · Tools managed")
             } else if managed {
-                format!("{transport} · Registry managed · imported from {sources}")
+                format!("{transport} · Tools managed · imported from {sources}")
             } else {
                 format!("{transport} · configured in {sources}")
             };
             let actions = if managed {
-                vec![RegistryAction::Forget]
-            } else if status == RegistryStatus::Available {
-                vec![RegistryAction::Adopt]
+                vec![ToolAction::Forget]
+            } else if status == ToolStatus::Available {
+                vec![ToolAction::Adopt]
             } else {
                 Vec::new()
             };
-            RegistryItem {
-                provider: RegistryProvider::Mcp,
+            ToolItem {
+                provider: ToolProvider::Mcp,
                 id: name.clone(),
                 name,
                 version: None,
@@ -700,14 +692,15 @@ fn scan_mcp(manifest: &RegistryManifest, errors: &mut Vec<String>) -> RegistryCa
             }
         })
         .collect();
-    RegistryCategory {
-        provider: RegistryProvider::Mcp,
+    ToolCategory {
+        provider: ToolProvider::Mcp,
         items,
     }
 }
 
-fn scan_dotfiles(manifest: &RegistryManifest) -> RegistryCategory {
+fn scan_dotfiles(manifest: &ToolsManifest) -> ToolCategory {
     let mut package_names = manifest_store::dotfile_packages()
+        .unwrap_or_default()
         .into_iter()
         .collect::<BTreeSet<_>>();
     package_names.extend(manifest.dotfiles.packages.iter().cloned());
@@ -723,35 +716,35 @@ fn scan_dotfiles(manifest: &RegistryManifest) -> RegistryCategory {
                     plan.conflicts()
                 );
                 let status = if plan.conflicts() > 0 {
-                    RegistryStatus::Conflict
+                    ToolStatus::Conflict
                 } else if plan.missing() > 0 {
                     if managed {
-                        RegistryStatus::Missing
+                        ToolStatus::Missing
                     } else {
-                        RegistryStatus::Available
+                        ToolStatus::Available
                     }
                 } else {
-                    RegistryStatus::Installed
+                    ToolStatus::Installed
                 };
                 let actions = if managed {
-                    vec![RegistryAction::Link, RegistryAction::Unlink]
+                    vec![ToolAction::Link, ToolAction::Unlink]
                 } else {
-                    vec![RegistryAction::Link]
+                    vec![ToolAction::Link]
                 };
                 (status, detail, actions)
             }
             Err(error) => (
-                RegistryStatus::Missing,
+                ToolStatus::Missing,
                 error,
                 if managed {
-                    vec![RegistryAction::Unlink]
+                    vec![ToolAction::Unlink]
                 } else {
                     Vec::new()
                 },
             ),
         };
-        items.push(RegistryItem {
-            provider: RegistryProvider::Dotfiles,
+        items.push(ToolItem {
+            provider: ToolProvider::Dotfiles,
             id: package.clone(),
             name: package,
             version: None,
@@ -761,44 +754,44 @@ fn scan_dotfiles(manifest: &RegistryManifest) -> RegistryCategory {
             actions,
         });
     }
-    RegistryCategory {
-        provider: RegistryProvider::Dotfiles,
+    ToolCategory {
+        provider: ToolProvider::Dotfiles,
         items,
     }
 }
 
-fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
-    if request.action == RegistryAction::Apply {
+fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
+    if request.action == ToolAction::Apply {
         return apply_manifest();
     }
-    if request.action == RegistryAction::Import {
+    if request.action == ToolAction::Import {
         return import_provider(request.provider, request.value.trim());
     }
     if request.id.trim().is_empty() {
         return Err("package name is required".to_string());
     }
     match request.action {
-        RegistryAction::Install => {
+        ToolAction::Install => {
             set_manifest_entry(request.provider, &request.id, true)?;
             install_provider(request.provider, &request.id)?;
             Ok(format!("{} installed", request.id))
         }
-        RegistryAction::Update => {
+        ToolAction::Update => {
             set_manifest_entry(request.provider, &request.id, true)?;
             update_provider(request.provider, &request.id)?;
             Ok(format!("{} updated", request.id))
         }
-        RegistryAction::Uninstall => {
+        ToolAction::Uninstall => {
             uninstall_provider(request.provider, &request.id)?;
             set_manifest_entry(request.provider, &request.id, false)?;
             Ok(format!("{} removed", request.id))
         }
-        RegistryAction::Forget => {
+        ToolAction::Forget => {
             set_manifest_entry(request.provider, &request.id, false)?;
-            Ok(format!("{} removed from registry.toml", request.id))
+            Ok(format!("{} removed from tools.toml", request.id))
         }
-        RegistryAction::Adopt => {
-            if request.provider == RegistryProvider::Dotfiles {
+        ToolAction::Adopt => {
+            if request.provider == ToolProvider::Dotfiles {
                 if request.value.trim().is_empty() {
                     return Err("dotfile path is required".to_string());
                 }
@@ -807,7 +800,7 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
                     request.id.trim(),
                 )?;
                 Ok(format!("adopted {}", destination.display()))
-            } else if request.provider == RegistryProvider::Mcp {
+            } else if request.provider == ToolProvider::Mcp {
                 manifest_store::import_discovered_mcp_server(&request.id)?;
                 Ok(format!("{} is now managed", request.id))
             } else {
@@ -815,16 +808,16 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
                 Ok(format!("{} is now managed", request.id))
             }
         }
-        RegistryAction::Link => {
-            if request.provider != RegistryProvider::Dotfiles {
+        ToolAction::Link => {
+            if request.provider != ToolProvider::Dotfiles {
                 return Err("link is only valid for dotfiles".to_string());
             }
             set_manifest_entry(request.provider, &request.id, true)?;
             let linked = manifest_store::apply_dotfile_package(&request.id)?;
             Ok(format!("linked {linked} file(s)"))
         }
-        RegistryAction::Unlink => {
-            if request.provider != RegistryProvider::Dotfiles {
+        ToolAction::Unlink => {
+            if request.provider != ToolProvider::Dotfiles {
                 return Err("unlink is only valid for dotfiles".to_string());
             }
             let removed = match manifest_store::unlink_dotfile_package(&request.id) {
@@ -835,13 +828,13 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
             set_manifest_entry(request.provider, &request.id, false)?;
             Ok(format!("unlinked {removed} file(s)"))
         }
-        RegistryAction::Apply | RegistryAction::Import => unreachable!(),
+        ToolAction::Apply | ToolAction::Import => unreachable!(),
     }
 }
 
-fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, String> {
+fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String> {
     match provider {
-        RegistryProvider::HomebrewFormula | RegistryProvider::HomebrewCask => {
+        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
             if !path.is_empty() {
                 let (formulae, casks) = manifest_store::import_brewfile(Path::new(path))?;
                 Ok(format!("imported {formulae} formulae and {casks} casks"))
@@ -850,13 +843,13 @@ fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, Str
                 let casks = scan_homebrew(true, false)?;
                 let mut manifest = manifest_store::load_manifest()?;
                 let formulae =
-                    import_inventory(&mut manifest, RegistryProvider::HomebrewFormula, formulae);
-                let casks = import_inventory(&mut manifest, RegistryProvider::HomebrewCask, casks);
+                    import_inventory(&mut manifest, ToolProvider::HomebrewFormula, formulae);
+                let casks = import_inventory(&mut manifest, ToolProvider::HomebrewCask, casks);
                 manifest_store::write_manifest(&manifest)?;
                 Ok(format!("imported {formulae} formulae and {casks} casks"))
             }
         }
-        RegistryProvider::Npm => {
+        ToolProvider::Npm => {
             if !path.is_empty() {
                 let imported = manifest_store::import_npm_manifest(Path::new(path))?;
                 Ok(format!("imported {imported} npm package(s)"))
@@ -864,9 +857,9 @@ fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, Str
                 import_scanned_inventory(provider, scan_npm(false)?)
             }
         }
-        RegistryProvider::Acp => import_scanned_inventory(provider, scan_acp(false)?),
-        RegistryProvider::Lsp => import_scanned_inventory(provider, scan_lsp(false)?),
-        RegistryProvider::Mcp => {
+        ToolProvider::Acp => import_scanned_inventory(provider, scan_acp(false)?),
+        ToolProvider::Lsp => import_scanned_inventory(provider, scan_lsp(false)?),
+        ToolProvider::Mcp => {
             let imported = if path.is_empty() {
                 manifest_store::import_default_mcp_configs()?
             } else {
@@ -874,9 +867,9 @@ fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, Str
             };
             Ok(format!("imported {imported} MCP server(s)"))
         }
-        RegistryProvider::Dotfiles => {
+        ToolProvider::Dotfiles => {
             if path.is_empty() {
-                let packages = manifest_store::dotfile_packages();
+                let packages = manifest_store::dotfile_packages()?;
                 let mut manifest = manifest_store::load_manifest()?;
                 let mut imported = 0;
                 for package in packages {
@@ -894,7 +887,7 @@ fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, Str
 }
 
 fn import_scanned_inventory(
-    provider: RegistryProvider,
+    provider: ToolProvider,
     inventory: Vec<InventoryItem>,
 ) -> Result<String, String> {
     let mut manifest = manifest_store::load_manifest()?;
@@ -904,17 +897,15 @@ fn import_scanned_inventory(
 }
 
 fn import_inventory(
-    manifest: &mut RegistryManifest,
-    provider: RegistryProvider,
+    manifest: &mut ToolsManifest,
+    provider: ToolProvider,
     inventory: Vec<InventoryItem>,
 ) -> usize {
     let mut imported = 0;
-    for item in inventory.into_iter().filter(|item| {
-        matches!(
-            item.status,
-            RegistryStatus::Installed | RegistryStatus::Outdated
-        )
-    }) {
+    for item in inventory
+        .into_iter()
+        .filter(|item| matches!(item.status, ToolStatus::Installed | ToolStatus::Outdated))
+    {
         imported += usize::from(!manifest.contains(provider.id(), &item.id));
         manifest.set_package(provider.id(), &item.id, true);
     }
@@ -923,19 +914,14 @@ fn import_inventory(
 
 fn apply_manifest() -> Result<String, String> {
     let manifest = manifest_store::load_manifest()?;
-    let snapshot = scan_registry(false);
+    let snapshot = scan_tools(false);
     let mut installed = 0;
     for item in snapshot
         .categories
         .iter()
         .flat_map(|category| &category.items)
-        .filter(|item| item.managed && item.status == RegistryStatus::Missing)
-        .filter(|item| {
-            !matches!(
-                item.provider,
-                RegistryProvider::Dotfiles | RegistryProvider::Mcp
-            )
-        })
+        .filter(|item| item.managed && item.status == ToolStatus::Missing)
+        .filter(|item| !matches!(item.provider, ToolProvider::Dotfiles | ToolProvider::Mcp))
     {
         install_provider(item.provider, &item.id)?;
         installed += 1;
@@ -946,11 +932,11 @@ fn apply_manifest() -> Result<String, String> {
     ))
 }
 
-fn set_manifest_entry(provider: RegistryProvider, id: &str, enabled: bool) -> Result<(), String> {
+fn set_manifest_entry(provider: ToolProvider, id: &str, enabled: bool) -> Result<(), String> {
     let mut manifest = manifest_store::load_manifest()?;
-    if provider == RegistryProvider::Dotfiles {
+    if provider == ToolProvider::Dotfiles {
         manifest.set_dotfile_package(id, enabled);
-    } else if provider == RegistryProvider::Mcp {
+    } else if provider == ToolProvider::Mcp {
         if enabled {
             return Err("MCP servers must be imported from a config".to_string());
         }
@@ -961,21 +947,21 @@ fn set_manifest_entry(provider: RegistryProvider, id: &str, enabled: bool) -> Re
     manifest_store::write_manifest(&manifest)
 }
 
-fn install_provider(provider: RegistryProvider, id: &str) -> Result<(), String> {
+fn install_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
-        RegistryProvider::HomebrewFormula => {
+        ToolProvider::HomebrewFormula => {
             command_output("brew", &["install", id], true)?;
         }
-        RegistryProvider::HomebrewCask => {
+        ToolProvider::HomebrewCask => {
             command_output("brew", &["install", "--cask", id], true)?;
         }
-        RegistryProvider::Npm => {
+        ToolProvider::Npm => {
             command_output("npm", &["install", "--global", id], true)?;
         }
-        RegistryProvider::Acp => {
+        ToolProvider::Acp => {
             vmux_agent::acp_install::resolve_from_registry(id, |_, _, _| {})?;
         }
-        RegistryProvider::Lsp => {
+        ToolProvider::Lsp => {
             let root = vmux_editor::lsp::store::default_root();
             let packages = vmux_editor::lsp::catalog::ensure_catalog(&root, false)?;
             let package = packages
@@ -989,53 +975,53 @@ fn install_provider(provider: RegistryProvider, id: &str) -> Result<(), String> 
                 |_, _, _| {},
             )?;
         }
-        RegistryProvider::Dotfiles => {
+        ToolProvider::Dotfiles => {
             manifest_store::apply_dotfile_package(id)?;
         }
-        RegistryProvider::Mcp => return Err("MCP servers are configuration, not packages".into()),
+        ToolProvider::Mcp => return Err("MCP servers are configuration, not packages".into()),
     }
     Ok(())
 }
 
-fn uninstall_provider(provider: RegistryProvider, id: &str) -> Result<(), String> {
+fn uninstall_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
-        RegistryProvider::HomebrewFormula => {
+        ToolProvider::HomebrewFormula => {
             command_output("brew", &["uninstall", id], true)?;
         }
-        RegistryProvider::HomebrewCask => {
+        ToolProvider::HomebrewCask => {
             command_output("brew", &["uninstall", "--cask", id], true)?;
         }
-        RegistryProvider::Npm => {
+        ToolProvider::Npm => {
             command_output("npm", &["uninstall", "--global", id], true)?;
         }
-        RegistryProvider::Acp => vmux_agent::acp_install::uninstall(id)?,
-        RegistryProvider::Lsp => {
+        ToolProvider::Acp => vmux_agent::acp_install::uninstall(id)?,
+        ToolProvider::Lsp => {
             vmux_editor::lsp::store::remove(&vmux_editor::lsp::store::default_root(), id)
                 .map_err(|error| error.to_string())?;
         }
-        RegistryProvider::Dotfiles => {
+        ToolProvider::Dotfiles => {
             manifest_store::unlink_dotfile_package(id)?;
         }
-        RegistryProvider::Mcp => return Err("forget the MCP server instead".to_string()),
+        ToolProvider::Mcp => return Err("forget the MCP server instead".to_string()),
     }
     Ok(())
 }
 
-fn update_provider(provider: RegistryProvider, id: &str) -> Result<(), String> {
+fn update_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
     match provider {
-        RegistryProvider::HomebrewFormula => {
+        ToolProvider::HomebrewFormula => {
             command_output("brew", &["upgrade", id], true)?;
         }
-        RegistryProvider::HomebrewCask => {
+        ToolProvider::HomebrewCask => {
             command_output("brew", &["upgrade", "--cask", id], true)?;
         }
-        RegistryProvider::Npm => {
+        ToolProvider::Npm => {
             command_output("npm", &["update", "--global", id], true)?;
         }
-        RegistryProvider::Acp | RegistryProvider::Lsp | RegistryProvider::Dotfiles => {
+        ToolProvider::Acp | ToolProvider::Lsp | ToolProvider::Dotfiles => {
             install_provider(provider, id)?;
         }
-        RegistryProvider::Mcp => return Err("MCP servers do not update through Registry".into()),
+        ToolProvider::Mcp => return Err("MCP servers do not update through Tools".into()),
     }
     Ok(())
 }
@@ -1085,15 +1071,15 @@ mod tests {
 
     #[test]
     fn category_adds_declared_missing_packages() {
-        let mut manifest = RegistryManifest::default();
-        manifest.set_package(RegistryProvider::Npm.id(), "typescript", true);
-        let category = build_category(RegistryProvider::Npm, Vec::new(), &manifest);
+        let mut manifest = ToolsManifest::default();
+        manifest.set_package(ToolProvider::Npm.id(), "typescript", true);
+        let category = build_category(ToolProvider::Npm, Vec::new(), &manifest);
         assert_eq!(category.items.len(), 1);
-        assert_eq!(category.items[0].status, RegistryStatus::Missing);
+        assert_eq!(category.items[0].status, ToolStatus::Missing);
         assert!(category.items[0].managed);
         assert_eq!(
             category.items[0].actions,
-            [RegistryAction::Install, RegistryAction::Forget]
+            [ToolAction::Install, ToolAction::Forget]
         );
     }
 
@@ -1110,22 +1096,22 @@ mod tests {
             .find(|item| item.id == "@scope/tool")
             .unwrap();
         assert_eq!(scoped.version.as_deref(), Some("2.0.0"));
-        assert_eq!(scoped.status, RegistryStatus::Outdated);
+        assert_eq!(scoped.status, ToolStatus::Outdated);
     }
 
     #[test]
     fn bulk_import_adopts_only_installed_inventory() {
-        let mut manifest = RegistryManifest::default();
+        let mut manifest = ToolsManifest::default();
         let imported = import_inventory(
             &mut manifest,
-            RegistryProvider::Npm,
+            ToolProvider::Npm,
             vec![
                 InventoryItem {
                     id: "installed".to_string(),
                     name: "installed".to_string(),
                     version: Some("1".to_string()),
                     detail: String::new(),
-                    status: RegistryStatus::Installed,
+                    status: ToolStatus::Installed,
                     removable: true,
                 },
                 InventoryItem {
@@ -1133,7 +1119,7 @@ mod tests {
                     name: "missing".to_string(),
                     version: None,
                     detail: String::new(),
-                    status: RegistryStatus::Missing,
+                    status: ToolStatus::Missing,
                     removable: true,
                 },
             ],
@@ -1147,12 +1133,12 @@ mod tests {
     #[test]
     fn unmanaged_installed_packages_can_be_adopted() {
         assert_eq!(
-            package_actions(RegistryStatus::Installed, false, true),
-            [RegistryAction::Adopt, RegistryAction::Uninstall]
+            package_actions(ToolStatus::Installed, false, true),
+            [ToolAction::Adopt, ToolAction::Uninstall]
         );
         assert_eq!(
-            package_actions(RegistryStatus::Outdated, true, true),
-            [RegistryAction::Update, RegistryAction::Uninstall]
+            package_actions(ToolStatus::Outdated, true, true),
+            [ToolAction::Update, ToolAction::Uninstall]
         );
     }
 }

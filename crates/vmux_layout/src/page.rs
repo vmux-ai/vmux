@@ -15,9 +15,7 @@ use vmux_core::event::extension::{
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
-use vmux_core::registry::{
-    REGISTRY_SNAPSHOT_EVENT, RegistryCategory, RegistryItem, RegistrySnapshot, RegistryStatus,
-};
+use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolCategory, ToolItem, ToolStatus, ToolsSnapshot};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -97,12 +95,12 @@ pub fn Page() -> Element {
             knowledge_state.set(data);
         });
 
-    let mut registry_state = use_signal(RegistrySnapshot::default);
-    let mut registry_state_received = use_signal(|| false);
-    let _registry_listener =
-        use_bin_event_listener::<RegistrySnapshot, _>(REGISTRY_SNAPSHOT_EVENT, move |data| {
-            registry_state_received.set(true);
-            registry_state.set(data);
+    let mut tools_state = use_signal(ToolsSnapshot::default);
+    let mut tools_state_received = use_signal(|| false);
+    let _tools_listener =
+        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
+            tools_state_received.set(true);
+            tools_state.set(data);
         });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
@@ -243,8 +241,8 @@ pub fn Page() -> Element {
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
                             knowledge_loaded: knowledge_state_received(),
-                            registry: registry_state(),
-                            registry_loaded: registry_state_received(),
+                            tools: tools_state(),
+                            tools_loaded: tools_state_received(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -829,8 +827,8 @@ fn SideSheetView(
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_loaded: bool,
-    registry: RegistrySnapshot,
-    registry_loaded: bool,
+    tools: ToolsSnapshot,
+    tools_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
     let active_page = panes
@@ -885,7 +883,7 @@ fn SideSheetView(
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
                 KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
-                RegistryCard { pane_id, registry, loaded: registry_loaded }
+                ToolsCard { pane_id, tools, loaded: tools_loaded }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
@@ -1181,9 +1179,9 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
     }
 }
 
-fn open_registry(pane_id: u64) {
+fn open_tools(pane_id: u64) {
     let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
-        command: "open_registry".to_string(),
+        command: "open_tools".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: 0,
         path: String::new(),
@@ -1191,17 +1189,17 @@ fn open_registry(pane_id: u64) {
 }
 
 #[component]
-fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Element {
+fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
     let mut folded = use_signal(|| false);
-    let root = compact_registry_path(&registry.root);
+    let root = compact_tools_path(&tools.root);
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
                 button {
                     r#type: "button",
-                    title: "Open Registry",
+                    title: "Open Tools",
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
-                    onclick: move |_| open_registry(pane_id),
+                    onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                         Icon { class: "h-3.5 w-3.5",
                             path { d: "M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" }
@@ -1209,17 +1207,17 @@ fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Eleme
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "flex items-center gap-1.5",
-                            div { class: "text-ui font-semibold text-foreground", "Registry" }
-                            if registry.updates > 0 {
-                                span { class: "rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300", "{registry.updates} updates" }
+                            div { class: "text-ui font-semibold text-foreground", "Tools" }
+                            if tools.updates > 0 {
+                                span { class: "rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300", "{tools.updates} updates" }
                             }
-                            if registry.conflicts > 0 {
-                                span { class: "rounded-full bg-ansi-1/15 px-1.5 py-0.5 text-[9px] font-medium text-ansi-1", "{registry.conflicts} conflicts" }
+                            if tools.conflicts > 0 {
+                                span { class: "rounded-full bg-ansi-1/15 px-1.5 py-0.5 text-[9px] font-medium text-ansi-1", "{tools.conflicts} conflicts" }
                             }
                         }
                         div { class: "truncate text-[10px] text-muted-foreground",
                             if loaded {
-                                "{registry.installed} installed · {root}"
+                                "{tools.installed} installed · {root}"
                             } else {
                                 "Scanning local tools…"
                             }
@@ -1228,8 +1226,8 @@ fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Eleme
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Unfold registry" } else { "Fold registry" },
-                    title: if folded() { "Unfold registry" } else { "Fold registry" },
+                    aria_label: if folded() { "Unfold tools" } else { "Fold tools" },
+                    title: if folded() { "Unfold tools" } else { "Fold tools" },
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -1250,12 +1248,12 @@ fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Eleme
                     div { class: "border-t border-foreground/10 p-1.5",
                         if !loaded {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Scanning…" }
-                        } else if registry.categories.iter().all(|category| category.items.is_empty()) {
+                        } else if tools.categories.iter().all(|category| category.items.is_empty()) {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No installed tools" }
                         } else {
                             div { class: "flex flex-col gap-0.5",
-                                for category in registry.categories.iter().filter(|category| !category.items.is_empty()) {
-                                    RegistryCategoryRow { key: "{category.provider.id()}", category: category.clone(), pane_id }
+                                for category in tools.categories.iter().filter(|category| !category.items.is_empty()) {
+                                    ToolCategoryRow { key: "{category.provider.id()}", category: category.clone(), pane_id }
                                 }
                             }
                         }
@@ -1267,17 +1265,17 @@ fn RegistryCard(pane_id: u64, registry: RegistrySnapshot, loaded: bool) -> Eleme
 }
 
 #[component]
-fn RegistryCategoryRow(category: RegistryCategory, pane_id: u64) -> Element {
+fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
     let mut expanded = use_signal(|| false);
     let updates = category
         .items
         .iter()
-        .filter(|item| item.status == RegistryStatus::Outdated)
+        .filter(|item| item.status == ToolStatus::Outdated)
         .count();
     let conflicts = category
         .items
         .iter()
-        .filter(|item| item.status == RegistryStatus::Conflict)
+        .filter(|item| item.status == ToolStatus::Conflict)
         .count();
     rsx! {
         div { class: "flex flex-col gap-0.5",
@@ -1300,7 +1298,7 @@ fn RegistryCategoryRow(category: RegistryCategory, pane_id: u64) -> Element {
             if expanded() {
                 div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
                     for item in category.items.iter() {
-                        RegistryItemRow { key: "{item.id}", item: item.clone(), pane_id }
+                        ToolItemRow { key: "{item.id}", item: item.clone(), pane_id }
                     }
                 }
             }
@@ -1309,20 +1307,20 @@ fn RegistryCategoryRow(category: RegistryCategory, pane_id: u64) -> Element {
 }
 
 #[component]
-fn RegistryItemRow(item: RegistryItem, pane_id: u64) -> Element {
+fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
     let status_class = match item.status {
-        RegistryStatus::Installed => "bg-emerald-400",
-        RegistryStatus::Outdated => "bg-amber-400",
-        RegistryStatus::Conflict | RegistryStatus::Failed => "bg-ansi-1",
-        RegistryStatus::Missing => "bg-muted-foreground/40",
-        RegistryStatus::Available => "bg-cyan-400/60",
+        ToolStatus::Installed => "bg-emerald-400",
+        ToolStatus::Outdated => "bg-amber-400",
+        ToolStatus::Conflict | ToolStatus::Failed => "bg-ansi-1",
+        ToolStatus::Missing => "bg-muted-foreground/40",
+        ToolStatus::Available => "bg-cyan-400/60",
     };
     rsx! {
         button {
             r#type: "button",
             title: "{item.detail}",
             class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-            onclick: move |_| open_registry(pane_id),
+            onclick: move |_| open_tools(pane_id),
             span { class: "size-1.5 shrink-0 rounded-full {status_class}" }
             span { class: "min-w-0 flex-1 truncate text-ui", "{item.name}" }
             if item.managed {
@@ -1335,7 +1333,7 @@ fn RegistryItemRow(item: RegistryItem, pane_id: u64) -> Element {
     }
 }
 
-fn compact_registry_path(path: &str) -> String {
+fn compact_tools_path(path: &str) -> String {
     path.rfind("/.vmux/")
         .map(|index| format!("~{}", &path[index..]))
         .unwrap_or_else(|| path.to_string())

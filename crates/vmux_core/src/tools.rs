@@ -1,11 +1,11 @@
-//! Wire model for the local tool and dotfile Registry.
+//! Wire model for local tools and dotfiles.
 
-/// Host-to-page event carrying a complete Registry snapshot.
-pub const REGISTRY_SNAPSHOT_EVENT: &str = "registry-snapshot";
+/// Host-to-page event carrying a complete tools snapshot.
+pub const TOOLS_SNAPSHOT_EVENT: &str = "tools-snapshot";
 /// Host-to-page event carrying one completed mutation.
-pub const REGISTRY_ACTION_RESULT_EVENT: &str = "registry-action-result";
+pub const TOOL_ACTION_RESULT_EVENT: &str = "tool-action-result";
 
-/// Source that owns an installed Registry item.
+/// Source that owns an installed tool item.
 #[derive(
     Clone,
     Copy,
@@ -21,7 +21,7 @@ pub const REGISTRY_ACTION_RESULT_EVENT: &str = "registry-action-result";
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub enum RegistryProvider {
+pub enum ToolProvider {
     HomebrewFormula,
     HomebrewCask,
     Npm,
@@ -31,8 +31,8 @@ pub enum RegistryProvider {
     Mcp,
 }
 
-impl RegistryProvider {
-    /// Providers rendered by the Registry, in display order.
+impl ToolProvider {
+    /// Providers rendered by the tools manager, in display order.
     pub const ALL: [Self; 7] = [
         Self::HomebrewFormula,
         Self::HomebrewCask,
@@ -83,7 +83,7 @@ impl RegistryProvider {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub enum RegistryStatus {
+pub enum ToolStatus {
     Available,
     Installed,
     Outdated,
@@ -92,7 +92,7 @@ pub enum RegistryStatus {
     Failed,
 }
 
-/// Mutation offered for a Registry item.
+/// Mutation offered for a tool item.
 #[derive(
     Clone,
     Copy,
@@ -105,7 +105,7 @@ pub enum RegistryStatus {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub enum RegistryAction {
+pub enum ToolAction {
     Install,
     Update,
     Uninstall,
@@ -129,15 +129,15 @@ pub enum RegistryAction {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistryItem {
-    pub provider: RegistryProvider,
+pub struct ToolItem {
+    pub provider: ToolProvider,
     pub id: String,
     pub name: String,
     pub version: Option<String>,
     pub detail: String,
-    pub status: RegistryStatus,
+    pub status: ToolStatus,
     pub managed: bool,
-    pub actions: Vec<RegistryAction>,
+    pub actions: Vec<ToolAction>,
 }
 
 /// Items grouped under one provider.
@@ -152,12 +152,12 @@ pub struct RegistryItem {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistryCategory {
-    pub provider: RegistryProvider,
-    pub items: Vec<RegistryItem>,
+pub struct ToolCategory {
+    pub provider: ToolProvider,
+    pub items: Vec<ToolItem>,
 }
 
-/// Complete Registry state rendered by the manager and side sheet.
+/// Complete tools state rendered by the manager and side sheet.
 #[derive(
     Clone,
     Debug,
@@ -170,9 +170,9 @@ pub struct RegistryCategory {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistrySnapshot {
+pub struct ToolsSnapshot {
     pub root: String,
-    pub categories: Vec<RegistryCategory>,
+    pub categories: Vec<ToolCategory>,
     pub installed: u32,
     pub updates: u32,
     pub conflicts: u32,
@@ -192,7 +192,7 @@ pub struct RegistrySnapshot {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistryRefreshRequest {
+pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
 
@@ -208,15 +208,15 @@ pub struct RegistryRefreshRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistryActionRequest {
-    pub provider: RegistryProvider,
-    pub action: RegistryAction,
+pub struct ToolActionRequest {
+    pub provider: ToolProvider,
+    pub action: ToolAction,
     pub id: String,
     #[serde(default)]
     pub value: String,
 }
 
-/// Completion result for a Registry mutation.
+/// Completion result for a tools mutation.
 #[derive(
     Clone,
     Debug,
@@ -228,9 +228,9 @@ pub struct RegistryActionRequest {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct RegistryActionResult {
-    pub provider: RegistryProvider,
-    pub action: RegistryAction,
+pub struct ToolActionResult {
+    pub provider: ToolProvider,
+    pub action: ToolAction,
     pub id: String,
     pub success: bool,
     pub message: String,
