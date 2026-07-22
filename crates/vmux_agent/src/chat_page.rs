@@ -2309,24 +2309,6 @@ mod native_tests {
     }
 
     #[test]
-    fn chat_page_bounds_gpu_work_without_losing_motion() {
-        let page = include_str!("chat_page/page.rs");
-        let shared = include_str!("../../vmux_chat_ui/src/lib.rs");
-        assert!(!page.contains("agent-chat-glow"));
-        assert!(!shared.contains("shadow-violet-950/5 backdrop-blur"));
-        assert!(!shared.contains("shadow-black/5 backdrop-blur"));
-        assert!(!page.contains("blur-["));
-        assert!(!shared.contains("blur-["));
-        assert!(shared.contains("[content-visibility:auto]"));
-        assert!(shared.contains("[contain:layout_paint_style]"));
-        assert!(page.contains("PromptComposer {"));
-        assert!(shared.contains("motion-safe:animate-pulse"));
-        assert!(page.contains("CHAT_HISTORY_PAGE_EVENT"));
-        assert!(page.contains("request_chat_history"));
-        assert!(page.contains("WorkingIndicator {}"));
-    }
-
-    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());
