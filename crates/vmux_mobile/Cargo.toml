@@ -35,10 +35,51 @@ vmux_remote = { path = "../vmux_remote" }
 vmux_chat_ui = { path = "../vmux_chat_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = "0.3"
 objc2 = "0.6"
+objc2-av-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "AVAnimation",
+    "AVCaptureDevice",
+    "AVCaptureInput",
+    "AVCaptureMetadataOutput",
+    "AVCaptureOutput",
+    "AVCaptureOutputBase",
+    "AVCaptureSession",
+    "AVCaptureVideoPreviewLayer",
+    "AVMediaFormat",
+    "AVMetadataObject",
+    "dispatch2",
+    "objc2-core-foundation",
+    "objc2-quartz-core",
+] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSError",
+    "NSObject",
+    "NSString",
+] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+    "objc2-core-foundation",
+] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "block2",
+    "NSText",
     "objc2-core-foundation",
+    "objc2-quartz-core",
+    "UIButton",
+    "UIColor",
+    "UIControl",
+    "UIFont",
+    "UILabel",
+    "UIGeometry",
     "UIPresentationController",
     "UIResponder",
     "UISheetPresentationController",
