@@ -45,6 +45,36 @@ pub fn identity_path() -> PathBuf {
     profile_file("identity")
 }
 
+/// Path to the bearer token accepted by the local mobile remote server.
+pub fn remote_token_path() -> PathBuf {
+    profile_file("remote-token")
+}
+
+/// Path to the desired Remote exposure state.
+pub fn remote_state_path() -> PathBuf {
+    profile_file("remote-state")
+}
+
+/// Path to the marker written after a phone first authenticates successfully.
+pub fn remote_paired_path() -> PathBuf {
+    profile_file("remote-paired")
+}
+
+/// Stable loopback port for the active build and profile.
+pub fn remote_port() -> u16 {
+    let build = current_profile();
+    let profile = active_profile_name();
+    if build == "release" && profile == "personal" {
+        return 54_821;
+    }
+    let hash = format!("{build}:{profile}")
+        .bytes()
+        .fold(5381_u32, |hash, byte| {
+            hash.wrapping_mul(33).wrapping_add(u32::from(byte))
+        });
+    54_822 + (hash % 1_000) as u16
+}
+
 /// Path to the per-profile service stdout/stderr capture log. Lives alongside
 /// the rotated application logs in `log_dir`, not in `service_dir`.
 pub fn log_path() -> PathBuf {
@@ -252,6 +282,22 @@ mod tests {
         assert!(name.starts_with("vmux-"));
         assert!(name.ends_with(".sock"));
         assert!(name.contains(current_profile()));
+    }
+
+    #[test]
+    fn remote_port_is_stable_and_non_privileged() {
+        let port = remote_port();
+        assert!((54_821..=55_821).contains(&port));
+        assert_eq!(port, remote_port());
+    }
+
+    #[test]
+    fn remote_token_uses_profile_file_name() {
+        let path = remote_token_path();
+        assert_eq!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("remote-token")
+        );
     }
 
     #[test]

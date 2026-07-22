@@ -1,0 +1,39 @@
+[application]
+name = "Vmux"
+default_platform = "ios"
+public_dir = "assets"
+tailwind_input = "assets/tailwind.css"
+tailwind_output = "assets/tailwind.out.css"
+
+[bundle]
+identifier = "ai.vmux.remote"
+publisher = "Vmux"
+short_description = "Continue Vmux agent chats from your phone."
+icon = ["../../icon.png"]
+
+[deep_links]
+schemes = ["vmuxremote"]
+
+[ios]
+deployment_target = "15.0"
+identifier = "ai.vmux.remote"
+icon = ["../../icon.png"]
+
+[ios.plist]
+CFBundleDisplayName = "Vmux"
+CFBundleName = "Vmux"
+NSAppTransportSecurity = { NSAllowsLocalNetworking = true }
+NSCameraUsageDescription = "Scan the pairing QR code shown by Vmux on your Mac."
+
+[android]
+min_sdk = 24
+target_sdk = 35
+compile_sdk = 35
+identifier = "ai.vmux.remote"
+icon = ["../../icon.png"]
+
+[android.application]
+uses_cleartext_traffic = true
+
+[android.permissions]
+"android.permission.INTERNET" = { description = "Connect to the paired Vmux Mac" }

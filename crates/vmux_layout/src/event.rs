@@ -28,6 +28,8 @@ pub const PANE_TREE_EVENT: &str = "pane-tree";
 pub const SIDE_SHEET_COMMAND_EVENT: &str = "side-sheet-command";
 pub const SIDE_SHEET_DRAG_EVENT: &str = "side-sheet-drag";
 pub const TAB_BOUNDARY_EVENT: &str = "tab-boundary";
+pub const REMOTE_STATE_EVENT: &str = "remote-state";
+pub const REMOTE_COMMAND_EVENT: &str = "remote-command";
 
 #[derive(
     Clone,
@@ -459,6 +461,80 @@ pub struct SideSheetCommandEvent {
     #[serde(default)]
     pub path: String,
 }
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum RemotePhase {
+    #[default]
+    Disabled,
+    Starting,
+    Enabled,
+    Error,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RemoteStateEvent {
+    pub enabled: bool,
+    pub phase: RemotePhase,
+    pub pairing_url: String,
+    pub pairing_deep_link: String,
+    pub paired: bool,
+    pub error: String,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RemoteCommandEvent {
+    pub enabled: bool,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct RemoteCopyEvent;
 
 /// The active tab's working directory + live git status, auto-detected from git. Rendered as the
 /// git-integration section of the side-sheet's first card.

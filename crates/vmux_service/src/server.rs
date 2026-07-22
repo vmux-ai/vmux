@@ -113,6 +113,17 @@ pub async fn run_server(listener: UnixListener) {
         Arc::new(Mutex::new(HashMap::new()));
     let agent_manager = Arc::new(Mutex::new(crate::agent::AgentSessionManager::default()));
     let acp_manager = Arc::new(Mutex::new(crate::acp::AcpSessionManager::default()));
+    let remote_broker = crate::agent_broker::AgentBroker::new(
+        agent_tx.clone(),
+        Arc::clone(&pending_commands),
+        Arc::clone(&pending_queries),
+        Arc::clone(&pending_tool_calls),
+    );
+    let remote_handle = crate::remote::server::spawn(
+        Arc::clone(&agent_manager),
+        Arc::clone(&acp_manager),
+        remote_broker,
+    );
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
 
     init_started_at();
@@ -205,6 +216,7 @@ pub async fn run_server(listener: UnixListener) {
 
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     poll_handle.abort();
+    remote_handle.abort();
     tracing::info!("server: drain complete, exiting");
 }
 
@@ -761,7 +773,7 @@ async fn handle_client(
                 sid,
                 provider,
                 model,
-                cwd: _,
+                cwd,
                 auto_tools,
                 tools_json,
             } => {
@@ -772,6 +784,7 @@ async fn handle_client(
                     sid,
                     &provider,
                     model,
+                    cwd,
                     tools,
                     auto,
                     broker.clone(),

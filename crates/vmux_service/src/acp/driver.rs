@@ -36,6 +36,7 @@ use crate::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
     ServiceMessage, compose_agent_prompt,
 };
+use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
@@ -133,6 +134,8 @@ pub struct AcpShared {
     pub input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
     agent_name: Mutex<Option<String>>,
     model_info: Mutex<Option<AcpModelInfoState>>,
+    status: Mutex<AgentRunStatus>,
+    approval: Mutex<Option<RemoteApproval>>,
     history_replay: AtomicBool,
     history_replay_updates: AtomicUsize,
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
@@ -161,6 +164,8 @@ impl AcpShared {
             input_writers,
             agent_name: Mutex::new(None),
             model_info: Mutex::new(None),
+            status: Mutex::new(AgentRunStatus::Idle),
+            approval: Mutex::new(None),
             history_replay: AtomicBool::new(false),
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
@@ -228,6 +233,53 @@ impl AcpShared {
             .unwrap()
             .as_ref()
             .map(|state| state.message(&self.sid))
+    }
+
+    pub fn remote_messages(&self) -> Vec<crate::message::Message> {
+        self.projector.lock().unwrap().messages().to_vec()
+    }
+
+    pub fn remote_session(&self, agent_id: &str, created_at_ms: u64) -> RemoteSession {
+        let name = self
+            .agent_name
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| agent_id.to_string());
+        let model = self
+            .model_info
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|state| state.current_model_id.clone())
+            .filter(|model| !model.is_empty());
+        RemoteSession {
+            sid: self.sid.clone(),
+            title: vmux_remote::conversation_title(&self.remote_messages(), &name),
+            name,
+            runtime: "acp".to_string(),
+            model,
+            cwd: self.cwd().to_string_lossy().into_owned(),
+            status: RemoteStatus::from(&*self.status.lock().unwrap()),
+            approval: self.approval.lock().unwrap().clone(),
+            created_at_ms,
+        }
+    }
+
+    pub fn resolve_approval(&self, call_id: &str) -> bool {
+        let mut approval = self.approval.lock().unwrap();
+        if approval
+            .as_ref()
+            .is_none_or(|pending| pending.call_id != call_id)
+        {
+            return false;
+        }
+        *approval = None;
+        self.emit(ServiceMessage::AgentApprovalResolved {
+            sid: self.sid.clone(),
+            call_id: call_id.to_string(),
+        });
+        true
     }
 
     fn publish_agent_info(&self, name: String) {
@@ -308,6 +360,10 @@ impl AcpShared {
     }
 
     fn emit_status(&self, status: AgentRunStatus) {
+        if !matches!(status, AgentRunStatus::Streaming) {
+            *self.approval.lock().unwrap() = None;
+        }
+        *self.status.lock().unwrap() = status.clone();
         self.emit(ServiceMessage::AgentRunStatusChanged {
             sid: self.sid.clone(),
             status,
@@ -634,19 +690,25 @@ pub async fn run(
                         };
                     return responder.respond(RequestPermissionResponse::new(outcome));
                 }
+                let (tx, rx) = oneshot::channel();
+                perm_shared
+                    .pending_perms
+                    .lock()
+                    .unwrap()
+                    .insert(call_id.clone(), tx);
+                *perm_shared.approval.lock().unwrap() = Some(RemoteApproval {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    args_json: args_json.clone(),
+                });
                 perm_shared.emit(ServiceMessage::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
                     name,
                     args_json,
                 });
-                let (tx, rx) = oneshot::channel();
-                perm_shared
-                    .pending_perms
-                    .lock()
-                    .unwrap()
-                    .insert(call_id, tx);
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
+                *perm_shared.approval.lock().unwrap() = None;
                 let outcome = match pick_permission_option(&req.options, decision) {
                     Some(id) => {
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id))
@@ -905,6 +967,7 @@ pub async fn run(
                         })?;
                     }
                     AcpInput::Approve { call_id, decision } => {
+                        *main_shared.approval.lock().unwrap() = None;
                         if let Some(tx) = main_shared.pending_perms.lock().unwrap().remove(&call_id)
                         {
                             let _ = tx.send(decision);
@@ -2305,6 +2368,25 @@ mod tests {
         shared.rebind_cwd(target.path().to_path_buf()).unwrap();
 
         assert_eq!(shared.cwd(), target.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn approval_resolution_is_broadcast_immediately() {
+        let (shared, mut receiver) =
+            test_shared(Arc::new(tokio::sync::Mutex::new(ProcessManager::default())));
+        *shared.approval.lock().unwrap() = Some(RemoteApproval {
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args_json: "{}".into(),
+        });
+
+        assert!(shared.resolve_approval("call-1"));
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(ServiceMessage::AgentApprovalResolved { sid, call_id })
+                if sid == "s1" && call_id == "call-1"
+        ));
+        assert!(shared.approval.lock().unwrap().is_none());
     }
 
     #[test]

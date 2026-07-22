@@ -1,0 +1,22 @@
+[package]
+name = "vmux_chat_ui"
+description = "Shared Dioxus chat presentation for desktop and mobile"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = ["minimal"] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+similar = "2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"

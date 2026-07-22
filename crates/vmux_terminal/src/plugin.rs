@@ -1167,6 +1167,8 @@ struct PollServiceWriters<'w> {
     page_agent_delta: MessageWriter<'w, vmux_service::agent_events::PageAgentDelta>,
     page_agent_run_status: MessageWriter<'w, vmux_service::agent_events::PageAgentRunStatus>,
     page_agent_awaiting: MessageWriter<'w, vmux_service::agent_events::PageAgentAwaitingApproval>,
+    page_agent_approval_resolved:
+        MessageWriter<'w, vmux_service::agent_events::PageAgentApprovalResolved>,
     page_agent_snapshot: MessageWriter<'w, vmux_service::agent_events::PageAgentSnapshot>,
     page_agent_info: MessageWriter<'w, vmux_service::agent_events::PageAgentInfo>,
     page_agent_workspace_changed:
@@ -1664,6 +1666,11 @@ fn poll_service_messages(
                         args_json,
                     },
                 );
+            }
+            ServiceMessage::AgentApprovalResolved { sid, call_id } => {
+                writers
+                    .page_agent_approval_resolved
+                    .write(vmux_service::agent_events::PageAgentApprovalResolved { sid, call_id });
             }
             ServiceMessage::AgentMessagesSnapshot { sid, messages_json } => {
                 writers

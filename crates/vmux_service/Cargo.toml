@@ -21,6 +21,8 @@ path = "src/lib.rs"
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+vmux_remote = { path = "../vmux_remote" }
+vmux_wire = { path = "../vmux_wire" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 base64 = "0.22"
@@ -39,20 +41,27 @@ serde_json = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 crossbeam-channel = "0.5"
 futures-util = "0.3"
+axum = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_service_client = { path = "../vmux_service_client" }
-vmux_wire = { path = "../vmux_wire" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 tempfile = "3.27.0"
+uuid = { workspace = true }
 url = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-foundation = { version = "0.3", default-features = false, features = [

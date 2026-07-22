@@ -34,6 +34,7 @@ web-sys = { version = "0.3", features = [
     "EventTarget", "Event", "HtmlTextAreaElement", "KeyboardEvent",
 ] }
 dioxus = { workspace = true }
+vmux_chat_ui = { path = "../vmux_chat_ui" }
 time = { version = "0.3", default-features = false, features = [
     "wasm-bindgen",
 ] }

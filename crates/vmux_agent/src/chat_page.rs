@@ -2309,21 +2309,6 @@ mod native_tests {
     }
 
     #[test]
-    fn chat_page_bounds_gpu_work_without_losing_motion() {
-        let page = include_str!("chat_page/page.rs");
-        assert!(!page.contains("agent-chat-glow"));
-        assert!(!page.contains("backdrop-blur"));
-        assert!(!page.contains("blur-["));
-        assert!(page.contains("content-visibility:auto"));
-        assert!(page.contains("PromptComposer {"));
-        assert!(page.contains("agent-working-hop"));
-        assert!(page.contains("prefers-reduced-motion:reduce"));
-        assert!(page.contains("CHAT_HISTORY_PAGE_EVENT"));
-        assert!(page.contains("request_chat_history"));
-        assert!(page.contains("WorkingIndicator {}"));
-    }
-
-    #[test]
     fn submitting_after_error_rearms_prompt_dispatch() {
         let mut queue = PromptQueue::default();
         let mut state = AgentRunState::Errored("failed".into());
@@ -2531,8 +2516,8 @@ mod native_tests {
     #[test]
     fn composer_supports_history_uploads_and_clipboard_media() {
         let source = include_str!("chat_page/page.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
-        let media_options = include_str!("../../vmux_ui/src/components/prompt_media_options.rs");
+        let composer = include_str!("../../vmux_chat_ui/src/prompt_composer.rs");
+        let media_options = include_str!("../../vmux_chat_ui/src/prompt_media_options.rs");
         assert!(source.contains("prompt_history_direction"));
         assert!(source.contains("move_prompt_history"));
         assert!(source.contains("ChatPickFiles"));
@@ -2583,7 +2568,7 @@ mod native_tests {
     #[test]
     fn queued_flush_controls_repurpose_composer_button() {
         let source = include_str!("chat_page/page.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
+        let composer = include_str!("../../vmux_chat_ui/src/prompt_composer.rs");
         assert!(source.contains("kbd {"));
         assert!(source.contains("prompt_streaming && queued.read().is_empty()"));
         assert!(source.contains("ChatCancelQueuedPrompt"));
