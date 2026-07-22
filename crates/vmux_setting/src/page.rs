@@ -21,10 +21,17 @@ use wasm_bindgen::JsCast;
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut snapshot = use_signal(|| Value::Null);
     let mut schema = use_signal(SettingsSchema::default);
     let mut search = use_signal(String::new);
+
+    use_effect(move || {
+        locale();
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            document.set_title(&translate("settings-title"));
+        }
+    });
 
     let _values =
         use_bin_event_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
@@ -538,7 +545,7 @@ fn ArrayBody(
     if items.is_empty() {
         return rsx! {
             div { class: "rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground",
-                "(empty)"
+                {translate("settings-empty")}
             }
         };
     }
@@ -675,7 +682,7 @@ fn WidgetView(
                         p { class: "mb-2 text-xs text-muted-foreground", "{h}" }
                     }
                     if arr.is_empty() {
-                        div { class: "text-xs text-muted-foreground", "(none)" }
+                        div { class: "text-xs text-muted-foreground", {translate("settings-none")} }
                     } else {
                         div { class: "flex flex-col gap-1",
                             for (i, binding) in arr.iter().enumerate() {
@@ -973,7 +980,7 @@ fn format_combo(combo: &Value) -> String {
         parts.push(pretty);
     }
     if parts.is_empty() {
-        "(none)".to_string()
+        translate("settings-none")
     } else {
         parts.join(" + ")
     }
@@ -984,7 +991,7 @@ fn format_binding(binding: &Value) -> String {
         return format_combo(direct);
     }
     if let Some(leader) = binding.get("Leader") {
-        return format!("Leader → {}", format_combo(leader));
+        return format!("{} → {}", translate("schema-leader"), format_combo(leader));
     }
     if let Some(arr) = binding.get("Chord").and_then(Value::as_array) {
         let combos: Vec<String> = arr.iter().map(format_combo).collect();

@@ -254,7 +254,7 @@ pub fn PromptComposer(
                         div { class: "min-w-0 flex-1 overflow-hidden", {footer} }
                     } else {
                         div { class: "min-w-0 flex-1 truncate px-1 text-[10px] text-muted-foreground/55",
-                            {translate("composer-send-hint")}
+                            {translate("command-send")}
                         }
                     }
                     button {

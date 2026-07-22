@@ -29,6 +29,9 @@ fn emit_query(query: &str, offset: u32, request_id: u64) {
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate("history-title"));
+    }
     let mut entries: Signal<Vec<HistoryEntry>> = use_signal(Vec::new);
     let mut query: Signal<String> = use_signal(String::new);
     let mut offset: Signal<u32> = use_signal(|| 0);

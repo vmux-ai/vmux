@@ -9,6 +9,9 @@ use wasm_bindgen::JsCast;
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate("spaces-title"));
+    }
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
     let mut new_name = use_signal(String::new);

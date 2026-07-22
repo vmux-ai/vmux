@@ -16,6 +16,7 @@ use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -376,7 +377,15 @@ fn render_preview(preview: &Preview) -> Element {
             kind,
         } => rsx! {
             div { class: "space-y-1 text-center text-xs text-muted-foreground",
-                div { class: "uppercase tracking-wide text-foreground/80", "{kind}" }
+                div {
+                    class: "uppercase tracking-wide text-foreground/80",
+                    {match kind.as_str() {
+                        "image (too large to preview)" => translate("editor-preview-large-image"),
+                        "binary" => translate("editor-preview-binary"),
+                        "file" => translate("editor-preview-file"),
+                        _ => kind.clone(),
+                    }}
+                }
                 div { "{format_size(*size)}" }
                 if !modified.is_empty() {
                     div { class: "opacity-70", "{modified}" }
@@ -518,7 +527,7 @@ fn ExplorerToggleButton(
     rsx! {
         button {
             class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
-            title: "Toggle Explorer (Cmd+B)",
+            title: translate("editor-toggle-explorer"),
             onclick: move |_| toggle_explorer(visible, client_id, request_id, mode),
             svg {
                 class: "h-4 w-4",
@@ -812,7 +821,7 @@ pub fn Page() -> Element {
         let next = match ev.kind {
             PreviewKind::Image { bytes, .. } => match blob_url(&bytes) {
                 Some(u) => Preview::Image(u),
-                None => Preview::Error("failed to decode image".into()),
+                None => Preview::Error(translate("editor-failed-decode-image")),
             },
             PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
             PreviewKind::Text(l) => Preview::Text(l),
@@ -1097,7 +1106,7 @@ pub fn Page() -> Element {
                 {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
-                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: "unsaved" }
+                    span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
                 }
                 div { class: "flex-1" }
                 if mode() == Mode::Text && (is_markdown_file(&git_path()) || git_has_diff()) {
@@ -1105,7 +1114,7 @@ pub fn Page() -> Element {
                         if is_markdown_file(&git_path()) {
                             button {
                                 class: file_mode_class(file_view_mode() == FileViewMode::Note),
-                                title: "Rendered Markdown with live editing",
+                                title: translate("editor-rendered-markdown"),
                                 onclick: move |_| {
                                     file_view_mode.set(FileViewMode::Note);
                                     let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
@@ -1115,7 +1124,7 @@ pub fn Page() -> Element {
                                         focus_container();
                                     }
                                 },
-                                "Note"
+                                {translate("editor-note")}
                             }
                         }
                         button {
@@ -1124,7 +1133,7 @@ pub fn Page() -> Element {
                                     || (file_view_mode() == FileViewMode::Note
                                         && !is_markdown_file(&git_path())),
                             ),
-                            title: "Source editor",
+                            title: translate("editor-source-editor"),
                             onclick: move |_| {
                                 note_editing.set(false);
                                 file_view_mode.set(FileViewMode::Editor);
@@ -1132,18 +1141,18 @@ pub fn Page() -> Element {
                                 let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
                                 focus_file_input();
                             },
-                            "Editor"
+                            {translate("editor-editor")}
                         }
                         if git_has_diff() {
                             button {
                                 class: file_mode_class(file_view_mode() == FileViewMode::Diff),
-                                title: "Git diff",
+                                title: translate("editor-git-diff"),
                                 onclick: move |_| {
                                     file_view_mode.set(FileViewMode::Diff);
                                     git_nonce.set(git_nonce().wrapping_add(1));
                                     let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
                                 },
-                                "Diff"
+                                {translate("editor-diff")}
                             }
                         }
                     }
@@ -1159,13 +1168,15 @@ pub fn Page() -> Element {
                 }
                 {
                     tidy_prompt().map(|count| {
-                        let noun = if count == 1 { "preview" } else { "previews" };
                         rsx! {
                             div {
                                 class: "flex shrink-0 items-center gap-1.5 text-[11px]",
                                 span {
                                     class: "select-none text-cyan-700 dark:text-cyan-200",
-                                    "\u{2726} {count} unchanged {noun}"
+                                    {translate_with(
+                                        "editor-unchanged-previews",
+                                        &[("count", TranslationValue::Number(count as i64))],
+                                    )}
                                 }
                                 button {
                                     class: "rounded-full bg-cyan-400/20 px-2 py-0.5 font-medium text-cyan-700 hover:bg-cyan-400/30 dark:text-cyan-100",
@@ -1173,7 +1184,7 @@ pub fn Page() -> Element {
                                         let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Tidy });
                                         tidy_prompt.set(None);
                                     },
-                                    "Tidy"
+                                    {translate("editor-tidy")}
                                 }
                                 button {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
@@ -1181,7 +1192,7 @@ pub fn Page() -> Element {
                                         let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Always });
                                         tidy_prompt.set(None);
                                     },
-                                    "Always"
+                                    {translate("editor-always")}
                                 }
                                 button {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
@@ -1254,7 +1265,7 @@ pub fn Page() -> Element {
                                                 onclick: move |_| {
                                                     let _ = try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path: abs.clone() });
                                                 },
-                                                "Open externally"
+                                                {translate("editor-open-externally")}
                                             }
                                         }
                                     }
@@ -1642,7 +1653,7 @@ pub fn Page() -> Element {
                                                                 class: if let Some(marker) = diff_marker { "ml-1 w-[1ch] shrink-0 text-center font-semibold {diff_marker_text_class(marker)}" } else { "ml-1 w-[1ch] shrink-0" },
                                                                 if let Some(marker) = diff_marker {
                                                                     span {
-                                                                        title: "Changed line",
+                                                                        title: translate("editor-changed-line"),
                                                                         "{diff_marker_sign(marker)}"
                                                                     }
                                                                 }
@@ -1916,7 +1927,7 @@ pub fn Page() -> Element {
                                 let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest { line, col });
                                 ctx_menu.set(None);
                             },
-                            "Go to Definition"
+                            {translate("editor-go-to-definition")}
                         }
                         div {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
@@ -1925,7 +1936,7 @@ pub fn Page() -> Element {
                                 let _ = try_cef_bin_emit_rkyv(&FileReferencesRequest { line, col });
                                 ctx_menu.set(None);
                             },
-                            "Find References"
+                            {translate("editor-find-references")}
                         }
                     }
                 })
@@ -1978,7 +1989,10 @@ pub fn Page() -> Element {
                                 }
                             },
                             div { class: "px-2 py-1 text-[10px] uppercase tracking-wide text-foreground/50",
-                                "{items.len()} references"
+                                {translate_with(
+                                    "editor-references",
+                                    &[("count", TranslationValue::Number(items.len() as i64))],
+                                )}
                             }
                             for (i, it) in items.iter().enumerate() {
                                 {
@@ -2020,10 +2034,22 @@ pub fn Page() -> Element {
                         let (dot, label) = match s.state {
                             LspServerState::Ready => ("text-ansi-2", s.server.clone()),
                             LspServerState::Starting => {
-                                ("text-ansi-3", format!("{} starting\u{2026}", s.server))
+                                (
+                                    "text-ansi-3",
+                                    translate_with(
+                                        "editor-lsp-starting",
+                                        &[("server", TranslationValue::String(&s.server))],
+                                    ),
+                                )
                             }
                             LspServerState::Missing => {
-                                ("text-ansi-1", format!("{} \u{2014} not installed", s.server))
+                                (
+                                    "text-ansi-1",
+                                    translate_with(
+                                        "editor-lsp-not-installed",
+                                        &[("server", TranslationValue::String(&s.server))],
+                                    ),
+                                )
                             }
                         };
                         rsx! {

@@ -12,6 +12,8 @@ pub struct MessageLoopPlugin {
     pub config: CommandLineConfig,
     pub extensions: CefExtensions,
     pub root_cache_path: Option<String>,
+    pub locale: String,
+    pub accept_language_list: String,
 }
 
 #[derive(Resource, Default)]
@@ -76,10 +78,18 @@ impl Plugin for MessageLoopPlugin {
             &args,
             &mut cef_app,
             self.root_cache_path.as_deref(),
+            &self.locale,
+            &self.accept_language_list,
             render_process_binary.as_deref(),
         );
         #[cfg(target_os = "macos")]
-        cef_initialize(&args, &mut cef_app, self.root_cache_path.as_deref());
+        cef_initialize(
+            &args,
+            &mut cef_app,
+            self.root_cache_path.as_deref(),
+            &self.locale,
+            &self.accept_language_list,
+        );
 
         app.insert_resource(wake_policy.clone())
             .init_resource::<CefShutdownState>()
@@ -117,7 +127,13 @@ fn load_cef_library(app: &mut App) {
 }
 
 #[cfg(target_os = "macos")]
-fn cef_initialize(args: &Args, cef_app: &mut cef::App, root_cache_path: Option<&str>) {
+fn cef_initialize(
+    args: &Args,
+    cef_app: &mut cef::App,
+    root_cache_path: Option<&str>,
+    locale: &str,
+    accept_language_list: &str,
+) {
     // Ensure the cache directory exists before CEF tries to use it.
     // Empty/whitespace paths are valid (CEF treats them as "use default"), so skip those.
     if let Some(path) = root_cache_path.filter(|p| !p.trim().is_empty()) {
@@ -172,6 +188,8 @@ Fix: make install-debug-render-process  (or: cargo build -p bevy_cef_debug_rende
         browser_subprocess_path: browser_subprocess_path.as_str().into(),
         no_sandbox: true as _,
         root_cache_path: root_cache_path.unwrap_or_default().into(),
+        locale: locale.into(),
+        accept_language_list: accept_language_list.into(),
         background_color: 0x00000000,
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,
@@ -195,6 +213,8 @@ fn cef_initialize(
     args: &Args,
     cef_app: &mut cef::App,
     root_cache_path: Option<&str>,
+    locale: &str,
+    accept_language_list: &str,
     render_process_binary: Option<&std::path::Path>,
 ) {
     // Ensure the cache directory exists before CEF tries to use it.
@@ -213,6 +233,8 @@ fn cef_initialize(
         browser_subprocess_path: subprocess_path.as_str().into(),
         no_sandbox: true as _,
         root_cache_path: root_cache_path.unwrap_or_default().into(),
+        locale: locale.into(),
+        accept_language_list: accept_language_list.into(),
         background_color: 0x00000000,
         windowless_rendering_enabled: true as _,
         external_message_pump: true as _,

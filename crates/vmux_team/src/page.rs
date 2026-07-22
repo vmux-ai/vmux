@@ -9,6 +9,9 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate("team-title"));
+    }
     let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let members = team().members;

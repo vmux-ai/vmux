@@ -99,6 +99,10 @@ fn configure_cef_backend_sync(app: &mut App) -> &mut App {
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
         let profile = vmux_core::profile::active_profile_name();
+        let startup_settings = vmux_setting::read_settings_from_disk();
+        let startup_locale =
+            vmux_ui::i18n::requested_locale(Some(&startup_settings.appearance.locale));
+        let startup_accept_language_list = browser_accept_language_list(&startup_locale);
         let prepared_extensions = crate::extensions::load::apply_env()
             .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
@@ -221,6 +225,8 @@ impl Plugin for BrowserPlugin {
                     CefPlugin {
                         command_line_config: cef_command_line,
                         root_cache_path: cef_root_cache_path(),
+                        locale: startup_locale,
+                        accept_language_list: startup_accept_language_list,
                         embedded_hosts,
                         ..default()
                     },
@@ -389,6 +395,22 @@ fn theme_event(settings: &AppSettings) -> ThemeEvent {
     }
 }
 
+fn browser_accept_language_list(locale: &str) -> String {
+    let locale = locale.trim();
+    let language = locale.split('-').next().unwrap_or(locale);
+    if language.eq_ignore_ascii_case("en") {
+        if locale.eq_ignore_ascii_case(language) {
+            "en,en-US;q=0.9".to_string()
+        } else {
+            format!("{locale},en;q=0.9")
+        }
+    } else if locale.eq_ignore_ascii_case(language) {
+        format!("{locale},en-US;q=0.9,en;q=0.8")
+    } else {
+        format!("{locale},{language};q=0.9,en-US;q=0.8,en;q=0.7")
+    }
+}
+
 fn external_locale_catalog(locale: &str) -> Option<String> {
     let directory = vmux_core::profile::config_dir().join("locales");
     [locale, locale.split('-').next().unwrap_or(locale)]
@@ -407,7 +429,8 @@ fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefCo
 fn sync_appearance_to_cef(
     settings: Res<AppSettings>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
-    browsers: Option<NonSend<Browsers>>,
+    mut accept_language_list: Option<ResMut<bevy_cef::prelude::CefAcceptLanguageList>>,
+    mut browsers: Option<NonSendMut<Browsers>>,
     ready: Query<Entity, With<PageReady>>,
     mut commands: Commands,
 ) {
@@ -415,12 +438,44 @@ fn sync_appearance_to_cef(
     if scheme.0 != mode {
         scheme.0 = mode;
     }
+    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
+    let next_accept_language_list = browser_accept_language_list(&locale);
+    if accept_language_list
+        .as_deref()
+        .is_none_or(|current| current.0 != next_accept_language_list)
+    {
+        if let Some(current) = accept_language_list.as_deref_mut() {
+            current.0 = next_accept_language_list.clone();
+        }
+        if let Some(browsers) = browsers.as_deref_mut() {
+            browsers.set_accept_language_list(&next_accept_language_list);
+        }
+    }
+    let browsers = browsers.as_deref();
     let Some(browsers) = browsers else { return };
     let payload = theme_event(&settings);
     for entity in &ready {
         if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
         }
+    }
+}
+
+#[cfg(test)]
+mod accept_language_tests {
+    use super::browser_accept_language_list;
+
+    #[test]
+    fn selected_locale_leads_browser_accept_language() {
+        assert_eq!(
+            browser_accept_language_list("ja"),
+            "ja,en-US;q=0.9,en;q=0.8"
+        );
+        assert_eq!(
+            browser_accept_language_list("pt-BR"),
+            "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+        );
+        assert_eq!(browser_accept_language_list("en-US"), "en-US,en;q=0.9");
     }
 }
 

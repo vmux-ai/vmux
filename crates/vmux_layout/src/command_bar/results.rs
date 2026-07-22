@@ -3,6 +3,7 @@ use vmux_command::event::{
     CommandBarWorkDir, HistoryEntry, SearchEngine,
 };
 use vmux_core::PageIcon;
+use vmux_ui::i18n::translate;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
@@ -298,7 +299,7 @@ pub fn space_switch_results(
     if let Some(page) = pages.iter().find(|p| p.host == "spaces") {
         items.push(CommandBarResultItem::Page {
             url: page.url.clone(),
-            title: "Manage spaces\u{2026}".to_string(),
+            title: translate("command-manage-spaces"),
             icon: page.icon.clone(),
             shortcut: String::new(),
         });
@@ -390,7 +391,12 @@ pub fn filter_results(
         });
     }
 
-    if !starts_with_cmd && !is_path && new_tab && "terminal".contains(&search_lower) {
+    let terminal_label = translate("command-terminal").to_lowercase();
+    if !starts_with_cmd
+        && !is_path
+        && new_tab
+        && ("terminal".contains(&search_lower) || terminal_label.contains(&search_lower))
+    {
         items.push(CommandBarResultItem::Terminal {
             path: String::new(),
         });

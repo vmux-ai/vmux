@@ -238,9 +238,8 @@ pub fn cef_scheme_flags() -> u32 {
         | CEF_SCHEME_OPTION_FETCH_ENABLED as u32
 }
 
-static MEDIA_ALLOWLIST: std::sync::LazyLock<
-    std::sync::RwLock<std::collections::HashSet<PathBuf>>,
-> = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashSet::new()));
+static MEDIA_ALLOWLIST: std::sync::LazyLock<std::sync::RwLock<std::collections::HashSet<PathBuf>>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashSet::new()));
 
 /// Replace the set of absolute paths the raw-media resource handler is allowed to
 /// read. Paths are canonicalized; callers pass the live set each frame.
@@ -387,12 +386,11 @@ pub fn build_raw_media_response(
         return deny(404, "text/plain");
     }
     let mime = raw_media_mime(path).to_string();
-    let (file, total) = match std::fs::File::open(path)
-        .and_then(|f| Ok((f.metadata()?.len() as usize, f)))
-    {
-        Ok((len, f)) => (f, len),
-        Err(_) => return deny(404, "text/plain"),
-    };
+    let (file, total) =
+        match std::fs::File::open(path).and_then(|f| Ok((f.metadata()?.len() as usize, f))) {
+            Ok((len, f)) => (f, len),
+            Err(_) => return deny(404, "text/plain"),
+        };
 
     RawMediaResponse {
         status: 200,
@@ -423,7 +421,10 @@ mod media_raw_tests {
     fn non_raw_returns_none() {
         assert_eq!(raw_media_request("file:///a/b/c.png"), None);
         assert_eq!(raw_media_request("file:///a/b/c.png?other=1"), None);
-        assert_eq!(raw_media_request("vmux://files/index.html?vmux-raw=1"), None);
+        assert_eq!(
+            raw_media_request("vmux://files/index.html?vmux-raw=1"),
+            None
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::event::*;
 use crate::view::{DiffViewRow, EditorDiffMarker, diff_view_rows, editor_diff_markers};
@@ -22,15 +23,15 @@ fn status_has_diff(s: FileStatus) -> bool {
     )
 }
 
-fn status_label(s: FileStatus) -> &'static str {
+fn status_label(s: FileStatus) -> String {
     match s {
-        FileStatus::Clean => "clean",
-        FileStatus::Modified => "modified",
-        FileStatus::Staged => "staged",
-        FileStatus::StagedModified => "staged*",
-        FileStatus::Untracked => "untracked",
-        FileStatus::Deleted => "deleted",
-        FileStatus::Conflicted => "conflict",
+        FileStatus::Clean => translate("git-status-clean"),
+        FileStatus::Modified => translate("git-status-modified"),
+        FileStatus::Staged => translate("git-status-staged"),
+        FileStatus::StagedModified => translate("git-status-staged-modified"),
+        FileStatus::Untracked => translate("git-status-untracked"),
+        FileStatus::Deleted => translate("git-status-deleted"),
+        FileStatus::Conflicted => translate("git-status-conflict"),
     }
 }
 
@@ -175,7 +176,7 @@ pub fn GitBar(
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&GitStageRequest { path: path() });
                     },
-                    "\u{2713} accept all"
+                    {translate("git-accept-all")}
                 }
             }
             if can_unstage {
@@ -184,7 +185,7 @@ pub fn GitBar(
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&GitUnstageRequest { path: path() });
                     },
-                    "Unstage"
+                    {translate("git-unstage")}
                 }
             }
             if can_discard {
@@ -195,18 +196,18 @@ pub fn GitBar(
                             let _ = try_cef_bin_emit_rkyv(&GitDiscardRequest { path: path() });
                             confirming.set(false);
                         },
-                        "Confirm deny all"
+                        {translate("git-confirm-deny-all")}
                     }
                     button {
                         class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
                         onclick: move |_| confirming.set(false),
-                        "Cancel"
+                        {translate("common-cancel")}
                     }
                 } else {
                     button {
                         class: "shrink-0 rounded px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                         onclick: move |_| confirming.set(true),
-                        "\u{2717} deny all"
+                        {translate("git-deny-all")}
                     }
                 }
             }
@@ -254,7 +255,7 @@ pub fn GitFooter(
                 input {
                     class: "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-0.5 text-term-fg outline-none placeholder:text-muted-foreground",
                     r#type: "text",
-                    placeholder: "commit message",
+                    placeholder: translate("git-commit-message"),
                     value: "{commit_msg}",
                     oninput: move |e| commit_msg.set(e.value()),
                 }
@@ -268,7 +269,10 @@ pub fn GitFooter(
                             commit_msg.set(String::new());
                         }
                     },
-                    "Commit ({staged_count})"
+                    {translate_with(
+                        "git-commit",
+                        &[("count", TranslationValue::Number(staged_count() as i64))],
+                    )}
                 }
             } else {
                 span { class: "flex-1" }
@@ -280,7 +284,7 @@ pub fn GitFooter(
                     onclick: move |_| {
                         let _ = try_cef_bin_emit_rkyv(&GitPushRequest { path: path() });
                     },
-                    "\u{2191} Push"
+                    {translate("git-push")}
                 }
             }
             if !message().is_empty() {
@@ -363,12 +367,12 @@ pub fn DiffView(
 
             if loading() {
                 div { class: "flex h-20 items-center justify-center font-sans text-xs text-muted-foreground",
-                    span { class: "animate-pulse", "Loading diff…" }
+                    span { class: "animate-pulse", {translate("git-loading-diff")} }
                 }
             } else if !error().is_empty() {
                 div { class: "p-3 font-sans text-xs text-ansi-1", "{error}" }
             } else if rows.is_empty() {
-                div { class: "p-3 text-xs text-muted-foreground", "No changes to show" }
+                div { class: "p-3 text-xs text-muted-foreground", {translate("git-no-changes")} }
             }
 
             for display_row in display_rows {
@@ -407,14 +411,14 @@ pub fn DiffView(
                                             onclick: move |_| {
                                                 let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: true });
                                             },
-                                            "\u{2713} accept"
+                                            {translate("git-accept")}
                                         }
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                                             onclick: move |_| {
                                                 let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: false });
                                             },
-                                            "\u{2717} deny"
+                                            {translate("git-deny")}
                                         }
                                     }
                                 }
@@ -429,7 +433,10 @@ pub fn DiffView(
                                 class: "border-y border-cyan-400/10 bg-cyan-400/[0.035] font-sans",
                                 button {
                                     class: "group flex h-7 w-full items-center gap-2 px-2 text-[11px] text-cyan-700/75 hover:bg-cyan-400/[0.08] hover:text-cyan-700 dark:text-cyan-200/70 dark:hover:text-cyan-100",
-                                    title: "Show {hidden} unchanged lines",
+                                    title: translate_with(
+                                        "git-show-unchanged-lines",
+                                        &[("count", TranslationValue::Number(hidden as i64))],
+                                    ),
                                     onclick: move |_| {
                                         expanded.write().insert((start, end));
                                     },

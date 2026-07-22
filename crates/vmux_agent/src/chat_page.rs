@@ -1490,19 +1490,13 @@ fn on_chat_approval(
     });
 }
 
-/// A short "2h ago"-style age for a session's last-modified time.
+/// Age in seconds for a session's last-modified time.
 #[cfg(not(target_arch = "wasm32"))]
-fn relative_time(mtime: std::time::SystemTime) -> String {
-    let secs = std::time::SystemTime::now()
+fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
+    std::time::SystemTime::now()
         .duration_since(mtime)
         .map(|d| d.as_secs())
-        .unwrap_or(0);
-    match secs {
-        0..=59 => "just now".to_string(),
-        60..=3599 => format!("{}m ago", secs / 60),
-        3600..=86399 => format!("{}h ago", secs / 3600),
-        _ => format!("{}d ago", secs / 86400),
-    }
+        .unwrap_or(0)
 }
 
 /// The slash commands offered on an ACP pane.
@@ -1679,7 +1673,8 @@ fn resume_entries(
                 sid: session.sid,
                 cwd: session.cwd.to_string_lossy().to_string(),
                 title: session.title,
-                subtitle: format!("{} · {}", relative_time(session.mtime), dir),
+                subtitle: dir,
+                age_seconds: relative_time_seconds(session.mtime),
                 agent_name,
                 cross_runtime: session.cross_runtime,
             }
@@ -2492,7 +2487,6 @@ mod native_tests {
         let source = include_str!("chat_page/page.rs");
         assert!(source.contains("SelectorMode::Resume"));
         assert!(source.contains("filter_sessions"));
-        assert!(source.contains("No matching sessions"));
         assert!(source.contains("menu_direction"));
         assert!(source.contains("ScrollLogicalPosition::Nearest"));
         assert!(source.contains("agent-selector-item-{i}"));
@@ -2558,7 +2552,6 @@ mod native_tests {
         let composer = page.find("PromptComposer {").expect("composer");
 
         assert!(choice < composer);
-        assert!(page.contains("Ctrl+N/Ctrl+P"));
         assert!(page.contains("choice_number_index"));
         assert!(page.contains("ChatChoiceSelected"));
         assert!(page.contains("agent-choice-item-{index}"));
@@ -2585,10 +2578,7 @@ mod native_tests {
         assert!(source.contains("kbd {"));
         assert!(source.contains("prompt_streaming && queued.read().is_empty()"));
         assert!(source.contains("ChatCancelQueuedPrompt"));
-        assert!(source.contains("title: \"Cancel queued prompt\""));
-        assert!(source.contains("\"Stop\""));
         assert!(composer.contains("rect { x: \"6\", y: \"6\""));
-        assert!(source.contains("\"Send all queued prompts now (Esc)\""));
         assert!(composer.contains("path { d: \"M12 19V5\" }"));
     }
 

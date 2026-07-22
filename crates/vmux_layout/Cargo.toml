@@ -26,6 +26,7 @@ path = "src/lib.rs"
 rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_core = { path = "../vmux_core" }
+vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_wire = { path = "../vmux_wire" }
 
 [dev-dependencies]
@@ -64,7 +65,6 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 dioxus = { workspace = true }
 js-sys = "0.3"
 vmux_command = { path = "../vmux_command" }
-vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = "0.2.115"
 web-sys = { version = "0.3", features = [
     "AddEventListenerOptions",

@@ -117,6 +117,11 @@ pub fn Page() -> Element {
 fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
     let icon_url = agent.icon.clone();
     let launch_url = agent.launch_url.clone();
+    let description = if agent.source == "cli" {
+        translate("agents-terminal-coding-agent")
+    } else {
+        agent.description.clone()
+    };
     rsx! {
         ManagerRow {
             icon: rsx! {
@@ -128,7 +133,7 @@ fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element 
                 }
             },
             title: agent.name.clone(),
-            subtitle: agent.description.clone(),
+            subtitle: description,
             meta: rsx! {
                 ManagerBadge { tone: ManagerTone::Neutral, "{agent.source}" }
                 if agent.runtime != agent.source {

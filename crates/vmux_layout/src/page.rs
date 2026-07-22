@@ -22,7 +22,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
-use vmux_ui::i18n::translate;
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -593,7 +593,7 @@ fn Tab(tab: TabRow) -> Element {
     } else if !tab.name.is_empty() {
         tab.name.clone()
     } else {
-        "Tab".to_string()
+        translate("layout-tab")
     };
     let tooltip = display_title.clone();
     let is_active = tab.is_active;
@@ -877,7 +877,7 @@ fn SideSheetView(
                 }
             } else if panes.is_empty() {
                 div { class: "flex shrink-0 items-center px-2 py-1",
-                    span { class: "text-ui text-muted-foreground", "No stacks" }
+                    span { class: "text-ui text-muted-foreground", {translate("layout-no-stacks")} }
                 }
             } else {
                 for (i, pane) in panes.iter().enumerate() {
@@ -1023,11 +1023,20 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
         .unwrap_or_else(|| root.clone());
     let root_title = compact_knowledge_path(&root);
     let root_action_title = if landing_path != root {
-        "Open Welcome to Knowledge".to_string()
+        translate("layout-open-welcome-knowledge")
     } else if root.is_empty() {
-        "Knowledge".to_string()
+        translate("layout-knowledge")
     } else {
-        format!("Open {root}")
+        translate_with(
+            "layout-open-path",
+            &[("path", TranslationValue::String(&root))],
+        )
+    };
+    let knowledge_title = translate("layout-knowledge");
+    let fold_title = if folded() {
+        translate("layout-unfold-knowledge")
+    } else {
+        translate("layout-fold-knowledge")
     };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
@@ -1044,14 +1053,14 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                         }
                     }
                     div { class: "min-w-0 flex-1",
-                        div { class: "text-ui font-semibold text-foreground", "Knowledge" }
+                        div { class: "text-ui font-semibold text-foreground", "{knowledge_title}" }
                         div { class: "truncate text-[10px] text-muted-foreground", "{root_title}" }
                     }
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Expand knowledge" } else { "Collapse knowledge" },
-                    title: if folded() { "Expand knowledge" } else { "Collapse knowledge" },
+                    aria_label: "{fold_title}",
+                    title: "{fold_title}",
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -1071,11 +1080,11 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                 div { class: "overflow-hidden",
                     div { class: "border-t border-foreground/10 p-1.5",
                         if !loaded {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Loading…" }
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-loading")} }
                         } else if !knowledge.error.is_empty() {
                             div { class: "px-2 py-2 text-ui-xs text-destructive", "{knowledge.error}" }
                         } else if knowledge.entries.is_empty() {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No Markdown files" }
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-markdown-files")} }
                         } else {
                             div { class: "flex flex-col gap-0.5",
                                 for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
@@ -1127,7 +1136,7 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                                 }
                             }
                         } else {
-                            div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", "Empty folder" }
+                            div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", {translate("layout-empty-folder")} }
                         }
                     }
                 }
@@ -1188,7 +1197,7 @@ fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
                     }
                     if b.is_worktree {
                         span { class: "shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                            "worktree"
+                            {translate("layout-worktree")}
                         }
                     }
                     if b.uncommitted > 0 {
@@ -1615,7 +1624,7 @@ fn BookmarkNameInput(
 }
 
 fn begin_new_folder(mut creating: Signal<bool>, mut draft: Signal<String>) {
-    draft.set("New Folder".to_string());
+    draft.set(translate("layout-new-folder"));
     creating.set(true);
 }
 
@@ -1660,18 +1669,20 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
     let mut folded = use_signal(|| false);
     let mut creating_folder = use_signal(|| false);
-    let new_folder_draft = use_signal(|| "New Folder".to_string());
+    let new_folder_draft = use_signal(|| translate("layout-new-folder"));
     let folders = bookmark_folder_choices(&roots);
     let folder_rows = bookmark_folder_rows(&roots);
     let root_targeted = bookmark_drop_targeted(drag_state, &BookmarkDropTarget::Root);
     let root_drop_label = drag_state()
         .filter(|drag| drag.active)
         .map(|drag| match drag.item {
-            BookmarkDragItem::Page { .. } => "Add to Bookmarks",
+            BookmarkDragItem::Page { .. } => translate("layout-add-to-bookmarks"),
             BookmarkDragItem::Bookmark { .. }
             | BookmarkDragItem::Pin { .. }
-            | BookmarkDragItem::Folder { .. } => "Move to Bookmarks",
+            | BookmarkDragItem::Folder { .. } => translate("layout-move-to-bookmarks"),
         });
+    let bookmarks_title = translate("layout-bookmarks");
+    let new_folder_title = translate("layout-new-folder");
 
     rsx! {
         div {
@@ -1704,11 +1715,11 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     if let Some(label) = root_drop_label {
                         span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{label}" }
                     } else {
-                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "Bookmarks" }
+                        span { class: "min-w-0 flex-1 text-ui font-semibold text-foreground", "{bookmarks_title}" }
                         button {
                             r#type: "button",
-                            aria_label: "New bookmark folder",
-                            title: "New Folder",
+                            aria_label: "{new_folder_title}",
+                            title: "{new_folder_title}",
                             class: "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onclick: move |event| {
                                 event.prevent_default();
@@ -1725,8 +1736,8 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Expand bookmarks" } else { "Collapse bookmarks" },
-                    title: if folded() { "Expand bookmarks" } else { "Collapse bookmarks" },
+                    aria_label: "{bookmarks_title}",
+                    title: "{bookmarks_title}",
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -1762,7 +1773,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                                 BookmarkNameInput {
                                     draft: new_folder_draft,
                                     class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
-                                    placeholder: "Folder name".to_string(),
+                                    placeholder: translate("layout-folder-name"),
                                     on_commit: move |name| {
                                         creating_folder.set(false);
                                         create_bookmark_folder(name, None);
@@ -1772,7 +1783,7 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                             }
                         }
                         if pins.is_empty() && roots.is_empty() && !creating_folder() {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No pins or bookmarks" }
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-pins-bookmarks")} }
                         } else {
                             div { class: "flex flex-col gap-1",
                                 for node in roots.iter() {
@@ -1852,14 +1863,14 @@ fn PinTile(row: BookmarkRow) -> Element {
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
                     attributes: vec![],
-                    "Open"
+                    {translate("common-open")}
                 }
                 ContextMenuItem {
                     index: 1usize,
                     value: Into::<ReadSignal<String>>::into(menu_val),
                     on_select: { let id = uuid_unpin.clone(); move |_: String| bookmark_cmd("unpin", Some(id.clone())) },
                     attributes: vec![],
-                    "Unpin"
+                    {translate("layout-unpin-page")}
                 }
                 if row.bookmarked {
                     ContextMenuItem {
@@ -1867,7 +1878,7 @@ fn PinTile(row: BookmarkRow) -> Element {
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: { let id = row.uuid.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
                         attributes: vec![],
-                        "Remove Bookmark"
+                        {translate("layout-remove-bookmark")}
                     }
                 }
             }
@@ -1896,7 +1907,7 @@ fn BookmarkEntry(
     let draft = use_signal(|| title.clone());
     let mut move_targets: Vec<(Option<String>, String)> = Vec::new();
     if folder_uuid.is_some() {
-        move_targets.push((None, "Move to Bookmarks".to_string()));
+        move_targets.push((None, translate("layout-move-to-bookmarks")));
     }
     move_targets.extend(
         folders
@@ -1905,7 +1916,10 @@ fn BookmarkEntry(
             .map(|folder| {
                 (
                     Some(folder.uuid.clone()),
-                    format!("Move to {}", folder.label),
+                    translate_with(
+                        "layout-move-to",
+                        &[("folder", TranslationValue::String(&folder.label))],
+                    ),
                 )
             }),
     );
@@ -1976,7 +1990,7 @@ fn BookmarkEntry(
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: { let u = url_open.clone(); move |_: String| open_bookmark(u.clone()) },
                         attributes: vec![],
-                        "Open"
+                        {translate("common-open")}
                     }
                     ContextMenuItem {
                         index: 1usize,
@@ -1986,7 +2000,7 @@ fn BookmarkEntry(
                             move |_: String| begin_inline_rename(editing, draft, name.clone())
                         },
                         attributes: vec![],
-                        "Rename"
+                        {translate("common-rename")}
                     }
                     ContextMenuItem {
                         index: 2usize,
@@ -1997,7 +2011,7 @@ fn BookmarkEntry(
                             move |_: String| bookmark_cmd(command, Some(id.clone()))
                         },
                         attributes: vec![],
-                        if row.pinned { "Unpin" } else { "Pin" }
+                        {if row.pinned { translate("layout-unpin-page") } else { translate("layout-pin") }}
                     }
                     for (index, (target_folder, label)) in move_targets.iter().enumerate() {
                         ContextMenuItem {
@@ -2018,7 +2032,7 @@ fn BookmarkEntry(
                         value: Into::<ReadSignal<String>>::into(menu_val),
                         on_select: { let id = uuid_remove.clone(); move |_: String| bookmark_cmd("remove", Some(id.clone())) },
                         attributes: vec![],
-                        "Remove"
+                        {translate("common-remove")}
                     }
                 }
             }
@@ -2040,12 +2054,12 @@ fn BookmarkFolder(
     let mut editing = use_signal(|| false);
     let draft = use_signal(|| folder.name.clone());
     let mut creating_child = use_signal(|| false);
-    let child_draft = use_signal(|| "New Folder".to_string());
+    let child_draft = use_signal(|| translate("layout-new-folder"));
     let menu_val = use_signal(|| folder.uuid.clone());
     let new_folder_uuid = uuid.clone();
     let mut move_targets = Vec::new();
     if parent_uuid.is_some() {
-        move_targets.push((None, "Move to Bookmarks".to_string()));
+        move_targets.push((None, translate("layout-move-to-bookmarks")));
     }
     move_targets.extend(
         folders
@@ -2054,7 +2068,10 @@ fn BookmarkFolder(
             .map(|target| {
                 (
                     Some(target.uuid.clone()),
-                    format!("Move to {}", target.label),
+                    translate_with(
+                        "layout-move-to",
+                        &[("folder", TranslationValue::String(&target.label))],
+                    ),
                 )
             }),
     );
@@ -2079,7 +2096,7 @@ fn BookmarkFolder(
                     BookmarkNameInput {
                         draft,
                         class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
-                        placeholder: "Folder name".to_string(),
+                        placeholder: translate("layout-folder-name"),
                         on_commit: {
                             let id = uuid.clone();
                             move |name| {
@@ -2127,7 +2144,7 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("toggle_folder", Some(id.clone())) },
                             attributes: vec![],
-                            if collapsed { "Expand" } else { "Collapse" }
+                            {if collapsed { translate("common-expand") } else { translate("common-collapse") }}
                         }
                         ContextMenuItem {
                             index: 1usize,
@@ -2152,7 +2169,7 @@ fn BookmarkFolder(
                                 }
                             },
                             attributes: vec![],
-                            "Bookmark Current Page"
+                            {translate("layout-bookmark-current-page")}
                         }
                         ContextMenuItem {
                             index: 2usize,
@@ -2164,7 +2181,7 @@ fn BookmarkFolder(
                                 begin_new_folder(creating_child, child_draft);
                             },
                             attributes: vec![],
-                            "New Folder"
+                            {translate("layout-new-folder")}
                         }
                         ContextMenuItem {
                             index: 3usize,
@@ -2174,7 +2191,7 @@ fn BookmarkFolder(
                                 move |_: String| begin_inline_rename(editing, draft, name.clone())
                             },
                             attributes: vec![],
-                            "Rename Folder"
+                            {translate("layout-rename-folder")}
                         }
                         for (index, (target_folder, label)) in move_targets.iter().enumerate() {
                             ContextMenuItem {
@@ -2195,7 +2212,7 @@ fn BookmarkFolder(
                             value: Into::<ReadSignal<String>>::into(menu_val),
                             on_select: { let id = uuid.clone(); move |_: String| bookmark_cmd("remove_folder", Some(id.clone())) },
                             attributes: vec![],
-                            "Remove Folder"
+                            {translate("layout-remove-folder")}
                         }
                     }
                 }
@@ -2208,7 +2225,7 @@ fn BookmarkFolder(
                     BookmarkNameInput {
                         draft: child_draft,
                         class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
-                        placeholder: "Folder name".to_string(),
+                        placeholder: translate("layout-folder-name"),
                         on_commit: {
                             let parent = uuid.clone();
                             move |name| {
@@ -2244,7 +2261,7 @@ fn BookmarkFolder(
                         }
                     }
                     if folder_is_empty {
-                        div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", "Empty folder" }
+                        div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", {translate("layout-empty-folder")} }
                     }
                 }
             }
@@ -2309,10 +2326,18 @@ fn SheetNewButton(label: String, icon: Element, onclick: EventHandler<MouseEvent
 
 #[component]
 fn PaneSection(pane: PaneNode, index: usize) -> Element {
-    let label = format!("Stack {}", index + 1);
+    let label = translate_with(
+        "layout-stack-number",
+        &[("number", TranslationValue::Number((index + 1) as i64))],
+    );
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
     let mut folded = use_signal(|| false);
+    let fold_title = if folded() {
+        translate("layout-unfold-stack")
+    } else {
+        translate("layout-fold-stack")
+    };
 
     rsx! {
         div { class: if pane.is_active && any_loading {
@@ -2341,8 +2366,8 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Expand stack" } else { "Collapse stack" },
-                    title: if folded() { "Expand stack" } else { "Collapse stack" },
+                    aria_label: "{fold_title}",
+                    title: "{fold_title}",
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -2383,7 +2408,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
 fn NewStackRow(pane_id: u64) -> Element {
     rsx! {
         SheetNewButton {
-            label: "New Stack".to_string(),
+            label: translate("layout-new-stack"),
             icon: rsx! {
                 Icon { class: "h-4 w-4 shrink-0",
                     path { d: "M12 5v14" }
@@ -2423,16 +2448,18 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
     let bookmark_metadata = metadata.clone();
     let pin_metadata = metadata;
     let pin_index = 1 + folders.len();
+    let display_title = localized_stack_title(&stack);
+    let close_title = translate("layout-close-stack");
 
     let title_class = if is_active {
         format!(
             "min-w-0 flex-1 {} text-ui font-medium text-foreground",
-            dir_truncate_class(&stack.title)
+            dir_truncate_class(&display_title)
         )
     } else {
         format!(
             "min-w-0 flex-1 {} text-ui",
-            dir_truncate_class(&stack.title)
+            dir_truncate_class(&display_title)
         )
     };
 
@@ -2468,11 +2495,11 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         });
                     },
                     StackIcon { icon: stack.icon.clone(), url: stack.url.clone(), title: stack.title.clone() }
-                    span { class: "{title_class}", "{stack.title}" }
+                    span { class: "{title_class}", "{display_title}" }
                     button {
                         r#type: "button",
-                        aria_label: "Close stack",
-                        title: "Close stack",
+                        aria_label: "{close_title}",
+                        title: "{close_title}",
                         class: if hovered() {
                             "ml-auto flex h-6 w-6 cursor-pointer shrink-0 items-center justify-center rounded-sm opacity-100 transition-opacity focus-visible:opacity-100 hover:bg-foreground/10"
                         } else {
@@ -2513,7 +2540,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         None,
                     ),
                     attributes: vec![],
-                    "Bookmark"
+                    {translate("layout-bookmark")}
                 }
                 for (index, folder) in folders.iter().enumerate() {
                     ContextMenuItem {
@@ -2535,7 +2562,10 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             )
                         },
                         attributes: vec![],
-                        "Bookmark in {folder.label}"
+                    {translate_with(
+                        "layout-bookmark-in",
+                        &[("folder", TranslationValue::String(&folder.label))],
+                    )}
                     }
                 }
                 ContextMenuItem {
@@ -2547,10 +2577,19 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         None,
                     ),
                     attributes: vec![],
-                    "Pin"
+                    {translate("layout-pin")}
                 }
             }
         }
+    }
+}
+
+fn localized_stack_title(stack: &StackNode) -> String {
+    match stack.url.trim_end_matches('/') {
+        "vmux://start" => translate("start-title"),
+        "vmux://settings" => translate("settings-title"),
+        _ if stack.url.is_empty() && stack.title == "New Stack" => translate("layout-new-stack"),
+        _ => stack.title.clone(),
     }
 }
 
@@ -2579,9 +2618,13 @@ enum UpdatePhase {
 #[component]
 fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
     let (label, version) = match &phase {
-        UpdatePhase::Downloading { version, .. } => ("Downloading update", version.clone()),
-        UpdatePhase::Installing { version } => ("Installing update…", version.clone()),
-        UpdatePhase::Ready { version } => ("New version available", version.clone()),
+        UpdatePhase::Downloading { version, .. } => {
+            (translate("layout-update-downloading"), version.clone())
+        }
+        UpdatePhase::Installing { version } => {
+            (translate("layout-update-installing"), version.clone())
+        }
+        UpdatePhase::Ready { version } => (translate("layout-update-ready"), version.clone()),
     };
     rsx! {
         div {
@@ -2605,7 +2648,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
                         onclick: move |_| {
                             let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
                         },
-                        "Restart to update"
+                        {translate("layout-restart-update")}
                     }
                 },
             }}

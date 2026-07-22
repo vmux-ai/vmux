@@ -105,6 +105,19 @@ pub(crate) struct SettingsSchemaSent;
 #[derive(Component)]
 pub(crate) struct UpdateCheckStatusSent;
 
+pub(crate) fn localize_settings_metadata(
+    settings: Res<AppSettings>,
+    mut views: Query<&mut PageMetadata, With<Settings>>,
+) {
+    let locale = requested_locale(Some(&settings.appearance.locale));
+    let title = translate_for(&locale, "settings-title");
+    for mut metadata in &mut views {
+        if metadata.title != title {
+            metadata.title.clone_from(&title);
+        }
+    }
+}
+
 pub(crate) fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsListSent>)>,
@@ -292,7 +305,7 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
     let t = |id| translate_for(locale, id);
     let locale_options = std::iter::once(SelectOption {
         value: "system".to_string(),
-        label: "system".to_string(),
+        label: t("schema-system"),
     })
     .chain(available_locales().iter().map(|locale| SelectOption {
         value: (*locale).to_string(),
@@ -302,18 +315,18 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
     SettingsSchema {
         sections: vec![
             SectionSpec {
-                id: "appearance".to_string(),
-                title: t("schema-appearance"),
-                description: None,
-                synthetic_keys: vec!["mode".to_string(), "locale".to_string()],
-                root_path: "appearance".to_string(),
-            },
-            SectionSpec {
                 id: "general".to_string(),
                 title: t("schema-general"),
                 description: None,
                 synthetic_keys: vec!["auto_update".to_string()],
                 root_path: String::new(),
+            },
+            SectionSpec {
+                id: "appearance".to_string(),
+                title: t("schema-appearance"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "appearance".to_string(),
             },
             SectionSpec {
                 id: "layout".to_string(),
@@ -350,8 +363,36 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                 synthetic_keys: vec![],
                 root_path: "browser".to_string(),
             },
+            SectionSpec {
+                id: "editor".to_string(),
+                title: t("schema-editor"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "editor".to_string(),
+            },
+            SectionSpec {
+                id: "recording".to_string(),
+                title: t("schema-recording"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "recording".to_string(),
+            },
+            SectionSpec {
+                id: "spaces".to_string(),
+                title: t("spaces-title"),
+                description: None,
+                synthetic_keys: vec![],
+                root_path: "spaces".to_string(),
+            },
         ],
         fields: vec![
+            field(
+                "appearance",
+                FieldSpec {
+                    order: vec!["mode".into(), "locale".into()],
+                    ..Default::default()
+                },
+            ),
             field(
                 "appearance.mode",
                 FieldSpec {
@@ -444,6 +485,7 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                 "layout",
                 FieldSpec {
                     order: vec![
+                        "radius".into(),
                         "window".into(),
                         "pane".into(),
                         "side_sheet".into(),
@@ -452,6 +494,7 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.radius", t("schema-radius")),
             field(
                 "layout.window",
                 FieldSpec {
@@ -460,21 +503,25 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.window.padding", t("schema-padding")),
             field(
                 "layout.pane",
                 FieldSpec {
                     label: Some(t("schema-pane")),
-                    order: vec!["gap".into(), "radius".into()],
+                    order: vec!["gap".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.pane.gap", t("schema-gap")),
             field(
                 "layout.side_sheet",
                 FieldSpec {
                     label: Some(t("schema-side-sheet")),
+                    order: vec!["width".into()],
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.side_sheet.width", t("schema-width")),
             field(
                 "layout.focus_ring",
                 FieldSpec {
@@ -483,6 +530,18 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("layout.focus_ring.width", t("schema-width")),
+            field(
+                "layout.focus_ring.color",
+                FieldSpec {
+                    label: Some(t("schema-color")),
+                    order: vec!["r".into(), "g".into(), "b".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("layout.focus_ring.color.r", t("schema-red")),
+            labeled_field("layout.focus_ring.color.g", t("schema-green")),
+            labeled_field("layout.focus_ring.color.b", t("schema-blue")),
             field(
                 "agent",
                 FieldSpec {
@@ -506,6 +565,21 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("agent.follow_files", t("schema-follow-files")),
+            labeled_field("agent.tidy_files", t("schema-tidy-files")),
+            labeled_field("agent.tidy_files_max", t("schema-tidy-files-max")),
+            labeled_field("agent.tidy_files_auto", t("schema-tidy-files-auto")),
+            labeled_field("agent.app_providers", t("schema-app-providers")),
+            labeled_field("agent.app_providers[].provider", t("schema-provider")),
+            labeled_field("agent.app_providers[].kind", t("schema-kind")),
+            labeled_field("agent.app_providers[].models", t("schema-models")),
+            labeled_field("agent.acp", t("schema-acp")),
+            labeled_field("agent.acp[].id", t("schema-id")),
+            labeled_field("agent.acp[].name", t("schema-name")),
+            labeled_field("agent.acp[].command", t("schema-command")),
+            labeled_field("agent.acp[].args", t("schema-arguments")),
+            labeled_field("agent.acp[].env", t("schema-environment")),
+            labeled_field("agent.acp[].cwd", t("schema-working-directory")),
             field(
                 "shortcuts",
                 FieldSpec {
@@ -546,6 +620,9 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                 "terminal",
                 FieldSpec {
                     order: vec![
+                        "shell".into(),
+                        "font_family".into(),
+                        "startup_dir".into(),
                         "confirm_close".into(),
                         "default_theme".into(),
                         "themes".into(),
@@ -554,6 +631,9 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("terminal.shell", t("schema-shell")),
+            labeled_field("terminal.font_family", t("schema-font-family")),
+            labeled_field("terminal.startup_dir", t("schema-startup-directory")),
             field(
                 "terminal.confirm_close",
                 FieldSpec {
@@ -571,12 +651,105 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     ..Default::default()
                 },
             ),
+            labeled_field("terminal.themes", t("schema-themes")),
+            labeled_field("terminal.themes[].name", t("schema-name")),
+            labeled_field("terminal.themes[].color_scheme", t("schema-color-scheme")),
+            labeled_field("terminal.themes[].font_family", t("schema-font-family")),
+            labeled_field("terminal.themes[].font_size", t("schema-font-size")),
+            labeled_field("terminal.themes[].line_height", t("schema-line-height")),
+            labeled_field("terminal.themes[].padding", t("schema-padding")),
+            labeled_field("terminal.themes[].cursor_style", t("schema-cursor-style")),
+            labeled_field("terminal.themes[].cursor_blink", t("schema-cursor-blink")),
+            labeled_field("terminal.themes[].shell", t("schema-shell")),
+            labeled_field("terminal.custom_themes", t("schema-custom-themes")),
+            labeled_field("terminal.custom_themes[].name", t("schema-name")),
+            labeled_field(
+                "terminal.custom_themes[].foreground",
+                t("schema-foreground"),
+            ),
+            labeled_field(
+                "terminal.custom_themes[].background",
+                t("schema-background"),
+            ),
+            labeled_field("terminal.custom_themes[].cursor", t("schema-cursor")),
+            labeled_field("terminal.custom_themes[].ansi", t("schema-ansi-colors")),
+            field(
+                "editor",
+                FieldSpec {
+                    order: vec!["keymap".into(), "explorer".into(), "lsp".into()],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "editor.keymap",
+                FieldSpec {
+                    label: Some(t("schema-keymap")),
+                    widget: Some(WidgetKind::Select),
+                    options: vec![
+                        SelectOption {
+                            value: "vscode".into(),
+                            label: "VS Code".into(),
+                        },
+                        SelectOption {
+                            value: "vim".into(),
+                            label: "Vim".into(),
+                        },
+                    ],
+                    ..Default::default()
+                },
+            ),
+            field(
+                "editor.explorer",
+                FieldSpec {
+                    label: Some(t("schema-explorer")),
+                    order: vec!["visible".into(), "width".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("editor.explorer.visible", t("schema-visible")),
+            labeled_field("editor.explorer.width", t("schema-width")),
+            field(
+                "editor.lsp",
+                FieldSpec {
+                    label: Some(t("schema-language-servers")),
+                    order: vec!["servers".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("editor.lsp.servers", t("schema-servers")),
+            labeled_field("editor.lsp.servers.*.command", t("schema-command")),
+            labeled_field("editor.lsp.servers.*.args", t("schema-arguments")),
+            labeled_field("editor.lsp.servers.*.language_id", t("schema-language-id")),
+            labeled_field(
+                "editor.lsp.servers.*.root_markers",
+                t("schema-root-markers"),
+            ),
+            field(
+                "recording",
+                FieldSpec {
+                    order: vec!["output_dir".into()],
+                    ..Default::default()
+                },
+            ),
+            labeled_field("recording.output_dir", t("schema-output-directory")),
+            labeled_field("spaces.*.startup_url", t("schema-startup-url")),
+            labeled_field("spaces.*.startup_dir", t("schema-startup-directory")),
         ],
     }
 }
 
 fn field(path: &str, spec: FieldSpec) -> (String, FieldSpec) {
     (path.to_string(), spec)
+}
+
+fn labeled_field(path: &str, label: String) -> (String, FieldSpec) {
+    field(
+        path,
+        FieldSpec {
+            label: Some(label),
+            ..Default::default()
+        },
+    )
 }
 
 #[cfg(test)]
@@ -627,6 +800,32 @@ mod appearance_schema_tests {
         assert_eq!(
             schema.field("appearance.locale").unwrap().label.as_deref(),
             Some("言語")
+        );
+        assert_eq!(appearance.root_path, "appearance");
+        assert!(appearance.synthetic_keys.is_empty());
+        assert_eq!(
+            schema
+                .field("agent.app_providers[0].provider")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("プロバイダー")
+        );
+        assert_eq!(
+            schema
+                .field("agent.acp[0].command")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("コマンド")
+        );
+        assert_eq!(
+            schema
+                .field("spaces.personal.startup_dir")
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("起動ディレクトリ")
         );
     }
 }

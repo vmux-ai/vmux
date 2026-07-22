@@ -8,6 +8,9 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 #[component]
 pub fn Page() -> Element {
     use_theme();
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate("services-title"));
+    }
     let state = use_event::<ProcessesListEvent>(PROCESSES_LIST_EVENT, || ProcessesListEvent {
         connected: false,
         processes: Vec::new(),
@@ -72,7 +75,7 @@ pub fn Page() -> Element {
                         p { class: "mt-1 text-xs opacity-60",
                             {translate("services-start-with")}
                             " "
-                            code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs", "Vmux service" }
+                            code { class: "rounded bg-muted px-1.5 py-0.5 font-mono text-xs", {translate("services-command")} }
                         }
                     }
                 }
@@ -245,12 +248,39 @@ fn MetaRow(label: String, value: String) -> Element {
 
 fn format_uptime(secs: u64) -> String {
     if secs < 60 {
-        format!("{secs}s")
+        translate_with(
+            "services-uptime-seconds",
+            &[("seconds", TranslationValue::Number(secs as i64))],
+        )
     } else if secs < 3600 {
-        format!("{}m {}s", secs / 60, secs % 60)
+        translate_with(
+            "services-uptime-minutes",
+            &[
+                ("minutes", TranslationValue::Number((secs / 60) as i64)),
+                ("seconds", TranslationValue::Number((secs % 60) as i64)),
+            ],
+        )
     } else if secs < 86400 {
-        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        translate_with(
+            "services-uptime-hours",
+            &[
+                ("hours", TranslationValue::Number((secs / 3600) as i64)),
+                (
+                    "minutes",
+                    TranslationValue::Number(((secs % 3600) / 60) as i64),
+                ),
+            ],
+        )
     } else {
-        format!("{}d {}h", secs / 86400, (secs % 86400) / 3600)
+        translate_with(
+            "services-uptime-days",
+            &[
+                ("days", TranslationValue::Number((secs / 86400) as i64)),
+                (
+                    "hours",
+                    TranslationValue::Number(((secs % 86400) / 3600) as i64),
+                ),
+            ],
+        )
     }
 }

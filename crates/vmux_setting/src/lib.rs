@@ -36,9 +36,9 @@ pub use plugin::runtime::{
     EXPLORER_MIN_WIDTH, EditorSettings, ExplorerSettings, KeyComboDef, LastSelfWriteHash,
     LspServerOverride, LspSettings, SettingsLoadSet, SettingsSaveRequest, SettingsWriteRequest,
     ShortcutDef, ShortcutEntry, ShortcutSettings, SpaceOverrides, TerminalSettings, TerminalTheme,
-    apply_settings_update, load_settings, resolve_startup_dir, resolve_startup_dir_for_tab,
-    resolve_startup_dir_for_tab_with_source, resolve_startup_url, resolve_tab_workspace_dir,
-    serialize_settings_to_json, set_at_path, validate_tab_workspace_dir,
+    apply_settings_update, load_settings, read_settings_from_disk, resolve_startup_dir,
+    resolve_startup_dir_for_tab, resolve_startup_dir_for_tab_with_source, resolve_startup_url,
+    resolve_tab_workspace_dir, serialize_settings_to_json, set_at_path, validate_tab_workspace_dir,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::view::Settings;

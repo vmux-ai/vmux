@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, mpsc};
 use std::time::{Duration, Instant};
 use vmux_command::event::SearchEngine;
-use vmux_layout::settings::ConfirmCloseSettings;
 pub use vmux_layout::settings::LayoutSettings;
+use vmux_layout::settings::{ConfirmCloseSettings, ResolvedLocale};
 #[cfg(test)]
 pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -711,14 +711,18 @@ fn parse_settings(text: &str) -> Result<AppSettings, ron::error::SpannedError> {
         .map(merge_over_embedded)
 }
 
-pub fn load_settings(mut commands: Commands) {
+pub fn read_settings_from_disk() -> AppSettings {
+    read_settings_and_path().0
+}
+
+fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
     // Resolve the active settings file: per-build override (~/.vmux/<profile>/
     // settings.ron) if present, else the shared ~/.vmux/settings.ron.
     let path = vmux_core::profile::settings_path();
     let parent_ready = path
         .parent()
         .is_some_and(|parent| std::fs::create_dir_all(parent).is_ok());
-    let (settings, config_path) = if parent_ready {
+    if parent_ready {
         let s = match std::fs::read_to_string(&path) {
             Ok(text) => match parse_settings(&text) {
                 Ok(s) => s,
@@ -735,7 +739,13 @@ pub fn load_settings(mut commands: Commands) {
         (s, Some(path))
     } else {
         (load_embedded_settings(), None)
-    };
+    }
+}
+
+pub fn load_settings(mut commands: Commands) {
+    let (settings, config_path) = read_settings_and_path();
+    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
+    vmux_ui::i18n::set_current_locale(&locale);
 
     sync_layout_resources(&mut commands, &settings);
     commands.insert_resource(settings);
@@ -777,6 +787,7 @@ pub(crate) fn reload_settings_on_change(
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
     mut confirm_close: ResMut<ConfirmCloseSettings>,
+    mut resolved_locale: ResMut<ResolvedLocale>,
     last_hash: Res<LastSelfWriteHash>,
 ) {
     let Some(watcher) = watcher else { return };
@@ -801,6 +812,10 @@ pub(crate) fn reload_settings_on_change(
             match parse_settings(&text) {
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
+                    let locale =
+                        vmux_ui::i18n::requested_locale(Some(&new_settings.appearance.locale));
+                    vmux_ui::i18n::set_current_locale(&locale);
+                    resolved_locale.0 = locale;
                     *layout_settings = new_settings.layout.clone();
                     confirm_close.enabled = new_settings
                         .terminal
@@ -825,6 +840,9 @@ fn load_embedded_settings() -> AppSettings {
 
 fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     commands.insert_resource(settings.layout.clone());
+    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::requested_locale(Some(
+        &settings.appearance.locale,
+    ))));
     commands.insert_resource(ConfirmCloseSettings {
         enabled: settings
             .terminal

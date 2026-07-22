@@ -108,8 +108,10 @@ impl ImplApp for BrowserProcessAppBuilder {
             .ok()
             .filter(|d| !d.is_empty());
         if is_browser_process && let Some(dirs) = load_extensions {
-            command_line
-                .append_switch_with_value(Some(&"load-extension".into()), Some(&dirs.as_str().into()));
+            command_line.append_switch_with_value(
+                Some(&"load-extension".into()),
+                Some(&dirs.as_str().into()),
+            );
             command_line.append_switch_with_value(
                 Some(&"disable-extensions-except".into()),
                 Some(&dirs.as_str().into()),

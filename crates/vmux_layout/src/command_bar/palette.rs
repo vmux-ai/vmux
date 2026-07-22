@@ -466,7 +466,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             Some(ResultItem::Stack { url, .. }) => url.clone(),
             Some(ResultItem::Space { name, .. }) => name.clone(),
             Some(ResultItem::Page { title, .. }) => title.clone(),
-            Some(ResultItem::Terminal { path }) if path.is_empty() => "Terminal".to_string(),
+            Some(ResultItem::Terminal { path }) if path.is_empty() => translate("command-terminal"),
             Some(ResultItem::Terminal { path }) => path.clone(),
             Some(ResultItem::History { title, url, .. }) => {
                 if title.is_empty() {
@@ -1231,8 +1231,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         }
                         button {
                             r#type: "button",
-                            aria_label: "Bookmark this page",
-                            title: "Bookmark this page (⌘D)",
+                            aria_label: translate("layout-bookmark-page"),
+                            title: format!("{} (⌘D)", translate("layout-bookmark-page")),
                             class: "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                             onmousedown: move |event| {
                                 event.prevent_default();
@@ -1265,6 +1265,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         items: prompt_media_options,
                         selected: media_sel,
                         loading: media_loading(),
+                        loading_label: translate("agent-loading-media"),
+                        empty_label: translate("agent-no-matching-media"),
                         on_hover: move |index| media_selected.set(index),
                         on_select: move |index| {
                             if let Some(entry) = media_entries.peek().get(index).cloned() {

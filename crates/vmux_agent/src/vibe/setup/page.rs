@@ -9,6 +9,7 @@ use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn current_agent_segment() -> String {
     web_sys::window()
@@ -18,11 +19,11 @@ fn current_agent_segment() -> String {
         .unwrap_or_else(|| "vibe".to_string())
 }
 
-fn tagline(segment: &str) -> &'static str {
+fn tagline(segment: &str) -> String {
     match segment {
-        "claude" => "Anthropic's coding agent, in vmux",
-        "codex" => "OpenAI's coding agent, in vmux",
-        _ => "Mistral's coding agent, in vmux",
+        "claude" => translate("setup-tagline-claude"),
+        "codex" => translate("setup-tagline-codex"),
+        _ => translate("setup-tagline-vibe"),
     }
 }
 
@@ -35,6 +36,12 @@ pub fn Page() -> Element {
     let brew_command = vmux_core::agent_setup::homebrew_install_command();
     let tagline = tagline(&segment);
     let accent = agent_accent(&segment);
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        document.set_title(&translate_with(
+            "setup-install-title",
+            &[("name", TranslationValue::String(name))],
+        ));
+    }
 
     let mut installing = use_signal(|| false);
     let mut needs_homebrew = use_signal(|| false);
@@ -87,16 +94,26 @@ pub fn Page() -> Element {
                         }
                     }
                     div { class: "min-w-0",
-                        h1 { class: "text-xl font-semibold leading-tight tracking-tight", "Install {name} CLI" }
+                        h1 {
+                            class: "text-xl font-semibold leading-tight tracking-tight",
+                            {translate_with(
+                                "setup-install-title",
+                                &[("name", TranslationValue::String(name))],
+                            )}
+                        }
                         p { class: "text-sm text-muted-foreground", "{tagline}" }
                     }
                 }
 
                 if needs_homebrew() {
                     p { class: "mb-5 text-sm leading-relaxed text-muted-foreground",
-                        "Homebrew is required to install "
-                        code { class: "rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
-                        " and isn't set up yet. vmux will install Homebrew first, then {name}."
+                        {translate_with(
+                            "setup-homebrew-required",
+                            &[
+                                ("command", TranslationValue::String(&segment)),
+                                ("name", TranslationValue::String(name)),
+                            ],
+                        )}
                     }
                     div { class: "mb-2 flex items-center gap-3 rounded-xl bg-foreground/[0.08] p-4 ring-1 ring-inset ring-foreground/10",
                         span { class: "{prompt_class}", "1" }
@@ -107,13 +124,14 @@ pub fn Page() -> Element {
                         code { class: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-sm text-foreground", "{command}" }
                     }
                     p { class: "mb-5 text-xs text-muted-foreground/70",
-                        "In the terminal, press Return to start, then enter your Mac password when prompted."
+                        {translate("setup-terminal-instructions")}
                     }
                 } else {
                     p { class: "mb-5 text-sm leading-relaxed text-muted-foreground",
-                        "vmux opened this page because the local "
-                        code { class: "rounded bg-foreground/10 px-1.5 py-0.5 font-mono text-[0.8em] text-foreground", "{segment}" }
-                        " command isn't installed yet. Run the command below to get it."
+                        {translate_with(
+                            "setup-command-missing",
+                            &[("command", TranslationValue::String(&segment))],
+                        )}
                     }
                     div { class: "mb-5 flex items-center gap-3 rounded-xl bg-foreground/[0.08] p-4 ring-1 ring-inset ring-foreground/10",
                         span { class: "{prompt_class}", "$" }
@@ -123,7 +141,7 @@ pub fn Page() -> Element {
 
                 if failed() {
                     p { class: "mb-3 rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300 ring-1 ring-inset ring-red-500/20",
-                        "Install didn't finish. Check the terminal for details, then retry."
+                        {translate("setup-install-failed")}
                     }
                 }
 
@@ -137,32 +155,36 @@ pub fn Page() -> Element {
                     },
                     if installing() {
                         span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" }
-                        "Installing…"
+                        {translate("setup-installing")}
                     } else if failed() {
                         Icon { class: "h-4 w-4",
                             path { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" }
                             path { d: "M3 3v5h5" }
                         }
-                        "Retry"
+                        {translate("common-retry")}
                     } else if needs_homebrew() {
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "m12 5 7 7-7 7" }
                         }
-                        "Install Homebrew + {name}"
+                        {translate_with(
+                            "setup-install-homebrew",
+                            &[("name", TranslationValue::String(name))],
+                        )}
                     } else {
                         Icon { class: "h-4 w-4",
                             path { d: "M5 12h14" }
                             path { d: "m12 5 7 7-7 7" }
                         }
-                        "Run install command"
+                        {translate("setup-run-install")}
                     }
                 }
 
                 p { class: "mt-3 text-center text-xs text-muted-foreground/70",
-                    "vmux runs it in a terminal and reloads when "
-                    code { class: "font-mono", "{segment}" }
-                    " is ready."
+                    {translate_with(
+                        "setup-auto-reload",
+                        &[("command", TranslationValue::String(&segment))],
+                    )}
                 }
             }
         }

@@ -107,7 +107,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("entry.name.eq_ignore_ascii_case(\"welcome.md\")"));
     assert!(source.contains("open_knowledge_path(pane_id, landing_path.clone())"));
     assert!(source.contains("if entry.title.is_empty()"));
-    assert!(source.contains("\"Empty folder\""));
     assert!(source.contains("if expanded() {"));
     assert!(!source.contains("if expanded() && has_children"));
     assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
@@ -231,7 +230,6 @@ fn dir_path_titles_truncate_at_start() {
     assert!(source.contains("title.starts_with('/') || title.starts_with(\"~/\")"));
     assert!(source.contains("\"truncate-start\""));
     assert!(source.contains("dir_truncate_class(&display_title)"));
-    assert!(source.contains("dir_truncate_class(&stack.title)"));
 
     let theme = include_str!("../../vmux_ui/assets/theme.css");
     assert!(theme.contains(".truncate-start"));

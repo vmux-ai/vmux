@@ -36,6 +36,7 @@ impl Plugin for LayoutPlugin {
         app.register_type::<Open>()
             .init_resource::<NewStackContext>()
             .init_resource::<settings::ConfirmCloseSettings>()
+            .init_resource::<settings::ResolvedLocale>()
             .init_resource::<crate::UpdateState>()
             .add_message::<LayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()

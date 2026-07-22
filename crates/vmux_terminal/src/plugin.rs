@@ -4677,7 +4677,6 @@ mod tests {
         assert!(page.contains("MatrixRain {"));
         assert!(page.contains("accent.rain_rgb"));
         assert!(page.contains("terminal: true"));
-        assert!(page.contains("type a command · runs when ready"));
 
         let rain = include_str!("matrix_rain.rs");
         assert!(rain.contains("request_animation_frame"));

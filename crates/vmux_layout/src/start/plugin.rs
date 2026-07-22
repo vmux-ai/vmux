@@ -19,6 +19,7 @@ use crate::cef::Browser;
 use crate::command_bar::handler::{
     TabGatherParams, build_command_bar_open_payload, gather_command_bar_tabs,
 };
+use crate::settings::ResolvedLocale;
 use crate::start::START_PAGE_URL;
 use crate::start::event::{
     START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput, StartSelectWorkspace,
@@ -289,6 +290,7 @@ fn sync_live_start_pages(
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
+    locale: Option<Res<ResolvedLocale>>,
     focused: Res<crate::stack::FocusedStack>,
     starts: Query<
         (
@@ -310,7 +312,12 @@ fn sync_live_start_pages(
         pages_snapshot.is_changed(),
         work_snapshot.is_changed(),
         focus_changed,
-    ) || prompt_context.changed(tab_gather.active_tab.get());
+    ) || prompt_context.changed(tab_gather.active_tab.get())
+        || locale.as_ref().is_some_and(|locale| locale.is_changed());
+    let locale = locale
+        .as_deref()
+        .map(|locale| locale.0.clone())
+        .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
@@ -342,6 +349,7 @@ fn sync_live_start_pages(
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
+        &locale,
     );
     for (e, focus_requested) in targets {
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -470,9 +478,14 @@ fn on_start_spare_revealed(
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
+    locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
     for ev in revealed.read() {
+        let locale = locale
+            .as_deref()
+            .map(|locale| locale.0.clone())
+            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
         let payload = build_start_payload(
             &tab_gather,
             &spaces_snapshot,
@@ -480,6 +493,7 @@ fn on_start_spare_revealed(
             &pages_snapshot,
             &work_snapshot,
             &prompt_context,
+            &locale,
         );
         commands.trigger(BinHostEmitEvent::from_rkyv(
             ev.webview,
@@ -506,6 +520,7 @@ fn on_start_data_request(
     agents_snapshot: Res<CommandBarAgentsSnapshot>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
+    locale: Option<Res<ResolvedLocale>>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
@@ -520,6 +535,10 @@ fn on_start_data_request(
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
+        &locale
+            .as_deref()
+            .map(|locale| locale.0.clone())
+            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None)),
     );
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
@@ -543,6 +562,7 @@ fn build_start_payload(
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &CommandBarWorkSnapshot,
     prompt_context: &StartPromptContextParams,
+    locale: &str,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = spaces_snapshot.active_space_name.clone();
@@ -557,6 +577,7 @@ fn build_start_payload(
         &tab_gather.browser_meta,
         &tab_gather.child_of_q,
         &space_name,
+        locale,
     );
     let mut payload = build_command_bar_open_payload(
         0,
@@ -567,6 +588,7 @@ fn build_start_payload(
         agents_snapshot,
         pages_snapshot,
         work_snapshot,
+        locale,
         active_stack_count,
         tabs,
         Some(OpenTarget::InPlace),

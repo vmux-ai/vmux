@@ -18,8 +18,8 @@ use runtime::{
 };
 use view::{
     broadcast_schema_to_views, broadcast_settings_to_views, broadcast_update_status_to_views,
-    handle_open_settings_command, on_check_for_updates, on_settings_command,
-    reset_sent_markers_on_page_ready,
+    handle_open_settings_command, localize_settings_metadata, on_check_for_updates,
+    on_settings_command, reset_sent_markers_on_page_ready,
 };
 
 /// Wires settings: RON load/save with debounce, schema and settings broadcasts, and the
@@ -78,6 +78,7 @@ impl Plugin for SettingsPlugin {
             .add_systems(
                 Update,
                 (
+                    localize_settings_metadata,
                     broadcast_schema_to_views,
                     broadcast_settings_to_views,
                     broadcast_update_status_to_views,

@@ -28,6 +28,15 @@ pub struct EffectiveStartupUrl(pub String);
 #[derive(Resource, Clone, Debug, Default)]
 pub struct EffectiveStartupDir(pub Option<(Entity, Option<std::path::PathBuf>)>);
 
+#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedLocale(pub String);
+
+impl Default for ResolvedLocale {
+    fn default() -> Self {
+        Self(vmux_ui::i18n::requested_locale(None))
+    }
+}
+
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EffectiveStartupDirSet;
 

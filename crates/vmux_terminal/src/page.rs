@@ -13,6 +13,7 @@ use unicode_width::UnicodeWidthChar;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -22,11 +23,28 @@ const CONTAINER_ID: &str = "term-container";
 /// ID for the hidden measurement span used to compute character dimensions.
 const MEASURE_ID: &str = "term-measure";
 
+fn localized_terminal_title(title: &str) -> String {
+    if title == "Terminal" {
+        translate("command-terminal")
+    } else if let Some(detail) = title
+        .strip_prefix("Terminal (")
+        .and_then(|value| value.strip_suffix(')'))
+    {
+        translate_with(
+            "command-terminal-path",
+            &[("path", TranslationValue::String(detail))],
+        )
+    } else {
+        title.to_string()
+    }
+}
+
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut rows = use_signal(std::collections::BTreeMap::<u32, Signal<TermLine>>::new);
     let mut first_row = use_signal(|| 0u32);
+    let mut raw_title = use_signal(String::new);
     let mut total_rows = use_signal(|| 0u32);
     let mut alt = use_signal(|| false);
     let mut mouse = use_signal(|| false);
@@ -111,12 +129,18 @@ pub fn Page() -> Element {
 
     let _title_listener =
         use_bin_event_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
-            if let Some(window) = web_sys::window()
-                && let Some(doc) = window.document()
-            {
-                doc.set_title(&evt.title);
-            }
+            raw_title.set(evt.title);
         });
+
+    use_effect(move || {
+        locale();
+        let title = localized_terminal_title(&raw_title());
+        if !title.is_empty()
+            && let Some(document) = web_sys::window().and_then(|window| window.document())
+        {
+            document.set_title(&title);
+        }
+    });
 
     let _loading_listener =
         use_bin_event_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
@@ -360,7 +384,7 @@ pub fn Page() -> Element {
                     div {
                         class: "absolute inset-0 z-40 flex items-center justify-center text-sm",
                         style: "color:#888;",
-                        "Loading…"
+                        {translate("terminal-loading")}
                     }
                 })
             }
@@ -369,8 +393,13 @@ pub fn Page() -> Element {
                 let state = loading.read().clone();
                 state.map(|(label, segment)| {
                     let accent = agent_accent(&segment);
+                    let display_label = if segment == "terminal" {
+                        translate("command-terminal")
+                    } else {
+                        label.clone()
+                    };
                     let favicon_url = format!("vmux://agent/{segment}/cli/");
-                    let words = vec![label.to_uppercase()];
+                    let words = vec![display_label.to_uppercase()];
                     let (draft_text, draft_skipped) = prompt_draft.read().clone();
                     let composing = !draft_skipped && !draft_text.is_empty();
                     rsx! {
@@ -391,7 +420,7 @@ pub fn Page() -> Element {
                                         }
                                     }
                                     div {
-                                        div { class: "text-sm font-semibold {accent.accent_text}", "{label}" }
+                                        div { class: "text-sm font-semibold {accent.accent_text}", "{display_label}" }
                                         if composing {
                                             div {
                                                 class: "mt-0.5 w-80 whitespace-pre-wrap break-words font-mono text-sm text-foreground",
@@ -400,12 +429,12 @@ pub fn Page() -> Element {
                                             }
                                             div {
                                                 class: "mt-1 text-[10px] text-muted-foreground/70",
-                                                "runs when ready · Ctrl+C clears · Esc skips"
+                                                {translate("terminal-runs-when-ready")}
                                             }
                                         } else if draft_skipped {
                                             div {
                                                 class: "flex items-center gap-1.5 text-xs text-muted-foreground",
-                                                span { class: "font-mono", "> booting" }
+                                                span { class: "font-mono", {format!("> {}", translate("terminal-booting"))} }
                                                 span { class: "inline-block h-3.5 w-2 animate-pulse {accent.accent_bg}" }
                                             }
                                         } else {
@@ -418,7 +447,7 @@ pub fn Page() -> Element {
                                             }
                                             div {
                                                 class: "mt-1 text-[10px] text-muted-foreground/70",
-                                                "type a command · runs when ready · Esc skips"
+                                                {translate("terminal-type-command")}
                                             }
                                         }
                                     }
