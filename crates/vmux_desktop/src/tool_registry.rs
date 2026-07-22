@@ -18,7 +18,7 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
     host: "registry",
     title: "Registry",
     keywords: &[
-        "registry", "packages", "tools", "dotfiles", "homebrew", "npm",
+        "registry", "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
     ],
     icon: Some(vmux_core::BuiltinIcon::Layers),
     command_bar: true,
@@ -300,6 +300,7 @@ fn scan_registry(refresh_catalogs: bool) -> RegistrySnapshot {
         };
         categories.push(build_category(provider, inventory, &manifest));
     }
+    categories.push(scan_mcp(&manifest, &mut errors));
     categories.push(scan_dotfiles(&manifest));
     let installed = categories
         .iter()
@@ -632,6 +633,79 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     Ok(inventory)
 }
 
+fn scan_mcp(manifest: &RegistryManifest, errors: &mut Vec<String>) -> RegistryCategory {
+    let (discovered, discovery_errors) = manifest_store::discover_mcp_servers();
+    errors.extend(
+        discovery_errors
+            .into_iter()
+            .map(|error| format!("MCP Servers: {error}")),
+    );
+    let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
+    names.extend(manifest.mcp.servers.keys().cloned());
+    let items = names
+        .into_iter()
+        .map(|name| {
+            let managed = manifest.mcp.servers.contains_key(&name);
+            let external = discovered.get(&name);
+            let status = if managed {
+                RegistryStatus::Installed
+            } else if external.is_some_and(|server| server.conflict) {
+                RegistryStatus::Conflict
+            } else {
+                RegistryStatus::Available
+            };
+            let definition = manifest
+                .mcp
+                .servers
+                .get(&name)
+                .or_else(|| external.map(|server| &server.definition));
+            let transport = definition
+                .map(|server| format!("{:?}", server.transport).to_ascii_lowercase())
+                .unwrap_or_else(|| "unknown".to_string());
+            let sources = external
+                .map(|server| {
+                    server
+                        .sources
+                        .iter()
+                        .map(|path| path.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            let detail = if external.is_some_and(|server| server.conflict) && !managed {
+                format!("Conflicting definitions in {sources}")
+            } else if managed && sources.is_empty() {
+                format!("{transport} · Registry managed")
+            } else if managed {
+                format!("{transport} · Registry managed · imported from {sources}")
+            } else {
+                format!("{transport} · configured in {sources}")
+            };
+            let actions = if managed {
+                vec![RegistryAction::Forget]
+            } else if status == RegistryStatus::Available {
+                vec![RegistryAction::Adopt]
+            } else {
+                Vec::new()
+            };
+            RegistryItem {
+                provider: RegistryProvider::Mcp,
+                id: name.clone(),
+                name,
+                version: None,
+                detail,
+                status,
+                managed,
+                actions,
+            }
+        })
+        .collect();
+    RegistryCategory {
+        provider: RegistryProvider::Mcp,
+        items,
+    }
+}
+
 fn scan_dotfiles(manifest: &RegistryManifest) -> RegistryCategory {
     let mut package_names = manifest_store::dotfile_packages()
         .into_iter()
@@ -697,6 +771,9 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
     if request.action == RegistryAction::Apply {
         return apply_manifest();
     }
+    if request.action == RegistryAction::Import {
+        return import_provider(request.provider, request.value.trim());
+    }
     if request.id.trim().is_empty() {
         return Err("package name is required".to_string());
     }
@@ -730,6 +807,9 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
                     request.id.trim(),
                 )?;
                 Ok(format!("adopted {}", destination.display()))
+            } else if request.provider == RegistryProvider::Mcp {
+                manifest_store::import_discovered_mcp_server(&request.id)?;
+                Ok(format!("{} is now managed", request.id))
             } else {
                 set_manifest_entry(request.provider, &request.id, true)?;
                 Ok(format!("{} is now managed", request.id))
@@ -755,8 +835,90 @@ fn perform_action(request: &RegistryActionRequest) -> Result<String, String> {
             set_manifest_entry(request.provider, &request.id, false)?;
             Ok(format!("unlinked {removed} file(s)"))
         }
-        RegistryAction::Apply => unreachable!(),
+        RegistryAction::Apply | RegistryAction::Import => unreachable!(),
     }
+}
+
+fn import_provider(provider: RegistryProvider, path: &str) -> Result<String, String> {
+    match provider {
+        RegistryProvider::HomebrewFormula | RegistryProvider::HomebrewCask => {
+            if !path.is_empty() {
+                let (formulae, casks) = manifest_store::import_brewfile(Path::new(path))?;
+                Ok(format!("imported {formulae} formulae and {casks} casks"))
+            } else {
+                let formulae = scan_homebrew(false, false)?;
+                let casks = scan_homebrew(true, false)?;
+                let mut manifest = manifest_store::load_manifest()?;
+                let formulae =
+                    import_inventory(&mut manifest, RegistryProvider::HomebrewFormula, formulae);
+                let casks = import_inventory(&mut manifest, RegistryProvider::HomebrewCask, casks);
+                manifest_store::write_manifest(&manifest)?;
+                Ok(format!("imported {formulae} formulae and {casks} casks"))
+            }
+        }
+        RegistryProvider::Npm => {
+            if !path.is_empty() {
+                let imported = manifest_store::import_npm_manifest(Path::new(path))?;
+                Ok(format!("imported {imported} npm package(s)"))
+            } else {
+                import_scanned_inventory(provider, scan_npm(false)?)
+            }
+        }
+        RegistryProvider::Acp => import_scanned_inventory(provider, scan_acp(false)?),
+        RegistryProvider::Lsp => import_scanned_inventory(provider, scan_lsp(false)?),
+        RegistryProvider::Mcp => {
+            let imported = if path.is_empty() {
+                manifest_store::import_default_mcp_configs()?
+            } else {
+                manifest_store::import_mcp_config(Path::new(path))?
+            };
+            Ok(format!("imported {imported} MCP server(s)"))
+        }
+        RegistryProvider::Dotfiles => {
+            if path.is_empty() {
+                let packages = manifest_store::dotfile_packages();
+                let mut manifest = manifest_store::load_manifest()?;
+                let mut imported = 0;
+                for package in packages {
+                    imported += usize::from(!manifest.dotfiles.packages.contains(&package));
+                    manifest.set_dotfile_package(&package, true);
+                }
+                manifest_store::write_manifest(&manifest)?;
+                Ok(format!("imported {imported} dotfile package(s)"))
+            } else {
+                let imported = manifest_store::import_dotfiles(Path::new(path))?;
+                Ok(format!("imported {imported} dotfile package(s)"))
+            }
+        }
+    }
+}
+
+fn import_scanned_inventory(
+    provider: RegistryProvider,
+    inventory: Vec<InventoryItem>,
+) -> Result<String, String> {
+    let mut manifest = manifest_store::load_manifest()?;
+    let imported = import_inventory(&mut manifest, provider, inventory);
+    manifest_store::write_manifest(&manifest)?;
+    Ok(format!("imported {imported} {} item(s)", provider.id()))
+}
+
+fn import_inventory(
+    manifest: &mut RegistryManifest,
+    provider: RegistryProvider,
+    inventory: Vec<InventoryItem>,
+) -> usize {
+    let mut imported = 0;
+    for item in inventory.into_iter().filter(|item| {
+        matches!(
+            item.status,
+            RegistryStatus::Installed | RegistryStatus::Outdated
+        )
+    }) {
+        imported += usize::from(!manifest.contains(provider.id(), &item.id));
+        manifest.set_package(provider.id(), &item.id, true);
+    }
+    imported
 }
 
 fn apply_manifest() -> Result<String, String> {
@@ -768,7 +930,12 @@ fn apply_manifest() -> Result<String, String> {
         .iter()
         .flat_map(|category| &category.items)
         .filter(|item| item.managed && item.status == RegistryStatus::Missing)
-        .filter(|item| item.provider != RegistryProvider::Dotfiles)
+        .filter(|item| {
+            !matches!(
+                item.provider,
+                RegistryProvider::Dotfiles | RegistryProvider::Mcp
+            )
+        })
     {
         install_provider(item.provider, &item.id)?;
         installed += 1;
@@ -783,6 +950,11 @@ fn set_manifest_entry(provider: RegistryProvider, id: &str, enabled: bool) -> Re
     let mut manifest = manifest_store::load_manifest()?;
     if provider == RegistryProvider::Dotfiles {
         manifest.set_dotfile_package(id, enabled);
+    } else if provider == RegistryProvider::Mcp {
+        if enabled {
+            return Err("MCP servers must be imported from a config".to_string());
+        }
+        manifest.mcp.servers.remove(id);
     } else {
         manifest.set_package(provider.id(), id, enabled);
     }
@@ -820,6 +992,7 @@ fn install_provider(provider: RegistryProvider, id: &str) -> Result<(), String> 
         RegistryProvider::Dotfiles => {
             manifest_store::apply_dotfile_package(id)?;
         }
+        RegistryProvider::Mcp => return Err("MCP servers are configuration, not packages".into()),
     }
     Ok(())
 }
@@ -843,6 +1016,7 @@ fn uninstall_provider(provider: RegistryProvider, id: &str) -> Result<(), String
         RegistryProvider::Dotfiles => {
             manifest_store::unlink_dotfile_package(id)?;
         }
+        RegistryProvider::Mcp => return Err("forget the MCP server instead".to_string()),
     }
     Ok(())
 }
@@ -861,6 +1035,7 @@ fn update_provider(provider: RegistryProvider, id: &str) -> Result<(), String> {
         RegistryProvider::Acp | RegistryProvider::Lsp | RegistryProvider::Dotfiles => {
             install_provider(provider, id)?;
         }
+        RegistryProvider::Mcp => return Err("MCP servers do not update through Registry".into()),
     }
     Ok(())
 }
@@ -936,6 +1111,37 @@ mod tests {
             .unwrap();
         assert_eq!(scoped.version.as_deref(), Some("2.0.0"));
         assert_eq!(scoped.status, RegistryStatus::Outdated);
+    }
+
+    #[test]
+    fn bulk_import_adopts_only_installed_inventory() {
+        let mut manifest = RegistryManifest::default();
+        let imported = import_inventory(
+            &mut manifest,
+            RegistryProvider::Npm,
+            vec![
+                InventoryItem {
+                    id: "installed".to_string(),
+                    name: "installed".to_string(),
+                    version: Some("1".to_string()),
+                    detail: String::new(),
+                    status: RegistryStatus::Installed,
+                    removable: true,
+                },
+                InventoryItem {
+                    id: "missing".to_string(),
+                    name: "missing".to_string(),
+                    version: None,
+                    detail: String::new(),
+                    status: RegistryStatus::Missing,
+                    removable: true,
+                },
+            ],
+        );
+
+        assert_eq!(imported, 1);
+        assert!(manifest.contains("npm", "installed"));
+        assert!(!manifest.contains("npm", "missing"));
     }
 
     #[test]

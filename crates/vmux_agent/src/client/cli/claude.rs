@@ -159,6 +159,9 @@ fn build_mcp_config_json(mcp: &McpServerConfig) -> String {
     }
     let mut servers = Map::new();
     servers.insert("vmux".into(), Value::Object(server));
+    for (name, server) in crate::managed_mcp::load() {
+        servers.insert(name, crate::managed_mcp::claude_value(&server));
+    }
     let mut root = Map::new();
     root.insert("mcpServers".into(), Value::Object(servers));
     serde_json::to_string(&Value::Object(root)).unwrap_or_else(|_| "{}".into())

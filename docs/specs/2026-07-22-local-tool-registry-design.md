@@ -6,8 +6,8 @@ Status: Implemented
 ## Summary
 
 Registry is vmux's profile-agnostic inventory and desired-state layer for local tools. It combines
-Homebrew formulae and casks, global npm packages, ACP agents, language tools, and Stow-style
-dotfiles in one side-sheet tree and one `vmux://registry/` manager.
+Homebrew formulae and casks, global npm packages, ACP agents, MCP servers, language tools, and
+Stow-style dotfiles in one side-sheet tree and one `vmux://registry/` manager.
 
 Registry delegates package installation to each native package manager. It does not copy Homebrew
 or npm packages into a vmux-owned store. ACP and language tools continue using their existing
@@ -23,6 +23,8 @@ vmux-managed receipt stores.
 - Installed state and desired state remain distinct. Discovered packages are never automatically
   written to the manifest.
 - “Manage” explicitly adopts an installed package into `registry.toml`.
+- “Import” copies desired state from existing manifests without modifying the source file.
+- Registry-managed MCP servers are injected into vmux-launched Claude, Codex, Vibe, and ACP agents.
 - Missing desired packages remain visible and installable.
 - Scans run asynchronously and only when dirty. External update checks run on explicit refresh,
   avoiding idle polling and package-manager network work during startup.
@@ -53,6 +55,15 @@ npm = ["typescript"]
 acp = ["claude-acp"]
 lsp = ["rust-analyzer"]
 
+[mcp.servers.docs]
+transport = "http"
+url = "https://example.com/mcp"
+
+[mcp.servers.local]
+transport = "stdio"
+command = "npx"
+args = ["-y", "local-mcp-server"]
+
 [dotfiles]
 packages = ["git", "nushell"]
 ```
@@ -69,6 +80,7 @@ seeds default or empty configuration.
 | npm | `npm list --global --depth=0 --json` | global install/update/uninstall |
 | ACP | Existing `~/.vmux/agents` receipts and ACP catalog | Existing ACP installer |
 | Language tools | Existing `~/.vmux/lsp` receipts and Mason catalog | Existing LSP installer |
+| MCP | Claude, Codex, Vibe, and explicit MCP configs | Registry-owned agent injection |
 | Dotfiles | Registry package trees and link plans | Native Rust link engine |
 
 Package-manager commands inherit the captured login-shell environment, preserving Finder/launchd
@@ -100,6 +112,8 @@ manager in the active pane.
 - Categorized package rows.
 - Install, update, uninstall, manage, forget, link, and unlink actions.
 - Add-package controls for Homebrew, npm, ACP, and language tools.
+- Import controls for Brewfile, package.json, installed ACP/LSP receipts, MCP configs, and existing
+  Stow roots.
 - Dotfile adoption by package name and path.
 - Refresh and declarative Apply actions.
 
@@ -135,6 +149,19 @@ Safety rules:
 Package-manager actions remain in the desktop backend, where ACP/LSP installers and progress state
 already live.
 
+`vmux registry import` supports file-owned imports without launching the desktop:
+
+- `vmux registry import homebrew <Brewfile>`
+- `vmux registry import npm <package.json>`
+- `vmux registry import mcp [config]`
+- `vmux registry import dotfiles [stow-root]`
+
+Import merges into existing desired state. Brewfile formulae and casks retain separate providers;
+npm imports runtime, development, and optional dependencies; MCP import normalizes stdio, HTTP,
+and SSE definitions from Claude JSON and Codex/Vibe TOML. Dotfile import copies complete package
+directories into Registry ownership, rejects symlinks and collisions, and leaves the source tree
+untouched.
+
 ## Implementation
 
 - `vmux_profile::registry`: manifest, link planning, apply, unlink, adopt.
@@ -151,4 +178,6 @@ already live.
 - Homebrew inventory parsing.
 - Desired-but-missing package projection.
 - Action policy for managed and unmanaged packages.
+- Brewfile, package.json, MCP JSON/TOML, and Stow-root import behavior.
+- Registry-managed MCP projection into CLI and ACP launch configuration.
 - Native desktop build plus wasm page build.

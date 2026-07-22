@@ -38,6 +38,24 @@ pub enum AgentPaneDirection {
     Left,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ManagedMcpTransport {
+    Stdio,
+    Http,
+    Sse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ManagedMcpServer {
+    pub name: String,
+    pub transport: ManagedMcpTransport,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub url: Option<String>,
+    pub headers: Vec<(String, String)>,
+}
+
 /// How a spawned page is placed relative to its anchor pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum PlacementMode {
@@ -613,6 +631,8 @@ pub enum ClientMessage {
         /// When set, resume this agent-assigned ACP session id via `session/load` instead of
         /// starting a fresh session (gated on the agent's `loadSession` capability).
         resume_acp_session_id: Option<String>,
+        /// MCP servers imported into vmux Registry and managed for every launched agent.
+        managed_mcp_servers: Vec<ManagedMcpServer>,
     },
     Status,
     AgentInputWithAttachments {
@@ -1626,6 +1646,15 @@ mod tests {
             mcp_command: Some("vmux".into()),
             mcp_args: vec!["mcp".into(), "--anchor".into()],
             resume_acp_session_id: Some("prev-session".into()),
+            managed_mcp_servers: vec![ManagedMcpServer {
+                name: "docs".into(),
+                transport: ManagedMcpTransport::Http,
+                command: None,
+                args: Vec::new(),
+                env: Vec::new(),
+                url: Some("https://example.com/mcp".into()),
+                headers: Vec::new(),
+            }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();

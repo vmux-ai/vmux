@@ -13,9 +13,11 @@ const MANIFEST_VERSION: u32 = 1;
 pub struct RegistryManifest {
     #[serde(default = "manifest_version")]
     pub version: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub packages: BTreeMap<String, Vec<String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "McpManifest::is_empty")]
+    pub mcp: McpManifest,
+    #[serde(default, skip_serializing_if = "DotfilesManifest::is_empty")]
     pub dotfiles: DotfilesManifest,
 }
 
@@ -24,6 +26,7 @@ impl Default for RegistryManifest {
         Self {
             version: MANIFEST_VERSION,
             packages: BTreeMap::new(),
+            mcp: McpManifest::default(),
             dotfiles: DotfilesManifest::default(),
         }
     }
@@ -75,7 +78,78 @@ impl RegistryManifest {
             .packages
             .sort_by_key(|package| package.to_ascii_lowercase());
         self.dotfiles.packages.dedup();
+        self.mcp.servers.remove("vmux");
     }
+}
+
+/// MCP servers vmux injects into agents it launches.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpManifest {
+    #[serde(default)]
+    pub servers: BTreeMap<String, McpServerManifest>,
+}
+
+impl McpManifest {
+    fn is_empty(&self) -> bool {
+        self.servers.is_empty()
+    }
+}
+
+/// Portable MCP server definition normalized from Claude, Codex, or Vibe config.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpServerManifest {
+    pub transport: McpTransport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub header_env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bearer_token_env_var: Option<String>,
+}
+
+impl McpServerManifest {
+    /// Resolves direct and environment-backed headers for clients that require literal values.
+    pub fn resolved_headers(&self) -> BTreeMap<String, String> {
+        let mut headers = self.headers.clone();
+        for (name, variable) in &self.header_env {
+            if let Ok(value) = std::env::var(variable) {
+                headers.insert(name.clone(), value);
+            }
+        }
+        if let Some(variable) = &self.bearer_token_env_var
+            && let Ok(value) = std::env::var(variable)
+        {
+            headers.insert("Authorization".to_string(), format!("Bearer {value}"));
+        }
+        headers
+    }
+}
+
+/// Transport shared by supported MCP client config formats.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Http,
+    Sse,
+}
+
+/// Package names parsed from one Brewfile.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BrewfileImport {
+    pub formulae: Vec<String>,
+    pub casks: Vec<String>,
 }
 
 /// Enabled package directories under the Registry dotfile root.
@@ -83,6 +157,12 @@ impl RegistryManifest {
 pub struct DotfilesManifest {
     #[serde(default)]
     pub packages: Vec<String>,
+}
+
+impl DotfilesManifest {
+    fn is_empty(&self) -> bool {
+        self.packages.is_empty()
+    }
 }
 
 /// Current relationship between one Registry source and its home target.
@@ -188,6 +268,306 @@ pub fn write_manifest_to(path: &Path, manifest: &RegistryManifest) -> Result<(),
     let temporary = path.with_extension("toml.tmp");
     std::fs::write(&temporary, source).map_err(|error| error.to_string())?;
     std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+}
+
+/// Imports formulae and casks from a Brewfile into the Registry manifest.
+pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
+    import_brewfile_to(path, &manifest_path())
+}
+
+/// Imports a Brewfile into an explicit Registry manifest.
+pub fn import_brewfile_to(path: &Path, manifest_path: &Path) -> Result<(usize, usize), String> {
+    let path = expand_user_path(path)?;
+    let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let imported = parse_brewfile(&source);
+    if imported.formulae.is_empty() && imported.casks.is_empty() {
+        return Err(format!("no formulae or casks found in {}", path.display()));
+    }
+    let mut manifest = load_manifest_from(manifest_path)?;
+    let formulae = add_packages(&mut manifest, "homebrew-formula", &imported.formulae);
+    let casks = add_packages(&mut manifest, "homebrew-cask", &imported.casks);
+    write_manifest_to(manifest_path, &manifest)?;
+    Ok((formulae, casks))
+}
+
+/// Parses the Homebrew formula and cask declarations understood by `brew bundle`.
+pub fn parse_brewfile(source: &str) -> BrewfileImport {
+    let mut import = BrewfileImport::default();
+    for line in source.lines() {
+        if let Some(name) = parse_quoted_call(line, "brew") {
+            import.formulae.push(name);
+        } else if let Some(name) = parse_quoted_call(line, "cask") {
+            import.casks.push(name);
+        }
+    }
+    normalize_names(&mut import.formulae);
+    normalize_names(&mut import.casks);
+    import
+}
+
+/// Imports dependency names from a package.json as global npm desired state.
+pub fn import_npm_manifest(path: &Path) -> Result<usize, String> {
+    import_npm_manifest_to(path, &manifest_path())
+}
+
+/// Imports a package.json into an explicit Registry manifest.
+pub fn import_npm_manifest_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
+    let path = expand_user_path(path)?;
+    let source = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let packages = parse_npm_manifest(&source)?;
+    if packages.is_empty() {
+        return Err(format!("no dependencies found in {}", path.display()));
+    }
+    let mut manifest = load_manifest_from(manifest_path)?;
+    let imported = add_packages(&mut manifest, "npm", &packages);
+    write_manifest_to(manifest_path, &manifest)?;
+    Ok(imported)
+}
+
+/// Parses installable dependency names from package.json.
+pub fn parse_npm_manifest(source: &str) -> Result<Vec<String>, String> {
+    let document: serde_json::Value =
+        serde_json::from_str(source).map_err(|error| error.to_string())?;
+    let mut packages = Vec::new();
+    for field in ["dependencies", "devDependencies", "optionalDependencies"] {
+        if let Some(entries) = document.get(field).and_then(serde_json::Value::as_object) {
+            packages.extend(entries.keys().cloned());
+        }
+    }
+    normalize_names(&mut packages);
+    Ok(packages)
+}
+
+/// One MCP server discovered in one or more external client configs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoveredMcpServer {
+    pub definition: McpServerManifest,
+    pub sources: Vec<PathBuf>,
+    pub conflict: bool,
+}
+
+/// Default global MCP config files supported by Registry import.
+pub fn default_mcp_config_paths() -> Vec<PathBuf> {
+    let home = home_dir();
+    [
+        home.join(".codex/config.toml"),
+        home.join(".claude.json"),
+        home.join(".vibe/config.toml"),
+        home.join(".mcp.json"),
+    ]
+    .into_iter()
+    .filter(|path| path.is_file())
+    .collect()
+}
+
+/// Discovers MCP servers from the user's global Claude, Codex, and Vibe configs.
+pub fn discover_mcp_servers() -> (BTreeMap<String, DiscoveredMcpServer>, Vec<String>) {
+    let mut discovered = BTreeMap::<String, DiscoveredMcpServer>::new();
+    let mut errors = Vec::new();
+    for path in default_mcp_config_paths() {
+        match parse_mcp_config_file(&path) {
+            Ok(servers) => {
+                for (name, definition) in servers {
+                    match discovered.get_mut(&name) {
+                        Some(existing) => {
+                            existing.conflict |= existing.definition != definition;
+                            existing.sources.push(path.clone());
+                        }
+                        None => {
+                            discovered.insert(
+                                name,
+                                DiscoveredMcpServer {
+                                    definition,
+                                    sources: vec![path.clone()],
+                                    conflict: false,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            Err(error) => errors.push(format!("{}: {error}", path.display())),
+        }
+    }
+    (discovered, errors)
+}
+
+/// Imports MCP servers from one Claude, Codex, or Vibe config.
+pub fn import_mcp_config(path: &Path) -> Result<usize, String> {
+    import_mcp_config_to(path, &manifest_path())
+}
+
+/// Imports MCP servers into an explicit Registry manifest.
+pub fn import_mcp_config_to(path: &Path, manifest_path: &Path) -> Result<usize, String> {
+    let path = expand_user_path(path)?;
+    let servers = parse_mcp_config_file(&path)?;
+    if servers.is_empty() {
+        return Err(format!("no MCP servers found in {}", path.display()));
+    }
+    let mut manifest = load_manifest_from(manifest_path)?;
+    let mut imported = 0;
+    for (name, definition) in servers {
+        if name == "vmux" {
+            continue;
+        }
+        imported += usize::from(manifest.mcp.servers.get(&name) != Some(&definition));
+        manifest.mcp.servers.insert(name, definition);
+    }
+    write_manifest_to(manifest_path, &manifest)?;
+    Ok(imported)
+}
+
+/// Imports every unambiguous MCP server found in the default global configs.
+pub fn import_default_mcp_configs() -> Result<usize, String> {
+    let (discovered, errors) = discover_mcp_servers();
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+    let conflicts = discovered
+        .iter()
+        .filter(|(_, server)| server.conflict)
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "conflicting MCP definitions: {}",
+            conflicts.join(", ")
+        ));
+    }
+    let mut manifest = load_manifest()?;
+    let mut imported = 0;
+    for (name, server) in discovered {
+        if name == "vmux" {
+            continue;
+        }
+        imported += usize::from(manifest.mcp.servers.get(&name) != Some(&server.definition));
+        manifest.mcp.servers.insert(name, server.definition);
+    }
+    write_manifest(&manifest)?;
+    Ok(imported)
+}
+
+/// Imports one unambiguous MCP server discovered in the default global configs.
+pub fn import_discovered_mcp_server(name: &str) -> Result<(), String> {
+    let (discovered, errors) = discover_mcp_servers();
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+    let server = discovered
+        .get(name)
+        .ok_or_else(|| format!("MCP server not found: {name}"))?;
+    if server.conflict {
+        return Err(format!(
+            "MCP server {name} has conflicting definitions; import an explicit config path"
+        ));
+    }
+    let mut manifest = load_manifest()?;
+    manifest
+        .mcp
+        .servers
+        .insert(name.to_string(), server.definition.clone());
+    write_manifest(&manifest)
+}
+
+/// Parses MCP server definitions from a Claude JSON or Codex/Vibe TOML config.
+pub fn parse_mcp_config_file(path: &Path) -> Result<BTreeMap<String, McpServerManifest>, String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse_mcp_config(&source)
+}
+
+/// Parses MCP server definitions from JSON or TOML config text.
+pub fn parse_mcp_config(source: &str) -> Result<BTreeMap<String, McpServerManifest>, String> {
+    if let Ok(document) = serde_json::from_str::<serde_json::Value>(source) {
+        return parse_json_mcp_document(&document);
+    }
+    let document: toml::Value = toml::from_str(source).map_err(|error| error.to_string())?;
+    parse_toml_mcp_document(&document)
+}
+
+/// Copies package directories from an existing Stow root into Registry ownership.
+pub fn import_dotfiles(path: &Path) -> Result<usize, String> {
+    import_dotfiles_to(path, &dotfiles_dir(), &manifest_path())
+}
+
+/// Copies package directories into explicit Registry roots.
+pub fn import_dotfiles_to(
+    path: &Path,
+    dotfiles_root: &Path,
+    manifest_path: &Path,
+) -> Result<usize, String> {
+    let source = expand_user_path(path)?;
+    if !source.is_dir() {
+        return Err(format!(
+            "dotfile root is not a directory: {}",
+            source.display()
+        ));
+    }
+    if source.starts_with(dotfiles_root) || dotfiles_root.starts_with(&source) {
+        return Err("dotfile import source overlaps the Registry root".to_string());
+    }
+    let mut packages = std::fs::read_dir(&source)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .into_string()
+                .ok()
+                .map(|name| (name, entry.path()))
+        })
+        .filter(|(name, _)| valid_package_name(name))
+        .collect::<Vec<_>>();
+    packages.sort_by(|left, right| left.0.cmp(&right.0));
+    if packages.is_empty() {
+        return Err(format!("no Stow packages found in {}", source.display()));
+    }
+    for (name, _) in &packages {
+        if dotfiles_root.join(name).symlink_metadata().is_ok() {
+            return Err(format!("Registry dotfile package already exists: {name}"));
+        }
+    }
+    let mut manifest = load_manifest_from(manifest_path)?;
+    std::fs::create_dir_all(dotfiles_root).map_err(|error| error.to_string())?;
+    let mut staged = Vec::new();
+    for (name, package_source) in &packages {
+        let temporary = dotfiles_root.join(format!(".{name}.import-{}", std::process::id()));
+        if temporary.symlink_metadata().is_ok() {
+            std::fs::remove_dir_all(&temporary).map_err(|error| error.to_string())?;
+        }
+        if let Err(error) = copy_directory(package_source, &temporary) {
+            for path in &staged {
+                let _ = std::fs::remove_dir_all(path);
+            }
+            let _ = std::fs::remove_dir_all(&temporary);
+            return Err(error);
+        }
+        staged.push(temporary);
+    }
+    let mut installed = Vec::new();
+    for ((name, _), temporary) in packages.iter().zip(&staged) {
+        let destination = dotfiles_root.join(name);
+        if let Err(error) = std::fs::rename(temporary, &destination) {
+            for path in &staged {
+                let _ = std::fs::remove_dir_all(path);
+            }
+            for path in &installed {
+                let _ = std::fs::remove_dir_all(path);
+            }
+            return Err(error.to_string());
+        }
+        installed.push(destination);
+    }
+    for (name, _) in &packages {
+        manifest.set_dotfile_package(name, true);
+    }
+    if let Err(error) = write_manifest_to(manifest_path, &manifest) {
+        for path in &installed {
+            let _ = std::fs::remove_dir_all(path);
+        }
+        return Err(error);
+    }
+    Ok(packages.len())
 }
 
 /// Lists valid dotfile package directories.
@@ -422,6 +802,223 @@ pub fn adopt_dotfile_in(
     Ok(destination)
 }
 
+fn add_packages(manifest: &mut RegistryManifest, provider: &str, names: &[String]) -> usize {
+    let mut imported = 0;
+    for name in names {
+        imported += usize::from(!manifest.contains(provider, name));
+        manifest.set_package(provider, name, true);
+    }
+    imported
+}
+
+fn normalize_names(names: &mut Vec<String>) {
+    names.retain(|name| !name.trim().is_empty());
+    names.sort_by_key(|name| name.to_ascii_lowercase());
+    names.dedup();
+}
+
+fn parse_quoted_call(line: &str, call: &str) -> Option<String> {
+    let line = line.trim_start();
+    let rest = line.strip_prefix(call)?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let quote = rest.chars().next()?;
+    if !matches!(quote, '\'' | '"') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut name = String::new();
+    for character in rest[quote.len_utf8()..].chars() {
+        if escaped {
+            name.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == quote {
+            return (!name.is_empty()).then_some(name);
+        } else {
+            name.push(character);
+        }
+    }
+    None
+}
+
+fn parse_json_mcp_document(
+    document: &serde_json::Value,
+) -> Result<BTreeMap<String, McpServerManifest>, String> {
+    let Some(servers) = document
+        .get("mcpServers")
+        .or_else(|| document.get("mcp_servers"))
+        .and_then(serde_json::Value::as_object)
+    else {
+        return Ok(BTreeMap::new());
+    };
+    let mut parsed = BTreeMap::new();
+    for (name, value) in servers {
+        if name == "vmux"
+            || value.get("enabled").and_then(serde_json::Value::as_bool) == Some(false)
+        {
+            continue;
+        }
+        parsed.insert(name.clone(), parse_json_mcp_server(value)?);
+    }
+    Ok(parsed)
+}
+
+fn parse_toml_mcp_document(
+    document: &toml::Value,
+) -> Result<BTreeMap<String, McpServerManifest>, String> {
+    let Some(servers) = document.get("mcp_servers") else {
+        return Ok(BTreeMap::new());
+    };
+    let mut parsed = BTreeMap::new();
+    match servers {
+        toml::Value::Table(table) => {
+            for (name, value) in table {
+                if name == "vmux"
+                    || value.get("enabled").and_then(toml::Value::as_bool) == Some(false)
+                {
+                    continue;
+                }
+                let value = serde_json::to_value(value).map_err(|error| error.to_string())?;
+                parsed.insert(name.clone(), parse_json_mcp_server(&value)?);
+            }
+        }
+        toml::Value::Array(entries) => {
+            for entry in entries {
+                let name = entry
+                    .get("name")
+                    .and_then(toml::Value::as_str)
+                    .ok_or("MCP server is missing name")?;
+                if name == "vmux"
+                    || entry.get("enabled").and_then(toml::Value::as_bool) == Some(false)
+                {
+                    continue;
+                }
+                let value = serde_json::to_value(entry).map_err(|error| error.to_string())?;
+                parsed.insert(name.to_string(), parse_json_mcp_server(&value)?);
+            }
+        }
+        _ => return Err("mcp_servers must be a table or array".to_string()),
+    }
+    Ok(parsed)
+}
+
+fn parse_json_mcp_server(value: &serde_json::Value) -> Result<McpServerManifest, String> {
+    let object = value.as_object().ok_or("MCP server must be an object")?;
+    let command = string_field(object, "command");
+    let url = string_field(object, "url");
+    let transport = string_field(object, "transport")
+        .or_else(|| string_field(object, "type"))
+        .map(|transport| match transport.as_str() {
+            "sse" => McpTransport::Sse,
+            "http" | "streamable-http" => McpTransport::Http,
+            _ => McpTransport::Stdio,
+        })
+        .unwrap_or_else(|| {
+            if url.is_some() {
+                McpTransport::Http
+            } else {
+                McpTransport::Stdio
+            }
+        });
+    match transport {
+        McpTransport::Stdio if command.is_none() => {
+            return Err("stdio MCP server is missing command".to_string());
+        }
+        McpTransport::Http | McpTransport::Sse if url.is_none() => {
+            return Err("remote MCP server is missing url".to_string());
+        }
+        _ => {}
+    }
+    let args = object
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect();
+    let headers = string_map_field(object, "headers")
+        .or_else(|| string_map_field(object, "http_headers"))
+        .unwrap_or_default();
+    Ok(McpServerManifest {
+        transport,
+        command,
+        args,
+        env: string_map_field(object, "env").unwrap_or_default(),
+        cwd: string_field(object, "cwd"),
+        url,
+        headers,
+        header_env: string_map_field(object, "env_http_headers").unwrap_or_default(),
+        bearer_token_env_var: string_field(object, "bearer_token_env_var"),
+    })
+}
+
+fn string_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Option<String> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn string_map_field(
+    object: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Option<BTreeMap<String, String>> {
+    object
+        .get(field)
+        .and_then(serde_json::Value::as_object)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|(name, value)| {
+                    value
+                        .as_str()
+                        .map(|value| (name.clone(), value.to_string()))
+                })
+                .collect()
+        })
+}
+
+fn expand_user_path(path: &Path) -> Result<PathBuf, String> {
+    if let Ok(relative) = path.strip_prefix("~") {
+        return Ok(home_dir().join(relative));
+    }
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn copy_directory(source: &Path, destination: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let kind = entry.file_type().map_err(|error| error.to_string())?;
+        let target = destination.join(entry.file_name());
+        if kind.is_dir() {
+            copy_directory(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target).map_err(|error| error.to_string())?;
+        } else {
+            return Err(format!(
+                "unsupported entry in dotfile package: {}",
+                entry.path().display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -570,6 +1167,21 @@ mod tests {
     }
 
     #[test]
+    fn manifest_omits_empty_sections() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("registry.toml");
+        let mut manifest = RegistryManifest::default();
+        manifest.set_package("npm", "typescript", true);
+
+        write_manifest_to(&path, &manifest).unwrap();
+
+        let source = std::fs::read_to_string(path).unwrap();
+        assert!(source.contains("[packages]"));
+        assert!(!source.contains("[mcp"));
+        assert!(!source.contains("[dotfiles]"));
+    }
+
+    #[test]
     fn unsupported_manifest_versions_are_rejected() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("registry.toml");
@@ -579,6 +1191,136 @@ mod tests {
                 .unwrap_err()
                 .contains("unsupported registry manifest version: 2")
         );
+    }
+
+    #[test]
+    fn brewfile_import_separates_formulae_and_casks() {
+        let imported = parse_brewfile(
+            r#"
+tap "homebrew/cask-fonts"
+brew "ripgrep"
+brew 'openssl@3', link: false
+cask "ghostty"
+brew "ripgrep"
+"#,
+        );
+
+        assert_eq!(imported.formulae, ["openssl@3", "ripgrep"]);
+        assert_eq!(imported.casks, ["ghostty"]);
+    }
+
+    #[test]
+    fn npm_import_combines_runtime_development_and_optional_dependencies() {
+        let imported = parse_npm_manifest(
+            r#"{
+                "dependencies": {"typescript": "^5"},
+                "devDependencies": {"eslint": "^9"},
+                "optionalDependencies": {"prettier": "^3"},
+                "peerDependencies": {"react": "^19"}
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(imported, ["eslint", "prettier", "typescript"]);
+    }
+
+    #[test]
+    fn mcp_import_normalizes_codex_and_vibe_formats() {
+        let codex = parse_mcp_config(
+            r#"
+[mcp_servers.docs]
+url = "https://example.com/mcp"
+bearer_token_env_var = "DOCS_TOKEN"
+
+[mcp_servers.local]
+command = "npx"
+args = ["-y", "server"]
+[mcp_servers.local.env]
+MODE = "local"
+"#,
+        )
+        .unwrap();
+        assert_eq!(codex["docs"].transport, McpTransport::Http);
+        assert_eq!(
+            codex["docs"].bearer_token_env_var.as_deref(),
+            Some("DOCS_TOKEN")
+        );
+        assert_eq!(codex["local"].command.as_deref(), Some("npx"));
+        assert_eq!(codex["local"].env["MODE"], "local");
+
+        let vibe = parse_mcp_config(
+            r#"
+[[mcp_servers]]
+name = "figma"
+transport = "http"
+url = "https://example.com/figma"
+
+[[mcp_servers]]
+name = "vmux"
+transport = "stdio"
+command = "vmux"
+"#,
+        )
+        .unwrap();
+        assert_eq!(vibe.keys().cloned().collect::<Vec<_>>(), ["figma"]);
+    }
+
+    #[test]
+    fn mcp_import_normalizes_claude_json() {
+        let imported = parse_mcp_config(
+            r#"{
+                "mcpServers": {
+                    "notion": {"type": "http", "url": "https://example.com/notion"},
+                    "local": {"command": "uvx", "args": ["server"]}
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(imported["notion"].transport, McpTransport::Http);
+        assert_eq!(imported["local"].transport, McpTransport::Stdio);
+    }
+
+    #[test]
+    fn config_without_mcp_section_is_ignored_during_discovery() {
+        assert!(parse_mcp_config(r#"{"theme":"dark"}"#).unwrap().is_empty());
+        assert!(
+            parse_mcp_config("model = \"default\"\n")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn file_imports_merge_without_removing_existing_desired_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let manifest_path = temp.path().join("registry.toml");
+        let brewfile = temp.path().join("Brewfile");
+        let package_json = temp.path().join("package.json");
+        let mcp = temp.path().join("mcp.json");
+        let mut manifest = RegistryManifest::default();
+        manifest.set_package("npm", "existing", true);
+        write_manifest_to(&manifest_path, &manifest).unwrap();
+        std::fs::write(&brewfile, "brew \"ripgrep\"\ncask \"ghostty\"\n").unwrap();
+        std::fs::write(&package_json, r#"{"devDependencies":{"eslint":"1"}}"#).unwrap();
+        std::fs::write(
+            &mcp,
+            r#"{"mcpServers":{"docs":{"url":"https://example.com"}}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            import_brewfile_to(&brewfile, &manifest_path).unwrap(),
+            (1, 1)
+        );
+        assert_eq!(
+            import_npm_manifest_to(&package_json, &manifest_path).unwrap(),
+            1
+        );
+        assert_eq!(import_mcp_config_to(&mcp, &manifest_path).unwrap(), 1);
+        let loaded = load_manifest_from(&manifest_path).unwrap();
+        assert_eq!(loaded.packages["npm"], ["eslint", "existing"]);
+        assert!(loaded.mcp.servers.contains_key("docs"));
     }
 
     #[cfg(unix)]
@@ -669,5 +1411,31 @@ mod tests {
             load_manifest_from(&manifest).unwrap().dotfiles.packages,
             ["shell"]
         );
+    }
+
+    #[test]
+    fn dotfile_import_copies_stow_packages_and_enables_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("stow");
+        let dotfiles = temp.path().join("registry/dotfiles");
+        let manifest = temp.path().join("registry/registry.toml");
+        std::fs::create_dir_all(source.join("git")).unwrap();
+        std::fs::create_dir_all(source.join("shell/.config/nushell")).unwrap();
+        std::fs::write(source.join("git/.gitconfig"), "git").unwrap();
+        std::fs::write(source.join("shell/.config/nushell/config.nu"), "nu").unwrap();
+
+        assert_eq!(
+            import_dotfiles_to(&source, &dotfiles, &manifest).unwrap(),
+            2
+        );
+        assert_eq!(
+            std::fs::read_to_string(dotfiles.join("git/.gitconfig")).unwrap(),
+            "git"
+        );
+        assert_eq!(
+            load_manifest_from(&manifest).unwrap().dotfiles.packages,
+            ["git", "shell"]
+        );
+        assert!(source.join("git/.gitconfig").is_file());
     }
 }

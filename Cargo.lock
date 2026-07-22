@@ -9933,6 +9933,7 @@ name = "vmux_profile"
 version = "0.0.28"
 dependencies = [
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
 ]

@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use vmux_profile::registry::{self, DotfileLinkState};
 
 #[derive(Debug, Args)]
@@ -14,6 +14,10 @@ pub struct RegistryArgs {
 enum RegistryCommand {
     Status,
     Apply,
+    Import {
+        provider: RegistryImportProvider,
+        path: Option<PathBuf>,
+    },
     Adopt {
         path: PathBuf,
         #[arg(long)]
@@ -22,6 +26,14 @@ enum RegistryCommand {
     Unlink {
         package: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum RegistryImportProvider {
+    Homebrew,
+    Npm,
+    Mcp,
+    Dotfiles,
 }
 
 pub fn run(args: RegistryArgs) -> io::Result<()> {
@@ -33,6 +45,7 @@ pub fn run(args: RegistryArgs) -> io::Result<()> {
             println!("linked {linked} file(s)");
             Ok(())
         }
+        RegistryCommand::Import { provider, path } => import(provider, path),
         RegistryCommand::Adopt { path, package } => {
             let destination = registry::adopt_dotfile(&path, &package).map_err(io::Error::other)?;
             println!("{}", destination.display());
@@ -49,6 +62,47 @@ pub fn run(args: RegistryArgs) -> io::Result<()> {
     }
 }
 
+fn import(provider: RegistryImportProvider, path: Option<PathBuf>) -> io::Result<()> {
+    match provider {
+        RegistryImportProvider::Homebrew => {
+            let path = path.ok_or_else(|| io::Error::other("Brewfile path is required"))?;
+            let (formulae, casks) = registry::import_brewfile(&path).map_err(io::Error::other)?;
+            println!("imported {formulae} formulae and {casks} casks");
+        }
+        RegistryImportProvider::Npm => {
+            let path = path.ok_or_else(|| io::Error::other("package.json path is required"))?;
+            let imported = registry::import_npm_manifest(&path).map_err(io::Error::other)?;
+            println!("imported {imported} npm package(s)");
+        }
+        RegistryImportProvider::Mcp => {
+            let imported = if let Some(path) = path {
+                registry::import_mcp_config(&path)
+            } else {
+                registry::import_default_mcp_configs()
+            }
+            .map_err(io::Error::other)?;
+            println!("imported {imported} MCP server(s)");
+        }
+        RegistryImportProvider::Dotfiles => {
+            if let Some(path) = path {
+                let imported = registry::import_dotfiles(&path).map_err(io::Error::other)?;
+                println!("imported {imported} dotfile package(s)");
+            } else {
+                let packages = registry::dotfile_packages();
+                let mut manifest = registry::load_manifest().map_err(io::Error::other)?;
+                let mut imported = 0;
+                for package in packages {
+                    imported += usize::from(!manifest.dotfiles.packages.contains(&package));
+                    manifest.set_dotfile_package(&package, true);
+                }
+                registry::write_manifest(&manifest).map_err(io::Error::other)?;
+                println!("imported {imported} dotfile package(s)");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn status() -> io::Result<()> {
     let manifest = registry::load_manifest().map_err(io::Error::other)?;
     println!("{}", registry::root_dir().display());
@@ -56,6 +110,12 @@ fn status() -> io::Result<()> {
         println!("{provider} ({})", packages.len());
         for package in packages {
             println!("  {package}");
+        }
+    }
+    if !manifest.mcp.servers.is_empty() {
+        println!("mcp ({})", manifest.mcp.servers.len());
+        for (name, server) in &manifest.mcp.servers {
+            println!("  {name} · {:?}", server.transport);
         }
     }
     let mut packages = registry::dotfile_packages();
