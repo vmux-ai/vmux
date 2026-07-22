@@ -543,29 +543,18 @@ fn App() -> Element {
         };
     }
 
-    if auth() == AuthState::Unpaired {
-        return rsx! {
-            AppHead {}
-            PairScreen {
-                value: pair_url(),
-                error: error(),
-                pairing: pairing(),
-                on_value: move |value| pair_url.set(value),
-                on_pair: move |_| {
-                    pending_pair_url.set(Some(pair_url()));
-                },
-            }
-        };
-    }
-
     if current().is_none() {
         return rsx! {
             AppHead {}
             MobileStartPage {
+                paired: auth() == AuthState::Paired,
                 sessions: sessions(),
                 draft: new_chat_draft(),
                 error: new_chat_error(),
                 creating: creating_chat(),
+                pair_value: pair_url(),
+                pair_error: error(),
+                pairing: pairing(),
                 on_draft: move |value| new_chat_draft.set(value),
                 on_submit: move |_| start_new_chat(
                     api,
@@ -594,6 +583,10 @@ fn App() -> Element {
                         connected,
                         stream_generation,
                     );
+                },
+                on_pair_value: move |value| pair_url.set(value),
+                on_pair: move |_| {
+                    pending_pair_url.set(Some(pair_url()));
                 },
                 on_disconnect: move |_| {
                     clear_credentials();
@@ -929,13 +922,19 @@ fn App() -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 struct MobileStartPageProps {
+    paired: bool,
     sessions: Vec<RemoteSession>,
     draft: String,
     error: String,
     creating: bool,
+    pair_value: String,
+    pair_error: String,
+    pairing: bool,
     on_draft: EventHandler<String>,
     on_submit: EventHandler<()>,
     on_open: EventHandler<RemoteSession>,
+    on_pair_value: EventHandler<String>,
+    on_pair: EventHandler<()>,
     on_disconnect: EventHandler<()>,
 }
 
@@ -950,13 +949,15 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
         div { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100",
             header { class: "flex shrink-0 items-center gap-2 px-5 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]",
                 span { class: "text-sm font-semibold", "Vmux" }
-                span { class: "ml-auto h-2 w-2 rounded-full bg-emerald-400" }
-                span { class: "text-[11px] text-zinc-500", "Mac connected" }
-                button {
-                    class: "ml-2 rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
-                    r#type: "button",
-                    onclick: move |_| props.on_disconnect.call(()),
-                    "Disconnect"
+                span { class: if props.paired { "ml-auto h-2 w-2 rounded-full bg-emerald-400" } else { "ml-auto h-2 w-2 rounded-full bg-zinc-700" } }
+                span { class: "text-[11px] text-zinc-500", if props.paired { "Mac connected" } else { "Mac disconnected" } }
+                if props.paired {
+                    button {
+                        class: "ml-2 rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
+                        r#type: "button",
+                        onclick: move |_| props.on_disconnect.call(()),
+                        "Disconnect"
+                    }
                 }
             }
             main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]",
@@ -965,74 +966,84 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                         h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-5xl font-semibold leading-none tracking-tight text-transparent", "vmux" }
                         p { class: "text-sm text-zinc-500", "One prompt. Anything, done." }
                     }
-                    div { class: "mt-8 w-full",
-                        PromptComposer {
-                            value: props.draft.clone(),
-                            placeholder: "Search or ask…".to_string(),
-                            accent_color: "#a78bfa".to_string(),
-                            accent_gradient: "from-violet-500 to-violet-700".to_string(),
-                            tone: PromptBoxTone::Dark,
-                            autofocus: true,
-                            show_attach: false,
-                            action: PromptComposerAction::Send,
-                            action_title: if props.creating { "Starting…".to_string() } else { "Start chat".to_string() },
-                            action_enabled: can_submit,
-                            on_input: move |value| props.on_draft.call(value),
-                            on_keydown: move |event: KeyboardEvent| {
-                                if event.key() == Key::Enter && !event.modifiers().shift() {
-                                    event.prevent_default();
-                                    submit_from_key.call(());
-                                }
-                            },
-                            on_paste: move |_| {},
-                            on_attach: move |_| {},
-                            on_remove_attachment: move |_| {},
-                            on_action: move |_| submit_from_action.call(()),
-                        }
-                        if !props.error.is_empty() {
-                            div { class: "mt-3 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200", "{props.error}" }
-                        }
-                    }
-                    section { class: "mt-12",
-                        div { class: "mb-3 flex items-center gap-2 px-1",
-                            h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500", "Stacks" }
-                            span { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-zinc-500", "{props.sessions.len()}" }
-                        }
-                        div { class: "flex flex-col gap-2",
-                            if props.sessions.is_empty() {
-                                div { class: "rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600", "No open stacks" }
+                    if props.paired {
+                        div { class: "mt-8 w-full",
+                            PromptComposer {
+                                value: props.draft.clone(),
+                                placeholder: "Search or ask…".to_string(),
+                                accent_color: "#a78bfa".to_string(),
+                                accent_gradient: "from-violet-500 to-violet-700".to_string(),
+                                tone: PromptBoxTone::Dark,
+                                autofocus: true,
+                                show_attach: false,
+                                action: PromptComposerAction::Send,
+                                action_title: if props.creating { "Starting…".to_string() } else { "Start chat".to_string() },
+                                action_enabled: can_submit,
+                                on_input: move |value| props.on_draft.call(value),
+                                on_keydown: move |event: KeyboardEvent| {
+                                    if event.key() == Key::Enter && !event.modifiers().shift() {
+                                        event.prevent_default();
+                                        submit_from_key.call(());
+                                    }
+                                },
+                                on_paste: move |_| {},
+                                on_attach: move |_| {},
+                                on_remove_attachment: move |_| {},
+                                on_action: move |_| submit_from_action.call(()),
                             }
-                            for session in props.sessions.iter().cloned() {
-                                button {
-                                    key: "{session.sid}",
-                                    class: "flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-white/[0.065]",
-                                    r#type: "button",
-                                    onclick: {
-                                        let next = session.clone();
-                                        move |_| on_open.call(next.clone())
-                                    },
-                                    span { class: status_dot(&session.status) }
-                                    div { class: "min-w-0 flex-1",
-                                        div { class: "truncate text-sm font-medium text-zinc-200", "{session.title}" }
-                                        div { class: "mt-1 truncate text-[11px] text-zinc-600",
-                                            "{session.name} · {session.runtime} · {cwd_name(&session.cwd)}"
-                                            if let Some(model) = session.model.as_ref() {
-                                                " · {model}"
+                            if !props.error.is_empty() {
+                                div { class: "mt-3 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200", "{props.error}" }
+                            }
+                        }
+                        section { class: "mt-12",
+                            div { class: "mb-3 flex items-center gap-2 px-1",
+                                h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500", "Stacks" }
+                                span { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-zinc-500", "{props.sessions.len()}" }
+                            }
+                            div { class: "flex flex-col gap-2",
+                                if props.sessions.is_empty() {
+                                    div { class: "rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600", "No open stacks" }
+                                }
+                                for session in props.sessions.iter().cloned() {
+                                    button {
+                                        key: "{session.sid}",
+                                        class: "flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-white/[0.065]",
+                                        r#type: "button",
+                                        onclick: {
+                                            let next = session.clone();
+                                            move |_| on_open.call(next.clone())
+                                        },
+                                        span { class: status_dot(&session.status) }
+                                        div { class: "min-w-0 flex-1",
+                                            div { class: "truncate text-sm font-medium text-zinc-200", "{session.title}" }
+                                            div { class: "mt-1 truncate text-[11px] text-zinc-600",
+                                                "{session.name} · {session.runtime} · {cwd_name(&session.cwd)}"
+                                                if let Some(model) = session.model.as_ref() {
+                                                    " · {model}"
+                                                }
                                             }
                                         }
-                                    }
-                                    svg {
-                                        class: "h-4 w-4 shrink-0 text-zinc-700",
-                                        view_box: "0 0 24 24",
-                                        fill: "none",
-                                        stroke: "currentColor",
-                                        stroke_width: "2",
-                                        stroke_linecap: "round",
-                                        stroke_linejoin: "round",
-                                        path { d: "m9 18 6-6-6-6" }
+                                        svg {
+                                            class: "h-4 w-4 shrink-0 text-zinc-700",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "2",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "m9 18 6-6-6-6" }
+                                        }
                                     }
                                 }
                             }
+                        }
+                    } else {
+                        PairCard {
+                            value: props.pair_value.clone(),
+                            error: props.pair_error.clone(),
+                            pairing: props.pairing,
+                            on_value: props.on_pair_value,
+                            on_pair: props.on_pair,
                         }
                     }
                 }
@@ -1052,7 +1063,7 @@ fn AppHead() -> Element {
 }
 
 #[derive(Props, Clone, PartialEq)]
-struct PairScreenProps {
+struct PairCardProps {
     value: String,
     error: String,
     pairing: bool,
@@ -1061,11 +1072,9 @@ struct PairScreenProps {
 }
 
 #[component]
-fn PairScreen(props: PairScreenProps) -> Element {
+fn PairCard(props: PairCardProps) -> Element {
     rsx! {
-        div { class: "flex h-dvh items-center justify-center bg-[radial-gradient(circle_at_10%_0%,rgba(124,58,237,0.2),transparent_38%),radial-gradient(circle_at_90%_100%,rgba(6,182,212,0.12),transparent_35%),#09090b] px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] text-zinc-100",
-            div { class: "w-full max-w-sm rounded-3xl border border-white/10 bg-zinc-900/90 p-6 shadow-2xl shadow-black/50",
-                div { class: "mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 text-xl font-bold text-white shadow-lg shadow-violet-500/20", "V" }
+        div { class: "mt-8 w-full rounded-3xl border border-white/10 bg-white/[0.035] p-5 shadow-lg shadow-black/20",
                 h1 { class: "text-2xl font-semibold tracking-tight", "Pair with your Mac" }
                 p { class: "mt-2 text-sm leading-6 text-zinc-500", "Enable Remote on your Mac and scan its QR code. You can also paste the pairing URL." }
                 form {
@@ -1094,7 +1103,6 @@ fn PairScreen(props: PairScreenProps) -> Element {
                         if props.pairing { "Pairing…" } else { "Pair" }
                     }
                 }
-            }
         }
     }
 }
