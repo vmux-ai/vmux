@@ -73,8 +73,6 @@ static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
-static NATIVE_WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
@@ -346,17 +344,12 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 | NSEventType::OtherMouseDown
                 | NSEventType::OtherMouseUp
         );
-        let scroll = event_type == NSEventType::ScrollWheel;
         let location = event_location_in_window_physical_px(ev);
-        let over_windowed_page =
-            location.is_some_and(|(x, y)| vmux_browser::native_windowed_page_contains_point(x, y));
-        let was_over_windowed_page =
-            NATIVE_WINDOWED_POINTER_INSIDE.swap(over_windowed_page, Ordering::Relaxed);
         let buttons = native_mouse_buttons();
         if let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        let layout_pointer = (motion || button_event || scroll)
+        let layout_pointer = (motion || button_event)
             .then(|| {
                 location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
             })
@@ -382,13 +375,9 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 } else if result.pending {
                     flush_layout(interval);
                 }
-            } else if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
+            } else {
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
-            }
-        } else if scroll {
-            if layout_pointer.is_some_and(|result| result.owns_pointer) || !over_windowed_page {
-                local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
             if layout_pointer.is_some_and(|result| {
@@ -515,14 +504,6 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
 }
 
 #[cfg(target_os = "macos")]
-fn event_window_is_key(event: &objc2_app_kit::NSEvent) -> bool {
-    let Some(mtm) = objc2::MainThreadMarker::new() else {
-        return false;
-    };
-    event.window(mtm).is_some_and(|window| window.isKeyWindow())
-}
-
-#[cfg(target_os = "macos")]
 fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
     let pressed = objc2_app_kit::NSEvent::pressedMouseButtons();
     bevy_cef_core::prelude::NativeMouseButtons {
@@ -535,13 +516,13 @@ fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
 /// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
 /// Player mode's free camera consumes `AccumulatedMouseMotion`.
 ///
-/// At rest window events wake rendering except while native CEF content owns the pointer. Native
-/// hover and scroll then use explicit monitor wakes instead of rendering once per raw macOS pointer
-/// event. During live resize the 16ms timer caps rendering near 60Hz.
+/// At rest window events wake rendering except while native layout chrome owns the pointer. Layout
+/// hover and scroll then use the explicit 30Hz native monitor wake instead of rendering once per
+/// raw macOS pointer event. During live resize the 16ms timer caps rendering near 60Hz.
 pub(crate) fn foreground_winit_settings(
     player: bool,
     live_resize: bool,
-    native_pointer_inside: bool,
+    layout_pointer_inside: bool,
 ) -> WinitSettings {
     let focused_mode = if live_resize {
         UpdateMode::Reactive {
@@ -555,7 +536,7 @@ pub(crate) fn foreground_winit_settings(
             wait: FOCUSED_FRAME_INTERVAL,
             react_to_device_events: player,
             react_to_user_events: true,
-            react_to_window_events: player || !native_pointer_inside,
+            react_to_window_events: player || !layout_pointer_inside,
         }
     };
     WinitSettings {
@@ -586,17 +567,16 @@ fn sync_winit_power_mode(
     #[cfg(not(target_os = "macos"))]
     let live_resize = false;
     #[cfg(target_os = "macos")]
-    let native_pointer_inside = vmux_browser::native_layout_pointer_is_inside()
-        || NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
+    let layout_pointer_inside = vmux_browser::native_layout_pointer_is_inside();
     #[cfg(not(target_os = "macos"))]
-    let native_pointer_inside = false;
+    let layout_pointer_inside = false;
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
         foreground_winit_settings(
             *mode == InteractionMode::Player,
             live_resize,
-            native_pointer_inside,
+            layout_pointer_inside,
         )
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
@@ -997,20 +977,6 @@ mod tests {
     }
 
     #[test]
-    fn native_mouse_motion_wakes_before_window_is_key() {
-        let source = include_str!("background_lifecycle.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("addLocalMonitorForEventsMatchingMask_handler"));
-        assert!(monitor.contains("addGlobalMonitorForEventsMatchingMask_handler"));
-        assert!(monitor.contains("!event_window_is_key(ev)"));
-    }
-
-    #[test]
     fn native_mouse_monitor_tracks_left_button_state() {
         let source = include_str!("background_lifecycle.rs");
         let monitor = source
@@ -1021,21 +987,6 @@ mod tests {
 
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
-    }
-
-    #[test]
-    fn native_layout_scroll_only_wakes_for_layout_regions() {
-        let source = include_str!("background_lifecycle.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("NSEventMask::ScrollWheel"));
-        assert!(monitor.contains("else if scroll"));
-        assert!(monitor.contains("layout_pointer.is_some_and(|result| result.owns_pointer)"));
-        assert!(monitor.contains("|| !over_windowed_page"));
     }
 
     #[test]

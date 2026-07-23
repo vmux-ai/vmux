@@ -413,6 +413,8 @@ pub struct PaneTreeEvent {
 pub struct PaneNode {
     pub id: u64,
     pub is_active: bool,
+    #[serde(default)]
+    pub collapsed: bool,
     pub stacks: Vec<StackNode>,
 }
 

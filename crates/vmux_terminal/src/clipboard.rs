@@ -66,6 +66,24 @@ fn read_image_png_inner() -> Option<Vec<u8>> {
     None
 }
 
+/// Read TIFF image bytes from the system clipboard, if present.
+pub fn read_image_tiff() -> Option<Vec<u8>> {
+    read_image_tiff_inner()
+}
+
+#[cfg(target_os = "macos")]
+fn read_image_tiff_inner() -> Option<Vec<u8>> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeTIFF};
+    let tiff_type = unsafe { NSPasteboardTypeTIFF };
+    let data = NSPasteboard::generalPasteboard().dataForType(tiff_type)?;
+    Some(data.to_vec())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_image_tiff_inner() -> Option<Vec<u8>> {
+    None
+}
+
 /// Absolute path of an image *file* on the clipboard (a copied file, e.g. a
 /// saved screenshot), if any.
 ///

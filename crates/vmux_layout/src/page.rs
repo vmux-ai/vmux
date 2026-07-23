@@ -2332,12 +2332,23 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     );
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
-    let mut folded = use_signal(|| false);
+    let mut folded = use_signal(|| pane.collapsed);
     let fold_title = if folded() {
         translate("layout-unfold-stack")
     } else {
         translate("layout-fold-stack")
     };
+    let visible_stacks = pane
+        .stacks
+        .iter()
+        .filter(|stack| !(stack.url.is_empty() && stack.title == "New Stack"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let collapsed_stack = visible_stacks
+        .iter()
+        .find(|stack| stack.is_active)
+        .or_else(|| visible_stacks.first())
+        .cloned();
 
     rsx! {
         div { class: if pane.is_active && any_loading {
@@ -2376,24 +2387,32 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     onclick: move |_| {
                         let next = !folded();
                         folded.set(next);
+                        let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                            command: if next {
+                                "collapse_card".to_string()
+                            } else {
+                                "expand_card".to_string()
+                            },
+                            pane_id: pane_id.to_string(),
+                            stack_index: 0,
+                            path: String::new(),
+                        });
                     },
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
                         path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
                     }
                 }
             }
-            div { class: if folded() {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "overflow-hidden",
-                    div { class: "flex flex-col gap-1 border-t border-foreground/10 p-1.5",
-                        for stack in pane
-                            .stacks
-                            .iter()
-                            .filter(|s| !(s.url.is_empty() && s.title == "New Stack"))
-                        {
+            div { class: "border-t border-foreground/10 p-1.5",
+                div { class: "flex flex-col gap-1",
+                    if folded() {
+                        if let Some(stack) = collapsed_stack {
+                            SideSheetStackRow { stack, pane_id }
+                        } else {
+                            NewStackRow { pane_id }
+                        }
+                    } else {
+                        for stack in visible_stacks.iter() {
                             SideSheetStackRow { stack: stack.clone(), pane_id }
                         }
                         NewStackRow { pane_id }

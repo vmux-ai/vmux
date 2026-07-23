@@ -23,10 +23,26 @@ pub enum StartMode {
 }
 
 pub fn start_mode_for(exe: &Path) -> StartMode {
-    if bundle::bundle_root_for(exe).is_some() {
+    start_mode_for_profile(crate::current_profile(), exe)
+}
+
+pub fn start_mode_for_profile(profile: &str, exe: &Path) -> StartMode {
+    if profile == "release" && bundle::bundle_root_for(exe).is_some() {
         StartMode::Register
     } else {
         StartMode::SpawnDetached
+    }
+}
+
+pub fn prepare_spawn_detached(exe: &Path) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = exe;
+
+    #[cfg(target_os = "macos")]
+    if bundle::bundle_root_for(exe).is_some()
+        && let Err(error) = crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
+    {
+        tracing::debug!(%error, "unregister embedded agent before detached spawn");
     }
 }
 

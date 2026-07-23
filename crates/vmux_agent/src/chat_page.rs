@@ -156,6 +156,68 @@ struct AcpSetModelRequest {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
+struct LastUsedAcpModels {
+    by_agent: std::collections::BTreeMap<String, String>,
+    dirty: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl LastUsedAcpModels {
+    fn remember(&mut self, agent_id: &str, model_id: &str) {
+        if self
+            .by_agent
+            .get(agent_id)
+            .is_some_and(|saved| saved == model_id)
+        {
+            return;
+        }
+        self.by_agent
+            .insert(agent_id.to_string(), model_id.to_string());
+        self.dirty = true;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn last_used_acp_models_path() -> std::path::PathBuf {
+    vmux_core::profile::profile_dir().join("agent-models.json")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
+    let Ok(bytes) = std::fs::read(last_used_acp_models_path()) else {
+        return;
+    };
+    let Ok(saved) = serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes)
+    else {
+        return;
+    };
+    models.by_agent = saved;
+    models.dirty = false;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
+    if !models.dirty {
+        return;
+    }
+    let path = last_used_acp_models_path();
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
+        return;
+    };
+    let temp = path.with_extension("json.tmp");
+    if std::fs::create_dir_all(parent).is_ok()
+        && std::fs::write(&temp, bytes).is_ok()
+        && std::fs::rename(&temp, &path).is_ok()
+    {
+        models.dirty = false;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
 struct AcpModelRequestCounter(u64);
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -171,7 +233,9 @@ impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
             .add_message::<AcpSetModelRequest>()
+            .add_systems(Startup, load_last_used_acp_models)
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatSubmit,
                 ChatApproval,
@@ -225,9 +289,12 @@ impl Plugin for AgentChatPagePlugin {
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
                     push_composer_context_to_page,
+                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
                     send_acp_model_requests,
+                    save_last_used_acp_models.after(apply_last_used_acp_model),
                     drain_chat_attachment_tasks,
                     drain_chat_media_list_tasks,
+                    drain_chat_media_preview_tasks,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -304,7 +371,12 @@ struct ChatMediaListTask {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const ATTACHMENT_PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
+#[derive(Component)]
+struct ChatMediaPreviewTask {
+    webview: Entity,
+    task: Task<ChatMediaEntries>,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
@@ -349,26 +421,12 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
     }
     let name = path.file_name()?.to_string_lossy().into_owned();
     let mime_type = attachment_mime(&path);
-    let preview_data_url =
-        if mime_type.starts_with("image/") && metadata.len() <= ATTACHMENT_PREVIEW_LIMIT {
-            std::fs::read(&path)
-                .ok()
-                .map(|bytes| {
-                    format!(
-                        "data:{mime_type};base64,{}",
-                        base64::engine::general_purpose::STANDARD.encode(bytes)
-                    )
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
     Some(ChatAttachment {
         path: path.to_string_lossy().into_owned(),
         name,
         mime_type,
         size: metadata.len(),
-        preview_data_url,
+        preview_data_url: String::new(),
     })
 }
 
@@ -404,10 +462,22 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
+    let mut attachment = chat_attachment(path)?;
+    if !attachment.mime_type.starts_with("image/") {
+        return None;
+    }
+    attachment.preview_data_url =
+        media_thumbnail_data_url(std::path::Path::new(&attachment.path), attachment.size);
+    (!attachment.preview_data_url.is_empty()).then_some(attachment)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_chat_attachment_task(
     webview: Entity,
     event: &'static str,
     paths: Vec<std::path::PathBuf>,
+    previews: bool,
     commands: &mut Commands,
 ) {
     if paths.is_empty() {
@@ -415,7 +485,14 @@ fn spawn_chat_attachment_task(
     }
     let task = IoTaskPool::get().spawn(async move {
         ChatAttachments {
-            attachments: paths.into_iter().filter_map(chat_attachment).collect(),
+            attachments: paths
+                .into_iter()
+                .filter_map(if previews {
+                    chat_attachment_preview
+                } else {
+                    chat_attachment
+                })
+                .collect(),
         }
     });
     commands.spawn(ChatAttachmentTask {
@@ -423,6 +500,21 @@ fn spawn_chat_attachment_task(
         event,
         task,
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_selected_attachment_tasks(
+    webview: Entity,
+    paths: Vec<std::path::PathBuf>,
+    commands: &mut Commands,
+) {
+    spawn_chat_attachment_task(
+        webview,
+        CHAT_ATTACHMENTS_EVENT,
+        paths.clone(),
+        false,
+        commands,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -564,8 +656,17 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
         })
     });
     entries.truncate(100);
+    ChatMediaEntries {
+        request_id,
+        query,
+        entries,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
-    for entry in &mut entries {
+    for entry in &mut response.entries {
         if entry.is_dir || !entry.mime_type.starts_with("image/") {
             continue;
         }
@@ -581,11 +682,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
             remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
         }
     }
-    ChatMediaEntries {
-        request_id,
-        query,
-        entries,
-    }
+    response
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -612,12 +709,7 @@ fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: 
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .collect();
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        paths,
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -637,6 +729,7 @@ fn on_chat_attachment_preview_request(
         trigger.event().webview,
         CHAT_ATTACHMENT_PREVIEWS_EVENT,
         paths,
+        true,
         &mut commands,
     );
 }
@@ -658,12 +751,15 @@ fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Comm
     let Some(paths) = dialog.pick_files() else {
         return;
     };
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        paths,
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).ok()?;
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut output, image::ImageFormat::Png).ok()?;
+    Some(output.into_inner())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -671,7 +767,9 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
     if let Some(path) = vmux_terminal::clipboard::image_file_path() {
         return Some(std::path::PathBuf::from(path));
     }
-    let png = vmux_terminal::clipboard::read_image_png()?;
+    let png = vmux_terminal::clipboard::read_image_png().or_else(|| {
+        vmux_terminal::clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes))
+    })?;
     let directory = std::env::temp_dir().join("vmux-prompt-attachments");
     std::fs::create_dir_all(&directory).ok()?;
     let path = directory.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));
@@ -684,12 +782,7 @@ fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Co
     let Some(path) = clipboard_image_path() else {
         return;
     };
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        vec![path],
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, vec![path], &mut commands);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -701,11 +794,27 @@ fn drain_chat_attachment_tasks(
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
+        let preview_paths = (pending.event == CHAT_ATTACHMENTS_EVENT).then(|| {
+            attachments
+                .attachments
+                .iter()
+                .map(|attachment| std::path::PathBuf::from(&attachment.path))
+                .collect::<Vec<_>>()
+        });
         commands.trigger(BinHostEmitEvent::from_rkyv(
             pending.webview,
             pending.event,
             &attachments,
         ));
+        if let Some(paths) = preview_paths {
+            spawn_chat_attachment_task(
+                pending.webview,
+                CHAT_ATTACHMENT_PREVIEWS_EVENT,
+                paths,
+                true,
+                &mut commands,
+            );
+        }
         commands.entity(entity).despawn();
     }
 }
@@ -713,6 +822,35 @@ fn drain_chat_attachment_tasks(
 #[cfg(not(target_arch = "wasm32"))]
 fn drain_chat_media_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            pending.webview,
+            CHAT_MEDIA_ENTRIES_EVENT,
+            &entries,
+        ));
+        if entries
+            .entries
+            .iter()
+            .any(|entry| !entry.is_dir && entry.mime_type.starts_with("image/"))
+        {
+            let task = IoTaskPool::get().spawn(async move { chat_media_previews(entries) });
+            commands.spawn(ChatMediaPreviewTask {
+                webview: pending.webview,
+                task,
+            });
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_chat_media_preview_tasks(
+    mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut tasks {
@@ -865,7 +1003,6 @@ struct ComposerContextCache {
 struct ComposerContextCacheEntry {
     input: ComposerContextInput,
     context: ComposerContext,
-    refreshed_at: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -910,13 +1047,12 @@ fn composer_context_input(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext {
-    let info = (!input.cwd.as_os_str().is_empty())
-        .then(|| vmux_git::worktree::repo_info(&input.cwd))
-        .flatten();
-    let is_git_repo = info.is_some() || input.cwd.join(".git").exists();
+fn composer_context_from_input(
+    input: &ComposerContextInput,
+    info: Option<&vmux_git::worktree::RepoInfo>,
+) -> ComposerContext {
+    let is_git_repo = info.is_some() || input.worktree.is_some() || input.cwd.join(".git").exists();
     let branch = info
-        .as_ref()
         .map(|info| info.branch.clone())
         .filter(|branch| !branch.is_empty())
         .or_else(|| {
@@ -924,11 +1060,6 @@ fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext 
                 .worktree
                 .as_ref()
                 .map(|worktree| worktree.branch.clone())
-        })
-        .or_else(|| {
-            is_git_repo
-                .then(|| vmux_git::worktree::head_ref(&input.cwd).ok())
-                .flatten()
         })
         .unwrap_or_default();
     let workspace_name = input
@@ -942,18 +1073,15 @@ fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext 
         workspace_name,
         workspace_selected: input.workspace_selected,
         is_git_repo,
-        is_worktree: info.as_ref().is_some_and(|info| info.is_worktree) || input.worktree.is_some(),
+        is_worktree: info.is_some_and(|info| info.is_worktree) || input.worktree.is_some(),
         branch,
         base_ref: input
             .worktree
             .as_ref()
             .map(|worktree| worktree.base_ref.clone())
             .unwrap_or_default(),
-        uncommitted: info
-            .as_ref()
-            .map(|info| info.uncommitted)
-            .unwrap_or_default(),
-        ahead: info.as_ref().map(|info| info.ahead).unwrap_or_default(),
+        uncommitted: info.map(|info| info.uncommitted).unwrap_or_default(),
+        ahead: info.map(|info| info.ahead).unwrap_or_default(),
         can_manage_workspace: input.can_manage_workspace,
         auto_allow_count: input.auto_allow_count,
     }
@@ -971,11 +1099,10 @@ fn push_composer_context_to_page(
         Option<&vmux_layout::tab::TabWorktree>,
     )>,
     browsers: NonSend<Browsers>,
-    time: Res<Time>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut cache: Local<ComposerContextCache>,
     mut commands: Commands,
 ) {
-    let now = time.elapsed_secs();
     let live_views = views
         .iter()
         .map(|(webview, _, _)| webview)
@@ -992,22 +1119,18 @@ fn push_composer_context_to_page(
             continue;
         };
         let input = composer_context_input(stack, acp, policy, &child_of, &tabs);
-        let refresh = cache
-            .entries
-            .get(&webview)
-            .is_none_or(|entry| entry.input != input || now - entry.refreshed_at >= 3.0);
-        if !refresh && !ready.is_changed() {
-            continue;
-        }
-        let context = if refresh {
-            composer_context_from_input(&input)
-        } else {
-            cache.entries.get(&webview).unwrap().context.clone()
-        };
+        let info = (!input.cwd.as_os_str().is_empty())
+            .then(|| {
+                repo_info
+                    .as_mut()
+                    .and_then(|cache| cache.bypass_change_detection().get(&input.cwd))
+            })
+            .flatten();
+        let context = composer_context_from_input(&input, info.as_ref());
         let changed = cache
             .entries
             .get(&webview)
-            .is_none_or(|entry| entry.context != context);
+            .is_none_or(|entry| entry.input != input || entry.context != context);
         if changed || ready.is_changed() {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 webview,
@@ -1015,14 +1138,9 @@ fn push_composer_context_to_page(
                 &context,
             ));
         }
-        cache.entries.insert(
-            webview,
-            ComposerContextCacheEntry {
-                input,
-                context,
-                refreshed_at: now,
-            },
-        );
+        cache
+            .entries
+            .insert(webview, ComposerContextCacheEntry { input, context });
     }
 }
 
@@ -1533,6 +1651,7 @@ fn on_select_model(
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
     mut counter: ResMut<AcpModelRequestCounter>,
+    mut last_used: ResMut<LastUsedAcpModels>,
     mut requests: MessageWriter<AcpSetModelRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
@@ -1548,6 +1667,7 @@ fn on_select_model(
         return;
     }
     let request_id = counter.next();
+    last_used.remember(&session.agent_id, &model_id);
     requests.write(AcpSetModelRequest {
         sid: session.sid.clone(),
         request_id,
@@ -1558,6 +1678,36 @@ fn on_select_model(
         request_id,
         model_id,
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_last_used_acp_model(
+    mut sessions: Query<(&AcpSession, &mut AcpModelState), Added<AcpModelState>>,
+    last_used: Res<LastUsedAcpModels>,
+    mut counter: ResMut<AcpModelRequestCounter>,
+    mut requests: MessageWriter<AcpSetModelRequest>,
+) {
+    for (session, mut state) in &mut sessions {
+        let Some(model_id) = last_used.by_agent.get(&session.agent_id) else {
+            continue;
+        };
+        if state.display_model_id() == model_id
+            || !state.models.iter().any(|model| &model.id == model_id)
+        {
+            continue;
+        }
+        let request_id = counter.next();
+        requests.write(AcpSetModelRequest {
+            sid: session.sid.clone(),
+            request_id,
+            config_id: state.config_id.clone(),
+            model_id: model_id.clone(),
+        });
+        state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+            request_id,
+            model_id: model_id.clone(),
+        });
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1926,6 +2076,22 @@ mod native_tests {
     }
 
     #[test]
+    fn clipboard_tiff_is_converted_to_png() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            4,
+            3,
+            image::Rgba([20, 40, 60, 255]),
+        ));
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut tiff, image::ImageFormat::Tiff).unwrap();
+
+        let png = tiff_to_png(&tiff.into_inner()).unwrap();
+        let decoded = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap();
+
+        assert_eq!((decoded.width(), decoded.height()), (4, 3));
+    }
+
+    #[test]
     fn runtime_switch_builtin_acp_agents_to_cli() {
         let cases = [
             ("claude", "claude"),
@@ -1986,6 +2152,7 @@ mod native_tests {
     fn model_selection_updates_cached_state_before_response() {
         let mut app = App::new();
         app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
             .add_message::<AcpSetModelRequest>()
             .add_observer(on_select_model);
         let stack = app
@@ -2050,6 +2217,14 @@ mod native_tests {
         assert_eq!(requests[0].request_id, 1);
         assert_eq!(requests[0].config_id, "model");
         assert_eq!(requests[0].model_id, "fable");
+        assert_eq!(
+            app.world()
+                .resource::<LastUsedAcpModels>()
+                .by_agent
+                .get("claude")
+                .map(String::as_str),
+            Some("fable")
+        );
 
         app.world_mut().trigger(BinReceive {
             webview,
@@ -2070,6 +2245,61 @@ mod native_tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn fresh_agent_session_applies_last_used_model() {
+        let mut app = App::new();
+        app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
+            .add_message::<AcpSetModelRequest>()
+            .add_systems(Update, apply_last_used_acp_model);
+        app.world_mut()
+            .resource_mut::<LastUsedAcpModels>()
+            .by_agent
+            .insert("claude".into(), "fable".into());
+        let stack = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s2".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AcpModelState {
+                    config_id: "model".into(),
+                    current_model_id: "default".into(),
+                    pending: None,
+                    models: vec![
+                        vmux_service::protocol::AcpModelOption {
+                            id: "default".into(),
+                            name: "Default".into(),
+                            description: None,
+                        },
+                        vmux_service::protocol::AcpModelOption {
+                            id: "fable".into(),
+                            name: "Fable".into(),
+                            description: None,
+                        },
+                    ],
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let state = app.world().get::<AcpModelState>(stack).unwrap();
+        assert_eq!(state.display_model_id(), "fable");
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AcpSetModelRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].sid, "s2");
+        assert_eq!(requests[0].model_id, "fable");
     }
 
     #[test]

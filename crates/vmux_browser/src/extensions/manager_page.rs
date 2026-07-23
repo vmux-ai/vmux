@@ -55,7 +55,7 @@ impl Plugin for ExtensionsPlugin {
                 host: "extensions",
                 url: EXTENSIONS_PAGE_URL,
                 title: "Extensions",
-                pool_size: 1,
+                pool_size: 0,
             },
         ));
         vmux_core::register_host_spawn(app, "extensions");

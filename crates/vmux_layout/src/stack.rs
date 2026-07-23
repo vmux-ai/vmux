@@ -193,17 +193,6 @@ impl ActiveTabParam<'_, '_> {
         // empty and respawn startup content every frame.
         active_among(self.tabs.iter())
     }
-
-    fn has_sibling(&self, tab: Entity, all_children: &Query<&Children>) -> bool {
-        let Ok(parent) = self.child_of.get(tab).map(Relationship::get) else {
-            return false;
-        };
-        all_children.get(parent).is_ok_and(|children| {
-            children
-                .iter()
-                .any(|entity| entity != tab && self.tabs.contains(entity))
-        })
-    }
 }
 
 pub fn focused_stack(
@@ -369,7 +358,6 @@ fn handle_stack_commands(
                     children.iter().filter(|&e| stack_q.contains(e)).collect();
                 if stacks_in_pane.len() <= 1 {
                     if let Some(tab) = active_tab
-                        && active_tab_param.has_sibling(tab, &all_children)
                         && close_tab_if_only_closing_stack(
                             tab,
                             active,
@@ -850,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_reuses_only_tab_and_workspace() {
+    fn closing_last_stack_preloads_fresh_tab_without_workspace_state() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<CloseTabRequest>()
@@ -883,11 +871,10 @@ mod tests {
                 vmux_core::Active,
             ))
             .id();
-        let startup = tempfile::tempdir().unwrap();
         let worktree = tempfile::tempdir().unwrap();
         app.insert_resource(crate::settings::EffectiveStartupDir(Some((
             space,
-            Some(startup.path().to_path_buf()),
+            Some(worktree.path().to_path_buf()),
         ))));
         let tab_e = app
             .world_mut()
@@ -901,6 +888,13 @@ mod tests {
                     checkout_dir: worktree.path().to_string_lossy().into_owned(),
                     branch: "test".to_string(),
                     base_ref: "main".to_string(),
+                },
+                crate::tab::TabWorkspace {
+                    project_dir: worktree.path().to_string_lossy().into_owned(),
+                },
+                crate::tab::TabDirDecided,
+                crate::tab::TabWorktreeUnavailable {
+                    message: "stale".to_string(),
                 },
                 vmux_core::Active,
                 LastActivatedAt::now(),
@@ -924,35 +918,68 @@ mod tests {
         app.update();
 
         assert!(app.world().get_entity(tab_e).is_ok());
-        assert!(app.world().get_entity(original_stack).is_err());
-        let remaining_tab = app
-            .world_mut()
-            .query_filtered::<Entity, With<Tab>>()
-            .single(app.world())
-            .unwrap();
-        assert_eq!(remaining_tab, tab_e);
+        assert!(app.world().get_entity(original_stack).is_ok());
         assert!(
             app.world()
-                .get::<crate::tab::TabWorktree>(remaining_tab)
+                .get::<crate::tab::TabReplacementSource>(tab_e)
                 .is_some()
         );
+        let replacement_tab = app
+            .world_mut()
+            .query_filtered::<Entity, With<crate::tab::PendingTabReplacement>>()
+            .single(app.world())
+            .unwrap();
+        assert_ne!(replacement_tab, tab_e);
         assert_eq!(
             app.world()
-                .get::<Tab>(remaining_tab)
+                .get::<crate::tab::PendingTabReplacement>(replacement_tab)
                 .unwrap()
-                .startup_dir
-                .as_deref(),
-            worktree.path().to_str()
+                .old_tab,
+            tab_e
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorkspace>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorktree>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabDirDecided>(replacement_tab)
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .get::<crate::tab::TabWorktreeUnavailable>(replacement_tab)
+                .is_none()
+        );
+        assert_eq!(
+            app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
+            None
         );
         let ctx = app.world().resource::<NewStackContext>();
         assert!(ctx.needs_open);
         assert!(ctx.stack.is_some());
         assert_eq!(ctx.previous_stack, None);
+        let new_pane = app
+            .world()
+            .get::<ChildOf>(ctx.stack.unwrap())
+            .map(Relationship::get)
+            .unwrap();
+        let split_root = app
+            .world()
+            .get::<ChildOf>(new_pane)
+            .map(Relationship::get)
+            .unwrap();
         assert_eq!(
             app.world()
-                .get::<ChildOf>(ctx.stack.unwrap())
+                .get::<ChildOf>(split_root)
                 .map(Relationship::get),
-            Some(pane)
+            Some(replacement_tab)
         );
     }
 
@@ -1394,7 +1421,7 @@ mod tests {
     }
 
     #[test]
-    fn closing_last_stack_reuses_only_tab_and_opens_startup_page() {
+    fn closing_last_stack_requests_tab_replacement() {
         let mut app = build_app_with_collector();
         app.insert_resource(crate::settings::EffectiveStartupUrl(
             "https://startup.test".into(),
@@ -1409,30 +1436,27 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(original_stack).is_err());
+        assert!(app.world().get_entity(original_stack).is_ok());
         assert!(app.world().get_entity(tab).is_ok());
         let ctx = app.world().resource::<NewStackContext>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
 
         let collected = app.world().resource::<CollectedSpawns>();
-        assert_eq!(collected.0.len(), 1);
-        assert_eq!(collected.0[0].url, "https://startup.test");
-        let PageOpenTarget::Stack(replacement) = collected.0[0].target else {
-            panic!("startup page must target the replacement stack");
-        };
-        assert_eq!(
-            app.world()
-                .get::<ChildOf>(replacement)
-                .map(Relationship::get),
-            Some(pane)
-        );
+        assert!(collected.0.is_empty());
         let close_requests: Vec<_> = app
             .world_mut()
             .resource_mut::<Messages<CloseTabRequest>>()
             .drain()
             .collect();
-        assert!(close_requests.is_empty());
+        assert_eq!(close_requests.len(), 1);
+        assert_eq!(close_requests[0].tab, tab);
+        assert_eq!(
+            app.world()
+                .get::<ChildOf>(original_stack)
+                .map(Relationship::get),
+            Some(pane)
+        );
     }
 
     #[test]

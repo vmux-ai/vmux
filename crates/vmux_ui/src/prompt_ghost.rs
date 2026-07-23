@@ -90,8 +90,9 @@ mod component {
         next_prompt_typed_count,
     };
 
-    const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
+    const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}.vmux-prompt-caret-paused{animation-play-state:paused}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
     type PromptTimerCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
+    type ActivityCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
     #[component]
     pub fn PromptGhost(accent_bg: String, terminal: bool) -> Element {
@@ -104,21 +105,89 @@ mod component {
         let typed = use_signal(|| 0usize);
         let cb: PromptTimerCallback = use_hook(|| Rc::new(RefCell::new(None)));
         let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
+        let mut active = use_signal(document_active);
+        let activity_cb: ActivityCallback = use_hook(|| Rc::new(RefCell::new(None)));
+        use_effect({
+            let activity_cb = activity_cb.clone();
+            move || {
+                let callback = Closure::wrap(
+                    Box::new(move || active.set(document_active())) as Box<dyn FnMut()>
+                );
+                if let Some(window) = web_sys::window() {
+                    let window_target: &web_sys::EventTarget = window.as_ref();
+                    let _ = window_target.add_event_listener_with_callback(
+                        "focus",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                    let _ = window_target.add_event_listener_with_callback(
+                        "blur",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                    if let Some(document) = window.document() {
+                        let document_target: &web_sys::EventTarget = document.as_ref();
+                        let _ = document_target.add_event_listener_with_callback(
+                            "focusin",
+                            callback.as_ref().unchecked_ref(),
+                        );
+                        let _ = document_target.add_event_listener_with_callback(
+                            "focusout",
+                            callback.as_ref().unchecked_ref(),
+                        );
+                    }
+                }
+                if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+                    let _ = document.add_event_listener_with_callback(
+                        "visibilitychange",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                }
+                *activity_cb.borrow_mut() = Some(callback);
+            }
+        });
         use_effect({
             let cb = cb.clone();
             let timer = timer.clone();
-            move || start_prompt_typewriter(examples, ex_idx, typed, cb.clone(), timer.clone())
+            move || {
+                stop_prompt_typewriter(cb.clone(), timer.clone());
+                if active() {
+                    start_prompt_typewriter(examples, ex_idx, typed, cb.clone(), timer.clone());
+                }
+            }
         });
         use_drop({
             let cb = cb.clone();
             let timer = timer.clone();
+            let activity_cb = activity_cb.clone();
             move || {
-                if let Some(id) = timer.borrow_mut().take()
-                    && let Some(win) = web_sys::window()
+                stop_prompt_typewriter(cb.clone(), timer.clone());
+                if let Some(callback) = activity_cb.borrow_mut().take()
+                    && let Some(window) = web_sys::window()
                 {
-                    win.clear_interval_with_handle(id);
+                    let window_target: &web_sys::EventTarget = window.as_ref();
+                    let _ = window_target.remove_event_listener_with_callback(
+                        "focus",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                    let _ = window_target.remove_event_listener_with_callback(
+                        "blur",
+                        callback.as_ref().unchecked_ref(),
+                    );
+                    if let Some(document) = window.document() {
+                        let document_target: &web_sys::EventTarget = document.as_ref();
+                        let _ = document_target.remove_event_listener_with_callback(
+                            "focusin",
+                            callback.as_ref().unchecked_ref(),
+                        );
+                        let _ = document_target.remove_event_listener_with_callback(
+                            "focusout",
+                            callback.as_ref().unchecked_ref(),
+                        );
+                        let _ = document_target.remove_event_listener_with_callback(
+                            "visibilitychange",
+                            callback.as_ref().unchecked_ref(),
+                        );
+                    }
                 }
-                *cb.borrow_mut() = None;
             }
         });
         let example = examples[ex_idx() % examples.len()];
@@ -129,10 +198,17 @@ mod component {
         } else {
             "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50"
         };
-        let caret_class = if terminal {
-            format!("vmux-prompt-caret ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}")
+        let caret_state = if active() {
+            ""
         } else {
-            format!("vmux-prompt-caret relative top-px ml-px h-4 w-1.5 shrink-0 {accent_bg}")
+            " vmux-prompt-caret-paused"
+        };
+        let caret_class = if terminal {
+            format!(
+                "vmux-prompt-caret{caret_state} ml-px inline-block h-3.5 w-1.5 align-middle {accent_bg}"
+            )
+        } else {
+            format!("vmux-prompt-caret{caret_state} ml-px h-5 w-px shrink-0 {accent_bg}")
         };
         rsx! {
             style { dangerous_inner_html: PROMPT_CARET_CSS }
@@ -147,6 +223,37 @@ mod component {
     fn random_prompt_example_index(len: usize, current: Option<usize>) -> usize {
         let candidate = (js_sys::Math::random() * len as f64) as usize;
         distinct_prompt_example_index(len, current, candidate)
+    }
+
+    fn document_visible() -> bool {
+        web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| {
+                js_sys::Reflect::get(
+                    document.as_ref(),
+                    &wasm_bindgen::JsValue::from_str("hidden"),
+                )
+                .ok()
+                .and_then(|hidden| hidden.as_bool())
+            })
+            .is_none_or(|hidden| !hidden)
+    }
+
+    fn document_active() -> bool {
+        document_visible()
+            && web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.has_focus().ok())
+                .unwrap_or(false)
+    }
+
+    fn stop_prompt_typewriter(cb_cell: PromptTimerCallback, timer_cell: Rc<RefCell<Option<i32>>>) {
+        if let Some(id) = timer_cell.borrow_mut().take()
+            && let Some(window) = web_sys::window()
+        {
+            window.clear_interval_with_handle(id);
+        }
+        *cb_cell.borrow_mut() = None;
     }
 
     fn start_prompt_typewriter(

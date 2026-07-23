@@ -14,7 +14,7 @@ pub trait WarmPage: Component {
     const HOST: &'static str;
     const URL: &'static str;
     const TITLE: &'static str;
-    const POOL_SIZE: usize = 1;
+    const POOL_SIZE: usize = 0;
 
     fn spawn(
         commands: &mut Commands,
@@ -125,11 +125,7 @@ fn handle_registered_page_open(
     mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let pages: HashMap<&str, &PrewarmPage> = pages
-        .iter()
-        .filter(|page| page.pool_size > 0)
-        .map(|page| (page.url, page))
-        .collect();
+    let pages: HashMap<&str, &PrewarmPage> = pages.iter().map(|page| (page.url, page)).collect();
     let mut available: HashMap<&str, Vec<Entity>> = HashMap::new();
     for (entity, spare) in &spares {
         available.entry(spare.url).or_default().push(entity);
@@ -330,6 +326,7 @@ mod tests {
         const HOST: &'static str = "test";
         const URL: &'static str = "vmux://test/";
         const TITLE: &'static str = "Test";
+        const POOL_SIZE: usize = 1;
 
         fn spawn(
             commands: &mut Commands,
@@ -480,6 +477,42 @@ mod tests {
         );
         assert!(app.world().get::<WarmPageSpare>(spare).is_none());
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
+    }
+
+    #[test]
+    fn registered_page_without_pool_opens_cold() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_registered_page_open);
+        app.world_mut().spawn(PrewarmPage {
+            host: "history",
+            url: "vmux://history/",
+            title: "History",
+            pool_size: 0,
+        });
+        let stack = app.world_mut().spawn_empty().id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: "vmux://history/".to_string(),
+                request_id: None,
+            })
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let pages = app
+            .world_mut()
+            .query_filtered::<&ChildOf, With<Browser>>()
+            .iter(app.world())
+            .filter(|child| child.parent() == stack)
+            .count();
+        assert_eq!(pages, 1);
     }
 
     #[test]

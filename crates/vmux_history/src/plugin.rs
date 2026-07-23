@@ -28,7 +28,7 @@ impl Plugin for HistoryPlugin {
                 host: "history",
                 url: "vmux://history/",
                 title: "History",
-                pool_size: 1,
+                pool_size: 0,
             },
         ));
         vmux_core::register_host_spawn(app, "history");

@@ -1032,7 +1032,10 @@ fn ensure_service_started() {
                 tracing::error!(error = ?e, "service registration failed");
             }
         }
-        vmux_service::registry::StartMode::SpawnDetached => spawn_detached_service(&binary),
+        vmux_service::registry::StartMode::SpawnDetached => {
+            vmux_service::registry::prepare_spawn_detached(&binary);
+            spawn_detached_service(&binary);
+        }
     }
 }
 
