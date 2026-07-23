@@ -1382,6 +1382,10 @@ mod tests {
         for title in [
             "mcp__vmux__set_conversation_title",
             "mcp.vmux.set_conversation_title",
+            "mcp vmux set conversation title",
+            "mcp-vmux-set-conversation-title",
+            "mcp:vmux:set:conversation:title",
+            "mcp__vmux.set-conversation title",
         ] {
             assert!(is_conversation_title_tool(title));
         }

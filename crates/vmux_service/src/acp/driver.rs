@@ -1472,7 +1472,7 @@ fn pick_permission_option(
     let preferred: &[Kind] = match decision {
         ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
         ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
-        ApprovalDecision::AllowAlways => &[Kind::AllowAlways, Kind::AllowOnce],
+        ApprovalDecision::AllowAlways => &[Kind::AllowAlways],
     };
     preferred
         .iter()
@@ -2364,6 +2364,13 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "aa"
+        );
+        assert_eq!(
+            pick_permission_option(
+                &[opt("once", PermissionOptionKind::AllowOnce)],
+                ApprovalDecision::AllowAlways,
+            ),
+            None
         );
     }
 

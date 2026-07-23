@@ -425,7 +425,8 @@ pub(crate) fn apply_acp_model_selection_result(
 }
 
 /// ACP agents re-request permission every time, so "allow always" must be answered by the host:
-/// if the tool name is already in this session's auto-policy, reply `Allow` without prompting.
+/// if the tool name is already in this session's auto-policy, reply `AllowAlways` without
+/// prompting.
 fn acp_auto_approval_message(
     session: &AcpSession,
     policy: &AgentApprovalPolicy,

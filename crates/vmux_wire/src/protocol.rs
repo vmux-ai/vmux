@@ -1590,8 +1590,24 @@ mod tests {
             },
         ];
         for msg in messages {
+            let expects_allow_always = matches!(
+                &msg,
+                ClientMessage::AgentApprove {
+                    decision: ApprovalDecision::AllowAlways,
+                    ..
+                }
+            );
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
-            rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+            let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+            if expects_allow_always {
+                assert!(matches!(
+                    decoded,
+                    ClientMessage::AgentApprove {
+                        decision: ApprovalDecision::AllowAlways,
+                        ..
+                    }
+                ));
+            }
         }
     }
 
