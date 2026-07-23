@@ -35,6 +35,9 @@ pub fn start_mode_for_profile(profile: &str, exe: &Path) -> StartMode {
 }
 
 pub fn prepare_spawn_detached(exe: &Path) {
+    #[cfg(not(target_os = "macos"))]
+    let _ = exe;
+
     #[cfg(target_os = "macos")]
     if bundle::bundle_root_for(exe).is_some()
         && let Err(error) = crate::sm_app_service::unregister_agent(bundle::EMBEDDED_AGENT_PLIST)
